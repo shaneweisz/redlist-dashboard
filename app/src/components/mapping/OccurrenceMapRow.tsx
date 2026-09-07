@@ -6899,19 +6899,15 @@ export default function OccurrenceMapRow({
   );
 
   /**
-   * The nearby-species panel, beside the map rather than under it.
+   * The nearby-species panel, under the map and the iNat column both.
    *
-   * Under it, the map kept its width and the panel got a strip of the page that
-   * scrolled away from the ground it describes. Beside it, the two are read
-   * together — which is the whole point of a list of what is around a record —
-   * and it takes the side the record table already trained the eye towards.
+   * Beside the map it squeezed the very thing it describes — in fullscreen the
+   * map column is already half the page, and a panel in it left the map 238px
+   * wide. Underneath, across the full width, the map keeps its size and the
+   * table gets room for its columns.
    */
   const NEARBY_PANEL = nearbyAt ? (
-    // Allowed to shrink, and never past 45% of the row. Fixed at 30rem it took
-    // 544px of a fullscreen map column that is itself only half the page, and
-    // left the map 238px wide — a panel about where things are, sitting next to
-    // a map too small to show it.
-    <div className="w-full lg:w-[26rem] lg:max-w-[45%] lg:shrink">
+    <div className="w-full">
       <NearbySpeciesPanel
                     lat={nearbyAt.lat}
                     lng={nearbyAt.lng}
@@ -7961,19 +7957,13 @@ export default function OccurrenceMapRow({
                         </svg>
                       </button>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2 min-h-0">
-                      <div className="flex flex-1 min-w-0 flex-col sm:flex-row gap-2">
-                        {renderMapPanel(preAssessmentOccs, bbox, `Before ${splitDate} (${preAssessmentOccs.length})`, "before")}
-                        {renderMapPanel(postAssessmentOccs, bbox, `After ${splitDate} (${postAssessmentOccs.length})`, "after")}
-                      </div>
-                      {nearbyAt && NEARBY_PANEL}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      {renderMapPanel(preAssessmentOccs, bbox, `Before ${splitDate} (${preAssessmentOccs.length})`, "before")}
+                      {renderMapPanel(postAssessmentOccs, bbox, `After ${splitDate} (${postAssessmentOccs.length})`, "after")}
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col lg:flex-row gap-2 min-h-0">
-                    <div className="flex flex-1 min-w-0 flex-col">{renderMapPanel(mappedOccurrences, bbox, null)}</div>
-                    {nearbyAt && NEARBY_PANEL}
-                  </div>
+                  renderMapPanel(mappedOccurrences, bbox, null)
                 )}
                 {/* In-range/out-of-range breakdown vs. the currently-visible IUCN
                     range polygons — one table covering Total plus (when a split
@@ -8272,6 +8262,12 @@ export default function OccurrenceMapRow({
               document.body
             )}
           </div>
+          {/* Below the map, and below the iNat column beside it: a sibling of
+              that whole row rather than of the map inside it. Nested in the map
+              column it took the map's width and stopped short of the page, which
+              for a table of species, taxa, threats, counts and years is the
+              difference between columns and stubs. */}
+          {NEARBY_PANEL}
         </div>
       </div>
     </div>
