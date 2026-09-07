@@ -25,6 +25,7 @@ import {
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
   THREAT_TOP_LEVEL,
+  compareThreatCodes,
   NEARBY_STALENESS_NOTE,
   nearbyGbifSiteUrl,
   type NearbyRadiusKm,
@@ -209,12 +210,10 @@ function SpeciesDetail({
   assessmentId,
   assessmentYear,
   redListHref,
-  actions,
 }: {
   assessmentId: number;
   assessmentYear: number | null;
   redListHref: string | null;
-  actions: React.ReactNode;
 }) {
   const [state, setState] = useState<Loaded | null>(() => assessmentCache.get(assessmentId) ?? null);
   const [section, setSection] = useState<SectionKey>("threats");
@@ -250,7 +249,10 @@ function SpeciesDetail({
 
   const a = state.assessment ?? {};
   const refs = a.references ?? [];
-  const rows = section === "threats" ? a.threat_classification ?? [] : [];
+  const rows =
+    section === "threats"
+      ? [...(a.threat_classification ?? [])].sort((x, y) => compareThreatCodes(x.code, y.code))
+      : [];
   const raw = a[section];
   const text = raw ? stripHtml(String(raw)) : "";
 
@@ -275,28 +277,13 @@ function SpeciesDetail({
       if (Number.isFinite(score) && (!Number.isFinite(best) || score > best)) at.worst = r.score;
       byTop.set(top, at);
     }
-    return [...byTop.entries()].sort((x, y) => y[1].leaves - x[1].leaves || Number(x[0]) - Number(y[0]));
+    // By code. Sorted by weight the summary reordered itself between species
+    // and you could not run your eye down the column to compare two.
+    return [...byTop.entries()].sort((x, y) => compareThreatCodes(x[0], y[0]));
   })();
 
   return (
     <div className="space-y-1.5">
-      {/* What you can do with this species, above the reading rather than under
-          it: they are the reason the row was opened as often as the prose is,
-          and at the foot of a long narrative they were a scroll away. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {actions}
-        {redListHref && (
-          <a
-            href={redListHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-700 hover:underline dark:text-blue-400"
-          >
-            Open {assessmentYear ?? "the"} Red List assessment →
-          </a>
-        )}
-      </div>
-
       {/* Every section, with the ones this assessment has nothing to say about
           left visibly empty rather than hidden — "no use and trade recorded" is
           itself worth knowing when you are comparing neighbours. */}
@@ -317,6 +304,14 @@ function SpeciesDetail({
           </button>
         ))}
       </div>
+
+      {text ? (
+        <Prose text={text} references={refs} />
+      ) : (
+        <span className="block text-zinc-400">
+          This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
+        </span>
+      )}
 
       {summary.length > 0 && (
         <div>
@@ -381,14 +376,18 @@ function SpeciesDetail({
         </div>
       )}
 
-      {text ? (
-        <Prose text={text} references={refs} />
-      ) : (
-        <span className="block text-zinc-400">
-          This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
-        </span>
+      {/* Last, after everything this panel can tell you: the point of the link
+          is what to do once the panel has run out. */}
+      {redListHref && (
+        <a
+          href={redListHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block border-t border-zinc-100 pt-1 text-blue-700 hover:underline dark:border-zinc-800 dark:text-blue-400"
+        >
+          Open the full {assessmentYear ?? ""} Red List assessment →
+        </a>
       )}
-
     </div>
   );
 }
@@ -398,7 +397,7 @@ function SpeciesDetail({
  * drift apart. Below the map there is width enough for threats to be a column.
  */
 const ROW =
-  "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_5rem_minmax(8rem,2fr)_4.5rem_2.5rem] gap-2 items-baseline px-2";
+  "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_8rem_minmax(8rem,2fr)_5.5rem_5rem] gap-2 items-baseline px-2";
 
 /** The panel's one busy indicator, used wherever it waits on a service. */
 function Spinner() {
@@ -428,6 +427,7 @@ export default function NearbySpeciesPanel({
   picked, onTogglePick, onClose,
 }: Props) {
   const pickedByKey = useMemo(() => new Map(picked.map((p) => [p.key, p])), [picked]);
+
   /** The row whose right-click menu is open, and where to draw it. */
   const [rowMenu, setRowMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [openRow, setOpenRow] = useState<string | null>(null);
@@ -437,6 +437,25 @@ export default function NearbySpeciesPanel({
   const [collapsed, setCollapsed] = useState(false);
   /** The height the reader has dragged it to; null means the default. */
   const [height, setHeight] = useState<number | null>(null);
+
+  /**
+   * Opening a row also puts the species on the map.
+   *
+   * Reading what an assessment says about a neighbour and seeing where that
+   * neighbour actually is are the same question asked twice, and making the
+   * second a separate button meant it mostly went unasked. Closing the row
+   * leaves it drawn — the legend is where a layer is taken off, as it is for
+   * every other layer on this map.
+   */
+  const openSpecies = useCallback(
+    (sp: NearbySpecies) => {
+      setOpenRow((prev) => (prev === sp.gbif_species_key ? null : sp.gbif_species_key));
+      if (!pickedByKey.has(sp.gbif_species_key)) {
+        onTogglePick({ key: sp.gbif_species_key, name: sp.scientific_name, commonName: sp.common_name });
+      }
+    },
+    [onTogglePick, pickedByKey]
+  );
 
   /**
    * The answer, tagged with the question it answers.
@@ -538,13 +557,19 @@ export default function NearbySpeciesPanel({
           <circle cx="12" cy="12" r="3" fill={NEARBY_SEARCH_COLOR} stroke="none" />
           <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
         </svg>
+        {/* The coordinates, not the record's name. Named, it read as a list
+            about that species — which is the one species it never contains.
+            The record it was opened from follows in brackets when there was
+            one, because that is provenance rather than subject. */}
         <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Recorded near</span>
-        <span
-          className="min-w-[6rem] flex-1 truncate italic text-zinc-500 dark:text-zinc-400"
-          title={`${recordName} — ${lat.toFixed(5)}, ${lng.toFixed(5)}`}
-        >
-          {recordName}
+        <span className="shrink-0 tabular-nums text-zinc-600 dark:text-zinc-300">
+          {lat.toFixed(4)}, {lng.toFixed(4)}
         </span>
+        {recordName && (
+          <span className="min-w-[4rem] flex-1 truncate italic text-zinc-400" title={recordName}>
+            ({recordName})
+          </span>
+        )}
 
         <span className="ml-auto flex items-center gap-1 shrink-0">
           <span className="text-zinc-500 dark:text-zinc-400">Within</span>
@@ -719,8 +744,8 @@ export default function NearbySpeciesPanel({
                       <span>Species</span>
                       <span>Taxon</span>
                       <span>Threats</span>
-                      <span className="text-right">Records</span>
-                      <span className="text-right">Yr</span>
+                      <span className="text-right">GBIF Records</span>
+                      <span className="text-right">Assessment Year</span>
                     </div>
                     {shownSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
@@ -736,13 +761,11 @@ export default function NearbySpeciesPanel({
                             role="button"
                             tabIndex={0}
                             aria-expanded={openRow === s.gbif_species_key}
-                            onClick={() =>
-                              setOpenRow((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key))
-                            }
+                            onClick={() => openSpecies(s)}
                             onKeyDown={(e) => {
                               if (e.key !== "Enter" && e.key !== " ") return;
                               e.preventDefault();
-                              setOpenRow((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key));
+                              openSpecies(s);
                             }}
                             // Right-click reaches the same two actions without
                             // opening the assessment first — the same bargain
@@ -858,39 +881,6 @@ export default function NearbySpeciesPanel({
                                   assessmentId={s.assessment_id}
                                   assessmentYear={s.assessment_year}
                                   redListHref={url}
-                                  actions={
-                                    <>
-                                      <button
-                                        onClick={() =>
-                                          onTogglePick({
-                                            key: s.gbif_species_key,
-                                            name: s.scientific_name,
-                                            commonName: s.common_name,
-                                          })
-                                        }
-                                        className="flex items-center gap-1.5 text-zinc-600 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400"
-                                      >
-                                        <span
-                                          className="h-2 w-2 shrink-0 rounded-full border border-white"
-                                          style={{ backgroundColor: pick?.color ?? "#9ca3af" }}
-                                        />
-                                        {pick ? "Hide records from map" : "Show records on map"}
-                                      </button>
-                                      <a
-                                        href={nearbyGbifSiteUrl({
-                                          lat,
-                                          lng,
-                                          radiusKm: result.radiusKm,
-                                          speciesKey: s.gbif_species_key,
-                                        })}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-zinc-600 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400"
-                                      >
-                                        Open these records on GBIF
-                                      </a>
-                                    </>
-                                  }
                                 />
                               )}
                             </div>

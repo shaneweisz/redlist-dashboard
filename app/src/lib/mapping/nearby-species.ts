@@ -158,6 +158,24 @@ export interface NearbyPoint {
 }
 
 /**
+ * Order two IUCN threat codes the way the classification is numbered.
+ *
+ * Segment by segment and numerically. Compared as strings "11.4" sorts before
+ * "2.1", and a table that disagrees with the summary above it is worse than an
+ * unsorted one. Accepts either spelling — the API writes "2_1_3", people write
+ * "2.1.3".
+ */
+export function compareThreatCodes(a: string, b: string): number {
+  const parts = (c: string) => c.replace(/_/g, ".").split(".").map((n) => Number(n) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? -1) - (y[i] ?? -1);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
  * The twelve top-level IUCN threat categories.
  *
  * Duplicated from lib/filter-vocab, which cannot cross to the browser (it

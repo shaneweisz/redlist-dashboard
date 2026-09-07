@@ -6,7 +6,7 @@ import {
   groupNearbyFeatures,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
-import { THREAT_TOP_LEVEL } from "../nearby-species";
+import { THREAT_TOP_LEVEL, compareThreatCodes } from "../nearby-species";
 import { THREAT_CATEGORIES } from "@/lib/filter-vocab";
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
@@ -114,5 +114,26 @@ describe("the top-level threat labels", () => {
     expect(THREAT_TOP_LEVEL).toEqual(
       Object.fromEntries(THREAT_CATEGORIES.map((c) => [c.code, c.label]))
     );
+  });
+});
+
+describe("ordering threat codes", () => {
+  // The whole reason this exists: as strings, 11 comes before 2.
+  it("sorts numerically, not as text", () => {
+    expect(["11.4", "2.1", "9.2"].sort(compareThreatCodes)).toEqual(["2.1", "9.2", "11.4"]);
+  });
+
+  it("orders deeper codes under their parent", () => {
+    expect(["2.3", "2.1.3", "2.1"].sort(compareThreatCodes)).toEqual(["2.1", "2.1.3", "2.3"]);
+  });
+
+  // The API writes them with underscores and people write them with dots.
+  it("reads either spelling", () => {
+    expect(compareThreatCodes("2_1_3", "2.1.3")).toBe(0);
+    expect(["5_3", "2_1_3"].sort(compareThreatCodes)).toEqual(["2_1_3", "5_3"]);
+  });
+
+  it("puts a bare parent before its own children", () => {
+    expect(["5.4.1", "5"].sort(compareThreatCodes)).toEqual(["5", "5.4.1"]);
   });
 });

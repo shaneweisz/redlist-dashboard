@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent } from "react-map-gl/maplibre";
+import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent, MapTouchEvent } from "react-map-gl/maplibre";
 import type maplibregl from "maplibre-gl";
 import { InatObservation, getThumbUrl, InatPhotoWithPreview } from "@/components/InatPhotoCard";
 import { QualityFlag, QUALITY_FLAG_LABELS, QUALITY_FLAG_DESCRIPTIONS, QUALITY_FLAG_SOURCES } from "@/lib/mapping/coordinate-cleaning";
@@ -1141,6 +1141,40 @@ export default function OccurrenceMapRow({
    * a checkbox and removing a thing.
    */
   const [nearbyHidden, setNearbyHidden] = useState<Set<string>>(new Set());
+  /** Whether the legend's nearby-species list is rolled up. */
+  const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
+  /** Where the browser says the reader is, once they've asked. */
+  const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
+
+  /**
+   * Fly to where the reader is, and ask what is threatened around them.
+   *
+   * The panel's whole question — what is around this point — has an obvious
+   * first answer that the map could not reach: where you are standing. The
+   * browser will not give it without a prompt, so this is a button rather than
+   * anything that happens on load.
+   */
+  const findMe = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocating("denied");
+      return;
+    }
+    setLocating("asking");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating("idle");
+        const { latitude: lat, longitude: lng } = pos.coords;
+        mapRef.current?.flyTo({ center: [lng, lat], zoom: 11, duration: 900 });
+        setNearbyAt({ lng, lat, recordName: "" });
+        setNearbyRadiusKm(NEARBY_RADIUS_DEFAULT);
+        setNearbyPicked([]);
+      },
+      // Denied, or no fix. Either way the map cannot help and says so rather
+      // than leaving the button spinning.
+      () => setLocating("denied"),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, []);
 
   /**
    * A colour per picked species, by pick order.
@@ -2878,10 +2912,15 @@ export default function OccurrenceMapRow({
    * Google Maps put it there and everyone learned it — and because the left
    * click is spoken for: a record opens on GBIF, a protected area names itself.
    */
-  const handleMapContextMenu = useCallback((e: MapLayerMouseEvent, panelId: string) => {
-    e.originalEvent?.preventDefault();
+  /**
+   * Ask what a spot is — from a right click, or from a long press.
+   *
+   * Split out from the right-click handler because a phone has no right button:
+   * holding a finger on the map is the gesture that means the same thing, and
+   * both need the identical query rather than a second, thinner one.
+   */
+  const openPointQuery = useCallback((lng: number, lat: number, panelId: string) => {
     if (measure) return;
-    const { lng, lat } = e.lngLat;
     const query = ++pointQueryId.current;
     // A second right-click while the first is in flight wins; without the guard
     // a slow answer would overwrite the panel you're already reading.
@@ -2910,6 +2949,54 @@ export default function OccurrenceMapRow({
       });
 
   }, [measure]);
+
+  const handleMapContextMenu = useCallback(
+    (e: MapLayerMouseEvent, panelId: string) => {
+      e.originalEvent?.preventDefault();
+      openPointQuery(e.lngLat.lng, e.lngLat.lat, panelId);
+    },
+    [openPointQuery]
+  );
+
+  /**
+   * A held finger opens the same panel a right click does.
+   *
+   * Cancelled by movement, because a hold that drifts is a pan — MapLibre is
+   * already interpreting it as one, and answering "what is here" about wherever
+   * the finger started would be an answer to a question nobody asked.
+   */
+  const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const cancelLongPress = useCallback(() => {
+    if (longPress.current) window.clearTimeout(longPress.current.timer);
+    longPress.current = null;
+  }, []);
+  const handleTouchStart = useCallback(
+    (e: MapTouchEvent, panelId: string) => {
+      if (e.points.length !== 1) return cancelLongPress();
+      const { lng, lat } = e.lngLat;
+      const [{ x, y }] = e.points;
+      cancelLongPress();
+      longPress.current = {
+        x,
+        y,
+        timer: window.setTimeout(() => {
+          longPress.current = null;
+          openPointQuery(lng, lat, panelId);
+        }, 550),
+      };
+    },
+    [cancelLongPress, openPointQuery]
+  );
+  const handleTouchMove = useCallback((e: MapTouchEvent) => {
+    const held = longPress.current;
+    if (!held || e.points.length !== 1) return;
+    const [{ x, y }] = e.points;
+    // A few pixels of wobble is a finger resting, not a pan.
+    if (Math.hypot(x - held.x, y - held.y) > 10) {
+      window.clearTimeout(held.timer);
+      longPress.current = null;
+    }
+  }, []);
 
   const copyPoint = useCallback((lat: number, lng: number) => {
     navigator.clipboard?.writeText(`${lat.toFixed(5)}, ${lng.toFixed(5)}`).then(
@@ -3508,6 +3595,10 @@ export default function OccurrenceMapRow({
               ]}
               onClick={(e: MapLayerMouseEvent) => handleMapClick(e, panelId)}
               onContextMenu={(e: MapLayerMouseEvent) => handleMapContextMenu(e, panelId)}
+              onTouchStart={(e: MapTouchEvent) => handleTouchStart(e, panelId)}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={cancelLongPress}
+              onTouchCancel={cancelLongPress}
               onMouseMove={(e: MapLayerMouseEvent) => handleMapMouseMove(e, panelId)}
               onMouseLeave={handleMapMouseLeave}
               onLoad={panelId === "main" || panelId === "before" || !splitView ? handleMapLoad : undefined}
@@ -4502,6 +4593,29 @@ export default function OccurrenceMapRow({
                         Measure
                       </button>
                     </div>
+                    {/* The same search a record's panel offers, from bare
+                        ground. Anchored to a record it could only answer
+                        "what is near this specimen"; the question people
+                        actually arrive with is often "what is near here" —
+                        a valley, a proposed site, where they are standing. */}
+                    <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
+                      <button
+                        onClick={() => {
+                          setNearbyAt({ lng: pointQuery.lng, lat: pointQuery.lat, recordName: "" });
+                          setNearbyRadiusKm(NEARBY_RADIUS_DEFAULT);
+                          setNearbyPicked([]);
+                          setPointQuery(null);
+                        }}
+                        title="Threatened and Near Threatened species with GBIF records around this point"
+                        className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left"
+                      >
+                        <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <circle cx="12" cy="12" r="3" />
+                          <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+                        </svg>
+                        Find threatened species near this point
+                      </button>
+                    </div>
                   </div>
                 </MapPopup>
               )}
@@ -4860,6 +4974,24 @@ export default function OccurrenceMapRow({
                 onSelect={goToPlace}
                 onPreview={setPreviewPlace}
               />
+            )}
+            {mounted && !splitView && (
+              <button
+                onClick={findMe}
+                disabled={locating === "asking"}
+                title={
+                  locating === "denied"
+                    ? "Your browser wouldn't share a location"
+                    : "Go to where you are, and list the threatened species around you"
+                }
+                className="flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[11px] text-zinc-700 shadow-md hover:bg-white disabled:opacity-60 dark:bg-zinc-800/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <circle cx="12" cy="12" r="3.5" />
+                  <path strokeLinecap="round" d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+                </svg>
+                {locating === "asking" ? "Finding you…" : locating === "denied" ? "Location unavailable" : "Near me"}
+              </button>
             )}
           </div>
           {/* Top-right stack: what's loaded, then the basemap choice. Stacked
@@ -6797,10 +6929,22 @@ export default function OccurrenceMapRow({
           the bottom is where they belong. */}
       {nearbyPicked.length > 0 && (
         <div className="px-2 pt-1 pb-0.5 border-t border-zinc-100 dark:border-zinc-700">
-          <div className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500 pb-0.5">
+          {/* Rolled up when the list gets long: opening six neighbours puts six
+              rows in a legend that also has to show the map's own layers. */}
+          <button
+            onClick={() => setNearbyLegendOpen((v) => !v)}
+            className="flex w-full items-center gap-1 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+          >
+            <svg
+              className={`w-2.5 h-2.5 shrink-0 transition-transform ${nearbyLegendOpen ? "rotate-90" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
             Other species nearby
-          </div>
-          {nearbyPicked.map((p) => (
+            <span className="ml-auto tabular-nums">{nearbyPicked.length}</span>
+          </button>
+          {nearbyLegendOpen && nearbyPicked.map((p) => (
             <label
               key={p.key}
               className="flex items-start gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
@@ -6830,6 +6974,22 @@ export default function OccurrenceMapRow({
               <span className="shrink-0 tabular-nums text-zinc-400">
                 {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
               </span>
+              {/* The checkbox hides a layer; this takes it off the map for
+                  good. Two different things, and a legend that only offered the
+                  first left the list growing with every species opened. */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleNearbyPicked(p);
+                }}
+                title={`Remove ${p.name} from the map`}
+                className="shrink-0 text-zinc-300 hover:text-red-600 dark:text-zinc-600 dark:hover:text-red-400"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5h6v2m-7 0v12h8V7" />
+                </svg>
+              </button>
             </label>
           ))}
         </div>
