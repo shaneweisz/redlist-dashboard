@@ -6366,7 +6366,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "col" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("col")}
                                 >
-                                  Catalogue of Life
+                                  {/* The full name is a third of a phone's tab strip. */}
+                                  <span className="sm:hidden">CoL</span>
+                                  <span className="hidden sm:inline">Catalogue of Life</span>
                                 </button>
                                 {SHOW_EOL_TAB && (
                                   <button
