@@ -502,8 +502,6 @@ export default function NearbySpeciesPanel({
   const [category, setCategory] = useState<string | null>(null);
   /** Which top-level threat is listed, or null for any. */
   const [threat, setThreat] = useState<string | null>(null);
-  /** Which page of the table is showing. */
-  const [page, setPage] = useState(0);
   /** Rolled up to its header bar, so the map above has the room back. */
   const [collapsed, setCollapsed] = useState(false);
   /** The height the reader has dragged it to; null means the default. */
@@ -614,8 +612,6 @@ export default function NearbySpeciesPanel({
   const activeCategory = category && categoryCounts.some(([c]) => c === category) ? category : null;
   const activeThreat = threat && threatCounts.some(([c]) => c === threat) ? threat : null;
 
-  const PAGE = 5;
-
   const shownSpecies = useMemo(
     () =>
       (result?.species ?? []).filter(
@@ -627,11 +623,6 @@ export default function NearbySpeciesPanel({
     [result, activeTaxon, activeCategory, activeThreat]
   );
 
-  // Clamped rather than reset in an effect: a filter that shortens the list
-  // should land you on its last page, not on a page that no longer exists.
-  const pageCount = Math.max(1, Math.ceil(shownSpecies.length / PAGE));
-  const activePage = Math.min(page, pageCount - 1);
-  const pageSpecies = shownSpecies.slice(activePage * PAGE, activePage * PAGE + PAGE);
 
   // Escape backs out of the open menu first, and closes the panel only when
   // there is nothing smaller to dismiss.
@@ -676,7 +667,7 @@ export default function NearbySpeciesPanel({
   return (
     <div
       ref={panelRef}
-      className="w-full rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-md text-[11px] flex flex-col"
+      className="flex h-full min-h-0 w-full flex-col rounded-lg border border-zinc-200 bg-white text-[11px] shadow-md dark:border-zinc-700 dark:bg-zinc-800"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
         {/* The same colour as the ring on the map, so the panel and the circle
@@ -813,8 +804,8 @@ export default function NearbySpeciesPanel({
       {!collapsed && (
         <>
           <div
-            className="overflow-y-auto py-1.5"
-            style={height ? { height } : { maxHeight: "26rem" }}
+            className="flex-1 min-h-0 overflow-y-auto py-1.5"
+            style={height ? { height } : undefined}
           >
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
@@ -839,23 +830,23 @@ export default function NearbySpeciesPanel({
                   <Picker
                     label="Taxon"
                     value={activeTaxon ?? ""}
-                    onChange={(v) => { setTaxon(v || null); setPage(0); }}
-                    all={`All ${result.species.length}`}
-                    options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} ${n}`])}
+                    onChange={(v) => setTaxon(v || null)}
+                    all={`All (${result.species.length})`}
+                    options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} (${n})`])}
                   />
                   <Picker
                     label="Category"
                     value={activeCategory ?? ""}
-                    onChange={(v) => { setCategory(v || null); setPage(0); }}
-                    all={`All ${result.species.length}`}
-                    options={categoryCounts.map(([c, n]) => [c, `${c} ${n}`])}
+                    onChange={(v) => setCategory(v || null)}
+                    all={`All (${result.species.length})`}
+                    options={categoryCounts.map(([c, n]) => [c, `${c} (${n})`])}
                   />
                   <Picker
                     label="Threat"
                     value={activeThreat ?? ""}
-                    onChange={(v) => { setThreat(v || null); setPage(0); }}
-                    all={`Any ${result.species.length}`}
-                    options={threatCounts.map(([c, n]) => [c, `${c} ${THREAT_TOP_LEVEL[c] ?? ""} ${n}`.replace(/\s+/g, " ")])}
+                    onChange={(v) => setThreat(v || null)}
+                    all={`Any (${result.species.length})`}
+                    options={threatCounts.map(([c, n]) => [c, `${`${c} ${THREAT_TOP_LEVEL[c] ?? ""}`.trim()} (${n})`])}
                   />
                 </div>
 
@@ -872,7 +863,7 @@ export default function NearbySpeciesPanel({
                       <span className="text-right">GBIF Records</span>
                       <span className="text-right">Assessment Year</span>
                     </div>
-                    {pageSpecies.map((s) => {
+                    {shownSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
                       const url = redListUrl(s);
                       return (
@@ -1013,29 +1004,6 @@ export default function NearbySpeciesPanel({
                         </div>
                       );
                     })}
-                  </div>
-                )}
-
-                {shownSpecies.length > PAGE && (
-                  <div className="flex items-center gap-2 px-2 pt-1 text-zinc-500 dark:text-zinc-400">
-                    <button
-                      onClick={() => setPage((p) => Math.max(0, p - 1))}
-                      disabled={activePage === 0}
-                      className="rounded border border-zinc-300 px-1.5 py-0.5 disabled:opacity-40 dark:border-zinc-600"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                      disabled={activePage >= pageCount - 1}
-                      className="rounded border border-zinc-300 px-1.5 py-0.5 disabled:opacity-40 dark:border-zinc-600"
-                    >
-                      Next
-                    </button>
-                    <span className="tabular-nums">
-                      {activePage * PAGE + 1}–{Math.min(shownSpecies.length, (activePage + 1) * PAGE)} of{" "}
-                      {shownSpecies.length}
-                    </span>
                   </div>
                 )}
 

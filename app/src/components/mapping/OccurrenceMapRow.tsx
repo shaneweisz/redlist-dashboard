@@ -966,7 +966,9 @@ export default function OccurrenceMapRow({
    * them in the same table would have meant a row that means something
    * different in every column.
    */
-  const [listTab, setListTab] = useState<"gbif" | "excluded" | "file">("gbif");
+  const [listTab, setListTab] = useState<"gbif" | "excluded" | "file" | "nearby">("gbif");
+  /** Whether the nearby tab has already been brought forward for this search. */
+  const nearbyTabSeen = useRef(false);
   /**
    * The record whose menu is open, from clicking its point.
    *
@@ -5551,7 +5553,7 @@ export default function OccurrenceMapRow({
     [occurrences, exclusions]
   );
   const listTabs = useMemo(() => {
-    const tabs: { key: "gbif" | "excluded" | "file"; label: string; count: number; title: string; dot?: string }[] = [
+    const tabs: { key: "gbif" | "excluded" | "file" | "nearby"; label: string; count: number; title: string; dot?: string }[] = [
       {
         key: "gbif",
         label: "GBIF records",
@@ -5559,6 +5561,14 @@ export default function OccurrenceMapRow({
         title: "The records being counted",
       },
     ];
+    if (nearbyAt) {
+      tabs.push({
+        key: "nearby",
+        label: "Nearby threatened species",
+        count: 0,
+        title: "Threatened species with GBIF records around the point you asked about",
+      });
+    }
     if (excludedOccurrences.length > 0) {
       tabs.push({
         key: "excluded",
@@ -5577,13 +5587,15 @@ export default function OccurrenceMapRow({
       });
     }
     return tabs;
-  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison]);
+  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison, nearbyAt]);
 
   // A tab that empties — the last excluded record put back, the file removed —
   // takes its list with it, so the reader is left on the one that's still there.
   useEffect(() => {
     if (!listTabs.some((t) => t.key === listTab)) setListTab("gbif");
-  }, [listTabs, listTab]);
+    else if (nearbyAt && fullscreen && listTab !== "nearby" && !nearbyTabSeen.current) setListTab("nearby");
+    nearbyTabSeen.current = !!nearbyAt;
+  }, [listTabs, listTab, nearbyAt, fullscreen]);
 
   useEffect(() => {
     setConfirmPutAllBack(false);
@@ -7988,7 +8000,9 @@ export default function OccurrenceMapRow({
             {/* Hidden in fullscreen — that view is the map and the record list
                 and nothing else, and the photo grid plays the same
                 hover-to-highlight role the list does there. */}
-            {!fullscreen && (!breakdown || breakdown.iNaturalist > 0) && (
+            {/* Hidden while the nearby search is open: on the dashboard the row
+                has room for two columns, and the panel is the one being read. */}
+            {!fullscreen && !nearbyAt && (!breakdown || breakdown.iNaturalist > 0) && (
             <div className="order-2 sm:order-none sm:w-44 shrink-0 flex flex-col gap-2">
               {/* iNat photo grid — only shown when photos exist or loading */}
               {(inatPhotos.length > 0 || loadingInatPhotos) && (
@@ -8068,7 +8082,9 @@ export default function OccurrenceMapRow({
               className={`order-1 sm:order-none flex-1 min-w-0 flex flex-col gap-2${fullscreen ? " min-h-0" : ""}`}
               // Two thirds by default, and whatever the divider has been
               // dragged to after that.
-              style={fullscreen ? { flex: `0 0 ${mapHeightPct}%` } : undefined}
+              style={
+                fullscreen || (nearbyAt && !splitView) ? { flex: `0 0 ${mapHeightPct}%` } : undefined
+              }
             >
                 {splitView && splitDate ? (
                   <div className="flex flex-col gap-2">
@@ -8174,7 +8190,7 @@ export default function OccurrenceMapRow({
                 and vice versa: the table carries the locality and collection
                 detail, the map carries the position. Stacks below the map on
                 narrow screens. */}
-            {fullscreen && (
+            {(fullscreen || (nearbyAt && !splitView)) && (
               <div
                 role="separator"
                 aria-orientation="horizontal"
@@ -8204,6 +8220,12 @@ export default function OccurrenceMapRow({
                 />
               </div>
             )}
+            {/* Beside the map on the dashboard, sharing the row the photo grid
+                gave up. In fullscreen it is a tab on the record list instead —
+                that column is the only one with room for a second table. */}
+            {!fullscreen && nearbyAt && !splitView && (
+              <div className="order-3 sm:order-none flex min-w-0 flex-1 flex-col">{NEARBY_PANEL}</div>
+            )}
             {fullscreen && (
               <div className="order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0">
                 <div className="flex items-center gap-1 shrink-0 text-[11px] border-b border-zinc-200 dark:border-zinc-700">
@@ -8222,12 +8244,19 @@ export default function OccurrenceMapRow({
                         <span className="w-2 h-2 rotate-45 shrink-0" style={{ background: tab.dot }} />
                       )}
                       <span className="truncate">{tab.label}</span>
-                      <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
+                      {tab.key !== "nearby" && (
+                        <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
+                      )}
                     </button>
                   ))}
                   <ListZoomControl zoom={listZoom} onChange={setListZoom} />
                 </div>
-                {pointFile && pointFileComparison && listTab === "file" ? (
+                {listTab === "nearby" ? (
+                  // In fullscreen the list column is the only place with room
+                  // for a second table, so the search takes a tab on it rather
+                  // than a third column squeezed beside the map.
+                  <div className="min-h-0 flex-1 overflow-hidden p-1">{NEARBY_PANEL}</div>
+                ) : pointFile && pointFileComparison && listTab === "file" ? (
                   <PointFileTable
                     comparison={pointFileComparison}
                     fileName={pointFile.fileName}
@@ -8413,12 +8442,6 @@ export default function OccurrenceMapRow({
               document.body
             )}
           </div>
-          {/* Below the map, and below the iNat column beside it: a sibling of
-              that whole row rather than of the map inside it. Nested in the map
-              column it took the map's width and stopped short of the page, which
-              for a table of species, taxa, threats, counts and years is the
-              difference between columns and stubs. */}
-          {NEARBY_PANEL}
         </div>
       </div>
     </div>
