@@ -723,36 +723,6 @@ export function isOutsideNativeRange(
 }
 
 /**
- * The flag beside a flagged point, with its reasons on hover.
- *
- * Its own bubble rather than a `title`: over the map a native tooltip never
- * arrived at all — the cursor changed to say there was something to read and
- * then nothing was ever shown — and where it does arrive it is a second late.
- */
-function FlagMark({ marks }: { marks: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      className="relative block text-amber-600 drop-shadow-sm cursor-help"
-    >
-      <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 22V3m0 0h12l-2 4 2 4H5" />
-      </svg>
-      {open && (
-        <span
-          data-occurrence-mark
-          className="absolute left-3 bottom-3 z-[1000] block w-max max-w-[220px] rounded-md bg-zinc-900/95 dark:bg-zinc-700 px-1.5 py-1 text-[10px] leading-snug text-white shadow-lg"
-        >
-          {marks}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
  * One driver's colour in the legend, with its name on hover.
  *
  * The same bubble FlagMark uses, for the same reason: these sit over the map,
@@ -3819,38 +3789,7 @@ export default function OccurrenceMapRow({
                     </MapLibreMarker>
                   );
                 })}
-              {/* A small flag beside any record the cleaning tests or the
-                  native range have something to say about. What you want from
-                  a flag is to see which records are being questioned across a
-                  whole distribution at once, without opening fifty panels; the
-                  panel's own flag then tells you what was said about the one
-                  you opened. Excluded records carry one too — why a record is
-                  questionable is worth seeing whether or not you've set it
-                  aside, and it is often the answer to why you did.
-
-                  Drawn only while the records themselves are: a flag beside a
-                  point that isn't there is a mark on nothing. */}
-              {showGbif && panelOccurrences.map((o) => {
-                const marks = recordMarks(o);
-                if (!marks) return null;
-                const mine = georeferences[o.properties.gbifID];
-                const position = mine
-                  ? [mine.decimalLongitude, mine.decimalLatitude]
-                  : o.geometry?.coordinates;
-                if (!position) return null;
-                return (
-                  <MapLibreMarker
-                    key={`mark-${o.properties.gbifID}`}
-                    longitude={position[0]}
-                    latitude={position[1]}
-                    anchor="bottom-left"
-                    offset={[3, -3]}
-                  >
-                    <FlagMark marks={marks} />
-                  </MapLibreMarker>
-                );
-              })}
-                {/* The radius the nearby panel is describing, drawn to scale.
+                              {/* The radius the nearby panel is describing, drawn to scale.
                     Under the record layers rather than over them: it is the
                     question's boundary, not a thing to read. */}
                 {nearbyAt && (
