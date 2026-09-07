@@ -20,6 +20,7 @@ function species(name: string, threat_codes: string[], over: Partial<NearbySpeci
     class_name: "amphibia",
     threat_codes,
     assessment_year: 2020,
+    assessment_id: 1,
     records: 1,
     sis_taxon_id: 1,
     dashboard_row_key: null,
@@ -84,7 +85,7 @@ describe("the threat summary", () => {
       species("Eus fus", ["2.1"]),
     ]);
     expect(threats[0]).toMatchObject({ code: "2", species: 3 });
-    expect(threats[0].examples).toEqual(["Aus bus", "Cus dus", "Eus fus"]);
+    expect(threats[0].examples.map((e) => e.name)).toEqual(["Aus bus", "Cus dus", "Eus fus"]);
     expect(threats[1]).toMatchObject({ code: "5", species: 1 });
   });
 
@@ -96,6 +97,13 @@ describe("the threat summary", () => {
   // just has nothing to contribute to the summary.
   it("ignores species with no threat codes", () => {
     expect(summariseThreats([species("Aus bus", [])])).toEqual([]);
+  });
+
+  // Each listed species carries the assessment behind it, because the row can
+  // be opened to read what that assessment actually says about threats.
+  it("carries each listed species' key and assessment id", () => {
+    const [t] = summariseThreats([species("Aus bus", ["2.1"], { assessment_id: 4242 })]);
+    expect(t.examples[0]).toEqual({ key: "Ausbus", name: "Aus bus", assessmentId: 4242 });
   });
 
   it("caps the named examples but keeps the full count", () => {

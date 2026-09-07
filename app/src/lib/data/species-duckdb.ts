@@ -978,6 +978,8 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
     /** Year of the assessment itself, not of its publication — the same field
      *  the dashboard's "outdated" test reads (species-filter.ts). */
     assessment_year: number | null;
+    /** The assessment behind the row, so its narrative can be fetched. */
+    assessment_id: number | null;
     sis_taxon_id: number | null;
     dashboard_row_key: SpeciesRowKey | null;
   }[]
@@ -989,7 +991,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
     await conn.runAndReadAll(`
       SELECT id, gbif_species_key, scientific_name, common_name, taxon_group,
              class_name, iucn_category AS category, criteria, threat_codes,
-             CAST(assessment_date AS VARCHAR) AS assessment_date
+             assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date
       FROM '${parquetUri("assessed.parquet")}'
       WHERE gbif_species_key IN (${list})`)
   ).getRowObjects();
@@ -1008,6 +1010,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
       // Free to carry: the row is already being read, so this is two more
       // columns off the same scan rather than another query.
       assessment_year: yearOf(r.assessment_date as string | null),
+      assessment_id: num(r.assessment_id),
       sis_taxon_id: sisTaxonId,
       // Assessed rows always have a SIS id, so the col_id half of a row key is
       // never needed here — which is what keeps this to a single scan.

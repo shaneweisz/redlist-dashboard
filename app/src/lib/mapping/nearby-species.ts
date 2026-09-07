@@ -89,20 +89,26 @@ export const NEARBY_SEARCH_COLOR = "#0ea5e9";
  * The colours picked neighbours' records are drawn in, in the order they are
  * handed out.
  *
- * Everything else on this map is spoken for: GBIF's own points are the green
- * ramp, the assessor's georeferences violet, an imported point file blue,
- * protected areas and forest loss the two pinks, and the search radius the sky
- * blue it is drawn in. These six keep clear of all of that and of each other,
- * which is the whole point once more than one species is drawn at a time — two
- * neighbours in nearly the same colour is worse than not drawing the second.
+ * Chosen against what this map already draws rather than for prettiness. Its
+ * own records are grey (#d1d5db/#9ca3af), amber (#fbbf24 — flagged), green
+ * (#4ade80 — new since the assessment) and near-black; its layers are violet
+ * (georeferences), blue (an imported point file), two pinks (protected areas,
+ * forest loss) and sky (the search radius). Every one of those hue families is
+ * avoided here, because a neighbour that reads as a flagged record or as one of
+ * the assessor's own is worse than one that isn't drawn.
+ *
+ * The last two are the closest calls and worth knowing about: cyan sits near the
+ * radius's sky, and violet near the georeference marker — but the radius is a
+ * thin dashed ring and georeferences only appear when the assessor has made
+ * some, so neither competes with a dot in practice.
  */
 export const NEARBY_PICKED_COLORS = [
-  "#ea580c", // orange
   "#0f766e", // teal
-  "#be123c", // rose
-  "#4338ca", // indigo
-  "#a16207", // amber-brown
   "#a21caf", // fuchsia
+  "#4338ca", // indigo
+  "#be123c", // rose
+  "#0e7490", // cyan
+  "#6d28d9", // violet
 ] as const;
 
 /** How many neighbours can be drawn at once — one per colour, and no more. */
@@ -174,6 +180,8 @@ export interface NearbySpecies {
   threat_codes: string[];
   /** Year of the assessment, not of its publication. */
   assessment_year: number | null;
+  /** The assessment behind it, for fetching what it says about threats. */
+  assessment_id: number | null;
   /** GBIF records for this species inside the radius. */
   records: number;
   sis_taxon_id: number | null;
@@ -189,8 +197,13 @@ export interface NearbyThreat {
   label: string;
   /** How many of the neighbours cite it. */
   species: number;
-  /** Their names, for the tooltip — capped by the caller. */
-  examples: string[];
+  /**
+   * The species citing it, listed under the row. They carry their assessment
+   * id because each one can be opened to read what its assessors actually
+   * wrote about threats — a code says which of twelve boxes was ticked, and
+   * the paragraph says what is happening.
+   */
+  examples: { key: string; name: string; assessmentId: number | null }[];
 }
 
 export interface NearbyResult {

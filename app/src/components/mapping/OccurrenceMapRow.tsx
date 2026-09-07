@@ -1163,6 +1163,15 @@ export default function OccurrenceMapRow({
   const [nearbyPoints, setNearbyPoints] = useState<Record<string, { points: NearbyPoint[]; total: number }>>({});
   /** The neighbour's record whose tooltip is open, if any. */
   const [nearbyShown, setNearbyShown] = useState<NearbyPoint | null>(null);
+  /**
+   * Picked species currently switched off in the legend.
+   *
+   * Hiding is not un-picking: the list in the panel still shows what you chose
+   * and its colour, and the records are already fetched, so switching one back
+   * on is instant. It is the same distinction the map's own layers make between
+   * a checkbox and removing a thing.
+   */
+  const [nearbyHidden, setNearbyHidden] = useState<Set<string>>(new Set());
 
   /**
    * A colour per picked species, by pick order.
@@ -1185,7 +1194,15 @@ export default function OccurrenceMapRow({
 
   const toggleNearbyPicked = useCallback((species: { key: string; name: string }) => {
     setNearbyPicked((prev) => {
-      if (prev.some((p) => p.key === species.key)) return prev.filter((p) => p.key !== species.key);
+      if (prev.some((p) => p.key === species.key)) {
+        setNearbyHidden((hidden) => {
+          if (!hidden.has(species.key)) return hidden;
+          const next = new Set(hidden);
+          next.delete(species.key);
+          return next;
+        });
+        return prev.filter((p) => p.key !== species.key);
+      }
       // Past the palette the map stops being readable, so the oldest pick makes
       // way rather than the newest being silently refused.
       return [...prev, species].slice(-NEARBY_MAX_PICKED);
@@ -1242,7 +1259,7 @@ export default function OccurrenceMapRow({
       // feature properties through its tile encoding, so this pair is what
       // survives to find the point again on a click. The colour rides along
       // because one layer draws every picked species.
-      features: nearbyPicked.flatMap((p) =>
+      features: nearbyPicked.filter((p) => !nearbyHidden.has(p.key)).flatMap((p) =>
         (nearbyPoints[p.key]?.points ?? []).map((pt, i) => ({
           type: "Feature" as const,
           properties: { nearbyKey: p.key, nearbyIndex: i, color: nearbyColors[p.key] },
@@ -1250,7 +1267,7 @@ export default function OccurrenceMapRow({
         }))
       ),
     }),
-    [nearbyPicked, nearbyPoints, nearbyColors]
+    [nearbyPicked, nearbyPoints, nearbyColors, nearbyHidden]
   );
   /** A pin whose label is being renamed in place. */
   const [renamingPin, setRenamingPin] = useState<string | null>(null);
@@ -3850,31 +3867,20 @@ export default function OccurrenceMapRow({
                   they are context for this map, not one of its own layers. */}
               {nearbyAt && nearbyPicked.length > 0 && nearbyPointsGeoJson.features.length > 0 && (
                 <Source id={`nearby-points-${panelId}`} type="geojson" data={nearbyPointsGeoJson}>
-                  {/* Triangles rather than dots. These land among the map's own
-                      round records, and at a glance a differently-coloured dot
-                      is still a dot — a different shape says "not one of yours"
-                      before the colour has to, which matters more now that the
-                      colour is carrying which species it is. Drawn as a text
-                      symbol, so it needs no sprite and stays crisp at every
-                      zoom. */}
+                  {/* Dots, in colours no other layer here uses — see
+                      NEARBY_PICKED_COLORS. They sit above the map's own records
+                      and carry a white ring, so a neighbour reads as a separate
+                      thing rather than merging into the points underneath. */}
                   <Layer
                     id={`nearby-points-circle-${panelId}`}
-                    type="symbol"
-                    layout={{
-                      "text-field": "▲",
-                      "text-size": 12,
-                      "text-font": ["Open Sans Regular"],
-                      // Every record matters here, so none may be dropped for
-                      // collision — a thinned layer would misreport the spread.
-                      "text-allow-overlap": true,
-                      "text-ignore-placement": true,
-                    }}
+                    type="circle"
                     paint={{
+                      "circle-radius": 4.5,
                       // One layer draws every picked species; the colour comes
                       // off the feature so they don't need a layer each.
-                      "text-color": ["get", "color"],
-                      "text-halo-color": "#ffffff",
-                      "text-halo-width": 1.5,
+                      "circle-color": ["get", "color"],
+                      "circle-stroke-width": 1.5,
+                      "circle-stroke-color": "#ffffff",
                     }}
                   />
                 </Source>
@@ -6664,20 +6670,35 @@ export default function OccurrenceMapRow({
             Recorded nearby
           </div>
           {nearbyPicked.map((p) => (
-            <button
+            <label
               key={p.key}
-              onClick={() => toggleNearbyPicked(p)}
-              title="Stop drawing this species"
-              className="flex w-full items-center gap-1.5 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 rounded"
+              className="flex items-center gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
             >
-              <span className="shrink-0 leading-none" style={{ color: nearbyColors[p.key] }}>
-                ▲
+              <input
+                type="checkbox"
+                checked={!nearbyHidden.has(p.key)}
+                onChange={() =>
+                  setNearbyHidden((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(p.key)) next.delete(p.key);
+                    else next.add(p.key);
+                    return next;
+                  })
+                }
+                className="w-3 h-3 rounded shrink-0"
+                style={{ accentColor: nearbyColors[p.key] }}
+              />
+              <span
+                className="shrink-0 w-2 h-2 rounded-full border border-white"
+                style={{ backgroundColor: nearbyColors[p.key] }}
+              />
+              <span className="italic truncate text-zinc-700 dark:text-zinc-200" title={p.name}>
+                {p.name}
               </span>
-              <span className="italic truncate text-zinc-700 dark:text-zinc-200">{p.name}</span>
               <span className="ml-auto shrink-0 tabular-nums text-zinc-400">
                 {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
               </span>
-            </button>
+            </label>
           ))}
         </div>
       )}

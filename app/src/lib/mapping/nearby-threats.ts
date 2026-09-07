@@ -31,23 +31,27 @@ export function summariseThreats(
   species: readonly NearbySpecies[],
   maxExamples = 12
 ): NearbyThreat[] {
-  const byCode = new Map<string, string[]>();
+  const byCode = new Map<string, NearbyThreat["examples"]>();
   for (const s of species) {
     const tops = new Set(
       s.threat_codes.map((c) => c.split(".")[0]).filter(Boolean)
     );
     for (const code of tops) {
-      const names = byCode.get(code) ?? [];
-      names.push(s.scientific_name);
-      byCode.set(code, names);
+      const listed = byCode.get(code) ?? [];
+      listed.push({
+        key: s.gbif_species_key,
+        name: s.scientific_name,
+        assessmentId: s.assessment_id,
+      });
+      byCode.set(code, listed);
     }
   }
   return [...byCode.entries()]
-    .map(([code, names]) => ({
+    .map(([code, listed]) => ({
       code,
       label: threatDisplay(code),
-      species: names.length,
-      examples: names.slice(0, maxExamples),
+      species: listed.length,
+      examples: listed.slice(0, maxExamples),
     }))
     .sort((a, b) => b.species - a.species || a.code.localeCompare(b.code));
 }
