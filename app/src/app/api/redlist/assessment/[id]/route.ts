@@ -90,6 +90,20 @@ export async function GET(
       population: doc.population || null,
       habitat: doc.habitats || null,
       threats: doc.threats || null,
+      /**
+       * The assessment's bibliography, so the in-text citations in those
+       * narratives can be resolved to what they cite. Passed through as the API
+       * gives it (citation, author, year, title) — the matching is the reader's
+       * side of the problem, in lib/mapping/nearby-citations.
+       */
+      references: Array.isArray(data.references)
+        ? data.references.map((r: { citation?: string; author?: string; year?: string; title?: string }) => ({
+            citation: r.citation ?? "",
+            author: r.author ?? null,
+            year: r.year ?? null,
+            title: r.title ?? null,
+          }))
+        : [],
       conservation_actions: doc.measures || null,
       use_trade: doc.use_trade || null,
       range: doc.range || null,

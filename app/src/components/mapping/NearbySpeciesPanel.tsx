@@ -15,10 +15,11 @@
  * of their own.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
+import { linkCitations, type AssessmentReference } from "@/lib/mapping/nearby-citations";
 import {
   NEARBY_RADII_KM,
   NEARBY_RECORDS_NOTE,
@@ -55,7 +56,9 @@ interface Props {
  * row and opened it again — which, in a panel built for comparing neighbours,
  * is exactly what people do.
  */
-const narrativeCache = new Map<number, { text?: string; error?: string }>();
+type Narrative = { text?: string; references?: AssessmentReference[]; error?: string };
+
+const narrativeCache = new Map<number, Narrative>();
 
 /**
  * Fetches already in the air, so two mounts of the same row make one request.
@@ -66,7 +69,7 @@ const narrativeCache = new Map<number, { text?: string; error?: string }>();
  * the IUCN API again. Sharing the promise means the second caller waits on the
  * first rather than starting another.
  */
-const narrativeInFlight = new Map<number, Promise<{ text?: string; error?: string }>>();
+const narrativeInFlight = new Map<number, Promise<Narrative>>();
 
 function fetchNarrative(assessmentId: number) {
   const running = narrativeInFlight.get(assessmentId);
@@ -80,7 +83,10 @@ function fetchNarrative(assessmentId: number) {
     .then(async (r) => {
       const body = await r.json();
       if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
-      const next = { text: body.threats ? stripHtml(String(body.threats)) : "" };
+      const next: Narrative = {
+        text: body.threats ? stripHtml(String(body.threats)) : "",
+        references: Array.isArray(body.references) ? body.references : [],
+      };
       narrativeCache.set(assessmentId, next);
       return next;
     })
@@ -98,9 +104,20 @@ function fetchNarrative(assessmentId: number) {
  * which is why this loads on demand rather than coming down with the list.
  */
 function ThreatNarrative({ assessmentId }: { assessmentId: number }) {
-  const [state, setState] = useState<{ text?: string; error?: string } | null>(
-    () => narrativeCache.get(assessmentId) ?? null
-  );
+  const [state, setState] = useState<Narrative | null>(() => narrativeCache.get(assessmentId) ?? null);
+  /** Which citation's reference is open, by its position in the prose. */
+  const [openCitation, setOpenCitation] = useState<number | null>(null);
+  /**
+   * Bring the reference into view when a citation is clicked.
+   *
+   * It renders under the prose, and a narrative long enough to be worth reading
+   * is long enough to push it below the panel's fold — where clicking a citation
+   * looks like it did nothing at all.
+   */
+  const refBlock = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (openCitation != null) refBlock.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [openCitation]);
 
   useEffect(() => {
     if (narrativeCache.has(assessmentId)) return;
@@ -129,7 +146,61 @@ function ThreatNarrative({ assessmentId }: { assessmentId: number }) {
   }
   if (state.error) return <span className="text-amber-600 dark:text-amber-400">{state.error}</span>;
   if (!state.text) return <span className="text-zinc-400">This assessment records no threats text.</span>;
-  return <span className="whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{state.text}</span>;
+
+  const segments = linkCitations(state.text, state.references ?? []);
+  const linkedCount = segments.filter((seg) => seg.reference).length;
+  const openRef = openCitation != null ? segments[openCitation]?.reference : undefined;
+
+  return (
+    <span className="block">
+      {linkedCount > 0 && (
+        <span className="mb-1 block text-zinc-400">Citations are underlined — click one for its reference.</span>
+      )}
+      <span className="block whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+        {segments.map((seg, i) =>
+          seg.reference ? (
+            <button
+              key={i}
+              onClick={() => setOpenCitation((prev) => (prev === i ? null : i))}
+              title="Show this reference"
+              className={`underline decoration-dotted underline-offset-2 ${
+                openCitation === i
+                  ? "bg-blue-50 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200"
+                  : "text-blue-700 hover:text-blue-500 dark:text-blue-400"
+              }`}
+            >
+              {seg.text}
+            </button>
+          ) : (
+            <span key={i}>{seg.text}</span>
+          )
+        )}
+      </span>
+      {/* Under the prose rather than floating over it: this panel is a narrow
+          column beside the map, and a popover anchored to a citation halfway
+          along a line spilled off its edge. Here it always fits, and it stays
+          put while the citation that opened it is highlighted above. */}
+      {openRef && (
+        <span
+          ref={refBlock}
+          className="mt-1 block rounded border border-zinc-200 bg-zinc-50 p-1.5 dark:border-zinc-700 dark:bg-zinc-900"
+        >
+          {/* Selectable, because the point of reaching a reference is usually to
+              put it somewhere else. The italics IUCN writes its titles in are
+              stripped with the rest of the markup, so this is plain text. */}
+          <span className="block select-text text-zinc-700 dark:text-zinc-200">
+            {stripHtml(openRef.citation)}
+          </span>
+          <button
+            onClick={() => navigator.clipboard?.writeText(stripHtml(openRef.citation))}
+            className="mt-1 rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            Copy
+          </button>
+        </span>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -271,7 +342,7 @@ export default function NearbySpeciesPanel({
 
   return (
     <div className="w-full rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-md text-[11px] flex flex-col">
-      <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
         {/* The same colour as the ring on the map, so the panel and the circle
             it drew read as one thing. */}
         <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke={NEARBY_SEARCH_COLOR} strokeWidth={2}>
@@ -280,8 +351,8 @@ export default function NearbySpeciesPanel({
         </svg>
         <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Recorded near</span>
         <span
-          className="italic text-zinc-500 dark:text-zinc-400 truncate"
-          title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}
+          className="min-w-[6rem] flex-1 truncate italic text-zinc-500 dark:text-zinc-400"
+          title={`${recordName} — ${lat.toFixed(5)}, ${lng.toFixed(5)}`}
         >
           {recordName}
         </span>
@@ -334,7 +405,7 @@ export default function NearbySpeciesPanel({
         <>
           <div
             className="overflow-y-auto py-1.5"
-            style={height ? { height } : { maxHeight: "24rem" }}
+            style={height ? { height } : { maxHeight: "34rem" }}
           >
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
@@ -400,7 +471,26 @@ export default function NearbySpeciesPanel({
                       const url = redListUrl(s);
                       return (
                         <div key={s.gbif_species_key} className="border-b border-zinc-50 dark:border-zinc-800/60">
-                          <div className={`${ROW} py-[3px] ${pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""}`}>
+                          {/* The whole row opens the menu. Hanging it off the
+                              name alone made the rest of a row — the tags, the
+                              counts, the taxon — dead space you could click at
+                              and get nothing, which in a table of 120 rows is
+                              most of the target anybody aims for. */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() =>
+                              setOpenMenu((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              setOpenMenu((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key));
+                            }}
+                            className={`${ROW} cursor-pointer py-[3px] hover:bg-zinc-50 dark:hover:bg-zinc-700/40 ${
+                              pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
+                            }`}
+                          >
                             {/* The dot the map is drawing it with, in its own
                                 colour — the row and the mark have to read as the
                                 same thing without counting positions. */}
@@ -426,22 +516,19 @@ export default function NearbySpeciesPanel({
                                 left the assessment reachable only through a click
                                 that also changed the map. */}
                             <span className="relative min-w-0">
-                              <button
-                                onClick={() =>
-                                  setOpenMenu((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key))
-                                }
-                                title="What you can do with this species"
-                                className="w-full truncate text-left italic text-zinc-700 hover:text-blue-600 dark:text-zinc-200 dark:hover:text-blue-400"
-                              >
+                              <span className="block truncate italic text-zinc-700 dark:text-zinc-200">
                                 {s.scientific_name}
-                              </button>
+                              </span>
                               {s.common_name && (
                                 <span className="block truncate text-zinc-400" title={s.common_name}>
                                   {s.common_name}
                                 </span>
                               )}
                               {openMenu === s.gbif_species_key && (
-                                <span className="absolute left-0 top-full z-[1002] mt-0.5 block w-max min-w-[13rem] rounded-md border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                                <span
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="absolute left-0 top-full z-[1002] mt-0.5 block w-max min-w-[15rem] rounded-md border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                                >
                                   <button
                                     onClick={() => {
                                       onTogglePick({
@@ -478,9 +565,9 @@ export default function NearbySpeciesPanel({
                                     >
                                       <path strokeLinecap="round" d="M4 6h16M4 10h16M4 14h10M4 18h7" />
                                     </svg>
-                                    {openNarrative === s.gbif_species_key
-                                      ? "Hide what it says about threats"
-                                      : "What it says about threats"}
+                                    {openNarrative === s.gbif_species_key ? "Hide" : "See"} threats text
+                                    {s.assessment_year ? ` from ${s.assessment_year}` : " from the"} Red List
+                                    assessment
                                   </button>
                                   {url && (
                                     <a
@@ -503,7 +590,7 @@ export default function NearbySpeciesPanel({
                                           d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3"
                                         />
                                       </svg>
-                                      Open the Red List assessment
+                                      Open {s.assessment_year ?? "the"} Red List assessment
                                     </a>
                                   )}
                                   <a
@@ -531,7 +618,7 @@ export default function NearbySpeciesPanel({
                                         d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3"
                                       />
                                     </svg>
-                                    These records on GBIF
+                                    Open these records on GBIF
                                   </a>
                                 </span>
                               )}

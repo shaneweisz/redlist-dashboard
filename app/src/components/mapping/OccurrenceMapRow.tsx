@@ -6661,49 +6661,6 @@ export default function OccurrenceMapRow({
           </span>
         </label>
       )}
-      {/* The neighbours currently drawn. They are a layer like any other here,
-          and a triangle in a colour with nothing naming it is a puzzle — this
-          is where the map says what it has drawn, so this is where they go.
-          Clicking one takes it off, the same as clicking its row in the panel. */}
-      {nearbyPicked.length > 0 && (
-        <div className="px-2 pt-1 pb-0.5 border-t border-zinc-100 dark:border-zinc-700">
-          <div className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500 pb-0.5">
-            Recorded nearby
-          </div>
-          {nearbyPicked.map((p) => (
-            <label
-              key={p.key}
-              className="flex items-center gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
-            >
-              <input
-                type="checkbox"
-                checked={!nearbyHidden.has(p.key)}
-                onChange={() =>
-                  setNearbyHidden((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(p.key)) next.delete(p.key);
-                    else next.add(p.key);
-                    return next;
-                  })
-                }
-                className="w-3 h-3 rounded shrink-0"
-                style={{ accentColor: nearbyColors[p.key] }}
-              />
-              <span
-                className="shrink-0 w-2 h-2 rounded-full border border-white"
-                style={{ backgroundColor: nearbyColors[p.key] }}
-              />
-              <span className="truncate text-zinc-700 dark:text-zinc-200" title={p.name}>
-                <span className="italic">{p.name}</span>
-                {p.commonName && <span className="text-zinc-400"> ({p.commonName})</span>}
-              </span>
-              <span className="ml-auto shrink-0 tabular-nums text-zinc-400">
-                {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
-              </span>
-            </label>
-          ))}
-        </div>
-      )}
       {pinnedPlaces.length > 0 && (
         <label className="flex items-center gap-1.5 px-2 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px]">
           <input
@@ -6893,8 +6850,90 @@ export default function OccurrenceMapRow({
           )}
         </div>
       )}
+      {/* The neighbours currently drawn — last, under GBIF's own points.
+          Sitting above them it read as a heading over the whole legend, so
+          "Records / Recorded nearby / <a species> / GBIF points" left it
+          genuinely unclear which rows the heading spoke for. These are the
+          outermost layer here — not this species, not this map's own data — so
+          the bottom is where they belong. */}
+      {nearbyPicked.length > 0 && (
+        <div className="px-2 pt-1 pb-0.5 border-t border-zinc-100 dark:border-zinc-700">
+          <div className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500 pb-0.5">
+            Other species nearby
+          </div>
+          {nearbyPicked.map((p) => (
+            <label
+              key={p.key}
+              className="flex items-start gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+            >
+              <input
+                type="checkbox"
+                checked={!nearbyHidden.has(p.key)}
+                onChange={() =>
+                  setNearbyHidden((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(p.key)) next.delete(p.key);
+                    else next.add(p.key);
+                    return next;
+                  })
+                }
+                className="w-3 h-3 rounded shrink-0 mt-0.5"
+                style={{ accentColor: nearbyColors[p.key] }}
+              />
+              <span
+                className="shrink-0 w-2 h-2 rounded-full border border-white mt-1"
+                style={{ backgroundColor: nearbyColors[p.key] }}
+              />
+              <span className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-200">
+                <span className="italic">{p.name}</span>
+                {p.commonName && <span className="text-zinc-400"> ({p.commonName})</span>}
+              </span>
+              <span className="shrink-0 tabular-nums text-zinc-400">
+                {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
+
+  /**
+   * The nearby-species panel, beside the map rather than under it.
+   *
+   * Under it, the map kept its width and the panel got a strip of the page that
+   * scrolled away from the ground it describes. Beside it, the two are read
+   * together — which is the whole point of a list of what is around a record —
+   * and it takes the side the record table already trained the eye towards.
+   */
+  const NEARBY_PANEL = nearbyAt ? (
+    // Allowed to shrink, and never past 45% of the row. Fixed at 30rem it took
+    // 544px of a fullscreen map column that is itself only half the page, and
+    // left the map 238px wide — a panel about where things are, sitting next to
+    // a map too small to show it.
+    <div className="w-full lg:w-[26rem] lg:max-w-[45%] lg:shrink">
+      <NearbySpeciesPanel
+                    lat={nearbyAt.lat}
+                    lng={nearbyAt.lng}
+                    recordName={nearbyAt.recordName}
+                    excludeGbifKey={speciesKey}
+                    radiusKm={nearbyRadiusKm}
+                    onRadiusChange={setNearbyRadiusKm}
+                    picked={nearbyPicked.map((p) => ({
+                      key: p.key,
+                      color: nearbyColors[p.key],
+                      drawn: nearbyPoints[p.key]
+                        ? { shown: nearbyPoints[p.key].points.length, total: nearbyPoints[p.key].total }
+                        : null,
+                    }))}
+                    onTogglePick={toggleNearbyPicked}
+                    onClose={() => {
+                      setNearbyAt(null);
+                      setNearbyPicked([]);
+                    }}
+                  />
+    </div>
+  ) : null;
 
   return (
     <div
@@ -7922,40 +7961,19 @@ export default function OccurrenceMapRow({
                         </svg>
                       </button>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      {renderMapPanel(preAssessmentOccs, bbox, `Before ${splitDate} (${preAssessmentOccs.length})`, "before")}
-                      {renderMapPanel(postAssessmentOccs, bbox, `After ${splitDate} (${postAssessmentOccs.length})`, "after")}
+                    <div className="flex flex-col sm:flex-row gap-2 min-h-0">
+                      <div className="flex flex-1 min-w-0 flex-col sm:flex-row gap-2">
+                        {renderMapPanel(preAssessmentOccs, bbox, `Before ${splitDate} (${preAssessmentOccs.length})`, "before")}
+                        {renderMapPanel(postAssessmentOccs, bbox, `After ${splitDate} (${postAssessmentOccs.length})`, "after")}
+                      </div>
+                      {nearbyAt && NEARBY_PANEL}
                     </div>
                   </div>
                 ) : (
-                  renderMapPanel(mappedOccurrences, bbox, null)
-                )}
-                {/* Below the map rather than over it: floated, it covered the
-                    ground it was describing, and you cannot read "twelve species
-                    within 10 km" and look at where they are at the same time.
-                    In flow it also gets the full width, which is what lets the
-                    threats be a column. */}
-                {nearbyAt && (
-                  <NearbySpeciesPanel
-                    lat={nearbyAt.lat}
-                    lng={nearbyAt.lng}
-                    recordName={nearbyAt.recordName}
-                    excludeGbifKey={speciesKey}
-                    radiusKm={nearbyRadiusKm}
-                    onRadiusChange={setNearbyRadiusKm}
-                    picked={nearbyPicked.map((p) => ({
-                      key: p.key,
-                      color: nearbyColors[p.key],
-                      drawn: nearbyPoints[p.key]
-                        ? { shown: nearbyPoints[p.key].points.length, total: nearbyPoints[p.key].total }
-                        : null,
-                    }))}
-                    onTogglePick={toggleNearbyPicked}
-                    onClose={() => {
-                      setNearbyAt(null);
-                      setNearbyPicked([]);
-                    }}
-                  />
+                  <div className="flex flex-col lg:flex-row gap-2 min-h-0">
+                    <div className="flex flex-1 min-w-0 flex-col">{renderMapPanel(mappedOccurrences, bbox, null)}</div>
+                    {nearbyAt && NEARBY_PANEL}
+                  </div>
                 )}
                 {/* In-range/out-of-range breakdown vs. the currently-visible IUCN
                     range polygons — one table covering Total plus (when a split
