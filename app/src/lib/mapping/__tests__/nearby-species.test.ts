@@ -6,7 +6,7 @@ import {
   groupNearbyFeatures,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
-import { THREAT_TOP_LEVEL, compareThreatCodes } from "../nearby-species";
+import { THREAT_TOP_LEVEL, THREAT_SUB_LEVEL, compareThreatCodes } from "../nearby-species";
 import { THREAT_CATEGORIES } from "@/lib/filter-vocab";
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
@@ -113,6 +113,12 @@ describe("the top-level threat labels", () => {
   it("match lib/filter-vocab's, code for code", () => {
     expect(THREAT_TOP_LEVEL).toEqual(
       Object.fromEntries(THREAT_CATEGORIES.map((c) => [c.code, c.label]))
+    );
+  });
+
+  it("carry every sub-level from the same source", () => {
+    expect(THREAT_SUB_LEVEL).toEqual(
+      Object.fromEntries(THREAT_CATEGORIES.flatMap((c) => c.children.map((s) => [s.code, s.label])))
     );
   });
 });

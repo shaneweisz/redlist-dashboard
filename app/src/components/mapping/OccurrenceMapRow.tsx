@@ -1147,12 +1147,12 @@ export default function OccurrenceMapRow({
   const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
 
   /**
-   * Fly to where the reader is, and ask what is threatened around them.
+   * Fly to where the reader is.
    *
-   * The panel's whole question — what is around this point — has an obvious
-   * first answer that the map could not reach: where you are standing. The
-   * browser will not give it without a prompt, so this is a button rather than
-   * anything that happens on load.
+   * The panel's question — what is around this point — has an obvious first
+   * answer the map could not reach: where you are standing. The browser will
+   * not give it without a prompt, so this is a button rather than anything
+   * that happens on load.
    */
   const findMe = useCallback(() => {
     if (!navigator.geolocation) {
@@ -1164,10 +1164,11 @@ export default function OccurrenceMapRow({
       (pos) => {
         setLocating("idle");
         const { latitude: lat, longitude: lng } = pos.coords;
+        // Takes you there and stops. Listing what is threatened around you is a
+        // question you then ask of the spot, with the same right click as
+        // anywhere else — doing it on arrival made one button do two things,
+        // and the second was rarely the one being asked for.
         mapRef.current?.flyTo({ center: [lng, lat], zoom: 11, duration: 900 });
-        setNearbyAt({ lng, lat, recordName: "" });
-        setNearbyRadiusKm(NEARBY_RADIUS_DEFAULT);
-        setNearbyPicked([]);
       },
       // Denied, or no fix. Either way the map cannot help and says so rather
       // than leaving the button spinning.
@@ -4975,24 +4976,6 @@ export default function OccurrenceMapRow({
                 onPreview={setPreviewPlace}
               />
             )}
-            {mounted && !splitView && (
-              <button
-                onClick={findMe}
-                disabled={locating === "asking"}
-                title={
-                  locating === "denied"
-                    ? "Your browser wouldn't share a location"
-                    : "Go to where you are, and list the threatened species around you"
-                }
-                className="flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[11px] text-zinc-700 shadow-md hover:bg-white disabled:opacity-60 dark:bg-zinc-800/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              >
-                <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <circle cx="12" cy="12" r="3.5" />
-                  <path strokeLinecap="round" d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-                </svg>
-                {locating === "asking" ? "Finding you…" : locating === "denied" ? "Location unavailable" : "Near me"}
-              </button>
-            )}
           </div>
           {/* Top-right stack: what's loaded, then the basemap choice. Stacked
               in a flex column rather than each guessing the other's offset —
@@ -5099,6 +5082,34 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
               )
+            )}
+            {/* Under the basemap button, in the stack of things that act on the
+                map rather than describe it. The crosshair-in-a-ring every map
+                uses for this, and no label — a control this conventional does
+                not need one. */}
+            {mounted && !splitView && (
+              <button
+                onClick={findMe}
+                disabled={locating === "asking"}
+                title={
+                  locating === "denied"
+                    ? "Your browser wouldn't share a location"
+                    : "Go to your location"
+                }
+                aria-label="Go to your location"
+                className={`p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-60 ${
+                  locating === "denied" ? "text-amber-600 dark:text-amber-400" : "text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                <svg
+                  className={`w-3.5 h-3.5 ${locating === "asking" ? "animate-pulse" : ""}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <circle cx="12" cy="12" r="3.5" />
+                  <circle cx="12" cy="12" r="8" />
+                  <path strokeLinecap="round" d="M12 1.5v2.5M12 20v2.5M1.5 12h2.5M20 12h2.5" />
+                </svg>
+              </button>
             )}
           </div>
         </div>

@@ -142,6 +142,8 @@ export async function GET(
               scope?: string;
               severity?: string;
               score?: string;
+              ias?: string;
+              virus?: string;
               stresses?: { code?: string; description?: { en?: string } | string }[];
             }) => ({
               code: t.code || "",
@@ -154,6 +156,9 @@ export async function GET(
               scope: t.scope || null,
               severity: t.severity || null,
               score: t.score || null,
+              // The species or pathogen named on an invasive-species threat —
+              // "Hymenoscyphus fraxineus" on an ash. Only 8.1/8.2 carry one.
+              named: t.ias || t.virus || null,
               stresses: Array.isArray(t.stresses)
                 ? t.stresses
                     .map(

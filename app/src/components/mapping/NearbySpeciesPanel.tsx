@@ -25,6 +25,7 @@ import {
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
   THREAT_TOP_LEVEL,
+  THREAT_SUB_LEVEL,
   compareThreatCodes,
   NEARBY_STALENESS_NOTE,
   nearbyGbifSiteUrl,
@@ -67,7 +68,15 @@ interface Assessment {
   conservation_actions?: string | null;
   threats?: string | null;
   threat_classification?:
-    | { code: string; name: string; timing: string | null; scope: string | null; severity: string | null; score: string | null }[]
+    | {
+        code: string;
+        name: string;
+        timing: string | null;
+        scope: string | null;
+        severity: string | null;
+        score: string | null;
+        named?: string | null;
+      }[]
     | null;
   references?: AssessmentReference[];
 }
@@ -348,7 +357,7 @@ function SpeciesDetail({
           {tableOpen && (
             <table className="mt-1 w-full border-collapse">
               <thead>
-                <tr className="text-left text-zinc-400 dark:text-zinc-500">
+                <tr className="text-left align-bottom text-zinc-400 dark:text-zinc-500">
                   <th className="pr-2 font-normal">Threat</th>
                   <th className="pr-2 font-normal">Timing</th>
                   <th className="pr-2 font-normal">Scope</th>
@@ -357,19 +366,41 @@ function SpeciesDetail({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((t, i) => (
-                  <tr key={`${t.code}-${i}`} className="align-top">
-                    <td className="pr-2 text-zinc-700 dark:text-zinc-200">
-                      {/* IUCN writes these codes with underscores in the API and
-                          with dots everywhere a person reads them. */}
-                      <span className="tabular-nums text-zinc-400">{t.code.replace(/_/g, ".")}</span> {t.name}
-                    </td>
-                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
-                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
-                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
-                    <td className="text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
-                  </tr>
-                ))}
+                {rows.map((t, i) => {
+                  // "5_4_1" is a path, not a label: the assessment names only
+                  // its own leaf, so the two levels above it come from the
+                  // classification itself.
+                  const parts = t.code.replace(/_/g, ".").split(".");
+                  const top = parts[0];
+                  const sub = parts.slice(0, 2).join(".");
+                  const levels = [
+                    { code: top, label: THREAT_TOP_LEVEL[top] },
+                    parts.length > 1 ? { code: sub, label: THREAT_SUB_LEVEL[sub] } : null,
+                    parts.length > 2 ? { code: parts.join("."), label: t.name } : null,
+                  ].filter(Boolean) as { code: string; label?: string }[];
+                  // A two-level code carries its own name at the second level.
+                  if (parts.length === 2 && levels[1]) levels[1].label = levels[1].label ?? t.name;
+                  return (
+                    <tr key={`${t.code}-${i}`} className="align-top border-t border-zinc-50 dark:border-zinc-800/60">
+                      <td className="py-0.5 pr-2 text-zinc-700 dark:text-zinc-200">
+                        {levels.map((l, depth) => (
+                          <span key={l.code} className="block" style={{ paddingLeft: depth * 10 }}>
+                            <span className="tabular-nums text-zinc-400">{l.code}.</span> {l.label ?? "—"}
+                          </span>
+                        ))}
+                        {t.named && (
+                          <span className="block italic text-zinc-500 dark:text-zinc-400" style={{ paddingLeft: levels.length * 10 }}>
+                            {t.named}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
+                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
+                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
+                      <td className="py-0.5 text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -694,11 +725,11 @@ export default function NearbySpeciesPanel({
               <>
                 <p className="px-2 pb-1 text-zinc-500 dark:text-zinc-400">
                   {result.species.length === 0 ? (
-                    <>No assessed threatened species recorded within {result.radiusKm} km.</>
+                    <>No threatened species recorded within {result.radiusKm} km.</>
                   ) : (
                     <>
                       <span className="font-medium text-zinc-700 dark:text-zinc-200">{result.species.length}</span>{" "}
-                      threatened or Near Threatened species, from{" "}
+                      threatened species (CR, EN, VU), from{" "}
                       <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
                       <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
                       {result.truncated && (

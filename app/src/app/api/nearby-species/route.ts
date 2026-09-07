@@ -16,6 +16,7 @@ import { normalizeCategory } from "@/config/taxa";
 import { threatTags } from "@/lib/mapping/nearby-threats";
 import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
 import {
+  NEARBY_CATEGORIES,
   NEARBY_FACET_LIMIT,
   NEARBY_RADII_KM,
   NEARBY_RADIUS_DEFAULT,
@@ -67,6 +68,11 @@ export async function GET(request: NextRequest) {
 
     const assessed = await getAssessedByGbifKeys([...byKey.keys()]);
     const species: NearbySpecies[] = assessed
+      // Our own category decides, not GBIF's. Theirs is a lagging snapshot and
+      // is only good enough to narrow the search; a species it still calls
+      // threatened may have been down-listed since, and the panel would then
+      // list an LC or NT species under a heading that says otherwise.
+      .filter((a) => (NEARBY_CATEGORIES as readonly string[]).includes(normalizeCategory(a.category)))
       .map((a) => ({
         ...a,
         records: byKey.get(a.gbif_species_key) ?? 0,

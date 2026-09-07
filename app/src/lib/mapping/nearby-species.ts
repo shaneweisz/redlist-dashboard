@@ -49,13 +49,15 @@ export type NearbyRadiusKm = (typeof NEARBY_RADII_KM)[number];
 export const NEARBY_RADIUS_DEFAULT: NearbyRadiusKm = 10;
 
 /**
- * The categories asked of GBIF: the threatened three, plus Near Threatened.
+ * The categories this panel is about: the threatened three.
  *
- * NT earns its place because the threats are the point rather than the ranking
- * — an NT neighbour was assessed against the same pressures and its assessment
- * is just as much a precedent to read.
+ * Asked of GBIF, and — this is the part that matters — checked again against
+ * this dashboard's own category before a species is listed. GBIF's Red List
+ * categories come from a checklist snapshot that lags, so filtering on them
+ * alone let through species we hold as Least Concern: the panel said
+ * "threatened species near here" and then listed an LC one.
  */
-export const NEARBY_CATEGORIES = ["CR", "EN", "VU", "NT"] as const;
+export const NEARBY_CATEGORIES = ["CR", "EN", "VU"] as const;
 
 /**
  * How many species the facet may return. GBIF caps facetLimit well above this;
@@ -156,6 +158,63 @@ export interface NearbyPoint {
    */
   images: { url: string; title?: string; creator?: string; license?: string; rightsHolder?: string }[];
 }
+
+/**
+ * The second level of the IUCN threat classification.
+ *
+ * Duplicated from lib/filter-vocab for the same reason as the top level, and
+ * pinned by the same test. Together they let a leaf code from the assessment
+ * API — which arrives as "5_4_1" with only its own name — be shown as the
+ * three-level thing it is: 5 Harvesting, 5.4 Fishing & harvesting, 5.4.1
+ * Intentional use.
+ */
+export const THREAT_SUB_LEVEL: Record<string, string> = {
+  "1.1": "Housing & urban areas",
+  "1.2": "Commercial & industrial areas",
+  "1.3": "Tourism & recreation areas",
+  "2.1": "Crops",
+  "2.2": "Wood & pulp plantations",
+  "2.3": "Livestock farming & ranching",
+  "2.4": "Aquaculture",
+  "3.1": "Oil & gas drilling",
+  "3.2": "Mining & quarrying",
+  "3.3": "Renewable energy",
+  "4.1": "Roads & railroads",
+  "4.2": "Utility & service lines",
+  "4.3": "Shipping lanes",
+  "4.4": "Flight paths",
+  "5.1": "Hunting & trapping",
+  "5.2": "Gathering plants",
+  "5.3": "Logging & wood harvesting",
+  "5.4": "Fishing & harvesting",
+  "6.1": "Recreational activities",
+  "6.2": "War & military",
+  "6.3": "Work & other activities",
+  "7.1": "Fire & fire suppression",
+  "7.2": "Dams & water management",
+  "7.3": "Other modifications",
+  "8.1": "Invasive non-native species",
+  "8.2": "Problematic native species",
+  "8.3": "Introduced genetic material",
+  "8.4": "Unknown origin species",
+  "8.5": "Viral/prion diseases",
+  "8.6": "Diseases of unknown cause",
+  "9.1": "Domestic & urban waste water",
+  "9.2": "Industrial & military effluents",
+  "9.3": "Agricultural & forestry effluents",
+  "9.4": "Garbage & solid waste",
+  "9.5": "Air-borne pollutants",
+  "9.6": "Excess energy (light, thermal, noise)",
+  "10.1": "Volcanoes",
+  "10.2": "Earthquakes/tsunamis",
+  "10.3": "Avalanches/landslides",
+  "11.1": "Habitat shifting & alteration",
+  "11.2": "Droughts",
+  "11.3": "Temperature extremes",
+  "11.4": "Storms & flooding",
+  "11.5": "Other impacts",
+  "12.1": "Other threat",
+};
 
 /**
  * Order two IUCN threat codes the way the classification is numbered.
