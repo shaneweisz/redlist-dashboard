@@ -146,7 +146,38 @@ export interface NearbyPoint {
   uncertaintyMetres: number | null;
   catalogNumber: string | null;
   datasetName: string | null;
+  /**
+   * Photographs the publisher attached, as the map's own records carry them.
+   *
+   * A neighbour's record answers in the same panel as this map's own, and for
+   * a great many records the photograph *is* the evidence — a herbarium sheet,
+   * a camera-trap frame. Leaving it out made a neighbour's panel quietly poorer
+   * than the one beside it.
+   */
+  images: { url: string; title?: string; creator?: string; license?: string; rightsHolder?: string }[];
 }
+
+/**
+ * The twelve top-level IUCN threat categories.
+ *
+ * Duplicated from lib/filter-vocab, which cannot cross to the browser (it
+ * reaches node's `fs` through vernacular-names). A test pins these against that
+ * file's own list, so the copy cannot drift without failing.
+ */
+export const THREAT_TOP_LEVEL: Record<string, string> = {
+  "1": "Development",
+  "2": "Agriculture",
+  "3": "Energy & Mining",
+  "4": "Transport",
+  "5": "Harvesting",
+  "6": "Disturbance",
+  "7": "System modifications",
+  "8": "Invasive species",
+  "9": "Pollution",
+  "10": "Geological events",
+  "11": "Climate change",
+  "12": "Other",
+};
 
 /**
  * The neighbours' records under one click, in draw order and deduped.

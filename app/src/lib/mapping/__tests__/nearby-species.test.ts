@@ -6,6 +6,8 @@ import {
   groupNearbyFeatures,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
+import { THREAT_TOP_LEVEL } from "../nearby-species";
+import { THREAT_CATEGORIES } from "@/lib/filter-vocab";
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
 describe("the GBIF query", () => {
@@ -77,7 +79,7 @@ describe("the stack under a click", () => {
   const pt = (gbifID: number) => ({
     gbifID, lat: 0, lng: 0, species: null, eventDate: null, year: null, basis: null,
     recordedBy: null, identifiedBy: null, locality: null, countryCode: null,
-    uncertaintyMetres: null, catalogNumber: null, datasetName: null,
+    uncertaintyMetres: null, catalogNumber: null, datasetName: null, images: [],
   });
   const points = { A: { points: [pt(1), pt(2), pt(3)] }, B: { points: [pt(9)] } };
   const f = (nearbyKey: string, nearbyIndex: number) => ({ properties: { nearbyKey, nearbyIndex } });
@@ -102,5 +104,15 @@ describe("the stack under a click", () => {
 
   it("has nothing to show for a click that hit no dot", () => {
     expect(groupNearbyFeatures([], points)).toEqual([]);
+  });
+});
+
+// The panel needs these labels in the browser, and lib/filter-vocab cannot go
+// there. This is the pin that stops the copy drifting from the original.
+describe("the top-level threat labels", () => {
+  it("match lib/filter-vocab's, code for code", () => {
+    expect(THREAT_TOP_LEVEL).toEqual(
+      Object.fromEntries(THREAT_CATEGORIES.map((c) => [c.code, c.label]))
+    );
   });
 });

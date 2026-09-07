@@ -36,6 +36,7 @@ interface GbifOccurrence {
   coordinateUncertaintyInMeters?: number;
   catalogNumber?: string;
   datasetName?: string;
+  media?: { type?: string; format?: string; identifier?: string; references?: string; title?: string; creator?: string; license?: string; rightsHolder?: string }[];
 }
 
 export async function GET(request: NextRequest) {
@@ -81,6 +82,17 @@ export async function GET(request: NextRequest) {
           : null,
         catalogNumber: r.catalogNumber ?? null,
         datasetName: r.datasetName ?? null,
+        // Same filter and cap the map's own records use (api/occurrences).
+        images: (r.media ?? [])
+          .filter((m) => m.type === "StillImage" && (m.identifier || m.references))
+          .slice(0, 6)
+          .map((m) => ({
+            url: (m.identifier || m.references) as string,
+            title: m.title,
+            creator: m.creator,
+            license: m.license,
+            rightsHolder: m.rightsHolder,
+          })),
       }));
 
     return NextResponse.json(

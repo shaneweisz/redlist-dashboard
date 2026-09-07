@@ -4013,6 +4013,11 @@ export default function OccurrenceMapRow({
                 <MapOccurrenceTooltip
                   lat={nearbyShown.lat}
                   lng={nearbyShown.lng}
+                  // The same photographs the map's own records show. For a
+                  // great many records the image is the evidence — a herbarium
+                  // sheet, a camera-trap frame — and a neighbour's panel was
+                  // quietly poorer than the one beside it without them.
+                  images={nearbyShown.images}
                   fields={[
                     {
                       label: "Species",

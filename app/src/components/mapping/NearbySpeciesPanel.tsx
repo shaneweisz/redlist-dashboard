@@ -24,6 +24,7 @@ import {
   NEARBY_RADII_KM,
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
+  THREAT_TOP_LEVEL,
   NEARBY_STALENESS_NOTE,
   nearbyGbifSiteUrl,
   type NearbyRadiusKm,
@@ -217,6 +218,8 @@ function SpeciesDetail({
 }) {
   const [state, setState] = useState<Loaded | null>(() => assessmentCache.get(assessmentId) ?? null);
   const [section, setSection] = useState<SectionKey>("threats");
+  /** Whether the scoring behind the threat summary is showing. */
+  const [tableOpen, setTableOpen] = useState(false);
 
   useEffect(() => {
     if (assessmentCache.has(assessmentId)) return;
@@ -247,12 +250,53 @@ function SpeciesDetail({
 
   const a = state.assessment ?? {};
   const refs = a.references ?? [];
-  const table = section === "threats" ? a.threat_classification ?? [] : [];
+  const rows = section === "threats" ? a.threat_classification ?? [] : [];
   const raw = a[section];
   const text = raw ? stripHtml(String(raw)) : "";
 
+  /**
+   * The classification rolled up to its twelve top-level categories.
+   *
+   * Opened straight into the full table, a species with a dozen scored leaves
+   * buried the one thing a reader wants first — that this is an agriculture
+   * problem, or a harvesting one. The summary answers that, and the table is
+   * a click away for the scoring behind it.
+   */
+  const summary = (() => {
+    const byTop = new Map<string, { label: string; leaves: number; worst: string | null }>();
+    for (const r of rows) {
+      const top = r.code.replace(/_/g, ".").split(".")[0];
+      const at = byTop.get(top) ?? { label: THREAT_TOP_LEVEL[top] ?? top, leaves: 0, worst: null };
+      at.leaves += 1;
+      // "Low Impact: 5" — the number ranks them, and the highest is the one
+      // the species is actually up against.
+      const score = Number((r.score ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
+      const best = Number((at.worst ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
+      if (Number.isFinite(score) && (!Number.isFinite(best) || score > best)) at.worst = r.score;
+      byTop.set(top, at);
+    }
+    return [...byTop.entries()].sort((x, y) => y[1].leaves - x[1].leaves || Number(x[0]) - Number(y[0]));
+  })();
+
   return (
     <div className="space-y-1.5">
+      {/* What you can do with this species, above the reading rather than under
+          it: they are the reason the row was opened as often as the prose is,
+          and at the foot of a long narrative they were a scroll away. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {actions}
+        {redListHref && (
+          <a
+            href={redListHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-700 hover:underline dark:text-blue-400"
+          >
+            Open {assessmentYear ?? "the"} Red List assessment →
+          </a>
+        )}
+      </div>
+
       {/* Every section, with the ones this assessment has nothing to say about
           left visibly empty rather than hidden — "no use and trade recorded" is
           itself worth knowing when you are comparing neighbours. */}
@@ -274,33 +318,67 @@ function SpeciesDetail({
         ))}
       </div>
 
-      {table.length > 0 && (
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="text-left text-zinc-400 dark:text-zinc-500">
-              <th className="pr-2 font-normal">Threat</th>
-              <th className="pr-2 font-normal">Timing</th>
-              <th className="pr-2 font-normal">Scope</th>
-              <th className="pr-2 font-normal">Severity</th>
-              <th className="font-normal">Impact</th>
-            </tr>
-          </thead>
-          <tbody>
-            {table.map((t, i) => (
-              <tr key={`${t.code}-${i}`} className="align-top">
-                <td className="pr-2 text-zinc-700 dark:text-zinc-200">
-                  {/* IUCN writes these codes with underscores in the API and
-                      with dots everywhere a person reads them. */}
-                  <span className="tabular-nums text-zinc-400">{t.code.replace(/_/g, ".")}</span> {t.name}
-                </td>
-                <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
-                <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
-                <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
-                <td className="text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {summary.length > 0 && (
+        <div>
+          <button
+            onClick={() => setTableOpen((v) => !v)}
+            className="flex w-full items-center gap-1.5 text-left"
+          >
+            <svg
+              className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${tableOpen ? "rotate-90" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="flex flex-wrap gap-1">
+              {summary.map(([code, t]) => (
+                <span
+                  key={code}
+                  className="rounded bg-zinc-100 px-1 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
+                  title={t.worst ? `${t.leaves} scored — worst ${t.worst}` : `${t.leaves} scored`}
+                >
+                  <span className="tabular-nums text-zinc-400">{code}</span> {t.label}
+                  {t.leaves > 1 && <span className="tabular-nums text-zinc-400"> ×{t.leaves}</span>}
+                </span>
+              ))}
+            </span>
+            <span className="ml-auto shrink-0 text-zinc-400">
+              {tableOpen ? "Hide scoring" : "Show scoring"}
+            </span>
+          </button>
+
+          {tableOpen && (
+            <table className="mt-1 w-full border-collapse">
+              <thead>
+                <tr className="text-left text-zinc-400 dark:text-zinc-500">
+                  <th className="pr-2 font-normal">Threat</th>
+                  <th className="pr-2 font-normal">Timing</th>
+                  <th className="pr-2 font-normal">Scope</th>
+                  <th className="pr-2 font-normal">Severity</th>
+                  <th className="font-normal">Impact</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t, i) => (
+                  <tr key={`${t.code}-${i}`} className="align-top">
+                    <td className="pr-2 text-zinc-700 dark:text-zinc-200">
+                      {/* IUCN writes these codes with underscores in the API and
+                          with dots everywhere a person reads them. */}
+                      <span className="tabular-nums text-zinc-400">{t.code.replace(/_/g, ".")}</span> {t.name}
+                    </td>
+                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
+                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
+                    <td className="pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
+                    <td className="text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
 
       {text ? (
@@ -311,19 +389,6 @@ function SpeciesDetail({
         </span>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-100 pt-1 dark:border-zinc-800">
-        {actions}
-        {redListHref && (
-          <a
-            href={redListHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-700 hover:underline dark:text-blue-400"
-          >
-            Read the full {assessmentYear ?? ""} Red List assessment →
-          </a>
-        )}
-      </div>
     </div>
   );
 }
@@ -363,7 +428,8 @@ export default function NearbySpeciesPanel({
   picked, onTogglePick, onClose,
 }: Props) {
   const pickedByKey = useMemo(() => new Map(picked.map((p) => [p.key, p])), [picked]);
-  /** Which species' action menu is open. */
+  /** The row whose right-click menu is open, and where to draw it. */
+  const [rowMenu, setRowMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [openRow, setOpenRow] = useState<string | null>(null);
   /** Which taxon's neighbours are listed, or null for all of them. */
   const [taxon, setTaxon] = useState<string | null>(null);
@@ -524,6 +590,73 @@ export default function NearbySpeciesPanel({
         </span>
       </div>
 
+      {/* Fixed at the pointer rather than inside the row: the table scrolls,
+          and a menu anchored in it goes with the row it belongs to. */}
+      {rowMenu && (
+        <>
+          <div className="fixed inset-0 z-[10001]" onClick={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }} />
+          <div
+            style={{
+              position: "fixed",
+              left: Math.min(rowMenu.x, window.innerWidth - 230),
+              top: Math.min(rowMenu.y, window.innerHeight - 120),
+              zIndex: 10002,
+            }}
+            className="w-56 rounded-lg border border-zinc-200 bg-white p-1 text-[11px] shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            {(() => {
+              const s = result?.species.find((x) => x.gbif_species_key === rowMenu.key);
+              if (!s) return null;
+              const pick = pickedByKey.get(s.gbif_species_key);
+              const url = redListUrl(s);
+              return (
+                <>
+                  <button
+                    onClick={() => {
+                      onTogglePick({ key: s.gbif_species_key, name: s.scientific_name, commonName: s.common_name });
+                      setRowMenu(null);
+                    }}
+                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full border border-white"
+                      style={{ backgroundColor: pick?.color ?? "#9ca3af" }}
+                    />
+                    {pick ? "Hide records from map" : "Show records on map"}
+                  </button>
+                  <a
+                    href={nearbyGbifSiteUrl({ lat, lng, radiusKm: radiusKm, speciesKey: s.gbif_species_key })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setRowMenu(null)}
+                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <svg className="h-3 w-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3" />
+                    </svg>
+                    Open these records on GBIF
+                  </a>
+                  {url && (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setRowMenu(null)}
+                      className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <svg className="h-3 w-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3" />
+                      </svg>
+                      Open {s.assessment_year ?? "the"} Red List assessment
+                    </a>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </>
+      )}
+
       {!collapsed && (
         <>
           <div
@@ -611,6 +744,16 @@ export default function NearbySpeciesPanel({
                               e.preventDefault();
                               setOpenRow((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key));
                             }}
+                            // Right-click reaches the same two actions without
+                            // opening the assessment first — the same bargain
+                            // the record list makes on its own rows.
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setRowMenu({ key: s.gbif_species_key, x: e.clientX, y: e.clientY });
+                            }}
+                            // Kept for the menu below, which needs the row it
+                            // was opened on without re-finding it.
+                            data-species={s.gbif_species_key}
                             className={`${ROW} cursor-pointer py-[3px] hover:bg-zinc-50 dark:hover:bg-zinc-700/40 ${
                               pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
                             }`}
