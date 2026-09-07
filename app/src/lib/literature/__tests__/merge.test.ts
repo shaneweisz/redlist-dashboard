@@ -6,6 +6,7 @@ import type { LiteratureWork, SourceId } from "../types";
 const LABELS: Record<SourceId, string> = {
   openalex: "OpenAlex",
   zenodo: "Zenodo",
+  core: "CORE",
   bhl: "Biodiversity Heritage Library",
   googlebooks: "Google Books",
   redlist: "Red List assessment",

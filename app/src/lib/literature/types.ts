@@ -9,6 +9,7 @@
 export type SourceId =
   | "openalex"
   | "zenodo"
+  | "core"
   | "bhl"
   | "googlebooks"
   | "redlist";

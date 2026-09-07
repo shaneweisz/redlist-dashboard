@@ -71,6 +71,7 @@ beforeEach(() => {
   clearLiteratureCache();
   // Key-gated sources stay off, so only the keyless ones make requests.
   delete process.env.BHL_API_KEY;
+  delete process.env.CORE_API_KEY;
   delete process.env.GOOGLE_BOOKS_API_KEY;
   process.env.RED_LIST_API_KEY = "test-redlist-key";
 });
@@ -101,6 +102,7 @@ describe("getLiteraturePool", () => {
     expect(pool.sources.map((s) => [s.id, s.status])).toEqual([
       ["openalex", "ok"],
       ["zenodo", "ok"],
+      ["core", "unconfigured"],
       ["bhl", "unconfigured"],
       ["googlebooks", "unconfigured"],
       // No assessment id was given, so there is no reference list to read.

@@ -25,6 +25,7 @@ import type { LiteratureWork, SourceId } from "./types";
 const FIELD_PRIORITY: SourceId[] = [
   "openalex",
   "zenodo",
+  "core",
   "bhl",
   "googlebooks",
   // Last for scalars: a Red List reference is a formatted citation string, so

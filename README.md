@@ -50,8 +50,8 @@ Click any species row for a tabbed (or stacked) detail view:
 - **Literature** — one chronological table of everything published about the species,
   newest first and paginated, with a dotted line marking the last assessment date.
   Merged and deduplicated across OpenAlex, Zenodo, the assessment's own reference
-  list, and Biodiversity Heritage Library / Google Books when their API keys are
-  configured. Rows the assessment cited are tagged as such
+  list, and Biodiversity Heritage Library / CORE / Google Books when their API
+  keys are configured. Rows the assessment cited are tagged as such
 - **Red List** — full assessment details: criteria, population trend, threats, conservation actions, rationale
 - **CITES** — trade status, suspensions, quotas, and a trade-flow map with history since 1975
 - **EOL** — traits and media from the Encyclopedia of Life
@@ -109,8 +109,8 @@ Live external APIs:
   OpenAlex          → scientific literature (primary literature source)
   Zenodo            → conservation grey literature, reports, theses
   IUCN Red List API → assessment detail, and the assessment's reference list
-  BHL / Google      → historical scans and printed floras
-  Books               (each optional — enabled by its own API key)
+  BHL / CORE /      → historical scans, repository theses and reports,
+  Google Books        printed floras (each optional — enabled by its own key)
   EOL TraitBank     → trait data for the EOL tab
 ```
 

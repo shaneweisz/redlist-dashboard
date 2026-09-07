@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { bhlSource } from "../sources/bhl";
+import { coreSource } from "../sources/core";
 import { googleBooksSource } from "../sources/google-books";
 import { openAlexSource, reconstructAbstract } from "../sources/openalex";
 import { redListSource } from "../sources/redlist";
@@ -41,6 +42,7 @@ beforeEach(() => {
   lastUrl = "";
   lastInit = undefined;
   delete process.env.BHL_API_KEY;
+  delete process.env.CORE_API_KEY;
   delete process.env.GOOGLE_BOOKS_API_KEY;
   process.env.RED_LIST_API_KEY = "test-redlist-key";
 });
@@ -316,6 +318,7 @@ describe("redListSource", () => {
 describe("key-gated sources", () => {
   it.each([
     ["bhl", bhlSource, "BHL_API_KEY"],
+    ["core", coreSource, "CORE_API_KEY"],
     ["googlebooks", googleBooksSource, "GOOGLE_BOOKS_API_KEY"],
   ])("%s reports itself unconfigured without a key, and makes no request", async (_id, source, envVar) => {
     const spy = mockFetch({});
@@ -386,6 +389,69 @@ describe("bhlSource", () => {
 
   it("declares a longer budget than the default", () => {
     expect(bhlSource.timeoutMs).toBeGreaterThan(8_000);
+  });
+});
+
+describe("coreSource", () => {
+  beforeEach(() => {
+    process.env.CORE_API_KEY = "test-key";
+  });
+
+  it("authenticates with a bearer token and maps a repository record", async () => {
+    mockFetch({
+      totalHits: 4,
+      results: [
+        {
+          id: 99,
+          title: "Population survey of Panthera leo",
+          doi: "10.5555/xyz",
+          publishedDate: "2018-09-30T00:00:00",
+          abstract: "Counts of lions.",
+          authors: [{ name: "B Two" }],
+          publisher: "University of Somewhere",
+          documentType: "thesis",
+          downloadUrl: "https://core.ac.uk/download/99.pdf",
+        },
+      ],
+    });
+
+    const result = await coreSource.fetch(QUERY);
+
+    expect((lastInit?.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
+    expect(result.works[0]).toMatchObject({
+      doi: "10.5555/xyz",
+      date: "2018-09-30",
+      type: "report",
+      openAccessUrl: "https://core.ac.uk/download/99.pdf",
+    });
+  });
+
+  it("sends an unqualified query to the trailing-slash path", async () => {
+    // A quoted query is rejected outright by CORE ("abstract is not a
+    // searchable field"), and without the trailing slash it 301s.
+    mockFetch({ totalHits: 0, results: [] });
+    await coreSource.fetch(QUERY);
+    expect(lastUrl).toContain("/v3/search/works/?q=");
+    expect(decodeURIComponent(lastUrl)).toContain("q=Panthera leo");
+    expect(lastUrl).not.toContain("%22");
+  });
+
+  it("drops the congeners its token search returns", async () => {
+    // CORE's quotes do not enforce a phrase, so this guard is what keeps the
+    // results on-species.
+    mockFetch({
+      totalHits: 2,
+      results: [
+        { id: 1, title: "Diet of Panthera leo in Kenya", yearPublished: 2020 },
+        { id: 2, title: "Diet of Panthera pardus in Kenya", yearPublished: 2020 },
+      ],
+    });
+    const result = await coreSource.fetch(QUERY);
+    expect(result.works.map((w) => w.title)).toEqual(["Diet of Panthera leo in Kenya"]);
+  });
+
+  it("declares a longer budget than the default", () => {
+    expect(coreSource.timeoutMs).toBeGreaterThan(8_000);
   });
 });
 

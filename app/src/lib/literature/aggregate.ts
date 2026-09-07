@@ -14,6 +14,7 @@
 import { generateNameVariants } from "@/lib/nameVariants";
 import { dedupeWorks } from "./merge";
 import { bhlSource } from "./sources/bhl";
+import { coreSource } from "./sources/core";
 import { googleBooksSource } from "./sources/google-books";
 import { openAlexSource } from "./sources/openalex";
 import { redListSource } from "./sources/redlist";
@@ -25,6 +26,7 @@ import type { LiteratureWork, SourceAdapter, SourceReport } from "./types";
 export const SOURCES: SourceAdapter[] = [
   openAlexSource,
   zenodoSource,
+  coreSource,
   bhlSource,
   googleBooksSource,
   redListSource,
