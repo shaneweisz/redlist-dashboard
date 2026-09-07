@@ -430,22 +430,37 @@ function SpeciesDetail({
 const ROW =
   "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_8rem_minmax(8rem,2fr)_5.5rem_5rem] gap-2 items-baseline px-2";
 
-/** One filter chip: the same shape for taxon, category and threat. */
-function Chip({
-  on, onClick, label, n, colour,
-}: { on: boolean; onClick: () => void; label: string; n: number; colour?: string }) {
+/** One labelled dropdown, the same shape for taxon, category and threat. */
+function Picker({
+  label, value, onChange, all, options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  all: string;
+  options: [string, string][];
+}) {
+  if (options.length < 2) return null;
   return (
-    <button
-      onClick={onClick}
-      className={`flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 tabular-nums ${
-        on
-          ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-          : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
-      }`}
-    >
-      {colour && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colour }} />}
-      {label} <span className="text-zinc-400">{n}</span>
-    </button>
+    <label className="flex items-center gap-1">
+      <span className="text-zinc-400">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`max-w-[11rem] rounded border px-1 py-0.5 ${
+          value
+            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+            : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+        }`}
+      >
+        <option value="">{all}</option>
+        {options.map(([v, text]) => (
+          <option key={v} value={v}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -487,6 +502,8 @@ export default function NearbySpeciesPanel({
   const [category, setCategory] = useState<string | null>(null);
   /** Which top-level threat is listed, or null for any. */
   const [threat, setThreat] = useState<string | null>(null);
+  /** Which page of the table is showing. */
+  const [page, setPage] = useState(0);
   /** Rolled up to its header bar, so the map above has the room back. */
   const [collapsed, setCollapsed] = useState(false);
   /** The height the reader has dragged it to; null means the default. */
@@ -597,6 +614,8 @@ export default function NearbySpeciesPanel({
   const activeCategory = category && categoryCounts.some(([c]) => c === category) ? category : null;
   const activeThreat = threat && threatCounts.some(([c]) => c === threat) ? threat : null;
 
+  const PAGE = 5;
+
   const shownSpecies = useMemo(
     () =>
       (result?.species ?? []).filter(
@@ -607,6 +626,12 @@ export default function NearbySpeciesPanel({
       ),
     [result, activeTaxon, activeCategory, activeThreat]
   );
+
+  // Clamped rather than reset in an effect: a filter that shortens the list
+  // should land you on its last page, not on a page that no longer exists.
+  const pageCount = Math.max(1, Math.ceil(shownSpecies.length / PAGE));
+  const activePage = Math.min(page, pageCount - 1);
+  const pageSpecies = shownSpecies.slice(activePage * PAGE, activePage * PAGE + PAGE);
 
   // Escape backs out of the open menu first, and closes the panel only when
   // there is nothing smaller to dismiss.
@@ -805,73 +830,34 @@ export default function NearbySpeciesPanel({
 
             {result && !error && (
               <>
-                <p className="px-2 pb-1 text-zinc-500 dark:text-zinc-400">
-                  {result.species.length === 0 ? (
-                    <>No threatened species recorded within {result.radiusKm} km.</>
-                  ) : (
-                    <>
-                      <span className="font-medium text-zinc-700 dark:text-zinc-200">{result.species.length}</span>{" "}
-                      threatened species (CR, EN, VU), from{" "}
-                      <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
-                      <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
-                      {result.truncated && (
-                        <span className="text-amber-600 dark:text-amber-400">
-                          {" "}
-                          Only the most-recorded are shown — there are more here.
-                        </span>
-                      )}
-                    </>
-                  )}
-                </p>
-
-                {/* Three ways to narrow the list, on one row each: the group
-                    you can compare against, the rank, and the pressure. Every
-                    chip is built from what came back, so a filter is never
-                    offered that would empty the table. */}
-                {(taxonCounts.length > 1 || categoryCounts.length > 1 || threatCounts.length > 0) && (
-                  <div className="space-y-1 px-2 pb-1.5">
-                    {taxonCounts.length > 1 && (
-                      <div className="flex flex-wrap items-baseline gap-1">
-                        <span className="w-14 shrink-0 text-zinc-400">Taxon</span>
-                        <Chip on={!activeTaxon} onClick={() => setTaxon(null)} label="All" n={result.species.length} />
-                        {taxonCounts.map(([g, n]) => (
-                          <Chip key={g} on={activeTaxon === g} onClick={() => setTaxon(g)} label={taxonLabel(g)} n={n} />
-                        ))}
-                      </div>
-                    )}
-                    {categoryCounts.length > 1 && (
-                      <div className="flex flex-wrap items-baseline gap-1">
-                        <span className="w-14 shrink-0 text-zinc-400">Category</span>
-                        <Chip on={!activeCategory} onClick={() => setCategory(null)} label="All" n={result.species.length} />
-                        {categoryCounts.map(([c, n]) => (
-                          <Chip
-                            key={c}
-                            on={activeCategory === c}
-                            onClick={() => setCategory(c)}
-                            label={c}
-                            n={n}
-                            colour={CATEGORY_COLORS[normalizeCategory(c)]}
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {threatCounts.length > 0 && (
-                      <div className="flex flex-wrap items-baseline gap-1">
-                        <span className="w-14 shrink-0 text-zinc-400">Threat</span>
-                        <Chip on={!activeThreat} onClick={() => setThreat(null)} label="Any" n={result.species.length} />
-                        {threatCounts.map(([c, n]) => (
-                          <Chip
-                            key={c}
-                            on={activeThreat === c}
-                            onClick={() => setThreat(c)}
-                            label={`${c} ${THREAT_TOP_LEVEL[c] ?? ""}`.trim()}
-                            n={n}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Three dropdowns rather than three rows of pills. The pills
+                    named every value up front, which read well at four taxa and
+                    pushed the table off the panel at twelve. Every option is
+                    built from what came back, so a filter is never offered that
+                    would empty the table. */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pb-1.5">
+                  <Picker
+                    label="Taxon"
+                    value={activeTaxon ?? ""}
+                    onChange={(v) => { setTaxon(v || null); setPage(0); }}
+                    all={`All ${result.species.length}`}
+                    options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} ${n}`])}
+                  />
+                  <Picker
+                    label="Category"
+                    value={activeCategory ?? ""}
+                    onChange={(v) => { setCategory(v || null); setPage(0); }}
+                    all={`All ${result.species.length}`}
+                    options={categoryCounts.map(([c, n]) => [c, `${c} ${n}`])}
+                  />
+                  <Picker
+                    label="Threat"
+                    value={activeThreat ?? ""}
+                    onChange={(v) => { setThreat(v || null); setPage(0); }}
+                    all={`Any ${result.species.length}`}
+                    options={threatCounts.map(([c, n]) => [c, `${c} ${THREAT_TOP_LEVEL[c] ?? ""} ${n}`.replace(/\s+/g, " ")])}
+                  />
+                </div>
 
                 {shownSpecies.length > 0 && (
                   <div>
@@ -886,7 +872,7 @@ export default function NearbySpeciesPanel({
                       <span className="text-right">GBIF Records</span>
                       <span className="text-right">Assessment Year</span>
                     </div>
-                    {shownSpecies.map((s) => {
+                    {pageSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
                       const url = redListUrl(s);
                       return (
@@ -1030,6 +1016,47 @@ export default function NearbySpeciesPanel({
                   </div>
                 )}
 
+                {shownSpecies.length > PAGE && (
+                  <div className="flex items-center gap-2 px-2 pt-1 text-zinc-500 dark:text-zinc-400">
+                    <button
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={activePage === 0}
+                      className="rounded border border-zinc-300 px-1.5 py-0.5 disabled:opacity-40 dark:border-zinc-600"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                      disabled={activePage >= pageCount - 1}
+                      className="rounded border border-zinc-300 px-1.5 py-0.5 disabled:opacity-40 dark:border-zinc-600"
+                    >
+                      Next
+                    </button>
+                    <span className="tabular-nums">
+                      {activePage * PAGE + 1}–{Math.min(shownSpecies.length, (activePage + 1) * PAGE)} of{" "}
+                      {shownSpecies.length}
+                    </span>
+                  </div>
+                )}
+
+                <p className="px-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400">
+                  {result.species.length === 0 ? (
+                    <>No threatened species recorded within {result.radiusKm} km.</>
+                  ) : (
+                    <>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-200">{result.species.length}</span>{" "}
+                      threatened species (CR, EN, VU), from{" "}
+                      <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
+                      <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
+                      {result.truncated && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {" "}
+                          Only the most-recorded are shown — there are more here.
+                        </span>
+                      )}
+                    </>
+                  )}
+                </p>
                 <p className="px-2 pt-1.5 leading-snug text-zinc-400">
                   {result.unmatched > 0 && `${result.unmatched} more had no assessment in this dashboard's data. `}
                   {NEARBY_RECORDS_NOTE} {NEARBY_STALENESS_NOTE}
