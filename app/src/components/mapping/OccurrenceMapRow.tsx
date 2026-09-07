@@ -6545,9 +6545,11 @@ export default function OccurrenceMapRow({
           {/* Filter dropdowns + sample-size summary, merged into one row (summary on
               the left) — sit above the map itself, not a separate header bar */}
           <div className="p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
-            <div className="flex flex-wrap items-center gap-2">
+            {/* `relative` here is what the dropdowns anchor to below lg — see
+                the `lg:relative` on each control's wrapper. */}
+            <div className="relative flex flex-wrap items-center gap-2">
               {/* Basis of Record — dropdown checklist */}
-              <div className="relative" ref={filtersRef}>
+              <div className="lg:relative" ref={filtersRef}>
                 <button
                   onClick={() => setFiltersOpen(!filtersOpen)}
                   title="Basis of Record — which kinds of evidence to include"
@@ -6572,9 +6574,9 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {filtersOpen && !loadingBreakdown && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-[25rem] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-[25rem] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
                     <div className="flex items-center gap-2 px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                      <span className="w-40 shrink-0 flex items-center gap-2">
+                      <span className="flex-1 min-w-0 flex items-center gap-2">
                         <button
                           onClick={() => setCheckedTypes((prev) => {
                             const next = { ...prev };
@@ -6619,7 +6621,7 @@ export default function OccurrenceMapRow({
                             onChange={() => toggleType(pill.key)}
                             className="w-3 h-3 rounded accent-emerald-500 shrink-0"
                           />
-                          <span className={`w-40 shrink-0 ${active ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400 dark:text-zinc-500"}`}>
+                          <span className={`flex-1 min-w-0 truncate ${active ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400 dark:text-zinc-500"}`}>
                             {pill.label}
                           </span>
                           {!isFullSample && (
@@ -6657,7 +6659,7 @@ export default function OccurrenceMapRow({
                       return (
                         <div className="flex items-center gap-2 px-3 py-1.5 mt-1 border-t border-zinc-100 dark:border-zinc-800 text-xs font-medium">
                           <span className="w-3 shrink-0" />
-                          <span className="w-40 shrink-0 text-zinc-700 dark:text-zinc-200">Total</span>
+                          <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">Total</span>
                           {!isFullSample && (
                             <span className="w-14 text-right tabular-nums shrink-0 text-zinc-500 dark:text-zinc-400">
                               {totalCount.toLocaleString()}
@@ -6678,7 +6680,7 @@ export default function OccurrenceMapRow({
               {/* Separator */}
               <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700 mx-0.5 hidden sm:block" />
               {/* Coordinate cleaning — dropdown: max GPS uncertainty + one checkbox per check */}
-              <div className="relative" ref={cleaningFilterRef}>
+              <div className="lg:relative" ref={cleaningFilterRef}>
                 <button
                   onClick={() => setCleaningFilterOpen(!cleaningFilterOpen)}
                   aria-label="Coordinate cleaning"
@@ -6706,7 +6708,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {cleaningFilterOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-80 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
                     <div className="flex items-center px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                       <button
                         onClick={() => {
@@ -6971,7 +6973,7 @@ export default function OccurrenceMapRow({
                   badge is what extends that span. GBIF's search API has no server-side
                   date sort/filter of its own (see api/occurrences/route.ts), so this
                   operates entirely on what's already been paged in. */}
-              <div className="relative" ref={dateRangeRef}>
+              <div className="lg:relative" ref={dateRangeRef}>
                 <button
                   onClick={() => setDateRangeOpen(!dateRangeOpen)}
                   aria-label="Date range"
@@ -6997,7 +6999,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {dateRangeOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-80 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg p-3">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg p-3">
                     {sliderMinDate === sliderMaxDate ? (
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">Not enough dated records loaded to filter by range.</p>
                     ) : (
@@ -7194,7 +7196,7 @@ export default function OccurrenceMapRow({
                   filters. On the map they were a panel covering the ground
                   they describe, which on the dashboard's half-width map was a
                   third of it. */}
-              <div className="relative" ref={overlaysRef}>
+              <div className="lg:relative" ref={overlaysRef}>
                 <button
                   onClick={() => setOverlaysOpen(!overlaysOpen)}
                   aria-label="Overlays"
@@ -7218,7 +7220,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {overlaysOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
                     {renderOverlayLayers()}
                   </div>
                 )}

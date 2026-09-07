@@ -6350,7 +6350,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                     className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "redlist" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("redlist")}
                                   >
-                                    IUCN Red List Assessments
+                                    {/* The full name costs a phone most of the
+                                        tab strip on its own. */}
+                                    <span className="sm:hidden">Red List</span>
+                                    <span className="hidden sm:inline">IUCN Red List Assessments</span>
                                   </button>
                                 )}
                                 <button
