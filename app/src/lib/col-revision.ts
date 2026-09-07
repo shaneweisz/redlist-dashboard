@@ -27,6 +27,8 @@
  * framings — rather than two independently-drifting sets of wording.
  */
 
+import { isGenusMove } from "@/lib/name-parts";
+
 /** The "split" pseudo-reason: not a no-match reason (those come from
  *  classifyNoMatch), but it sits alongside them as a bar and a filter value. */
 export const SPLIT_REASON = "split";
@@ -214,6 +216,78 @@ export type RevisionReasonCode = (typeof REVISION_REASONS)[number];
 
 /** Short label for a chart axis / filter chip. Kept to a couple of words —
  *  the sentence below is what a tooltip or table cell shows. */
+/**
+ * The reason code a row is LABELLED and COUNTED under.
+ *
+ * One divergence from the raw classifier code, and it is the card's: an
+ * assessment whose name CoL files as a synonym of a different accepted species
+ * is an accepted-name difference, and the useful split is where the difference
+ * falls — genus alone (Sorbus greenii / Aria greenii, 6,377 species on the
+ * dashboard) or the epithet too. "Synonym of" describes the CoL record; these
+ * describe the disagreement, which is what a reader is looking at.
+ */
+export function displayReason(row: { reason?: string; name?: string; detail?: string; colName?: string }): string | undefined {
+  const reason = canonicalReason(row.reason);
+  const accepted = acceptedNameFor(row);
+  if (!accepted || !row.name) return reason;
+  return isGenusMove(row.name, accepted) ? GENUS_DIFFERS_REASON : RENAMED_REASON;
+}
+
+/**
+ * CoL's accepted name for the species, where the row's finding IS that name.
+ *
+ * Two classifier codes carry one finding. `synonym_of` is CoL filing the
+ * assessed name under another accepted species; `classified_elsewhere` is the
+ * matched record sitting outside the group being viewed — and 186 of genus
+ * Sorbus's 187 rows are that, every one of them because CoL accepts the species
+ * under another genus (Aria, Karpatiosorbus, Hedlundia) in the same family. The
+ * name is the finding in both; the code only records which check noticed it.
+ */
+function acceptedNameFor(row: { reason?: string; name?: string; detail?: string; colName?: string }): string | undefined {
+  const reason = canonicalReason(row.reason);
+  const accepted = reason === "synonym_of" ? row.detail : reason === "classified_elsewhere" ? row.colName : undefined;
+  // Same name filed somewhere else is a placement difference, not a name one.
+  return accepted && row.name && accepted.toLowerCase() !== row.name.toLowerCase() ? accepted : undefined;
+}
+
+/**
+ * Reason codes shipped by an older build, mapped to the ones in use.
+ *
+ * Data outlives code here: a summaries artifact is rebuilt by a data sync, not
+ * by a deploy, so a renamed code keeps arriving for as long as the artifact
+ * that carries it is current. "no_link" became "unmatched", and 322 rows in
+ * today's ssc-group-children-summaries.json still say "no_link".
+ */
+const RETIRED_REASONS: Record<string, string> = { no_link: "unmatched" };
+
+/** The code a reason is known by now — see RETIRED_REASONS. */
+export function canonicalReason(reason: string | undefined): string | undefined {
+  return reason == null ? reason : (RETIRED_REASONS[reason] ?? reason);
+}
+
+/**
+ * What a set of no-match diagnoses is MADE OF, commonest first, labelled with
+ * the same words the dashboard's filter chart uses.
+ *
+ * The panel's "No 1:1 CoL Match" is one number over nine quite different
+ * findings, and the mix is the part a specialist reads first: 72 lumped is a
+ * taxonomy story, 15 "CoL only has the name in its extended release" is a
+ * coverage story, and a bare 127 tells neither. Borrowing REVISION_REASON_SHORT
+ * rather than inventing labels is deliberate — a reader who has used the
+ * dashboard's chart has already learnt these words.
+ */
+export function reasonComposition(details: readonly { reason?: string; name?: string; detail?: string }[]): { reason: string; label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const d of details) {
+    const reason = displayReason(d);
+    if (!reason) continue;
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count, label: REVISION_REASON_SHORT[reason] ?? reason }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
 export const REVISION_REASON_SHORT: Record<string, string> = {
   // "on CoL" goes on every label that names something BOTH databases do, and
   // nowhere else. Splitting, lumping and assigning a rank are all acts either
@@ -309,6 +383,12 @@ export interface ColRevision {
   /** Why it has no clean 1:1 CoL match. Absent when the match IS clean and the
    *  only signal is `splitInto`. */
   reason?: string;
+  /** The assessed name this flag is about. Carried by the SSC panel's rows
+   *  (NoMatchDetail), which pass no `subject` because the column beside them
+   *  already names the species — but the wording still has to compare the two
+   *  names to say whether CoL's differs in the genus alone. Absent on the
+   *  dashboard's own flags, which name the species through `subject`. */
+  name?: string;
   /** The species it's lumped with / demoted under ("lumped"/"infraspecific"). */
   detail?: string;
   /** CoL's rank for it when that is below species ("infraspecific" only), so the
@@ -346,6 +426,8 @@ export interface ColRevision {
   acceptedColId?: string;
   /** The difference is in the genus alone — same epithet, different genus. */
   genusDiffers?: boolean;
+  /** Where CoL files the record, "Family (Order)" ("classified_elsewhere" only). */
+  colGroup?: string;
 }
 
 /** Does this species carry any revision signal at all? */
@@ -487,22 +569,39 @@ const COL = "Catalogue of Life";
  * reader to work out why it mattered, which is the whole job of a flag.
  *
  * `subject` is the species name for a standalone tooltip, or null where the
- * surrounding UI already names it (the SSC panel's table cell), which drops the
- * sentence to its verb phrase.
+ * surrounding UI already names it (the SSC panel's table cell).
+ *
+ * The two framings do different jobs, so they say different things.
+ *
+ * The tooltip argues: it names the species, states the finding and says what
+ * follows from it, because it stands alone on a dashboard row with nothing else
+ * to explain why the flag is there.
+ *
+ * The panel states: every line is a checkable claim about what Catalogue of
+ * Life's own record says — the status it gives the name, the species or rank it
+ * files it under — sitting next to a link to that record. A reader who doubts
+ * the row can follow the link and see the same words on CoL's page. Drawing the
+ * consequence instead ("so it covers part of another species") gives that reader
+ * nothing to check, so the panel leaves it to them. It is also a ~240px column,
+ * where an inference costs the line that the evidence should be using.
  */
 export function noMatchSentence(flag: ColRevision, subject: string | null): NoMatchSentence {
   const s = subject ? `${subject} ` : "";
-  switch (flag.reason) {
+  switch (canonicalReason(flag.reason)) {
     case "lumped": {
       // The interesting sub-case is a lump under a THIRD name — both assessed
       // species merged into a CoL name that is neither of them (e.g. IUCN's
       // Epimyrma ravouxi + this one → CoL's Temnothorax ravouxi). Only ~240 of
       // the ~2.1k lumps do that, so naming it unconditionally would mostly
-      // repeat `detail` back at the reader.
-      const merged = flag.colName ? ` — both are now called ${flag.colName}` : "";
+      // repeat `detail` back at the reader — which it was doing whenever CoL's
+      // accepted name IS the winner's, as it usually is: "The same species as
+      // Acer oblongum — both are now called Acer oblongum".
+      const thirdName = flag.colName && flag.colName !== flag.detail ? flag.colName : null;
       return subject
-        ? { before: `According to ${COL}, ${s}is the same species as `, detail: flag.detail, after: `${merged}.` }
-        : { before: "Same species as ", detail: flag.detail, after: merged };
+        ? { before: `According to ${COL}, ${s}is the same species as `, detail: flag.detail, after: `${thirdName ? ` — both are now called ${thirdName}` : ""}.` }
+        // One CoL record reached from two assessed names, which is the thing to
+        // check: open it and the other assessment's name is on that same page.
+        : { before: "CoL lists this and ", detail: flag.detail, after: thirdName ? ` under ${thirdName}.` : " as one species." };
     }
     case "synonym_of":
       // NOT "not in the checklist yet" — the checklist has the name, filed as a
@@ -510,7 +609,13 @@ export function noMatchSentence(flag: ColRevision, subject: string | null): NoMa
       // adopted (Sorbus minima -> Hedlundia minima).
       return subject
         ? { before: `This assessment is published under ${subject}, but according to ${COL} the accepted name for this species is `, detail: flag.detail, after: "." }
-        : { before: "Filed as a synonym of ", detail: flag.detail, after: "" };
+        // The card's framing, because it is the better one: what a reader wants
+        // from a row whose name CoL files under another species is the name CoL
+        // accepts, and whether the move is the genus alone. "Synonym of" says
+        // the same thing about the record without saying either.
+        : flag.name && flag.detail && isGenusMove(flag.name, flag.detail)
+          ? { before: "CoL uses another genus, accepting ", detail: flag.detail, after: "." }
+          : { before: "CoL accepts a different name: ", detail: flag.detail, after: "." };
     case "infraspecific": {
       // Say the rank CoL actually gives it. 124 of these are varieties and one is
       // a form; telling a botanist their variety is a subspecies is simply wrong,
@@ -518,7 +623,7 @@ export function noMatchSentence(flag: ColRevision, subject: string | null): NoMa
       const rank = flag.rank && flag.rank !== "subspecies" ? flag.rank : "subspecies";
       return subject
         ? { before: `${COL} ranks ${s}as a ${rank} of `, detail: flag.detail, after: ", so this assessment covers what it treats as part of another species." }
-        : { before: `Now a ${rank} of `, detail: flag.detail, after: "" };
+        : { before: `CoL lists this as a ${rank} of `, detail: flag.detail, after: "." };
     }
     // Deliberately NOT "hasn't added it yet": that implies a backlog the
     // checklist is working through, and for most of these it isn't true. Only
@@ -530,14 +635,14 @@ export function noMatchSentence(flag: ColRevision, subject: string | null): NoMa
     case "not_in_base":
       return subject
         ? { before: `${COL}'s curated checklist doesn't accept ${subject}, so the name survives only in its extended release.`, after: "" }
-        : { before: `In ${COL}'s extended release only, not its curated checklist`, after: "" };
+        : { before: "In CoL's extended release only, not its curated checklist.", after: "" };
     case "provisional":
       return subject
         // Quoting CoL's own two status values rather than paraphrasing them: the
         // distinction between them IS the finding, and a reader who goes to look
         // will see those exact words on the page.
         ? { before: `${COL} currently lists ${subject} as a 'provisionally accepted species', not yet an 'accepted species'.`, after: "" }
-        : { before: `Listed by ${COL} only provisionally`, after: "" };
+        : { before: "CoL lists this as a 'provisionally accepted species'.", after: "" };
     // Usually a species-boundary disagreement, not a data error: e.g. Equus ferus
     // (wild horse) — CoL treats it and Equus przewalskii as two species, one of
     // them (the true wild tarpan) extinct; this IUCN assessment lumps them as one,
@@ -551,23 +656,53 @@ export function noMatchSentence(flag: ColRevision, subject: string | null): NoMa
       // Columba elphinstonii (a Least Concern, extant pigeon) extinct.
       return subject
         ? { before: `${COL} marks ${s}extinct and this assessment doesn't, so one of them is wrong about whether it survives.`, after: "" }
-        : { before: `${COL}'s record is flagged extinct; this assessment's category contradicts it`, after: "" };
+        : { before: "CoL's record for this name is flagged extinct.", after: "" };
     case "unmatched":
       return subject
         ? { before: `No ${COL} species matches ${subject}, so there is nothing there to check this assessment against.`, after: "" }
-        : { before: `No ${COL} species matches this name`, after: "" };
+        : { before: "No CoL record of this name, at any status.", after: "" };
     case "missing_from_backbone":
+      // Name the id. "A record that no longer resolves" is not something a reader
+      // can look up, act on, or report; the id is all three — it is what they
+      // would paste into CoL, and what makes the claim falsifiable.
       return subject
-        ? { before: `${s}links to a ${COL} record that no longer resolves, so the match needs redoing.`, after: "" }
-        : { before: `Links to a ${COL} record that no longer resolves`, after: "" };
-    case "classified_elsewhere":
+        ? { before: `${s}links to ${COL} id ${flag.colId ?? "(unknown)"}, which this release doesn't hold, so the match needs redoing.`, after: "" }
+        : { before: `Links to CoL id ${flag.colId ?? "(unknown)"}, which this release doesn't hold.`, after: "" };
+    case "classified_elsewhere": {
+      // Where CoL accepts the species under another NAME, that is the finding,
+      // and the reader wants the name — the group, when it differs too, comes
+      // after it. Sorbus is the case: same family, different genus, and a row
+      // reading "CoL files this record under Rosaceae" while sitting under
+      // Rosaceae said nothing at all.
+      const accepted = acceptedNameFor(flag);
+      if (accepted) {
+        const where = flag.colGroup ? `, in ${flag.colGroup}` : "";
+        const genus = flag.name && isGenusMove(flag.name, accepted);
+        return subject
+          ? genus
+            ? { before: `${COL} uses a different genus for ${subject}, accepting `, detail: accepted, after: `${where}.` }
+            : { before: `${COL} accepts a different name for ${subject}: `, detail: accepted, after: `${where}.` }
+          : genus
+            ? { before: "CoL uses another genus, accepting ", detail: accepted, after: `${where}.` }
+            : { before: "CoL accepts a different name: ", detail: accepted, after: `${where}.` };
+      }
+      // Same name, different placement — then the group IS the whole finding, so
+      // withholding it leaves nothing to check.
+      const where = flag.colGroup;
       return subject
-        ? { before: `${COL} files ${s}under a different group, so it won't appear where this assessment places it.`, after: "" }
-        : { before: `${COL} classifies it under a different group here`, after: "" };
+        ? where
+          ? { before: `${COL} files ${s}under ${where}, so it won't appear where this assessment places it.`, after: "" }
+          : { before: `${COL} files ${s}under a different group, so it won't appear where this assessment places it.`, after: "" }
+        : where
+          ? { before: `CoL files this record under ${where}.`, after: "" }
+          : { before: "CoL files this record under a different group.", after: "" };
+    }
     default:
-      // An unrecognised code renders as itself rather than as "undefined" — the
-      // col-revision test asserts this can't happen for any shipped reason.
-      return { before: flag.reason ?? "", after: "" };
+      // Never reached for a shipped reason (the col-revision test asserts every
+      // one is handled), so this is for data written by a future or older build.
+      // Says what the row is for rather than leaking a code the reader can make
+      // nothing of, which is what "no_link" did.
+      return { before: `No 1:1 ${COL} match for this name.`, after: "" };
   }
 }
 
@@ -712,6 +847,52 @@ export function acceptedNameSentence(
   return flag.genusDiffers
     ? { before: `${COL} uses a different genus for ${subject}, accepting `, detail: name, after: "." }
     : { before: `${COL} accepts a different name for ${subject}: `, detail: name, after: "." };
+}
+
+/**
+ * Why a Catalogue of Life species has no IUCN assessment, where we can say —
+ * the Not Evaluated half of the same panel, in the same voice as the no-match
+ * half above: a checkable statement about CoL's record, with the related
+ * assessed species named so a reader can see the assessment does exist, just
+ * not under this name.
+ *
+ * Two shapes, both derived from CoL's own synonymy (col-breakdown.ts):
+ *
+ *  - `neSynonym` — CoL files an IUCN-ASSESSED name among this species' synonyms
+ *    (SYNONYM_ASSESSED_SQL). Checkable on the species' CoL page, under Synonyms.
+ *  - `split` — CoL keeps an old infraspecific name under an assessed species
+ *    that now resolves here (SPLIT_CANDIDATES_SQL). A heuristic, so it stays
+ *    hedged, and the evidence is only visible from THIS species' CoL page —
+ *    hence a tooltip alongside saying what to look for.
+ *
+ * Most NE species get neither: they are simply species nobody has assessed,
+ * which the panel says by leaving the cell empty rather than padding it out.
+ */
+export function neSynonymSentence(assessedName: string): NoMatchSentence {
+  return { before: "CoL lists the assessed ", detail: assessedName, after: " as a synonym of this species." };
+}
+
+export function neSplitSentence(parentName: string): NoMatchSentence {
+  return { before: "Likely split from the assessed ", detail: parentName, after: "." };
+}
+
+/** The evidence behind neSplitSentence's hedge, for the tooltip beside it. */
+export const NE_SPLIT_EVIDENCE =
+  `Heuristic, not a confirmed taxonomic changelog: ${COL} still files an old subspecies name of the linked species as a synonym of this one. Its page lists that name under Synonyms.`;
+
+/**
+ * The CoL record `noMatchSentence`'s `detail` names, for linking it.
+ *
+ * Usually detailColId — the record for the second species a row names. For a
+ * reclassified row the second name IS the record this assessment matched, which
+ * the classifier files under colId, so the link target has to follow the name
+ * rather than sit on one fixed field. Without this the reclassified rows print
+ * "accepting Aria greenii" as plain text, which is the one sentence in the
+ * column whose whole point is that you can go and look at it.
+ */
+export function noMatchDetailColId(flag: ColRevision): string | undefined {
+  if (flag.detailColId) return flag.detailColId;
+  return canonicalReason(flag.reason) === "classified_elsewhere" ? flag.colId : undefined;
 }
 
 /** The sentence as one plain string, for a `title`/tooltip that can't hold a link. */

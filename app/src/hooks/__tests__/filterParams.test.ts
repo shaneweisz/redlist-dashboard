@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseParams, buildQs, mergeParamsIntoSearch, OWN_PARAM_NAMES } from "../useFilterParams";
+import { parseParams, buildQs, mergeParamsIntoSearch, OWN_PARAM_NAMES, SPECIES_SCOPED_RESET } from "../useFilterParams";
 import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "../../lib/habitat-filter";
 
 describe("parseParams", () => {
@@ -1202,5 +1202,63 @@ describe("bd= breakdown param", () => {
   ])("round-trips through buildQs: %j", (breakdown) => {
     const qs = buildQs({ ...parseParams(""), breakdown } as unknown as Parameters<typeof buildQs>[0]);
     expect(parseParams(qs).breakdown).toEqual(breakdown);
+  });
+});
+
+// A taxa / sub-group navigation is a fresh browse: everything scoped to the
+// species you were previously looking at goes with it, in the same atomic state
+// update. Before this, clicking another taxa row from a species search kept
+// `species=`/`search=` in the URL, so the new taxon's table came up narrowed to
+// (and expanded on) a species that isn't even in it.
+describe("SPECIES_SCOPED_RESET", () => {
+  // The header search bar's own URL push: one species, its detail panel open,
+  // the taxon it sits in selected, and its name left in `search=`.
+  const searched = "?taxa=mammals~family:Felidae&search=Panthera+leo&species=sis-15951&tab=redlist";
+
+  it("names exactly the species-scoped fields", () => {
+    expect(Object.keys(SPECIES_SCOPED_RESET).sort()).toEqual(["breakdown", "search", "species", "tab"]);
+  });
+
+  it("drops species, tab, search and bd= from a searched-species URL", () => {
+    const next = { ...parseParams(searched), taxa: new Set(["birds"]), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
+    const params = new URLSearchParams(buildQs(next as unknown as Parameters<typeof buildQs>[0]));
+    expect(params.get("species")).toBeNull();
+    expect(params.get("tab")).toBeNull();
+    expect(params.get("search")).toBeNull();
+    expect(params.get("bd")).toBeNull();
+    expect(params.get("taxa")).toBe("birds");
+  });
+
+  it("removes those params from the live URL, not just from the new state", () => {
+    const next = { ...parseParams(searched), taxa: new Set(["birds"]), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
+    const qs = mergeParamsIntoSearch(searched, next as unknown as Parameters<typeof buildQs>[0], "");
+    expect(qs).not.toContain("species=");
+    expect(qs).not.toContain("search=");
+    expect(qs).not.toContain("tab=");
+  });
+
+  it("leaves the rest of the filter state alone", () => {
+    const withFilters = parseParams(searched + "&categories=CR,EN&sort=totalGbif");
+    const next = { ...withFilters, taxa: new Set(["birds"]), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
+    const parsed = parseParams(buildQs(next as unknown as Parameters<typeof buildQs>[0]));
+    expect(parsed.categories).toEqual(new Set(["CR", "EN"]));
+    expect(parsed.sortField).toBe("totalGbif");
+  });
+
+  it("clears the species drill-down on its own, keeping the taxon and sub-group", () => {
+    // What clearSpeciesDrilldown does — re-clicking the group you're already in.
+    const next = { ...parseParams(searched), ...SPECIES_SCOPED_RESET };
+    const parsed = parseParams(buildQs(next as unknown as Parameters<typeof buildQs>[0]));
+    expect(parsed.species).toBeNull();
+    expect(parsed.search).toBe("");
+    expect(parsed.taxa).toEqual(new Set(["mammals"]));
+    expect(parsed.subgroups).toEqual(new Set(["mammals~family:Felidae"]));
+  });
+
+  it("leaves the landing page's own empty state at the landing page", () => {
+    // "All Species" from a drill-down: taxa cleared AND the species drill-down
+    // with it, so the URL is bare — exactly what a fresh visit produces.
+    const next = { ...parseParams(searched), taxa: new Set<string>(), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
+    expect(buildQs(next as unknown as Parameters<typeof buildQs>[0])).toBe("");
   });
 });

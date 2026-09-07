@@ -17,7 +17,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { run } from "../build-backbone";
+import { run, backboneHasCurrentColumns } from "../build-backbone";
 
 // Minimal ColDP NameUsage: only the columns build-backbone reads by name. The last
 // three feed described_year: the current-combination author year, the basionym
@@ -216,6 +216,27 @@ describe("build-backbone species universe", () => {
     // comparison runs on normalised names, not raw ColDP strings.
     expect(by.get("7")?.scientific_name).toBe("Peropteryx leucoptera");
     expect(by.get("7")?.checklist_name).toBeNull();
+  });
+
+  // The sync decides whether to rebuild the backbone from the CoL release pins,
+  // and those say which release the data came from, never which version of this
+  // script wrote it. Adding a column here while both pins hold steady leaves a
+  // file that is current by every check the sync makes and missing a column the
+  // read layer queries — so the sync asks the file itself (see sync.ts).
+  it("reports a backbone written by an earlier version of this script as not current", async () => {
+    expect(await backboneHasCurrentColumns(backbone)).toBe(true);
+
+    // backbone.parquet exactly as it looked before the checklist columns existed.
+    const legacy = path.join(tmp, "backbone-legacy.parquet");
+    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    await conn.run(`COPY (
+      SELECT col_id, parent_id, status, rank, scientific_name, authorship
+      FROM read_parquet('${backbone}')
+    ) TO '${legacy}' (FORMAT PARQUET)`);
+    expect(await backboneHasCurrentColumns(legacy)).toBe(false);
+
+    // Unreadable is not "current" either — a rebuild is the right answer.
+    expect(await backboneHasCurrentColumns(path.join(tmp, "no-such-file.parquet"))).toBe(false);
   });
 
   it("refuses to name an accepted species from an AMBIGUOUS synonym", async () => {

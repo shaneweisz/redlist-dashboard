@@ -51,6 +51,7 @@ yarn-error.log*
 !/data/country-stats.json
 !/data/vernacular-names.json
 !/data/col-split-candidates.parquet
+!/data/col-synonym-assessed.parquet
 !/data/col-to-assessed.parquet
 !/data/col-revisions.json
 

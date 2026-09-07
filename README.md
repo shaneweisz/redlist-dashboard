@@ -47,7 +47,11 @@ Charts support multi-select (Cmd/Ctrl+click) and cross-filter with the search ba
 ### Expandable species rows
 Click any species row for a tabbed (or stacked) detail view:
 - **GBIF Map** — occurrence points on a MapLibre GL map, plus an iNaturalist photo gallery
-- **Literature** — papers published since the last assessment (from OpenAlex)
+- **Literature** — one chronological table of everything published about the species,
+  newest first and paginated, with a dotted line marking the last assessment date.
+  Merged and deduplicated across OpenAlex, Zenodo, the assessment's own reference
+  list, and Biodiversity Heritage Library / CORE / Google Books when their API
+  keys are configured. Rows the assessment cited are tagged as such
 - **Red List** — full assessment details: criteria, population trend, threats, conservation actions, rationale
 - **CITES** — trade status, suspensions, quotas, and a trade-flow map with history since 1975
 - **EOL** — traits and media from the Encyclopedia of Life
@@ -102,7 +106,11 @@ Data Flow:
 Live external APIs:
   GBIF REST API     → occurrence points, record breakdowns, iNaturalist photos
   Species+ API      → CITES listings, trade data
-  OpenAlex          → scientific literature since last assessment
+  OpenAlex          → scientific literature (primary literature source)
+  Zenodo            → conservation grey literature, reports, theses
+  IUCN Red List API → assessment detail, and the assessment's reference list
+  BHL / CORE /      → historical scans, repository theses and reports,
+  Google Books        printed floras (each optional — enabled by its own key)
   EOL TraitBank     → trait data for the EOL tab
 ```
 

@@ -117,6 +117,39 @@ const TAXON_GROUP_CASE = `
     ELSE 'other'
   END`;
 
+/**
+ * Every column the COPY below writes into backbone.parquet. Declared here, beside
+ * the query that produces them, so the sync's staleness check (below) can't drift
+ * from what a rebuild actually yields.
+ */
+export const BACKBONE_COLUMNS = [
+  "col_id", "parent_id", "status", "rank", "scientific_name", "authorship",
+  "in_checklist", "checklist_parent_id", "checklist_name",
+];
+
+/**
+ * Does the backbone already on disk have every column a rebuild would write?
+ *
+ * The sync otherwise decides to skip the (expensive, 3.4GB-download) rebuild purely
+ * from the release pins — which say which CoL release the data came from, not which
+ * version of this script wrote it. Adding a column here while both pins hold steady
+ * therefore produces a backbone that is current by every check the sync makes and
+ * still missing a column the read layer queries, failing those queries outright.
+ * A parquet DESCRIBE reads footer metadata only (no scan), so asking the file itself
+ * costs nothing and closes that gap.
+ */
+export async function backboneHasCurrentColumns(backbonePath: string): Promise<boolean> {
+  try {
+    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const rows = await (await conn.run(`DESCRIBE SELECT * FROM read_parquet('${backbonePath}') LIMIT 0`)).getRowObjects();
+    const cols = new Set(rows.map((r) => String(r.column_name)));
+    return BACKBONE_COLUMNS.every((c) => cols.has(c));
+  } catch {
+    // Unreadable is not "current" — a rebuild is the right answer either way.
+    return false;
+  }
+}
+
 async function fetchBaseSourceIds(): Promise<string[]> {
   const res = await fetch(`https://api.checklistbank.org/dataset/${COL_BASE_DATASET}/source`);
   if (!res.ok) throw new Error(`Base source list fetch failed (${COL_BASE_DATASET}): ${res.status}`);

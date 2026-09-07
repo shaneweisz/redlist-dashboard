@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary from "./TaxaSummary";
-import NewLiteratureSinceAssessment from "../LiteratureSearch";
+import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams, taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -17,7 +17,8 @@ import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/tax
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import ReviewerChart from "./ReviewerChart";
-import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, noMatchSentence, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
+import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
+import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
@@ -848,49 +849,15 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
   // Resets to the first page on every open: the panel is only mounted while the
   // tooltip is up, so there is no stale page to come back to.
   const [splitPage, setSplitPage] = useState(0);
-  const colLink = (text: string, colId?: string) =>
-    colId ? (
-      <a
-        href={colUrl(colId)}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="text-blue-300 hover:text-blue-200 underline"
-      >
-        {text}
-      </a>
-    ) : (
-      text
-    );
-
+  // colLink/linkNames now live in revision-links.tsx, shared with the SSC
+  // panel's Explanation column so the same finding links the same way in both.
+  const colLink = (text: string, colId?: string) => <ColLink text={text} colId={colId} />;
   // The row's own species is a link too, wherever its name appears in the
   // sentence — for reasons that name no second species ("provisional",
   // "extinct flag") it is the only record there is to open, and even where a
   // second species IS named, "what does CoL say about THIS one" is the question
   // the flag raises. A lump's lead also names the CoL species the group is filed
   // under, which is the most useful target in it, so that gets linked too.
-  const linkNames = (text: string, targets: { name: string; href: string }[]): React.ReactNode => {
-    const hit = targets
-      .map((t) => ({ ...t, at: text.indexOf(t.name) }))
-      .filter((t) => t.at >= 0)
-      .sort((a, b) => a.at - b.at)[0];
-    if (!hit) return text;
-    return (
-      <>
-        {text.slice(0, hit.at)}
-        <a
-          href={hit.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-blue-300 hover:text-blue-200 underline"
-        >
-          {hit.name}
-        </a>
-        {linkNames(text.slice(hit.at + hit.name.length), targets.filter((t) => t.name !== hit.name))}
-      </>
-    );
-  };
   const linkSubject = (text: string): React.ReactNode => linkNames(text, [
     { name, href: colTaxonUrl(flag, name) },
     // For a lump, CoL's accepted name for the shared record — flag.colId IS that
@@ -973,12 +940,13 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
   // no-match reason, and its tooltip has to show every finding its own flag is
   // filterable by, or a bar returns a row that never explains itself.
   if (flag.reason != null && !(lump && flag.reason === "lumped")) {
-    const s = noMatchSentence(flag, name);
     sentences.push({ code: flag.reason, node: (
       <span key="no-match">
-        {linkSubject(s.before)}
-        {s.detail != null && colLink(s.detail, flag.detailColId)}
-        {s.after}
+        <NoMatchLine
+          flag={flag}
+          subject={name}
+          extraTargets={flag.lumpedUnder && flag.colId ? [{ name: flag.lumpedUnder, href: colUrl(flag.colId) }] : []}
+        />
       </span>
     ) });
   }
@@ -1312,6 +1280,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
   }, [viewMode, setSelectedTaxa, setSelectedCategories, setSelectedYearRanges, setSelectedAssessmentYears, setSelectedDescribedYears, setSelectedCountries, setSelectedObsRanges, setSelectedAssessmentCounts, setSelectedSystems, setSelectedPopulationTrends, setSelectedMovementPatterns, setSelectedThreats, setSelectedCriteria, setSelectedHabitat, setHabitatBreadth, setSelectedHabitatImportance, setSelectedHabitatSeasons, setSelectedHabitatSuitability, setEndemicsOnly, setSelectedGrowthForms, setSelectedAssessors, setSelectedReviewers, setSelectedFacilitators, setSelectedContributors, setSelectedInstitutions, setSort]);
 
+  // Set by the navigations that already produce a complete, fully-specified
+  // state in one atomic update (a sub-group selection that also moves the view
+  // root, "All Species" resetting everything) — the generic per-field reset
+  // effect below must not run a second, partial pass over what they just set.
+  const skipClearOnTaxaChangeRef = useRef(false);
+
   // Taxon toggle handler (used by TaxaSummary)
   // Regular click: select only that taxon (or deselect if already sole selection)
   // Cmd/Ctrl+Click on taxon row: multi-select toggle (expands taxa summary to show all rows)
@@ -1354,9 +1328,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           returnToLayoutMode("country");
           return;
         }
-        // Return to landing page
-        setSelectedSubgroups(new Set());
-        setSelectedTaxa(new Set());
+        // Return to the landing page — the same table a fresh visit lands on,
+        // so this drops every filter along with the taxa/sub-group selection,
+        // the header search bar's `search=` and any open species panel with
+        // them. Atomic (clearAllFiltersAndTaxa is one setState + one history
+        // push) rather than a taxa-clear that leaves the reset to the effect
+        // below: one back-press then returns to the drill-down instead of
+        // unwinding through a half-cleared intermediate. The ref tells that
+        // effect this transition is already complete, so it doesn't run a
+        // second, redundant pass over it.
+        skipClearOnTaxaChangeRef.current = true;
+        clearAllFiltersAndTaxa();
+        setShowOnlyStarred(false);
         return;
       }
       // On landing page: toggle "all" on/off (disabled in new-assessments — NE dataset too large)
@@ -1393,14 +1376,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       setSelectedSubgroups(new Set());
       return new Set([taxonId]);
     });
-  }, [setSelectedTaxa, setSelectedSubgroups, selectedTaxa, selectedSubgroups, isNewAssessments, searchFilter, urlSpecies, clearAllFilters, layoutMode, setLayoutMode, exitCountryModeForTaxon, originLayout, returnToLayoutMode, fromPopstateRef]);
+  }, [setSelectedTaxa, setSelectedSubgroups, selectedTaxa, selectedSubgroups, isNewAssessments, searchFilter, urlSpecies, clearAllFilters, clearAllFiltersAndTaxa, layoutMode, setLayoutMode, exitCountryModeForTaxon, originLayout, returnToLayoutMode, fromPopstateRef]);
 
   // Reset all other filters when taxa selection changes
   const prevTaxaRef = useRef(selectedTaxa);
-  const skipClearOnTaxaChangeRef = useRef(false);
   useEffect(() => {
     const prev = prevTaxaRef.current;
     prevTaxaRef.current = selectedTaxa;
+    // Consume the popstate flag up front, before any early return below.
+    // parseParams builds a fresh Set on every popstate, so this effect re-runs
+    // for each one — but a popstate that doesn't *change* the taxa (searching a
+    // species from within the taxon it already sits in) used to bail out at the
+    // contents check with the flag still raised, and the next genuine taxon
+    // click would then read that stale flag and skip its reset entirely,
+    // leaving the previous taxon's filters applied to the new one.
+    const fromPopstate = fromPopstateRef.current;
+    fromPopstateRef.current = false;
     // Skip if taxa haven't actually changed (same reference or same contents)
     if (prev === selectedTaxa) return;
     if (prev.size === selectedTaxa.size && [...selectedTaxa].every(t => prev.has(t))) return;
@@ -1411,10 +1402,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     // Skip clearing when the taxa change came from URL navigation (popstate) —
     // the URL already contains the complete state (e.g. from search bar navigation).
-    if (fromPopstateRef.current) {
-      fromPopstateRef.current = false;
-      return;
-    }
+    if (fromPopstate) return;
     // Skip clearing when going from no taxa to some taxa — this happens during
     // URL hydration (useFilterParams starts empty then populates from URL) and
     // there are no taxa-specific filters to reset when nothing was selected before.
@@ -2118,6 +2106,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       manualTabSelectionRef.current = visibleTab(urlTab) !== "gbif";
       autoColSwitchedRef.current = false;
       urlSpeciesHandledRef.current = false; // allow auto-page-navigate for new species
+    } else {
+      // `species=` is gone — close the detail panel. Not just the back button:
+      // navigating to another taxa/sub-group row drops the species drill-down
+      // with it (SPECIES_SCOPED_RESET in useFilterParams), and without this the
+      // row expansion is local state that would keep the old species' panel
+      // open under a table it no longer belongs to.
+      setSelectedSpeciesKeyRaw(null);
+      setActiveDetailTabRaw("gbif");
+      setVisitedTabs(new Set(["gbif"]));
+      manualTabSelectionRef.current = false;
+      autoColSwitchedRef.current = false;
+      urlSpeciesHandledRef.current = false;
     }
   }, [urlSpecies, urlTab]);
 
@@ -6350,7 +6350,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                     className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "redlist" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("redlist")}
                                   >
-                                    IUCN Red List Assessments
+                                    {/* The full name costs a phone most of the
+                                        tab strip on its own. */}
+                                    <span className="sm:hidden">Red List</span>
+                                    <span className="hidden sm:inline">IUCN Red List Assessments</span>
                                   </button>
                                 )}
                                 <button
@@ -6363,7 +6366,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "col" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("col")}
                                 >
-                                  Catalogue of Life
+                                  {/* The full name is a third of a phone's tab strip. */}
+                                  <span className="sm:hidden">CoL</span>
+                                  <span className="hidden sm:inline">Catalogue of Life</span>
                                 </button>
                                 {SHOW_EOL_TAB && (
                                   <button
@@ -6425,9 +6430,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {(assessmentYear || s.category === "NE") && (visitedTabs.has("literature")) && (
                             <div className="p-4" style={{ display: activeDetailTab === "literature" ? undefined : "none" }}>
-                              <NewLiteratureSinceAssessment
+                              <LiteratureTimeline
                                 scientificName={s.scientific_name}
-                                assessmentYear={assessmentYear ?? 0}
+                                assessmentDate={s.assessment_date ?? null}
+                                assessmentId={s.assessment_id ? String(s.assessment_id) : null}
+                                assessmentYear={assessmentYear}
                               />
                             </div>
                           )}

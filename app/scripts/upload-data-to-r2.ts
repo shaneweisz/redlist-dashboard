@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   console.log(`Updated ${path.relative(process.cwd(), LATEST_SYNC_FILE)} → ${timestamp}`);
   console.log("");
   console.log("Next steps:");
-  console.log("  git add app/latest-sync.txt app/data/taxa-summary.json app/data/table1a-children-summaries.json app/data/ssc-group-children-summaries.json app/data/col-split-candidates.parquet app/data/col-to-assessed.parquet");
+  console.log("  git add app/latest-sync.txt app/data/taxa-summary.json app/data/table1a-children-summaries.json app/data/ssc-group-children-summaries.json app/data/col-split-candidates.parquet app/data/col-synonym-assessed.parquet app/data/col-to-assessed.parquet");
   console.log(`  git commit -m "Bump data sync to ${timestamp}"`);
   console.log("  git push  # open PR; merging flips production to the new sync");
   logger.close();

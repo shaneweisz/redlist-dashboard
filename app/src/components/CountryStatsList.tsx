@@ -51,7 +51,20 @@ interface CountryStatsListProps {
   onSortChange?: (key: SortKey, dir: SortDir) => void;
 }
 
-const PAGE_SIZE = 10;
+// How many rows a page holds is measured, not fixed: this list is absolutely
+// filled into exactly the box the map would have occupied (see WorldMap), so it
+// has to page at whatever that box holds rather than force the card taller —
+// 10 text-sm rows are two-thirds of Country View's full-height panel but nearly
+// double the Country FILTER card, which is only as tall as the 200px map inside
+// it. Below, `fit` carries both halves of that answer.
+//
+// The compact scale is the same one this table ran at before Country View gave
+// it a full-height panel — micro-text reads as cramped there, and as the only
+// way to show a useful number of countries in a small filter card.
+const DENSE_MAX_HEIGHT = 340; // available box below which the compact scale kicks in
+const DENSE_ROW_H = 25; // text-xs + py-1 + border, pre-paint fallback only
+const ROW_H = 37; // text-sm + py-2 + border, likewise
+const MIN_ROWS = 3; // never page fewer than this, however short the box
 
 function percentOutdatedOf(species: number, outdated: number): number {
   return species > 0 ? (outdated / species) * 100 : 0;
@@ -63,6 +76,7 @@ function SortHeader({
   dir,
   align = "right",
   widthClass,
+  dense,
   onClick,
   filterButton,
 }: {
@@ -71,18 +85,30 @@ function SortHeader({
   dir: SortDir;
   align?: "left" | "right";
   widthClass?: string;
+  dense?: boolean;
   onClick: () => void;
   filterButton?: React.ReactNode;
 }) {
   return (
+    // The label wraps rather than truncating: "# Needs Updating" doesn't fit one
+    // line of a quarter-width column in the Country filter card, and an ellipsed
+    // "# Needs U…" beside an ellipsed "% Needs …" leaves the two indistinguishable.
+    // Two lines cost ~16px of header once, which the row fit below accounts for;
+    // in Country View's full-width panel there's room for one line and nothing
+    // wraps at all. Same call the species table's long headers make (see
+    // RedListView's SPECIES_TH_LABEL). The sort caret and filter icon sit beside
+    // the label in a flex rather than trailing its last word, so they stay put
+    // however the text breaks.
     <th
-      className={`text-sm font-medium text-zinc-500 dark:text-zinc-400 px-3 py-2 cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200 whitespace-nowrap overflow-hidden text-ellipsis ${align === "left" ? "text-left" : "text-right"} ${widthClass ?? ""}`}
+      className={`font-medium text-zinc-500 dark:text-zinc-400 cursor-pointer select-none hover:text-zinc-700 dark:hover:text-zinc-200 ${dense ? "text-xs px-2 py-1" : "text-sm px-3 py-2"} ${align === "left" ? "text-left" : "text-right"} ${widthClass ?? ""}`}
       onClick={onClick}
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
     >
-      {label}
-      <span className="inline-block w-3 text-zinc-400">{active ? (dir === "asc" ? "▲" : "▼") : ""}</span>
-      {filterButton}
+      <span className={`flex items-center gap-0.5 ${align === "left" ? "justify-start" : "justify-end"}`}>
+        <span className="leading-tight break-words min-w-0">{label}</span>
+        <span className="w-3 shrink-0 text-zinc-400">{active ? (dir === "asc" ? "▲" : "▼") : ""}</span>
+        {filterButton}
+      </span>
     </th>
   );
 }
@@ -194,6 +220,40 @@ export default function CountryStatsList({
     return () => document.removeEventListener("mousedown", handler);
   }, [openFilterKey]);
 
+  // Rows per page + text scale, both read off the box this list is given (see
+  // the constants above). The scroll viewport's own height comes from the
+  // absolutely-filled parent minus the pagination footer — never from the rows
+  // inside it — so measuring here can't feed back into what it measures.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ rows: number; dense: boolean }>({ rows: MIN_ROWS, dense: false });
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const measure = () => {
+      const avail = el.clientHeight;
+      if (avail <= 0) return; // hidden (display:none) — keep the last real fit
+      const dense = avail < DENSE_MAX_HEIGHT;
+      const headH = el.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+      // The rendered row is the honest height (padding, border, whatever the
+      // text wraps to); the constants only stand in before the first paint, and
+      // for the "No data" row, which is nothing like a real one.
+      const rowH =
+        el.querySelector("tbody tr[data-country-row]")?.getBoundingClientRect().height ||
+        (dense ? DENSE_ROW_H : ROW_H);
+      const rows = Math.max(MIN_ROWS, Math.floor((avail - headH) / rowH));
+      setFit(prev => (prev.rows === rows && prev.dense === dense ? prev : { rows, dense }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // fit.dense re-measures once the compact scale has actually rendered (the
+    // viewport's own height doesn't change, so the observer wouldn't fire);
+    // the column set changes the header's height by changing where it wraps.
+  }, [fit.dense, showOutdatedMode, speciesLabel]);
+  const pageSize = fit.rows;
+  const dense = fit.dense;
+
   const regionCodes = useMemo(
     () => (regionsFilter.length
       ? new Set(regionsFilter.flatMap((r) => iucnRegionCountries(r)))
@@ -240,9 +300,9 @@ export default function CountryStatsList({
     setPage(0);
   }
 
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
   const clampedPage = Math.min(page, pageCount - 1);
-  const pageRows = sorted.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+  const pageRows = sorted.slice(clampedPage * pageSize, (clampedPage + 1) * pageSize);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -257,40 +317,31 @@ export default function CountryStatsList({
   }
 
   const openFilterConfig = openFilterKey ? filterConfigs[openFilterKey] : null;
+  const cellPad = dense ? "px-2 py-1" : "px-3 py-2";
 
   return (
-    // mb-9 reserves room for WorldMap's floating Map/List toggle, which
-    // overlays bottom-left of whichever view is showing (absolutely
-    // positioned against the shared card, not this component) — harmless
-    // dead space when this list is short, but without it the pagination
-    // footer collides with the toggle once the list is tall enough to fill
-    // the card (e.g. Country View's now-full-height landing map/list).
-    <div className="flex-1 min-h-0 flex flex-col mb-11 rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <div className="flex-1 min-h-0 overflow-auto">
+    <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-800">
+      <div ref={viewportRef} className="flex-1 min-h-0 overflow-auto">
         {/* table-fixed + explicit column-width shares (rather than auto/content-based
             sizing) so the Country column truncates instead of wrapping long names
             ("United States of America") across multiple lines, whatever width this
-            ends up at. text-sm + more generous py (up from the text-xs/py-0.5 this
-            used to run at) reads properly now that Country View's landing map (and
-            this List alternative to it) is flex-1'd to fill the viewport instead of
-            a small fixed-height card — cramped micro-text made sense in that small
-            card, not in a full-height one. Once a country's picked, the map/list
-            card sits in a half-width grid cell with align-items: stretch matching
-            the taxa table's own height (see TaxaSummary), so this can still end up
-            shorter there — same sizing either way, it just scrolls internally
-            (flex-1 min-h-0 overflow-auto below) rather than changing text size to
-            fit. Min/max filters live behind each numeric header's filter icon (see
-            FilterIconButton) rather than a permanent row, to keep the header compact
-            regardless of available height. */}
-        <table className="w-full table-fixed text-sm border-collapse">
+            ends up at. The text scale follows the height on offer (see `fit`
+            above): text-sm/py-2 in Country View's full-height panel, where
+            micro-text reads as cramped, and the compact scale in the Country
+            filter card, where it's the difference between showing three
+            countries and showing seven. Min/max filters live behind each numeric
+            header's filter icon (see FilterIconButton) rather than a permanent
+            row, to keep the header compact regardless of available height. */}
+        <table className={`w-full table-fixed border-collapse ${dense ? "text-xs" : "text-sm"}`}>
           <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-10">
             <tr>
-              <SortHeader label="Country" active={sortKey === "name"} dir={sortDir} align="left" widthClass={showOutdatedMode ? "w-[34%]" : "w-2/3"} onClick={() => toggleSort("name")} />
+              <SortHeader label="Country" active={sortKey === "name"} dir={sortDir} align="left" dense={dense} widthClass={showOutdatedMode ? "w-[28%]" : "w-1/2"} onClick={() => toggleSort("name")} />
               <SortHeader
                 label={speciesLabel}
                 active={sortKey === "species"}
                 dir={sortDir}
-                widthClass={showOutdatedMode ? "w-[22%]" : "w-1/3"}
+                dense={dense}
+                widthClass={showOutdatedMode ? "w-[24%]" : "w-1/2"}
                 onClick={() => toggleSort("species")}
                 filterButton={
                   <FilterIconButton
@@ -305,7 +356,8 @@ export default function CountryStatsList({
                   label="# Needs Updating"
                   active={sortKey === "outdated"}
                   dir={sortDir}
-                  widthClass="w-[22%]"
+                  dense={dense}
+                  widthClass="w-[24%]"
                   onClick={() => toggleSort("outdated")}
                   filterButton={
                     <FilterIconButton
@@ -321,7 +373,8 @@ export default function CountryStatsList({
                   label="% Needs Updating"
                   active={sortKey === "percentOutdated"}
                   dir={sortDir}
-                  widthClass="w-[22%]"
+                  dense={dense}
+                  widthClass="w-[24%]"
                   onClick={() => toggleSort("percentOutdated")}
                   filterButton={
                     <FilterIconButton
@@ -340,20 +393,21 @@ export default function CountryStatsList({
               return (
                 <tr
                   key={row.code}
+                  data-country-row=""
                   onClick={(e) => onCountrySelect(row.code, row.name, e)}
                   className={`cursor-pointer border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 ${
                     isSelected ? "bg-blue-50 dark:bg-blue-900/30" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                   }`}
                 >
-                  <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300 max-w-0">
+                  <td className={`${cellPad} text-zinc-700 dark:text-zinc-300 max-w-0`}>
                     <span className="block truncate" title={row.name}>{row.name}</span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{row.species.toLocaleString()}</td>
+                  <td className={`${cellPad} text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap`}>{row.species.toLocaleString()}</td>
                   {showOutdatedMode && (
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{row.outdated.toLocaleString()}</td>
+                    <td className={`${cellPad} text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap`}>{row.outdated.toLocaleString()}</td>
                   )}
                   {showOutdatedMode && (
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap">{row.percentOutdated.toFixed(1)}%</td>
+                    <td className={`${cellPad} text-right tabular-nums text-zinc-700 dark:text-zinc-300 whitespace-nowrap`}>{row.percentOutdated.toFixed(1)}%</td>
                   )}
                 </tr>
               );
@@ -369,9 +423,17 @@ export default function CountryStatsList({
         </table>
       </div>
       {sorted.length > 0 && (
-        <div className="flex items-center justify-between px-3 py-1.5 border-t border-zinc-200 dark:border-zinc-800 text-sm text-zinc-500 dark:text-zinc-400 shrink-0">
+        // Everything sits at the right end, leaving the footer's left for
+        // WorldMap's floating Map/List toggle — it overlays bottom-left of
+        // whichever view is showing (absolutely positioned against the shared
+        // wrapper, not this component), which is exactly where the row count
+        // used to be. The toggle used to be cleared by a 44px bottom margin
+        // instead — affordable when the list could grow the card, but a seventh
+        // of the Country filter card's height, i.e. two more countries on
+        // screen, now that it can't.
+        <div className={`flex items-center justify-end gap-3 px-3 py-1.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0 text-zinc-500 dark:text-zinc-400 ${dense ? "text-xs" : "text-sm"}`}>
           <span>
-            {clampedPage * PAGE_SIZE + 1}–{Math.min((clampedPage + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+            {clampedPage * pageSize + 1}–{Math.min((clampedPage + 1) * pageSize, sorted.length)} of {sorted.length}
           </span>
           <div className="flex items-center gap-1">
             <button

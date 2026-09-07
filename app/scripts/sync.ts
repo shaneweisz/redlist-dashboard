@@ -60,7 +60,7 @@ import { run as checkSyncRegressions } from "./check-sync-regressions";
 import { run as buildSpeciesParquet } from "./build-parquet";
 import { run as fetchColXr, resolveXrDataset, currentReleaseOnDisk, currentChecklistOnDisk, writeReleaseMetadata } from "./fetch-col-xr";
 import { run as fetchColChecklist, resolveChecklistDataset } from "./fetch-col-checklist";
-import { run as buildBackbone } from "./build-backbone";
+import { run as buildBackbone, backboneHasCurrentColumns } from "./build-backbone";
 import { run as deriveGbifTaxonKeys } from "./derive-gbif-taxon-keys";
 import { run as buildMatching } from "./build-matching";
 import { run as buildSynonymIndex } from "./build-synonym-index";
@@ -135,7 +135,21 @@ async function main() {
       const checklistMoved = checklistInfo.issued !== haveChecklist;
       const releaseMoved = xrMoved || checklistMoved;
 
-      if (!releaseMoved && fs.existsSync(path.join(DATA_DIR, "backbone.parquet"))) {
+      // A release pin can be current while the backbone on disk is not. The pin is
+      // a checked-in file (src/config/col-release.json), so a commit that adds a
+      // column to build-backbone AND records the checklist that column comes from
+      // leaves every later sync reading "both pins match, nothing to rebuild" over
+      // a backbone that never had the column written into it. That is exactly what
+      // happened to in_checklist / checklist_parent_id / checklist_name: the
+      // queries reading them shipped, the rebuild never ran, and every
+      // live-drilldown breakdown answered with a Binder Error 500. The schema of
+      // the file itself is therefore a rebuild trigger too — it is the one signal
+      // about the backbone that cannot be out of step with the backbone.
+      const backbonePath = path.join(DATA_DIR, "backbone.parquet");
+      const backboneOnDisk = fs.existsSync(backbonePath);
+      const schemaStale = backboneOnDisk && !(await backboneHasCurrentColumns(backbonePath));
+
+      if (!releaseMoved && !schemaStale && backboneOnDisk) {
         console.log(`\nPhases 2-4 (CoL backbone): skipped — GBIF still indexes release ${wantRelease} and the curated checklist is still ${checklistInfo.alias}, already built.`);
       } else {
         if (haveRelease && xrMoved) {
@@ -145,6 +159,10 @@ async function main() {
         if (checklistMoved) {
           console.log(`\nCurated checklist moved: ${haveChecklist ?? "(unpinned)"} → ${checklistInfo.issued} (${checklistInfo.alias}).`);
           console.log("in_checklist / checklist_parent_id / checklist_name come from it, so the backbone is rebuilt.");
+        }
+        if (schemaStale && !releaseMoved) {
+          console.log("\nbackbone.parquet is missing columns build-backbone now writes, though both release pins are current.");
+          console.log("The queries that read them fail outright against it, so the backbone is rebuilt.");
         }
         console.log("\nPhase 2: fetch-col-xr (CoL XR ColDP → NameUsage.tsv + Reference.tsv + VernacularName.tsv)");
         console.log("═".repeat(60));

@@ -640,23 +640,35 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
           Shares this relative wrapper with the map below (rather than each
           having its own) so the Map/List toggle can overlay bottom-left of
           whichever one is actually showing. */}
-      <div className="relative flex-1 min-h-0 flex flex-col">
+      {/* min-h-[200px] is the map's own floor, moved up here off the map itself
+          so List inherits it: the map is display:none in List view, so a floor
+          left on it would let the card shrink to whatever the list is instead —
+          and the list, absolutely filled into this box below, would then have no
+          height to fill. Held here, the two views are exactly the same size,
+          which is the point: switching to List can't resize the card. */}
+      <div className="relative flex-1 min-h-[200px] flex flex-col">
       {viewMode === "list" && (
-        <CountryStatsList
-          stats={activeStats}
-          selectedCountries={selectedCountries}
-          onCountrySelect={onCountrySelect}
-          speciesLabel={speciesLabel}
-          showOutdatedMode={showOutdatedMode}
-          regionsFilter={activeRegions}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSortChange={setSort}
-        />
+        // absolute inset-0 so the list takes the box the map would have had
+        // rather than sizing this card itself — 10 rows of countries nearly
+        // doubled the height of the Country filter card (#487). It pages at
+        // whatever the box actually holds; see CountryStatsList's `fit`.
+        <div className="absolute inset-0 flex flex-col">
+          <CountryStatsList
+            stats={activeStats}
+            selectedCountries={selectedCountries}
+            onCountrySelect={onCountrySelect}
+            speciesLabel={speciesLabel}
+            showOutdatedMode={showOutdatedMode}
+            regionsFilter={activeRegions}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSortChange={setSort}
+          />
+        </div>
       )}
 
       {/* Map */}
-      <div className={viewMode === "list" ? "hidden" : "flex-1 rounded-lg overflow-hidden relative"} ref={mapContainerRef} style={{ minHeight: "200px", touchAction: "none" }}>
+      <div className={viewMode === "list" ? "hidden" : "flex-1 rounded-lg overflow-hidden relative"} ref={mapContainerRef} style={{ touchAction: "none" }}>
         {(loading || (colorMode === "occurrences" && !occurrenceStats)) && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-zinc-900/50 z-10">
             <svg className="animate-spin h-5 w-5 text-zinc-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

@@ -365,6 +365,32 @@ export function parseParams(search: string, suffix: string = "") {
   };
 }
 
+/**
+ * The species-scoped fields that a taxa / sub-group navigation drops.
+ *
+ * `species`/`tab` (the open detail panel) and `search` (the scientific name the
+ * header search bar leaves behind when it jumps straight to one species) only
+ * ever describe the taxon you were looking at when they were set. Clicking a
+ * *different* taxa or sub-group row is a fresh browse, so carrying them over
+ * strands the user on a one-row table for a species that isn't even in the
+ * group they just clicked, with that species' detail panel still open below.
+ * `breakdown` (bd=) is the same story one level further down.
+ *
+ * Spread into the same state update as the taxa/sub-group change (rather than
+ * cleared by a follow-up setter) so the whole navigation stays one atomic
+ * transition — one history entry, and no intermediate URL where the new taxon
+ * and the old species coexist.
+ */
+export const SPECIES_SCOPED_RESET: Pick<
+  ReturnType<typeof parseParams>,
+  "search" | "species" | "tab" | "breakdown"
+> = {
+  search: "",
+  species: null,
+  tab: null,
+  breakdown: null,
+};
+
 export function buildQs(state: {
   viewMode: ViewMode;
   layoutMode?: LayoutMode;
@@ -572,14 +598,17 @@ export function useFilterParams(paramSuffix: string = "") {
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       setState(prev => {
         const nextTaxa = typeof updater === "function" ? updater(prev.taxa) : updater;
-        // A breakdown-name filter (bd=) is only ever set via the atomic URL push in
-        // TaxaSummary.tsx's navigateToNodeSpeciesList (which goes through parseParams
-        // on popstate, not this setter) — an actual taxa change here is a fresh
-        // selection, so drop a stale bd= rather than silently carrying it over. Guard
-        // on reference inequality (not just "this setter ran"): some callers invoke
-        // this as a conditional no-op (e.g. the view-mode-switch effect's `prev.has("all")
-        // ? new Set() : prev`), which must NOT clobber a bd= a same-tick popstate just set.
-        const next = nextTaxa === prev.taxa ? { ...prev, taxa: nextTaxa } : { ...prev, taxa: nextTaxa, breakdown: null };
+        // An actual taxa change here is a fresh selection, so drop everything scoped
+        // to the previous one (the open species panel, the header search bar's
+        // `search=`, a stale bd=) rather than silently carrying it over — see
+        // SPECIES_SCOPED_RESET. None of those are ever set via this setter: they
+        // arrive by their own atomic URL push (SpeciesSearchBar, TaxaSummary.tsx's
+        // navigateToNodeSpeciesList), read back through parseParams on popstate.
+        // Guard on reference inequality (not just "this setter ran"): some callers
+        // invoke this as a conditional no-op (e.g. the view-mode-switch effect's
+        // `prev.has("all") ? new Set() : prev`), which must NOT clobber state a
+        // same-tick popstate just set.
+        const next = nextTaxa === prev.taxa ? { ...prev, taxa: nextTaxa } : { ...prev, taxa: nextTaxa, ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true)); // push so back button works
         return next;
       });
@@ -675,9 +704,9 @@ export function useFilterParams(paramSuffix: string = "") {
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       setState(prev => {
         const nextSubgroups = typeof updater === "function" ? updater(prev.subgroups) : updater;
-        // See setSelectedTaxa above — drop a stale bd= on an actual subgroup change,
-        // but not a same-reference no-op.
-        const next = nextSubgroups === prev.subgroups ? { ...prev, subgroups: nextSubgroups } : { ...prev, subgroups: nextSubgroups, breakdown: null };
+        // See setSelectedTaxa above — drop the previous selection's species/search/bd=
+        // on an actual subgroup change, but not on a same-reference no-op.
+        const next = nextSubgroups === prev.subgroups ? { ...prev, subgroups: nextSubgroups } : { ...prev, subgroups: nextSubgroups, ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });
@@ -706,7 +735,7 @@ export function useFilterParams(paramSuffix: string = "") {
   const navigateToTaxonSubgroup = useCallback(
     (taxonId: string, subgroupId: string) => {
       setState(prev => {
-        const next = { ...prev, taxa: new Set([taxonId]), subgroups: new Set([subgroupId]), layoutMode: null, originLayout: null as LayoutMode, breakdown: null };
+        const next = { ...prev, taxa: new Set([taxonId]), subgroups: new Set([subgroupId]), layoutMode: null, originLayout: null as LayoutMode, ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });
@@ -731,7 +760,7 @@ export function useFilterParams(paramSuffix: string = "") {
   const exitCountryModeForTaxon = useCallback(
     (taxonId: string) => {
       setState(prev => {
-        const next = { ...prev, taxa: new Set([taxonId]), subgroups: new Set<string>(), layoutMode: null as LayoutMode, originLayout: "country" as LayoutMode, breakdown: null };
+        const next = { ...prev, taxa: new Set([taxonId]), subgroups: new Set<string>(), layoutMode: null as LayoutMode, originLayout: "country" as LayoutMode, ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });
@@ -749,7 +778,7 @@ export function useFilterParams(paramSuffix: string = "") {
   const returnToLayoutMode = useCallback(
     (mode: LayoutMode) => {
       setState(prev => {
-        const next = { ...prev, taxa: new Set<string>(), subgroups: new Set<string>(), layoutMode: mode, originLayout: null as LayoutMode, breakdown: null };
+        const next = { ...prev, taxa: new Set<string>(), subgroups: new Set<string>(), layoutMode: mode, originLayout: null as LayoutMode, ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });
@@ -785,7 +814,7 @@ export function useFilterParams(paramSuffix: string = "") {
       fromPopstateRef.current = true;
       setState(prev => {
         const nextCountries = typeof updater === "function" ? updater(prev.countries) : updater;
-        const next = { ...prev, countries: nextCountries, taxa: new Set<string>(), subgroups: new Set<string>(), breakdown: null };
+        const next = { ...prev, countries: nextCountries, taxa: new Set<string>(), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });

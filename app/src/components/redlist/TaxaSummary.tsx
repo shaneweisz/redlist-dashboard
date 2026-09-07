@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { FaInfoCircle, FaChevronRight } from "react-icons/fa";
+import { FaInfoCircle, FaChevronRight, FaFlag } from "react-icons/fa";
 
 import { HiOutlineAdjustmentsHorizontal } from "react-icons/hi2";
 import TaxaIcon from "@/components/TaxaIcon";
@@ -22,12 +22,13 @@ import { prettifyQs } from "@/lib/query-string";
 import { sisRowKey } from "@/lib/species-row-key";
 // Reason labels are shared with the main dashboard's taxonomic-revision flag —
 // see lib/col-revision.ts (both surfaces must explain a reason the same way).
-import { noMatchSentence } from "@/lib/col-revision";
+import { neSplitSentence, neSynonymSentence, reasonComposition, displayReason, NE_SPLIT_EVIDENCE } from "@/lib/col-revision";
+import { NoMatchLine } from "@/components/redlist/revision-links";
 
 // See scripts/build-taxa-summary.ts's classifyNoMatch for what each reason means.
 // Modular/additive on top of colBreakdown[].noMatchIds — safe to drop independently
 // of the count-only CoL Match / No CoL Match mechanism it rides alongside.
-type NoMatchDetail = { id: number; name: string; reason: string; detail?: string; detailId?: number; detailColId?: string; colId?: string; colName?: string };
+type NoMatchDetail = { id: number; name: string; reason: string; detail?: string; detailId?: number; detailColId?: string; colId?: string; colName?: string; colGroup?: string };
 
 // See scripts/build-taxa-summary.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
 // caveats — a name-pattern heuristic (former-subspecies synonym → promoted species),
@@ -35,6 +36,12 @@ type NoMatchDetail = { id: number; name: string; reason: string; detail?: string
 // as fact. Modular/additive on top of colBreakdown[].splitDetails — keyed by col_id
 // since Not Evaluated species have no sis_taxon_id.
 type SplitDetail = { colId: string; parentId: number; parentName: string; parentCategory: string };
+
+// The second Not-Evaluated explanation: CoL files an IUCN-ASSESSED name among
+// this species' synonyms, so the taxon IS assessed — under a name CoL doesn't
+// accept. See col-breakdown.ts's SYNONYM_ASSESSED_SQL. Keyed by col_id and
+// droppable, exactly like SplitDetail.
+type NeSynonymDetail = { colId: string; assessedId: number; assessedName: string; assessedCategory: string };
 
 interface Table1aRowData {
   group: string;
@@ -52,7 +59,7 @@ interface Table1aRowData {
   medianGbifObsPerSpecies?: number;
   colDescribed?: number;
   colNe?: number;
-  colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[];
+  colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
   /** SSC groups mode only: which real view-root taxon this row's group is a
    * sub-population of (e.g. "mammals", "reptiles") — used to navigate to the
    * right root on click, since SSC group nodes span multiple taxa. */
@@ -117,7 +124,7 @@ interface SubGroupSummary {
   byCategory: Record<string, number>;
   colDescribed?: number;
   colNe?: number;
-  colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[];
+  colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
 }
 
 interface Props {
@@ -169,6 +176,16 @@ const expandToggle = (expandable: boolean, expanded: boolean) =>
   );
 
 // Bar color helpers
+// Why a row can read over 100% assessed. The numerator is IUCN's count of what
+// it has assessed; the denominator is how many species this Catalogue of Life
+// release describes in the same group — two organisations' answers to "which
+// species exist", not one number divided by itself. Said in the row rather than
+// left to the reader, since a percentage above 100 reads as a bug on sight.
+// Deliberately no direction: IUCN has the newer treatment about as often as CoL
+// does (see col-revision.ts's "differs, never moved").
+const OVER_100_ASSESSED_NOTE =
+  "More species assessed than Catalogue of Life describes here, due to taxonomic mismatches between the Red List and CoL — often genus transfers, splits or lumps accepted by one source but not yet the other.";
+
 const getAssessedBarColor = (percent: number) =>
   percent >= 50 ? "#22c55e" : percent >= 20 ? "#eab308" : "#ef4444";
 
@@ -363,6 +380,7 @@ interface PanelRequest {
   noMatchIds?: number[];
   noMatchDetails?: NoMatchDetail[];
   splitDetails?: SplitDetail[];
+  neSynonymDetails?: NeSynonymDetail[];
 }
 
 const PANEL_PAGE_SIZE = 10;
@@ -439,6 +457,72 @@ function computePopoverPos(rect: { top: number; bottom: number; left: number }):
   };
 }
 
+/**
+ * An explanatory note that appears the moment you hover, not a second later.
+ *
+ * A `title` attribute cannot do this: the delay before the browser shows one is
+ * the browser's, not ours, and it is about a second. On a note that explains a
+ * number the reader is already looking at ("why does this say 105.9%?"), a
+ * second is long enough to give up and assume it is a bug.
+ *
+ * Portalled and position: fixed, for the same reason the popovers above are: the
+ * taxa table scrolls horizontally and has sticky columns, so a tooltip rendered
+ * in place is clipped by one ancestor or another. Shown on focus as well as
+ * hover, since the trigger is reachable by keyboard.
+ */
+function HoverNote({ note, className, children }: { note: string; className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const noteId = useId();
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const show = () => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 260;
+    const margin = 8;
+    // Clamped so a flag near either edge doesn't hang off it.
+    const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - margin));
+    // Below by default, above when there isn't room — a row near the fold is
+    // exactly where an over-100% flag tends to be.
+    const below = window.innerHeight - rect.bottom > 90;
+    setPos({ top: below ? rect.bottom + 6 : rect.top - 6, left });
+  };
+  return (
+    <>
+      <span
+        ref={ref}
+        tabIndex={0}
+        onMouseEnter={show}
+        onMouseLeave={() => setPos(null)}
+        onFocus={show}
+        onBlur={() => setPos(null)}
+        aria-describedby={noteId}
+        className={className}
+      >
+        {children}
+        {/* describedby, not aria-label: on the split line the visible sentence is
+            the content and this is the caveat about it, and a label would replace
+            the sentence rather than follow it. */}
+        <span id={noteId} className="sr-only">{note}</span>
+      </span>
+      {pos && typeof document !== "undefined" && createPortal(
+        <div
+          role="tooltip"
+          className="fixed z-[9999] px-3 py-2 text-xs text-white bg-zinc-800 dark:bg-zinc-700 rounded-lg shadow-lg normal-case text-left pointer-events-none"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            width: 260,
+            transform: window.innerHeight - pos.top < 90 ? "translateY(-100%)" : undefined,
+          }}
+        >
+          {note}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 // Same idea as computePopoverPos, but opens ABOVE the trigger instead of below —
 // for a column HEADER icon (DescribedSourceInfoIcon), where opening below would
 // drop the popover straight onto the table's own first data row instead of into
@@ -486,8 +570,15 @@ function SpeciesListPanel({
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"name" | "date">("name");
+  // Newest first by default — assessment year for the assessed buckets, CoL
+  // description year for Not Evaluated. Alphabetical put Abrahamia and Acer at
+  // the top of every plant list, which is an accident of the alphabet; the
+  // recent end is the part anyone opening this is looking at.
+  const [sortBy, setSortBy] = useState<"name" | "date">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Set by clicking one of the composition entries above the table: shows only
+  // that reason's species. Same code the entry is labelled with (displayReason).
+  const [reasonFilter, setReasonFilter] = useState<string | null>(null);
 
   useEffect(() => {
     const cacheKey = isNe ? "ne" : "assessed";
@@ -515,19 +606,24 @@ function SpeciesListPanel({
   useEffect(() => {
     setPage(1); // eslint-disable-line react-hooks/set-state-in-effect -- reset when switching bucket/name
     setSearch("");
-    setSortBy("name");
+    setSortBy("date");
     setSortDir("desc");
+    setReasonFilter(null);
   }, [nodeId, request.bucket, request.name, request.rank]);
 
   const filtered = useMemo(() => {
     if (!rows) return null;
     let matched = rows.filter((s) => speciesMatchesNode(s, nodeId) && matchesBreakdownName(s, request.rank, request.name, nodeId));
     if (request.bucket === "noColMatch" && request.noMatchIds?.length) {
-      const only = new Set(request.noMatchIds);
+      const only = new Set(
+        reasonFilter
+          ? (request.noMatchDetails ?? []).filter((d) => displayReason(d) === reasonFilter).map((d) => d.id)
+          : request.noMatchIds,
+      );
       matched = matched.filter((s) => s.sis_taxon_id != null && only.has(s.sis_taxon_id));
     }
     return matched;
-  }, [rows, nodeId, request]);
+  }, [rows, nodeId, request, reasonFilter]);
 
   const searched = useMemo(() => {
     if (!filtered) return null;
@@ -570,6 +666,17 @@ function SpeciesListPanel({
     request.splitDetails?.forEach((d) => m.set(d.colId, d));
     return m;
   }, [request.splitDetails]);
+
+  const composition = useMemo(
+    () => (request.bucket === "noColMatch" ? reasonComposition(request.noMatchDetails ?? []) : []),
+    [request.bucket, request.noMatchDetails],
+  );
+
+  const neSynonymByColId = useMemo(() => {
+    const m = new Map<string, NeSynonymDetail>();
+    request.neSynonymDetails?.forEach((d) => m.set(d.colId, d));
+    return m;
+  }, [request.neSynonymDetails]);
 
   const total = sorted?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PANEL_PAGE_SIZE));
@@ -643,6 +750,45 @@ function SpeciesListPanel({
           </svg>
         </div>
       )}
+      {/* What the one number is made of, in the dashboard chart's own words.
+          Nine findings sit under "No 1:1 CoL Match" and they are not the same
+          kind of thing: "Lumped on CoL" is a taxonomic disagreement, "In XR,
+          not Base" is CoL holding the record outside its curated checklist,
+          and a bare count tells a specialist neither. Describes the whole
+          bucket, not the filtered page — it explains the column's number. */}
+      {!error && request.bucket === "noColMatch" && composition.length > 0 && (() => {
+        const chip = (c: { reason: string; label: string; count: number }, i: number) => (
+          <span key={c.reason}>
+            {i > 0 && <span className="text-zinc-600"> · </span>}
+            <button
+              type="button"
+              aria-pressed={reasonFilter === c.reason}
+              onClick={() => { setReasonFilter((r) => (r === c.reason ? null : c.reason)); setPage(1); }}
+              className={
+                reasonFilter === c.reason
+                  ? "text-white underline underline-offset-2"
+                  : "underline decoration-dotted underline-offset-2 hover:text-white"
+              }
+            >
+              {c.count} {c.label}
+            </button>
+          </span>
+        );
+        return (
+          <p className="mb-1.5 text-zinc-400">
+            {composition.map(chip)}
+            {reasonFilter && (
+              <button
+                type="button"
+                onClick={() => { setReasonFilter(null); setPage(1); }}
+                className="ml-1.5 text-zinc-500 hover:text-zinc-300"
+              >
+                ✕ clear
+              </button>
+            )}
+          </p>
+        );
+      })()}
       {!error && filtered && filtered.length === 0 && <p className="text-zinc-400">No species.</p>}
       {!error && filtered && filtered.length > 0 && sorted && sorted.length === 0 && (
         <p className="text-zinc-400">No species match your search.</p>
@@ -661,6 +807,7 @@ function SpeciesListPanel({
               {pageRows.map((s) => {
                 const detail = s.sis_taxon_id != null ? reasonBySisId.get(s.sis_taxon_id) : undefined;
                 const split = s.col_id != null ? splitByColId.get(s.col_id) : undefined;
+                const neSyn = s.col_id != null ? neSynonymByColId.get(s.col_id) : undefined;
                 const year = isNe ? s.described_year : (s.assessment_date ? s.assessment_date.slice(0, 4) : null);
                 return (
                   <tr key={s.species_key} className="border-t border-zinc-700/60 align-top">
@@ -683,44 +830,50 @@ function SpeciesListPanel({
                       )}
                     </td>
                     <td className="py-1 pr-2 text-zinc-300">
-                      {detail && (() => {
-                        // Subject-free framing: the Name column beside this one
-                        // already says which species it is (see noMatchSentence).
-                        const sentence = noMatchSentence(detail, null);
+                      {/* The dashboard flag's own renderer, subject-free: same
+                          sentence, same links. It used to link a named species to
+                          its page in this app instead of to CoL, which is the one
+                          link a row of evidence about CoL's records should have —
+                          the species page is a click away in the Name column. */}
+                      {detail && <NoMatchLine flag={detail} subject={null} />}
+                      {/* Not Evaluated, but IUCN has assessed the taxon under another
+                          name — the checkable one first, since the split line is a
+                          heuristic and this is CoL's own synonymy. A species can
+                          carry both; they are different relationships, so both show. */}
+                      {neSyn && (() => {
+                        const sentence = neSynonymSentence(neSyn.assessedName);
                         return (
-                          <>
+                          <span className="block">
                             {sentence.before}
-                            {sentence.detail && (
-                              detail.detailId != null ? (
-                                <a
-                                  href={speciesHref(nodeId, sisRowKey(detail.detailId), "reassessments")}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-300 hover:text-blue-200 underline"
-                                >
-                                  {sentence.detail}
-                                </a>
-                              ) : sentence.detail
-                            )}
+                            <a
+                              href={speciesHref(nodeId, sisRowKey(neSyn.assessedId), "reassessments")}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-300 hover:text-blue-200 underline"
+                            >
+                              {sentence.detail}
+                            </a>
                             {sentence.after}
-                          </>
+                          </span>
                         );
                       })()}
-                      {split && (
-                        <span
-                          title="Heuristic: Catalogue of Life still records this name as a former subspecies of the linked species — not a confirmed taxonomic changelog."
-                        >
-                          {"Likely split from "}
-                          <a
-                            href={speciesHref(nodeId, sisRowKey(split.parentId), "reassessments")}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-300 hover:text-blue-200 underline"
-                          >
-                            {split.parentName}
-                          </a>
-                        </span>
-                      )}
+                      {split && (() => {
+                        const sentence = neSplitSentence(split.parentName);
+                        return (
+                          <HoverNote note={NE_SPLIT_EVIDENCE} className="block">
+                            {sentence.before}
+                            <a
+                              href={speciesHref(nodeId, sisRowKey(split.parentId), "reassessments")}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-300 hover:text-blue-200 underline"
+                            >
+                              {sentence.detail}
+                            </a>
+                            {sentence.after}
+                          </HoverNote>
+                        );
+                      })()}
                     </td>
                     <td className="py-1 text-right text-zinc-400 whitespace-nowrap">{year ?? "—"}</td>
                   </tr>
@@ -784,7 +937,7 @@ function BreakdownList({
 }: {
   rank: FilterRank;
   label: string;
-  breakdown: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[];
+  breakdown: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
   onOpenPanel: (request: PanelRequest) => void;
   liveColIds?: Record<string, string>;
 }) {
@@ -816,7 +969,7 @@ function BreakdownList({
             <th className="px-2 pb-1 pt-0.5 font-normal text-right">Total</th>
             <th
               className="px-2 pb-1 pt-0.5 font-normal text-right"
-              title="Assessed by IUCN, but doesn't cleanly correspond to one counted Catalogue of Life species here — most of these DO have a Catalogue of Life record (see the reason shown per species): a demoted subspecies, a provisionally-accepted name, a taxonomic split/lump, or a coverage gap. Only a small minority have no Catalogue of Life record at all."
+              title="Assessed by IUCN, with no clean 1:1 link to one of the species counted under # Described. Not one finding but several — a lump, a demotion below species, a name CoL doesn't accept, a record CoL holds only in its extended release or only provisionally, or nothing in CoL at all. Click the number for the breakdown by reason, and for the species behind each."
             >
               No 1:1 CoL Match
             </th>
@@ -871,7 +1024,7 @@ function BreakdownList({
                   <button
                     type="button"
                     className="underline decoration-dotted underline-offset-2 hover:text-white"
-                    onClick={() => onOpenPanel({ rank, name: b.name, bucket: "ne", label: `${rowLabel} — Not Evaluated`, splitDetails: b.splitDetails })}
+                    onClick={() => onOpenPanel({ rank, name: b.name, bucket: "ne", label: `${rowLabel} — Not Evaluated`, splitDetails: b.splitDetails, neSynonymDetails: b.neSynonymDetails })}
                   >
                     {b.neCount}
                   </button>
@@ -985,7 +1138,7 @@ function DescribedSourceInfoIcon({ describedSource, setDescribedSource }: { desc
 // between a hover trigger and its target does this, there's no CSS-only fix that
 // survives a real mouse gap. Portal-rendered (mirrors the column-visibility menu
 // pattern above) so it isn't clipped by the table's scroll/sticky ancestors.
-function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; source: "iucn" | "col"; breakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[] }) {
+function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; source: "iucn" | "col"; breakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[] }) {
   const node = findNode(nodeId);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -1009,15 +1162,20 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   const [liveBreakdownLoading, setLiveBreakdownLoading] = useState(false);
   const [liveBreakdownError, setLiveBreakdownError] = useState(false);
   useEffect(() => {
-    if (!open || !isDynamicNodeId(nodeId) || breakdown?.length || liveBreakdown || liveBreakdownLoading) return;
+    // liveBreakdownError is a guard, not just a display flag: without it a failed
+    // request re-armed this effect the moment `finally` cleared the loading flag
+    // (both are dependencies), which refetched, failed, and refetched again —
+    // hammering the endpoint while the popover showed a spinner that never
+    // resolved, since loading was true again before the error line could be read.
+    // Cleared on each open below, so a reopen retries once rather than never.
+    if (!open || !isDynamicNodeId(nodeId) || breakdown?.length || liveBreakdown || liveBreakdownLoading || liveBreakdownError) return;
     setLiveBreakdownLoading(true); // eslint-disable-line react-hooks/set-state-in-effect -- kick off the fetch's loading state
-    setLiveBreakdownError(false);
     fetch(`/api/redlist/taxa-breakdown-live?nodeId=${encodeURIComponent(nodeId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Live breakdown failed (${res.status})`))))
       .then((data) => setLiveBreakdown([data.breakdown]))
       .catch(() => setLiveBreakdownError(true))
       .finally(() => setLiveBreakdownLoading(false));
-  }, [open, nodeId, breakdown, liveBreakdown, liveBreakdownLoading]);
+  }, [open, nodeId, breakdown, liveBreakdown, liveBreakdownLoading, liveBreakdownError]);
   const effectiveBreakdown = breakdown?.length ? breakdown : liveBreakdown;
   // CoL taxon ids for this dynamic node's own ancestor chain (e.g.
   // "rodentia"/"heteromyidae"/"chaetodipus"), used as a fallback wherever the
@@ -1151,6 +1309,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
           e.stopPropagation();
           if (!open && btnRef.current) {
             setPos(computePopoverPos(btnRef.current.getBoundingClientRect()));
+            setLiveBreakdownError(false); // one fresh attempt per open — see the fetch effect's guard
           }
           setOpen((v) => !v);
         }}
@@ -1213,7 +1372,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Loading species-level detail — may take several seconds…
+                  Enumerating described species from CoL and assessed species from Red List – may take several seconds...
                 </p>
               )}
               {liveBreakdownError && (
@@ -1787,8 +1946,15 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     );
   };
 
-  // Render a percentage bar (optionally with a count label above)
-  const renderBar = (percent: number, barColor: string, isAll: boolean, count?: number, fontWeight?: string) => {
+  // Render a percentage bar (optionally with a count label above).
+  //
+  // `flagOver100` opts a column into the over-100% note. Only # Red List Assessed
+  // can exceed 100% — its numerator is IUCN's count and its denominator is CoL's,
+  // and 5 SSC groups are over today (Wild Pig SG: 18 assessed, 17 described) —
+  // so only that column asks for it, and its explanation is written for it.
+  // Every row in an opted-in column reserves the icon's slot whether or not it
+  // shows one, so the percentages stay aligned down the column.
+  const renderBar = (percent: number, barColor: string, isAll: boolean, count?: number, fontWeight?: string, flagOver100?: boolean) => {
     const clampedPercent = Math.min(100, Math.max(0, percent));
     const fillColor = isAll ? "rgba(255,255,255,0.25)" : barColor;
     const fw = fontWeight || "font-medium";
@@ -1808,9 +1974,30 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <span className="text-xs md:text-sm tabular-nums text-zinc-500 dark:text-zinc-400 w-[44px] sm:w-[52px] text-right flex-shrink-0">
           {percent.toFixed(1)}%
         </span>
+        {flagOver100 && (
+          <span className="w-3 flex-shrink-0 flex justify-end">
+            {percent > 100 && (
+              <HoverNote note={OVER_100_ASSESSED_NOTE}>
+                <span className="text-amber-500 dark:text-amber-400">
+                  <FaFlag size={8} />
+                </span>
+              </HoverNote>
+            )}
+          </span>
+        )}
       </div>
     );
   };
+
+  // Every # Red List Assessed bar goes through this, never renderBar directly.
+  // It is the one metric whose numerator (IUCN's count) and denominator (this
+  // CoL release's) come from different organisations, so it is the only one that
+  // can exceed 100% — and the over-100 note was wired into three of its seven
+  // call sites and missed the four that draw drilldown rows, which is where the
+  // over-100 rows actually are (genus Sorbus: 251 assessed, 171 described).
+  // One entry point, so the next bar added cannot be inconsistent either.
+  const renderAssessedBar = (percent: number, count: number, opts?: { isAll?: boolean; fontWeight?: string }) =>
+    renderBar(percent, getAssessedBarColor(percent), opts?.isAll ?? false, count, opts?.fontWeight, true);
 
   // Keeps renderBar's footprint (so the column doesn't resize when the numbers
   // land) but spins in the count's own slot instead of drawing the bar — used in
@@ -2034,7 +2221,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               // comment — so this is a plain count, not renderBar's bar+percent.
               <span className="text-sm md:text-base text-zinc-700 dark:text-zinc-300 tabular-nums">{assessed.toLocaleString()}</span>
             ) : (
-              renderBar(percentAssessed, getAssessedBarColor(percentAssessed), isAllRow, assessed)
+              renderAssessedBar(percentAssessed, assessed, { isAll: isAllRow })
             )}
           </td>
         )}
@@ -2174,7 +2361,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         {colDescribedCell(sg.colDescribed)}
         {isVisible("assessed") && (
           <td className={flexTdClasses}>
-            {isPending ? renderPendingBar() : renderBar(sgPctAssessed, getAssessedBarColor(sgPctAssessed), false, sg.totalAssessed)}
+            {isPending ? renderPendingBar() : renderAssessedBar(sgPctAssessed, sg.totalAssessed)}
           </td>
         )}
         {isVisible("outdated") && (
@@ -2267,7 +2454,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         {colDescribedCell(sg.colDescribed)}
         {isVisible("assessed") && (
           <td className={flexTdClasses}>
-            {isPending ? renderPendingBar() : renderBar(sgPctAssessed, getAssessedBarColor(sgPctAssessed), false, sg.totalAssessed)}
+            {isPending ? renderPendingBar() : renderAssessedBar(sgPctAssessed, sg.totalAssessed)}
           </td>
         )}
         {isVisible("outdated") && (
@@ -2368,7 +2555,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               {countryStyleColumns ? (
                 <span className="text-sm text-zinc-600 dark:text-zinc-400 tabular-nums">{sg.totalAssessed.toLocaleString()}</span>
               ) : (
-                renderBar(sgPctAssessed, getAssessedBarColor(sgPctAssessed), false, sg.totalAssessed)
+                renderAssessedBar(sgPctAssessed, sg.totalAssessed)
               )}
             </td>
           )}
@@ -2485,7 +2672,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               ) : countryStyleColumns ? (
                 <span className="text-sm md:text-base text-zinc-700 dark:text-zinc-300 tabular-nums">{taxon.totalAssessed.toLocaleString()}</span>
               ) : (
-                renderBar(taxon.percentAssessed, getAssessedBarColor(taxon.percentAssessed), false, taxon.totalAssessed)
+                renderAssessedBar(taxon.percentAssessed, taxon.totalAssessed)
               )}
             </td>
           )}
@@ -2826,7 +3013,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                         {colDescribedCell(subColDescribed, true)}
                         {isVisible("assessed") && (
                           <td className={flexTdClasses}>
-                            {renderBar(subPctAssessed, getAssessedBarColor(subPctAssessed), false, subAssessed, "font-semibold")}
+                            {renderAssessedBar(subPctAssessed, subAssessed, { fontWeight: "font-semibold" })}
                           </td>
                         )}
                         {isVisible("outdated") && (
@@ -2950,7 +3137,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           {colDescribedCell(row.colDescribed)}
                           {isVisible("assessed") && (
                             <td className={flexTdClasses}>
-                              {renderBar(row.percentAssessed, getAssessedBarColor(row.percentAssessed), false, row.totalAssessed)}
+                              {renderAssessedBar(row.percentAssessed, row.totalAssessed)}
                             </td>
                           )}
                           {isVisible("outdated") && (
