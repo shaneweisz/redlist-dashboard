@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary from "./TaxaSummary";
-import NewLiteratureSinceAssessment from "../LiteratureSearch";
+import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams, taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -6350,7 +6350,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                     className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "redlist" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("redlist")}
                                   >
-                                    IUCN Red List Assessments
+                                    {/* The full name costs a phone most of the
+                                        tab strip on its own. */}
+                                    <span className="sm:hidden">Red List</span>
+                                    <span className="hidden sm:inline">IUCN Red List Assessments</span>
                                   </button>
                                 )}
                                 <button
@@ -6363,7 +6366,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "col" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("col")}
                                 >
-                                  Catalogue of Life
+                                  {/* The full name is a third of a phone's tab strip. */}
+                                  <span className="sm:hidden">CoL</span>
+                                  <span className="hidden sm:inline">Catalogue of Life</span>
                                 </button>
                                 {SHOW_EOL_TAB && (
                                   <button
@@ -6425,9 +6430,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {(assessmentYear || s.category === "NE") && (visitedTabs.has("literature")) && (
                             <div className="p-4" style={{ display: activeDetailTab === "literature" ? undefined : "none" }}>
-                              <NewLiteratureSinceAssessment
+                              <LiteratureTimeline
                                 scientificName={s.scientific_name}
-                                assessmentYear={assessmentYear ?? 0}
+                                assessmentDate={s.assessment_date ?? null}
+                                assessmentId={s.assessment_id ? String(s.assessment_id) : null}
+                                assessmentYear={assessmentYear}
                               />
                             </div>
                           )}

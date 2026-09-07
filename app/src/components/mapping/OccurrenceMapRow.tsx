@@ -3361,7 +3361,7 @@ export default function OccurrenceMapRow({
                   controls: the EOO/AOO switch and its figures, and measuring.
                   Both were panels of their own in opposite corners, which is a
                   lot of standing furniture for two things used occasionally. */}
-              {fullscreen && (panelId === "main" || !splitView) ? (
+              {panelId === "main" || !splitView ? (
                 <MapToolsMenu
                   open={toolsOpen}
                   onToggle={() => setToolsOpen((v) => !v)}
@@ -6534,11 +6534,15 @@ export default function OccurrenceMapRow({
           {/* Filter dropdowns + sample-size summary, merged into one row (summary on
               the left) — sit above the map itself, not a separate header bar */}
           <div className="p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
-            <div className="flex flex-wrap items-center gap-2">
+            {/* `relative` here is what the dropdowns anchor to below lg — see
+                the `lg:relative` on each control's wrapper. */}
+            <div className="relative flex flex-wrap items-center gap-2">
               {/* Basis of Record — dropdown checklist */}
-              <div className="relative" ref={filtersRef}>
+              <div className="lg:relative" ref={filtersRef}>
                 <button
                   onClick={() => setFiltersOpen(!filtersOpen)}
+                  title="Basis of Record — which kinds of evidence to include"
+                  aria-label="Basis of Record"
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
                     filtersOpen
                       ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
@@ -6548,9 +6552,9 @@ export default function OccurrenceMapRow({
                   <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                   </svg>
-                  Basis of Record
+                  <span className="hidden lg:inline">Basis of Record</span>
                   {!loadingBreakdown && (
-                    <span className="text-[10px] text-zinc-400 tabular-nums">
+                    <span className="hidden lg:inline text-[10px] text-zinc-400 tabular-nums">
                       Selected {pillDefs.filter(p => checkedTypes[p.key]).length} of {pillDefs.length}
                     </span>
                   )}
@@ -6559,9 +6563,9 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {filtersOpen && !loadingBreakdown && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-[25rem] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-[25rem] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
                     <div className="flex items-center gap-2 px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
-                      <span className="w-40 shrink-0 flex items-center gap-2">
+                      <span className="flex-1 min-w-0 flex items-center gap-2">
                         <button
                           onClick={() => setCheckedTypes((prev) => {
                             const next = { ...prev };
@@ -6606,7 +6610,7 @@ export default function OccurrenceMapRow({
                             onChange={() => toggleType(pill.key)}
                             className="w-3 h-3 rounded accent-emerald-500 shrink-0"
                           />
-                          <span className={`w-40 shrink-0 ${active ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400 dark:text-zinc-500"}`}>
+                          <span className={`flex-1 min-w-0 truncate ${active ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400 dark:text-zinc-500"}`}>
                             {pill.label}
                           </span>
                           {!isFullSample && (
@@ -6644,7 +6648,7 @@ export default function OccurrenceMapRow({
                       return (
                         <div className="flex items-center gap-2 px-3 py-1.5 mt-1 border-t border-zinc-100 dark:border-zinc-800 text-xs font-medium">
                           <span className="w-3 shrink-0" />
-                          <span className="w-40 shrink-0 text-zinc-700 dark:text-zinc-200">Total</span>
+                          <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">Total</span>
                           {!isFullSample && (
                             <span className="w-14 text-right tabular-nums shrink-0 text-zinc-500 dark:text-zinc-400">
                               {totalCount.toLocaleString()}
@@ -6665,9 +6669,10 @@ export default function OccurrenceMapRow({
               {/* Separator */}
               <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700 mx-0.5 hidden sm:block" />
               {/* Coordinate cleaning — dropdown: max GPS uncertainty + one checkbox per check */}
-              <div className="relative" ref={cleaningFilterRef}>
+              <div className="lg:relative" ref={cleaningFilterRef}>
                 <button
                   onClick={() => setCleaningFilterOpen(!cleaningFilterOpen)}
+                  aria-label="Coordinate cleaning"
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
                     cleaningFilterOpen
                       ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
@@ -6675,11 +6680,14 @@ export default function OccurrenceMapRow({
                   } text-zinc-700 dark:text-zinc-300`}
                   title="Filter by GPS uncertainty and hide records flagged by coordinate-cleaning checks (e.g. zero coordinates, GBIF headquarters, duplicates)"
                 >
+                  {/* A crosshair, not the funnel Basis of Record uses: with the
+                      labels hidden below lg the two would be indistinguishable. */}
                   <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    <circle cx="12" cy="12" r="7" strokeLinecap="round" strokeLinejoin="round" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v3M12 19v3M2 12h3M19 12h3" />
                   </svg>
-                  Coordinate cleaning
-                  <span className="text-[10px] text-zinc-400 tabular-nums">
+                  <span className="hidden lg:inline">Coordinate cleaning</span>
+                  <span className="hidden lg:inline text-[10px] text-zinc-400 tabular-nums">
                     {/* Counts every row in the dropdown, GBIF's own verdict included */}
                     Applied {flagDefs.filter((d) => appliedChecks[d.key]).length + (hideGbifFlagged ? 1 : 0) + (hasNativeRangeData && nativeRangeOnly ? 1 : 0)} of {flagDefs.length + 1 + (hasNativeRangeData ? 1 : 0)}
                     {maxUncertainty != null && ` · ≤ ${formatUncertainty(maxUncertainty)}`}
@@ -6689,7 +6697,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {cleaningFilterOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-80 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
                     <div className="flex items-center px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                       <button
                         onClick={() => {
@@ -6954,9 +6962,10 @@ export default function OccurrenceMapRow({
                   badge is what extends that span. GBIF's search API has no server-side
                   date sort/filter of its own (see api/occurrences/route.ts), so this
                   operates entirely on what's already been paged in. */}
-              <div className="relative" ref={dateRangeRef}>
+              <div className="lg:relative" ref={dateRangeRef}>
                 <button
                   onClick={() => setDateRangeOpen(!dateRangeOpen)}
+                  aria-label="Date range"
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
                     dateRangeOpen
                       ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
@@ -6968,8 +6977,8 @@ export default function OccurrenceMapRow({
                     <rect x="3" y="4" width="18" height="17" rx="2" strokeLinecap="round" strokeLinejoin="round" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 9h18M8 2v4M16 2v4" />
                   </svg>
-                  Date range
-                  <span className="text-[10px] text-zinc-400 tabular-nums">
+                  <span className="hidden lg:inline">Date range</span>
+                  <span className="hidden lg:inline text-[10px] text-zinc-400 tabular-nums">
                     {dateRangeFrom == null && dateRangeTo == null
                       ? "All dates"
                       : `${dateRangeFrom ?? sliderMinDate} – ${dateRangeTo ?? sliderMaxDate}`}
@@ -6979,7 +6988,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {dateRangeOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 w-80 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg p-3">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg p-3">
                     {sliderMinDate === sliderMaxDate ? (
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">Not enough dated records loaded to filter by range.</p>
                     ) : (
@@ -7176,9 +7185,10 @@ export default function OccurrenceMapRow({
                   filters. On the map they were a panel covering the ground
                   they describe, which on the dashboard's half-width map was a
                   third of it. */}
-              <div className="relative" ref={overlaysRef}>
+              <div className="lg:relative" ref={overlaysRef}>
                 <button
                   onClick={() => setOverlaysOpen(!overlaysOpen)}
+                  aria-label="Overlays"
                   className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
                     overlaysOpen
                       ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
@@ -7190,8 +7200,8 @@ export default function OccurrenceMapRow({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l9 5-9 5-9-5 9-5z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l9 5 9-5" />
                   </svg>
-                  Overlays
-                  <span className="text-[10px] text-zinc-400 tabular-nums">
+                  <span className="hidden lg:inline">Overlays</span>
+                  <span className="hidden lg:inline text-[10px] text-zinc-400 tabular-nums">
                     {overlayToggleValues.filter(Boolean).length} of {overlayToggleValues.length}
                   </span>
                   <svg className={`w-3 h-3 text-zinc-400 transition-transform ${overlaysOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -7199,7 +7209,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {overlaysOpen && (
-                  <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
+                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
                     {renderOverlayLayers()}
                   </div>
                 )}
@@ -7359,12 +7369,12 @@ export default function OccurrenceMapRow({
                   <Link
                     href={`/mapping/${encodeURIComponent(speciesKey)}`}
                     title="Open the map and record list fullscreen, on their own shareable page"
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                    className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
                   >
                     <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V5a1 1 0 011-1h3m8 0h3a1 1 0 011 1v3m0 8v3a1 1 0 01-1 1h-3m-8 0H5a1 1 0 01-1-1v-3" />
                     </svg>
-                    Fullscreen
+                    <span className="hidden lg:inline">Fullscreen</span>
                   </Link>
                 )}
               </div>

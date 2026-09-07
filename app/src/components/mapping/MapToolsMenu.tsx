@@ -30,22 +30,39 @@ export default function MapToolsMenu({
 }) {
   const { current: map } = useMap();
   const [offset, setOffset] = useState(40);
+  /**
+   * How tall the open panel may be before it runs off the top of the map. The
+   * map is 450px on a desktop but 300px in the tab on a phone, and the EOO/AOO
+   * figures alone are 235px, so on a phone the panel was starting above the
+   * map's own top edge.
+   */
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!map) return;
-    const column = map.getContainer().querySelector(".maplibregl-ctrl-bottom-right");
+    const container = map.getContainer();
+    const column = container.querySelector(".maplibregl-ctrl-bottom-right");
     if (!column) return;
-    const measure = () => setOffset(column.getBoundingClientRect().height + 8);
+    const measure = () => {
+      const bottom = column.getBoundingClientRect().height + 8;
+      setOffset(bottom);
+      // Leave room for the cog itself and a margin at the map's top edge.
+      setMaxHeight(Math.max(120, container.getBoundingClientRect().height - bottom - 52));
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(column);
+    observer.observe(container);
     return () => observer.disconnect();
   }, [map]);
 
   return (
     <div className="absolute right-2 z-[1000] flex flex-col items-end gap-1.5" style={{ bottom: offset }}>
       {open && (
-        <div className="w-56 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 p-2 space-y-2">
+        <div
+          className="w-56 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 p-2 space-y-2"
+          style={{ maxHeight }}
+        >
           {children}
           <button
             onClick={onMeasureToggle}

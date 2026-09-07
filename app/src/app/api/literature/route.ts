@@ -1,235 +1,109 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateNameVariants } from "@/lib/nameVariants";
 import { CACHE_1H } from "@/lib/cache-headers";
+import {
+  DEFAULT_PER_SOURCE_LIMIT,
+  getLiteraturePool,
+} from "@/lib/literature/aggregate";
+import {
+  assessmentSortStamp,
+  countAroundAssessment,
+  findMarkerPosition,
+  paginate,
+} from "@/lib/literature/timeline";
 
 /**
- * Literature Since Assessment API
+ * Literature timeline API
  *
- * Automatically finds literature published AFTER a species' last assessment date.
- * Combines results from:
- * - OpenAlex (primary): Scientific papers with DOIs, citations, abstracts
- * - Nosible (supplementary): Grey literature, news, NGO reports
+ * One chronological list of everything published about a species, newest
+ * first, paginated, with the position of the species' last assessment marked
+ * in it — replacing the old pre-/post-assessment split, which forced a reader
+ * to switch modes to answer "what has appeared since we last looked?".
  *
- * See: Weeknotes/Subpages/Nosible API Evaluation.md for comparison details
+ * Sources are merged and deduplicated (see `lib/literature/`): OpenAlex and
+ * Zenodo need no credentials; BHL and Google Books activate when their API keys
+ * are configured; and the assessment's own reference list comes from the Red
+ * List API, so a row can show that the last assessment cited it. Every source's
+ * outcome is reported in `sources` so an absent one is visible rather than
+ * silently narrowing the results.
+ *
+ * Query parameters:
+ *   scientificName  (required) accepted binomial; Latin gender variants are added
+ *   assessmentDate  ISO date of the last assessment — where the marker goes
+ *   assessmentYear  fallback when only the year is known (placed mid-year)
+ *   assessmentId    the latest assessment, whose reference list is one of the sources
+ *   page            1-based, clamped into range (default 1)
+ *   perPage         1-50 (default 10)
  */
 
-interface OpenAlexWork {
-  id: string;
-  doi: string | null;
-  title: string;
-  publication_year: number | null;
-  publication_date: string | null;
-  cited_by_count: number;
-  type: string;
-  primary_location?: {
-    source?: {
-      display_name: string;
-    };
-  };
-  abstract_inverted_index?: Record<string, number[]>;
-  authorships?: Array<{
-    author: {
-      display_name: string;
-    };
-  }>;
-}
-
-interface OpenAlexResponse {
-  meta: {
-    count: number;
-  };
-  results: OpenAlexWork[];
-}
-
-interface LiteratureResult {
-  title: string;
-  url: string;
-  doi: string | null;
-  year: number | null;
-  date: string | null;
-  citations: number | null;
-  source: string;
-  sourceType: "academic" | "grey";
-  abstract: string | null;
-  authors: string | null;
-}
-
-// Cache for literature results (1 hour)
-const literatureCache = new Map<string, { data: object; timestamp: number }>();
-const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
-
-// Reconstruct abstract from OpenAlex inverted index
-function reconstructAbstract(invertedIndex: Record<string, number[]> | undefined, maxWords = 100): string | null {
-  if (!invertedIndex) return null;
-
-  const words: [number, string][] = [];
-  for (const [word, positions] of Object.entries(invertedIndex)) {
-    for (const pos of positions) {
-      words.push([pos, word]);
-    }
-  }
-  words.sort((a, b) => a[0] - b[0]);
-
-  const reconstructed = words.slice(0, maxWords).map(([, word]) => word).join(" ");
-  return reconstructed + (words.length > maxWords ? "..." : "");
-}
-
-// Search OpenAlex for papers published after a given year
-async function searchOpenAlexSinceYear(
-  scientificName: string,
-  sinceYear: number,
-  limit: number = 5
-): Promise<{ count: number; results: LiteratureResult[] }> {
-  // OpenAlex filter: use quoted default.search for exact phrase matching
-  // OR together gender variants of the species epithet (e.g. "albocaudata"|"albocaudatus"|"albocaudatum")
-  // publication_year > sinceYear, exclude datasets (GBIF occurrence downloads)
-  // Sorted by most recent first
-  // Note: per_page must be >= 1 for the API to work, even for count-only requests
-  const nameVariants = generateNameVariants(scientificName);
-  const searchTerms = nameVariants.map(v => `"${v}"`).join("|");
-  const filter = encodeURIComponent(`default.search:${searchTerms},publication_year:>${sinceYear},type:!dataset`);
-  const url = `https://api.openalex.org/works?filter=${filter}&sort=publication_date:desc&per_page=${Math.max(1, limit)}&mailto=sw984@cam.ac.uk`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error("OpenAlex API error:", response.status);
-    return { count: 0, results: [] };
-  }
-
-  const data: OpenAlexResponse = await response.json();
-
-  const results = data.results.map((work) => ({
-    title: work.title,
-    url: work.doi ? `https://doi.org/${work.doi.replace("https://doi.org/", "")}` : work.id,
-    doi: work.doi,
-    year: work.publication_year,
-    date: work.publication_date,
-    citations: work.cited_by_count,
-    source: work.primary_location?.source?.display_name || "Unknown",
-    sourceType: "academic" as const,
-    abstract: reconstructAbstract(work.abstract_inverted_index),
-    authors: work.authorships?.slice(0, 3).map(a => a.author.display_name).join(", ") || null,
-  }));
-
-  return { count: data.meta.count, results };
-}
-
-// Search OpenAlex for papers published up to and including a given year
-async function searchOpenAlexUpToYear(
-  scientificName: string,
-  upToYear: number,
-  limit: number = 5
-): Promise<{ count: number; results: LiteratureResult[] }> {
-  // Use quoted default.search for exact phrase matching
-  // OR together gender variants of the species epithet
-  // Use < (year+1) instead of <= year to avoid encoding issues
-  // Sorted by most cited first for pre-assessment papers
-  const nameVariants = generateNameVariants(scientificName);
-  const searchTerms = nameVariants.map(v => `"${v}"`).join("|");
-  const filter = encodeURIComponent(`default.search:${searchTerms},publication_year:<${upToYear + 1},type:!dataset`);
-  const url = `https://api.openalex.org/works?filter=${filter}&sort=cited_by_count:desc&per_page=${Math.max(1, limit)}&mailto=sw984@cam.ac.uk`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error("OpenAlex API error:", response.status);
-    return { count: 0, results: [] };
-  }
-
-  const data: OpenAlexResponse = await response.json();
-
-  const results = data.results.map((work) => ({
-    title: work.title,
-    url: work.doi ? `https://doi.org/${work.doi.replace("https://doi.org/", "")}` : work.id,
-    doi: work.doi,
-    year: work.publication_year,
-    date: work.publication_date,
-    citations: work.cited_by_count,
-    source: work.primary_location?.source?.display_name || "Unknown",
-    sourceType: "academic" as const,
-    abstract: reconstructAbstract(work.abstract_inverted_index),
-    authors: work.authorships?.slice(0, 3).map(a => a.author.display_name).join(", ") || null,
-  }));
-
-  return { count: data.meta.count, results };
-}
+const DEFAULT_PER_PAGE = 10;
+const MAX_PER_PAGE = 50;
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const scientificName = searchParams.get("scientificName");
+  const assessmentDate = searchParams.get("assessmentDate");
   const assessmentYear = searchParams.get("assessmentYear");
-  const limit = Math.min(parseInt(searchParams.get("limit") || "5"), 20);
-  const mode = searchParams.get("mode") || "after"; // "after" or "before"
+  const assessmentId = searchParams.get("assessmentId");
 
   if (!scientificName) {
     return NextResponse.json(
       { error: "Query parameter 'scientificName' is required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  if (!assessmentYear) {
-    return NextResponse.json(
-      { error: "Query parameter 'assessmentYear' is required" },
-      { status: 400 }
-    );
-  }
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
+  const perPage = Math.min(
+    MAX_PER_PAGE,
+    Math.max(1, parseInt(searchParams.get("perPage") || String(DEFAULT_PER_PAGE), 10) || DEFAULT_PER_PAGE),
+  );
 
-  const sinceYear = parseInt(assessmentYear);
-  if (isNaN(sinceYear)) {
-    return NextResponse.json(
-      { error: "Invalid assessmentYear" },
-      { status: 400 }
-    );
-  }
-
-  // Check cache
-  const cacheKey = `${scientificName.toLowerCase()}-${sinceYear}-${limit}-${mode}`;
-  const cached = literatureCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    return NextResponse.json({ ...cached.data, cached: true }, { headers: CACHE_1H });
-  }
+  // A full date puts the marker on the right day; a bare year is placed
+  // mid-year, the same convention imprecise publication dates use.
+  const markerStamp = assessmentSortStamp(assessmentDate) ?? assessmentSortStamp(assessmentYear);
 
   try {
-    let papers: { count: number; results: LiteratureResult[] };
-    let otherCount: number;
-
-    if (mode === "before") {
-      // Pre-assessment: fetch papers up to assessment year, and count of post-assessment
-      const [prePapers, postPapers] = await Promise.all([
-        searchOpenAlexUpToYear(scientificName, sinceYear, limit),
-        searchOpenAlexSinceYear(scientificName, sinceYear, 1),
-      ]);
-      papers = prePapers;
-      otherCount = postPapers.count;
-    } else {
-      // Post-assessment (default): fetch papers after assessment year, and count of pre-assessment
-      const [postPapers, prePapers] = await Promise.all([
-        searchOpenAlexSinceYear(scientificName, sinceYear, limit),
-        searchOpenAlexUpToYear(scientificName, sinceYear, 1),
-      ]);
-      papers = postPapers;
-      otherCount = prePapers.count;
-    }
-
-    const result = {
+    const { pool, cached } = await getLiteraturePool(
       scientificName,
-      assessmentYear: sinceYear,
-      mode,
-      totalPapersSinceAssessment: mode === "after" ? papers.count : otherCount,
-      papersAtAssessment: mode === "before" ? papers.count : otherCount,
-      totalPapers: papers.count,
-      topPapers: papers.results,
-    };
+      assessmentId,
+      DEFAULT_PER_SOURCE_LIMIT,
+    );
 
-    // Cache the result
-    literatureCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    const markerPosition = findMarkerPosition(pool.works, markerStamp);
+    const timeline = paginate(pool.works, page, perPage, markerPosition);
+    const counts = countAroundAssessment(pool.works, markerStamp);
 
-    return NextResponse.json(result, { headers: CACHE_1H });
+    // The biggest single-source total is the closest honest answer to "how much
+    // is out there?" — the sources overlap heavily, so summing would inflate it.
+    const upstreamTotal = pool.sources.reduce<number | null>(
+      (max, s) => (s.upstreamTotal === null ? max : Math.max(max ?? 0, s.upstreamTotal)),
+      null,
+    );
+
+    return NextResponse.json(
+      {
+        scientificName: pool.scientificName,
+        assessmentId: pool.assessmentId,
+        nameVariants: pool.nameVariants,
+        assessmentDate: assessmentDate || (assessmentYear ? String(assessmentYear) : null),
+        assessmentStamp: markerStamp,
+        ...timeline,
+        counts,
+        upstreamTotal,
+        /** True when at least one source holds more than we pulled into the pool. */
+        poolTruncated: pool.sources.some(
+          (s) => s.upstreamTotal !== null && s.fetched > 0 && s.upstreamTotal > s.fetched,
+        ),
+        sources: pool.sources,
+        cached,
+      },
+      { headers: CACHE_1H },
+    );
   } catch (error) {
-    console.error("Literature search error:", error);
+    console.error("Literature timeline error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Search failed" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
