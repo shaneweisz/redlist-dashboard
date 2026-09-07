@@ -4,31 +4,9 @@ import {
   nearbyFacetUrl,
   nearbyGbifSiteUrl,
   groupNearbyFeatures,
-  type NearbySpecies,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
-
-/** A neighbour, with only the fields the summary reads spelled out. */
-function species(name: string, threat_codes: string[], over: Partial<NearbySpecies> = {}): NearbySpecies {
-  return {
-    gbif_species_key: name.replace(/\s/g, ""),
-    scientific_name: name,
-    common_name: null,
-    category: "EN",
-    criteria: null,
-    taxon_group: "amphibians",
-    class_name: "amphibia",
-    threat_codes,
-    assessment_year: 2020,
-    threat_tags: [],
-    assessment_id: 1,
-    records: 1,
-    sis_taxon_id: 1,
-    dashboard_row_key: null,
-    ...over,
-  };
-}
 
 describe("the GBIF query", () => {
   // The stored keys are Catalogue of Life ones and the v1 API still defaults to
