@@ -8,8 +8,8 @@
  * mirroring how taxonomy-sql.ts's filterToSql was pulled out for the same
  * reason (see that file's doc comment).
  *
- * The diagnostic query needs two backbone.parquet-dependent temp tables
- * (split_candidates, col_to_assessed) built ONCE per caller — full
+ * The diagnostic query needs three backbone.parquet-dependent temp tables
+ * (split_candidates, synonym_assessed, col_to_assessed) built ONCE per caller — full
  * backbone scans/joins, not cheap to repeat per name. build-taxa-summary.ts
  * builds them once per whole script run; live-taxa-children.ts memoizes them
  * once per warm server connection (see ensureBackboneHelpers there). This
@@ -42,6 +42,11 @@ export interface NoMatchDetail {
    *  the assessed one that won the tie-break (e.g. a lump under a third name), so
    *  the UI can name the species the two were merged INTO rather than guess. */
   colName?: string;
+  /** Where CoL files the record, as "Family (Order)" — the finest two ranks it
+   *  has ("classified_elsewhere" only). The reason is that CoL puts this species
+   *  somewhere other than the group being viewed, and a reader can neither check
+   *  nor act on that without being told where. */
+  colGroup?: string;
 }
 
 // Heuristic "split from" flag for Not Evaluated species — see SPLIT_CANDIDATES_SQL
@@ -54,6 +59,18 @@ export interface SplitDetail {
   parentCategory: string;
 }
 
+/**
+ * "Not Evaluated, but IUCN has assessed it under another name" — an NE species
+ * for which CoL files an IUCN-ASSESSED name among its synonyms. See
+ * SYNONYM_ASSESSED_SQL. Keyed by col_id like SplitDetail, and equally droppable.
+ */
+export interface NeSynonymDetail {
+  colId: string;
+  assessedId: number;
+  assessedName: string;
+  assessedCategory: string;
+}
+
 export interface BreakdownEntry {
   name: string;
   count: number;
@@ -62,6 +79,7 @@ export interface BreakdownEntry {
   noMatchIds: number[];
   noMatchDetails?: NoMatchDetail[];
   splitDetails?: SplitDetail[];
+  neSynonymDetails?: NeSynonymDetail[];
 }
 
 // Classifies one "no match" diagnosis row (see computeBreakdownEntry's diagRows
@@ -125,6 +143,24 @@ export function classifyNoMatch(row: Record<string, unknown>): NoMatchDetail {
   const parentName = row.parent_name as string | null;
   const parentAssessedId = row.parent_assessed_id as number | null;
   const parentAssessedName = row.parent_assessed_name as string | null;
+  // CoL's own placement, finest two ranks it has — "Valloniidae (Stylommatophora)",
+  // or just the order/class where CoL records no family (its order coverage is
+  // patchy for molluscs especially, hence the fallback chain rather than a fixed
+  // pair of ranks).
+  const titleCase = (v: unknown) => (typeof v === "string" && v ? v.charAt(0).toUpperCase() + v.slice(1) : null);
+  const same = (a: unknown, b: unknown) =>
+    typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+  const colFamily = titleCase(row.col_family);
+  const colOrder = titleCase(row.col_order);
+  // Only the ranks that actually DIFFER from where the assessment sits. Sorbus
+  // is the case that made this necessary: CoL moves 186 of its species to Aria,
+  // Karpatiosorbus and friends, all still in Rosaceae — so the family and order
+  // agree, and only the genus (which the accepted name carries) has moved.
+  const familyDiffers = colFamily != null && !same(row.col_family, row.assessed_family);
+  const orderDiffers = colOrder != null && !same(row.col_order, row.assessed_order);
+  const colGroupName = familyDiffers ? colFamily : orderDiffers ? colOrder : null;
+  const colGroupOuter = familyDiffers && orderDiffers ? ` (${colOrder})` : "";
+  const colGroup = colGroupName ? `${colGroupName}${colGroupOuter}` : undefined;
   if (!linkedColId) {
     // Nothing in species_link — but CoL may still hold the name, just not as an
     // accepted species: build-matching only links accepted names, so a
@@ -193,7 +229,7 @@ export function classifyNoMatch(row: Record<string, unknown>): NoMatchDetail {
     return { id, name, reason: "not_in_base", ...ref };
   }
   if (linkedExtinct) return { id, name, reason: "extinct_unconfirmed", ...ref };
-  return { id, name, reason: "classified_elsewhere", ...ref };
+  return { id, name, reason: "classified_elsewhere", ...(colGroup ? { colGroup } : {}), ...ref };
 }
 
 // Precomputes a col_id -> likely-former-parent lookup, once per caller lifetime
@@ -277,6 +313,56 @@ export const SPLIT_CANDIDATES_SQL = (bb: string, assessedPath: string, assessedC
          row_number() OVER (PARTITION BY ne_col_id ORDER BY parent_id) AS rn
   FROM matched`;
 
+/**
+ * The other half of "why is this species Not Evaluated": CoL files an
+ * IUCN-ASSESSED name among this species' synonyms, so IUCN has assessed the
+ * taxon — under a name CoL doesn't accept.
+ *
+ * SPLIT_CANDIDATES_SQL catches the promoted-subspecies case ("Gazella gazella
+ * acaciae" survives as a synonym of the now-accepted Gazella acaciae). This is
+ * the same shape one rank up: a SPECIES-rank synonym whose own name IUCN has
+ * assessed (CoL files Epidendrum paniculatum, assessed DD, as a synonym of the
+ * unassessed Epidendrum diffusum). 491 NE species across the current data.
+ *
+ * Both databases hold both names; they disagree only on which one is accepted,
+ * and the matcher linked the assessment to CoL's other record for it — so the
+ * assessment is not missing, it is filed under a name this NE row doesn't carry.
+ * A reader can check the claim on CoL's page for the NE species: the assessed
+ * name is listed there, under Synonyms.
+ *
+ * status = 'synonym' exactly, never LIKE '%synonym%': 'ambiguous synonym' is CoL
+ * saying the name's application is UNCERTAIN, which is the opposite of evidence
+ * that these two names are one taxon (same rule as build-backbone's, and the same
+ * trap Pararge xiphia fell into there).
+ *
+ * One assessed species per NE species, or no claim — CoL can file two names IUCN
+ * assesses separately under one accepted species, and picking one of them would
+ * present a coin toss as a finding. Same refusal as syn_in_checklist's.
+ */
+export const SYNONYM_ASSESSED_SQL = (bb: string, assessedPath: string, assessedCidsTable: string) => `
+  CREATE TEMP TABLE synonym_assessed AS
+  WITH species_synonyms AS (
+    SELECT b.parent_id AS ne_col_id, lower(b.scientific_name) AS lname
+    FROM read_parquet('${bb}') b
+    WHERE b.status = 'synonym' AND b.rank = 'species' AND b.parent_id IS NOT NULL
+  ),
+  -- Only names IUCN has assessed, and only under accepted records we count as NE
+  -- (an assessed parent would make this a match, not an explanation for a gap).
+  matched AS (
+    SELECT ss.ne_col_id, a.id AS assessed_id, a.scientific_name AS assessed_name,
+           a.iucn_category AS assessed_category
+    FROM species_synonyms ss
+    JOIN read_parquet('${assessedPath}') a ON lower(a.scientific_name) = ss.lname
+    WHERE ss.ne_col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
+  )
+  SELECT ne_col_id,
+         any_value(assessed_id) AS assessed_id,
+         any_value(assessed_name) AS assessed_name,
+         any_value(assessed_category) AS assessed_category
+  FROM matched
+  GROUP BY ne_col_id
+  HAVING count(DISTINCT assessed_id) = 1`;
+
 // Precomputes a global col_id -> IUCN-assessed-species lookup, once per caller
 // lifetime. Used by the "infraspecific" no-match reason (classifyNoMatch) to
 // name/link the currently-assessed species a demoted subspecies/variety is now
@@ -310,8 +396,39 @@ export interface BreakdownQueryContext {
   excludedColIdsSql: string;
   /** Whether split_candidates/col_to_assessed (backbone-dependent) have been built. */
   hasBackbone: boolean;
+  /**
+   * Whether backbone.parquet actually carries build-backbone's checklist-derived
+   * columns (in_checklist / checklist_parent_id / checklist_name). Separate from
+   * hasBackbone because those three were added to the backbone AFTER the queries
+   * that read them: the sync only rebuilds the backbone when a CoL release moves,
+   * so a data sync built before that change has a perfectly usable backbone that
+   * simply lacks these columns — and referencing one anyway is a DuckDB Binder
+   * Error that fails the whole request, which is exactly how every live-drilldown
+   * breakdown started returning a 500. False just drops the rename claim (the one
+   * thing those columns feed), same graceful degradation hasBackbone already gives.
+   * Callers derive it with backboneHasChecklistColumns below.
+   */
+  hasChecklistColumns: boolean;
   /** Only read when hasBackbone is true. */
   backbonePath?: string;
+}
+
+/** The build-backbone columns syn_in_checklist needs; see hasChecklistColumns. */
+const CHECKLIST_COLUMNS = ["in_checklist", "checklist_parent_id", "checklist_name"];
+
+/**
+ * Does the backbone on disk carry the checklist-derived columns? A parquet
+ * DESCRIBE reads footer metadata only — no scan — so this is cheap enough to run
+ * once per server/build rather than being cached in the data sync itself.
+ */
+export async function backboneHasChecklistColumns(conn: DuckDBConnection, backbonePath: string): Promise<boolean> {
+  try {
+    const rows = await (await conn.run(`DESCRIBE SELECT * FROM read_parquet('${backbonePath}') LIMIT 0`)).getRowObjects();
+    const cols = new Set(rows.map((r) => String(r.column_name)));
+    return CHECKLIST_COLUMNS.every((c) => cols.has(c));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -332,6 +449,8 @@ export async function computeNoMatchDetails(
   assessedWhere: string,
 ): Promise<NoMatchDetail[]> {
   const { conn, speciesGlob, assessedPath, linkPath, universeSql: universe, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone } = ctx;
+  // The synonym-rename claim needs both the backbone AND its checklist columns.
+  const hasSynClaim = hasBackbone && ctx.hasChecklistColumns;
   // The specific assessed species (sis_taxon_id) behind that gap, plus enough
   // context (its own primary CoL link, and who "won" that link if it lost a tie)
   // to classify WHY each one doesn't have a clean match — see classifyNoMatch.
@@ -352,7 +471,12 @@ export async function computeNoMatchDetails(
       WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${speciesWhere}
     ),
     matched_assessed AS (
-      SELECT id, scientific_name FROM read_parquet('${assessedPath}') WHERE ${assessedWhere}
+      -- family/order come along so classified_elsewhere can say WHICH rank CoL
+      -- files the record under differently. Naming CoL's family unconditionally
+      -- is no help when it is the same family: every Sorbus row read "CoL files
+      -- this record under Rosaceae (Rosales)" while sitting under Rosaceae.
+      SELECT id, scientific_name, family AS assessed_family, order_name AS assessed_order
+      FROM read_parquet('${assessedPath}') WHERE ${assessedWhere}
     ),
     primary_links AS (
       -- Primary link only (excludes 'iucn_synonym_covered' — a bookkeeping alias
@@ -386,7 +510,7 @@ export async function computeNoMatchDetails(
       WHERE rank = 'species' AND status = 'provisionally accepted'
         AND lower(scientific_name) IN (SELECT lower(scientific_name) FROM matched_assessed)
       GROUP BY 1
-    ),
+    )` : ""}${hasSynClaim ? `,
     -- The backbone's own synonym -> accepted-in-Base edge, for the names
     -- 'iucn_synonym_covered' misses. Same semi-join shape as prov_by_name.
     -- Synonymies CoL's CURRENT RELEASE holds, not the extended release's.
@@ -431,10 +555,15 @@ export async function computeNoMatchDetails(
       ma.id AS id, ma.scientific_name AS name,
       pl.col_id AS linked_col_id,
       sp.scientific_name AS linked_name, sp.in_base AS linked_in_base, sp.extinct AS linked_extinct,
+      -- Where CoL itself files the matched record. Only read for
+      -- classified_elsewhere, whose whole content is "somewhere other than the
+      -- group you are looking at" — which is not worth saying without saying where.
+      sp.family AS col_family, sp.order_name AS col_order, sp.class_name AS col_class,
+      ma.assessed_family AS assessed_family, ma.assessed_order AS assessed_order,
       w.winner_name AS winner_name, w.winner_id AS winner_id
       ${hasBackbone ? `,
-      pbn.col_id AS prov_col_id,
-      sib.name AS syn_name, sib.col_id AS syn_col_id,
+      pbn.col_id AS prov_col_id,${hasSynClaim ? `
+      sib.name AS syn_name, sib.col_id AS syn_col_id,` : ""}
       bk.parent_id AS parent_col_id,
       bk.rank AS bk_rank,
       bkparent.scientific_name AS parent_name,
@@ -451,7 +580,7 @@ export async function computeNoMatchDetails(
     LEFT JOIN read_parquet('${ctx.backbonePath}') bk ON bk.col_id = pl.col_id
     LEFT JOIN read_parquet('${ctx.backbonePath}') bkparent ON bkparent.col_id = bk.parent_id
     LEFT JOIN col_to_assessed ca ON ca.col_id = bk.parent_id
-    LEFT JOIN prov_by_name pbn ON pl.col_id IS NULL AND pbn.lname = lower(ma.scientific_name)
+    LEFT JOIN prov_by_name pbn ON pl.col_id IS NULL AND pbn.lname = lower(ma.scientific_name)` : ""}${hasSynClaim ? `
     LEFT JOIN syn_in_checklist sib ON sib.lname = lower(ma.scientific_name)` : ""}
     WHERE cl.id IS NULL
     -- Deterministic order — this JOIN chain has no natural order, and without one
@@ -475,8 +604,8 @@ export async function computeNoMatchDetails(
  * One breakdown entry (colDescribed/colNe split by name, plus the no-match
  * diagnostic) for a single narrowed filter. Callers must have already built
  * ctx.assessedCidsTable and, if ctx.hasBackbone, the split_candidates/
- * col_to_assessed temp tables (see the file doc comment for why building them
- * is the caller's responsibility, not this function's).
+ * synonym_assessed/col_to_assessed temp tables (see the file doc comment for why
+ * building them is the caller's responsibility, not this function's).
  */
 export async function computeBreakdownEntry(
   ctx: BreakdownQueryContext,
@@ -524,11 +653,29 @@ export async function computeBreakdownEntry(
           parentName: String(r.parent_name), parentCategory: String(r.parent_category),
         }))
     : [];
+  // The same lookup shape as splitDetails, against synonym_assessed — scoped to
+  // the identical NE universe, so every row here is one of this name's neCount.
+  const neSynonymDetails: NeSynonymDetail[] = hasBackbone
+    ? (await (await conn.run(`
+        SELECT ns.col_id AS ne_col_id, sa.assessed_id, sa.assessed_name, sa.assessed_category
+        FROM (
+          SELECT col_id FROM read_parquet('${speciesGlob}', hive_partitioning=true)
+          WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+            AND ${filterToSql(narrowed, nodeId)} AND col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
+        ) ns
+        JOIN synonym_assessed sa ON sa.ne_col_id = ns.col_id
+        ORDER BY ns.col_id`)).getRowObjects())
+        .map((r) => ({
+          colId: String(r.ne_col_id), assessedId: Number(r.assessed_id),
+          assessedName: String(r.assessed_name), assessedCategory: String(r.assessed_category),
+        }))
+    : [];
   return {
     name, count: Number(bRows[0].n), neCount: Number(bRows[0].ne), trueAssessed: Number(trueRows[0].n),
     noMatchIds: noMatchDetails.map((d) => d.id),
     ...(noMatchDetails.length ? { noMatchDetails } : {}),
     ...(splitDetails.length ? { splitDetails } : {}),
+    ...(neSynonymDetails.length ? { neSynonymDetails } : {}),
   };
 }
 

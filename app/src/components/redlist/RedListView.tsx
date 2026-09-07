@@ -17,7 +17,8 @@ import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/tax
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import ReviewerChart from "./ReviewerChart";
-import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, noMatchSentence, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
+import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
+import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
@@ -848,49 +849,15 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
   // Resets to the first page on every open: the panel is only mounted while the
   // tooltip is up, so there is no stale page to come back to.
   const [splitPage, setSplitPage] = useState(0);
-  const colLink = (text: string, colId?: string) =>
-    colId ? (
-      <a
-        href={colUrl(colId)}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="text-blue-300 hover:text-blue-200 underline"
-      >
-        {text}
-      </a>
-    ) : (
-      text
-    );
-
+  // colLink/linkNames now live in revision-links.tsx, shared with the SSC
+  // panel's Explanation column so the same finding links the same way in both.
+  const colLink = (text: string, colId?: string) => <ColLink text={text} colId={colId} />;
   // The row's own species is a link too, wherever its name appears in the
   // sentence — for reasons that name no second species ("provisional",
   // "extinct flag") it is the only record there is to open, and even where a
   // second species IS named, "what does CoL say about THIS one" is the question
   // the flag raises. A lump's lead also names the CoL species the group is filed
   // under, which is the most useful target in it, so that gets linked too.
-  const linkNames = (text: string, targets: { name: string; href: string }[]): React.ReactNode => {
-    const hit = targets
-      .map((t) => ({ ...t, at: text.indexOf(t.name) }))
-      .filter((t) => t.at >= 0)
-      .sort((a, b) => a.at - b.at)[0];
-    if (!hit) return text;
-    return (
-      <>
-        {text.slice(0, hit.at)}
-        <a
-          href={hit.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-blue-300 hover:text-blue-200 underline"
-        >
-          {hit.name}
-        </a>
-        {linkNames(text.slice(hit.at + hit.name.length), targets.filter((t) => t.name !== hit.name))}
-      </>
-    );
-  };
   const linkSubject = (text: string): React.ReactNode => linkNames(text, [
     { name, href: colTaxonUrl(flag, name) },
     // For a lump, CoL's accepted name for the shared record — flag.colId IS that
@@ -973,12 +940,13 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
   // no-match reason, and its tooltip has to show every finding its own flag is
   // filterable by, or a bar returns a row that never explains itself.
   if (flag.reason != null && !(lump && flag.reason === "lumped")) {
-    const s = noMatchSentence(flag, name);
     sentences.push({ code: flag.reason, node: (
       <span key="no-match">
-        {linkSubject(s.before)}
-        {s.detail != null && colLink(s.detail, flag.detailColId)}
-        {s.after}
+        <NoMatchLine
+          flag={flag}
+          subject={name}
+          extraTargets={flag.lumpedUnder && flag.colId ? [{ name: flag.lumpedUnder, href: colUrl(flag.colId) }] : []}
+        />
       </span>
     ) });
   }

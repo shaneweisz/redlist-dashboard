@@ -38,6 +38,7 @@ import {
   computeNoMatchDetails,
   SPLIT_CANDIDATES_SQL,
   COL_TO_ASSESSED_SQL,
+  backboneHasChecklistColumns,
   type BreakdownQueryContext,
   type NoMatchDetail,
 } from "../src/lib/data/col-breakdown";
@@ -112,6 +113,10 @@ export async function run(): Promise<void> {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql, assessedCidsTable: "assessed_cids",
     excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone, backbonePath,
+    // Always true in the real pipeline (the sync rebuilds the backbone whenever it
+    // lacks these columns — see sync.ts) — probed rather than assumed so a
+    // hand-run against an older data dir degrades instead of throwing a Binder Error.
+    hasChecklistColumns: hasBackbone && (await backboneHasChecklistColumns(conn, backbonePath)),
   };
 
   const started = Date.now();

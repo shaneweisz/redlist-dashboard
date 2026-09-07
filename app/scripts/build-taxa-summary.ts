@@ -38,7 +38,9 @@ import { DYNAMIC_DRILLDOWN_ROOTS, nextDynamicRank } from "../src/lib/dynamic-tax
 import {
   computeBreakdownEntry,
   SPLIT_CANDIDATES_SQL,
+  SYNONYM_ASSESSED_SQL,
   COL_TO_ASSESSED_SQL,
+  backboneHasChecklistColumns,
   type BreakdownQueryContext,
 } from "../src/lib/data/col-breakdown";
 
@@ -186,6 +188,7 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   const hasBackbone = fs.existsSync(backbonePath);
   if (hasBackbone) {
     await conn.run(SPLIT_CANDIDATES_SQL(backbonePath, assessedPath, "assessed_cids"));
+    await conn.run(SYNONYM_ASSESSED_SQL(backbonePath, assessedPath, "assessed_cids"));
     await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
     // Dump both to small precomputed parquet files — they're fully determined by
     // this data sync (never by which taxon/bucket a user is viewing), but building
@@ -195,15 +198,21 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
     // server start; loading these tiny files instead (~6K / ~173K rows) is
     // effectively instant. See that file's fallback if these are ever missing.
     const splitCandidatesOut = path.join(DATA_DIR, "col-split-candidates.parquet");
+    const synonymAssessedOut = path.join(DATA_DIR, "col-synonym-assessed.parquet");
     const colToAssessedOut = path.join(DATA_DIR, "col-to-assessed.parquet");
     await conn.run(`COPY split_candidates TO '${splitCandidatesOut}' (FORMAT PARQUET)`);
+    await conn.run(`COPY synonym_assessed TO '${synonymAssessedOut}' (FORMAT PARQUET)`);
     await conn.run(`COPY col_to_assessed TO '${colToAssessedOut}' (FORMAT PARQUET)`);
-    console.log(`  CoL match helpers: ${splitCandidatesOut}, ${colToAssessedOut}`);
+    console.log(`  CoL match helpers: ${splitCandidatesOut}, ${synonymAssessedOut}, ${colToAssessedOut}`);
   }
   const breakdownCtx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql: universe, assessedCidsTable: "assessed_cids",
     excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone, backbonePath,
+    // See BreakdownQueryContext.hasChecklistColumns: the sync rebuilds a backbone
+    // that lacks these, so this is true for every real build — probed anyway so a
+    // hand-run against an older data dir degrades instead of throwing.
+    hasChecklistColumns: hasBackbone && (await backboneHasChecklistColumns(conn, backbonePath)),
   };
   let n = 0;
   let breakdownQueries = 0;
