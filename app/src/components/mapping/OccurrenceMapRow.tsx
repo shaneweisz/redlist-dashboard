@@ -1385,6 +1385,17 @@ export default function OccurrenceMapRow({
   // Share of the fullscreen height given to the map, as a percentage. Two
   // thirds by default, dragged from the divider between map and list.
   const [mapHeightPct, setMapHeightPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
+  /**
+   * The dashboard's own map/panel split, kept apart from fullscreen's.
+   *
+   * They are the same handle but not the same question — how much room the
+   * record list wants against a full-page map is nothing to do with how much
+   * the nearby panel wants beside a dashboard one. Shared, dragging either
+   * moved the other the next time you opened it.
+   */
+  const [nearbySplitPct, setNearbySplitPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
+  const splitPct = fullscreen ? mapHeightPct : nearbySplitPct;
+  const setSplitPct = fullscreen ? setMapHeightPct : setNearbySplitPct;
   const [draggingDivider, setDraggingDivider] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitView, setSplitView] = useState(false);
@@ -3245,8 +3256,8 @@ export default function OccurrenceMapRow({
     const pct = panelLayout === "rows"
       ? ((e.clientY - rect.top) / span) * 100
       : ((e.clientX - rect.left) / span) * 100;
-    setMapHeightPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
-  }, [draggingDivider, panelLayout]);
+    setSplitPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
+  }, [draggingDivider, panelLayout, setSplitPct]);
 
   const handleDividerPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -3263,10 +3274,10 @@ export default function OccurrenceMapRow({
     const step = e.key === "ArrowUp" ? -5 : e.key === "ArrowDown" ? 5 : 0;
     if (step === 0) return;
     e.preventDefault();
-    setMapHeightPct((pct) =>
+    setSplitPct((pct) =>
       Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step))
     );
-  }, []);
+  }, [setSplitPct]);
 
   /**
    * Hovering a row in the record list highlights that record on the map, using
@@ -7060,7 +7071,11 @@ export default function OccurrenceMapRow({
    * table gets room for its columns.
    */
   const NEARBY_PANEL = nearbyAt ? (
-    <div className="w-full">
+    // Full height of whatever column it is given, so the panel's own body is
+    // the thing that scrolls. As a plain `w-full` it sized to its content, the
+    // content never overflowed, and the list simply ran past the bottom of the
+    // page with no scrollbar anywhere.
+    <div className="flex h-full min-h-0 w-full flex-col">
       <NearbySpeciesPanel
                     lat={nearbyAt.lat}
                     lng={nearbyAt.lng}
@@ -8083,7 +8098,7 @@ export default function OccurrenceMapRow({
               // Two thirds by default, and whatever the divider has been
               // dragged to after that.
               style={
-                fullscreen || (nearbyAt && !splitView) ? { flex: `0 0 ${mapHeightPct}%` } : undefined
+                fullscreen || (nearbyAt && !splitView) ? { flex: `0 0 ${splitPct}%` } : undefined
               }
             >
                 {splitView && splitDate ? (
@@ -8195,7 +8210,7 @@ export default function OccurrenceMapRow({
                 role="separator"
                 aria-orientation="horizontal"
                 aria-label="Resize map and record list"
-                aria-valuenow={Math.round(mapHeightPct)}
+                aria-valuenow={Math.round(splitPct)}
                 aria-valuemin={FULLSCREEN_MIN_MAP_PCT}
                 aria-valuemax={FULLSCREEN_MAX_MAP_PCT}
                 tabIndex={0}
@@ -8255,7 +8270,12 @@ export default function OccurrenceMapRow({
                   // In fullscreen the list column is the only place with room
                   // for a second table, so the search takes a tab on it rather
                   // than a third column squeezed beside the map.
-                  <div className="min-h-0 flex-1 overflow-hidden p-1">{NEARBY_PANEL}</div>
+                  <div
+                    className="min-h-0 flex-1 overflow-hidden p-1"
+                    style={listZoom === 1 ? undefined : { zoom: listZoom }}
+                  >
+                    {NEARBY_PANEL}
+                  </div>
                 ) : pointFile && pointFileComparison && listTab === "file" ? (
                   <PointFileTable
                     comparison={pointFileComparison}
