@@ -148,6 +148,34 @@ export interface NearbyPoint {
   datasetName: string | null;
 }
 
+/**
+ * The neighbours' records under one click, in draw order and deduped.
+ *
+ * Records stack: a locality collected from repeatedly puts several dots on the
+ * same pixel, and with only the topmost one reachable the rest were invisible.
+ * MapLibre hands back every feature under the pointer, so the click can open
+ * the whole stack and page through it the way the map's own records do — and it
+ * can hand back the same feature twice where tile boundaries overlap, which is
+ * what the dedupe is for.
+ */
+export function groupNearbyFeatures(
+  features: readonly { properties?: Record<string, unknown> | null }[],
+  pointsByKey: Record<string, { points: NearbyPoint[] }>
+): NearbyPoint[] {
+  const seen = new Set<number>();
+  const group: NearbyPoint[] = [];
+  for (const f of features) {
+    const i = Number(f.properties?.nearbyIndex);
+    const key = String(f.properties?.nearbyKey ?? "");
+    const pt = Number.isFinite(i) ? pointsByKey[key]?.points[i] : undefined;
+    if (pt && !seen.has(pt.gbifID)) {
+      seen.add(pt.gbifID);
+      group.push(pt);
+    }
+  }
+  return group;
+}
+
 /** Where a picked neighbour's records are, inside the same radius. */
 export function nearbyPointsUrl(opts: {
   lat: number;
@@ -182,28 +210,22 @@ export interface NearbySpecies {
   assessment_year: number | null;
   /** The assessment behind it, for fetching what it says about threats. */
   assessment_id: number | null;
+  /**
+   * The threats its assessment cites, as codes with their labels.
+   *
+   * Two levels deep — "5.4", not "5.4.1" — because that is the level at which
+   * a threat is a thing you recognise ("Fishing & harvesting") rather than a
+   * classification leaf, and because a species citing four leaves under one
+   * sub-code would otherwise wear four tags saying the same thing. Labelled
+   * here, on the server, since the IUCN threat vocabulary lives in
+   * lib/filter-vocab, which cannot cross to the browser (see nearby-threats).
+   */
+  threat_tags: { code: string; label: string }[];
   /** GBIF records for this species inside the radius. */
   records: number;
   sis_taxon_id: number | null;
   /** `species=` param for the dashboard, when the species has a row there. */
   dashboard_row_key: string | null;
-}
-
-/** A threat cited by the neighbours, rolled up to its top-level IUCN code. */
-export interface NearbyThreat {
-  /** Top-level IUCN threat code, e.g. "2". */
-  code: string;
-  /** e.g. "Agriculture & aquaculture". */
-  label: string;
-  /** How many of the neighbours cite it. */
-  species: number;
-  /**
-   * The species citing it, listed under the row. They carry their assessment
-   * id because each one can be opened to read what its assessors actually
-   * wrote about threats — a code says which of twelve boxes was ticked, and
-   * the paragraph says what is happening.
-   */
-  examples: { key: string; name: string; assessmentId: number | null }[];
 }
 
 export interface NearbyResult {
@@ -215,7 +237,6 @@ export interface NearbyResult {
   /** Records in the radius belonging to the categories asked for. */
   categoryRecords: number;
   species: NearbySpecies[];
-  threats: NearbyThreat[];
   /** Species GBIF returned that this dashboard's data doesn't carry a row for. */
   unmatched: number;
   /** The facet hit its limit, so the list is the commonest, not all of them. */

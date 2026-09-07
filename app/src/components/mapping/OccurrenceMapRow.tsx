@@ -32,6 +32,7 @@ import {
   NEARBY_SEARCH_COLOR,
   NEARBY_PICKED_COLORS,
   NEARBY_MAX_PICKED,
+  groupNearbyFeatures,
   type NearbyPoint,
   type NearbyRadiusKm,
 } from "@/lib/mapping/nearby-species";
@@ -1158,11 +1159,20 @@ export default function OccurrenceMapRow({
    * shape that can be read — a valley, a roadside, a single locality everything
    * came from.
    */
-  const [nearbyPicked, setNearbyPicked] = useState<{ key: string; name: string }[]>([]);
+  const [nearbyPicked, setNearbyPicked] = useState<{ key: string; name: string; commonName: string | null }[]>([]);
   /** Each picked species' records, by GBIF key, as they arrive. */
   const [nearbyPoints, setNearbyPoints] = useState<Record<string, { points: NearbyPoint[]; total: number }>>({});
-  /** The neighbour's record whose tooltip is open, if any. */
-  const [nearbyShown, setNearbyShown] = useState<NearbyPoint | null>(null);
+  /**
+   * The neighbours' records under the last click, and which of them is showing.
+   *
+   * A list rather than one record, because these stack: a locality collected
+   * from repeatedly puts several dots on the same pixel, and with only the top
+   * one clickable the ones underneath were unreachable — the same problem the
+   * map's own records solve by paging, so this pages the same way.
+   */
+  const [nearbyShownGroup, setNearbyShownGroup] = useState<NearbyPoint[]>([]);
+  const [nearbyShownIndex, setNearbyShownIndex] = useState(0);
+  const nearbyShown = nearbyShownGroup[Math.min(nearbyShownIndex, nearbyShownGroup.length - 1)] ?? null;
   /**
    * Picked species currently switched off in the legend.
    *
@@ -1192,7 +1202,7 @@ export default function OccurrenceMapRow({
     return out;
   }, [nearbyPicked]);
 
-  const toggleNearbyPicked = useCallback((species: { key: string; name: string }) => {
+  const toggleNearbyPicked = useCallback((species: { key: string; name: string; commonName: string | null }) => {
     setNearbyPicked((prev) => {
       if (prev.some((p) => p.key === species.key)) {
         setNearbyHidden((hidden) => {
@@ -1249,7 +1259,7 @@ export default function OccurrenceMapRow({
   if (lastNearbyFetchKey.current !== nearbyFetchKey) {
     lastNearbyFetchKey.current = nearbyFetchKey;
     if (Object.keys(nearbyPoints).length) setNearbyPoints({});
-    if (nearbyShown) setNearbyShown(null);
+    if (nearbyShownGroup.length) setNearbyShownGroup([]);
   }
 
   const nearbyPointsGeoJson = useMemo<GeoJSON.FeatureCollection>(
@@ -2747,15 +2757,18 @@ export default function OccurrenceMapRow({
     // A neighbour's cross, before anything else: it is drawn above the map's
     // own records, so a click that reaches one is aimed at it rather than at
     // whatever green circle happens to lie underneath.
-    const cross = features?.find((f) => String(f.layer?.id ?? "").startsWith(`nearby-points-circle-`));
-    if (cross) {
-      const i = Number(cross.properties?.nearbyIndex);
-      const k = String(cross.properties?.nearbyKey ?? "");
-      const pt = Number.isFinite(i) ? nearbyPoints[k]?.points[i] : undefined;
-      if (pt) {
-        // Clicking the open one again closes it, the way a record's own panel
+    const crosses = (features ?? []).filter((f) =>
+      String(f.layer?.id ?? "").startsWith(`nearby-points-circle-`)
+    );
+    if (crosses.length > 0) {
+      const group = groupNearbyFeatures(crosses, nearbyPoints);
+      if (group.length > 0) {
+        // Clicking the same stack again closes it, the way a record's own panel
         // behaves.
-        setNearbyShown((prev) => (prev?.gbifID === pt.gbifID ? null : pt));
+        setNearbyShownGroup((prev) =>
+          prev.length === group.length && prev.every((p, n) => p.gbifID === group[n].gbifID) ? [] : group
+        );
+        setNearbyShownIndex(0);
         closeTooltip();
         return;
       }
@@ -4093,7 +4106,20 @@ export default function OccurrenceMapRow({
                       : []),
                     ...(nearbyShown.datasetName ? [{ label: "Dataset", value: nearbyShown.datasetName }] : []),
                   ]}
-                  onClose={() => setNearbyShown(null)}
+                  page={
+                    nearbyShownGroup.length > 1
+                      ? {
+                          index: Math.min(nearbyShownIndex, nearbyShownGroup.length - 1),
+                          total: nearbyShownGroup.length,
+                          onPrev: () =>
+                            setNearbyShownIndex(
+                              (i) => (i - 1 + nearbyShownGroup.length) % nearbyShownGroup.length
+                            ),
+                          onNext: () => setNearbyShownIndex((i) => (i + 1) % nearbyShownGroup.length),
+                        }
+                      : undefined
+                  }
+                  onClose={() => setNearbyShownGroup([])}
                   actions={
                     nearbyShown.gbifID ? (
                       <a
@@ -4831,34 +4857,9 @@ export default function OccurrenceMapRow({
             </div>
           )}
           </div>
-          {/* Sits where the edit history sits, and the two are never both open:
-              asking what else is here closes the history rather than stacking
-              a second card on the same corner. */}
-          {nearbyAt && (
-            <NearbySpeciesPanel
-              lat={nearbyAt.lat}
-              lng={nearbyAt.lng}
-              recordName={nearbyAt.recordName}
-              excludeGbifKey={speciesKey}
-              radiusKm={nearbyRadiusKm}
-              onRadiusChange={setNearbyRadiusKm}
-              picked={nearbyPicked.map((p) => ({
-                key: p.key,
-                color: nearbyColors[p.key],
-                drawn: nearbyPoints[p.key]
-                  ? { shown: nearbyPoints[p.key].points.length, total: nearbyPoints[p.key].total }
-                  : null,
-              }))}
-              onTogglePick={toggleNearbyPicked}
-              onClose={() => {
-                setNearbyAt(null);
-                setNearbyPicked([]);
-              }}
-            />
-          )}
           {/* This session's edits, newest first. Clicking one steps back to it,
               which is undo applied until it's reached. */}
-          {!nearbyAt && historyOpen && editHistory.length > 0 && (
+          {historyOpen && editHistory.length > 0 && (
             <div className="absolute top-2 right-2 z-[1001] w-72 max-h-[60%] overflow-y-auto rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-lg text-[11px]">
               <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 sticky top-0 bg-white dark:bg-zinc-800">
                 <span className="font-medium text-zinc-700 dark:text-zinc-200">This session</span>
@@ -6692,8 +6693,9 @@ export default function OccurrenceMapRow({
                 className="shrink-0 w-2 h-2 rounded-full border border-white"
                 style={{ backgroundColor: nearbyColors[p.key] }}
               />
-              <span className="italic truncate text-zinc-700 dark:text-zinc-200" title={p.name}>
-                {p.name}
+              <span className="truncate text-zinc-700 dark:text-zinc-200" title={p.name}>
+                <span className="italic">{p.name}</span>
+                {p.commonName && <span className="text-zinc-400"> ({p.commonName})</span>}
               </span>
               <span className="ml-auto shrink-0 tabular-nums text-zinc-400">
                 {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
@@ -7927,6 +7929,33 @@ export default function OccurrenceMapRow({
                   </div>
                 ) : (
                   renderMapPanel(mappedOccurrences, bbox, null)
+                )}
+                {/* Below the map rather than over it: floated, it covered the
+                    ground it was describing, and you cannot read "twelve species
+                    within 10 km" and look at where they are at the same time.
+                    In flow it also gets the full width, which is what lets the
+                    threats be a column. */}
+                {nearbyAt && (
+                  <NearbySpeciesPanel
+                    lat={nearbyAt.lat}
+                    lng={nearbyAt.lng}
+                    recordName={nearbyAt.recordName}
+                    excludeGbifKey={speciesKey}
+                    radiusKm={nearbyRadiusKm}
+                    onRadiusChange={setNearbyRadiusKm}
+                    picked={nearbyPicked.map((p) => ({
+                      key: p.key,
+                      color: nearbyColors[p.key],
+                      drawn: nearbyPoints[p.key]
+                        ? { shown: nearbyPoints[p.key].points.length, total: nearbyPoints[p.key].total }
+                        : null,
+                    }))}
+                    onTogglePick={toggleNearbyPicked}
+                    onClose={() => {
+                      setNearbyAt(null);
+                      setNearbyPicked([]);
+                    }}
+                  />
                 )}
                 {/* In-range/out-of-range breakdown vs. the currently-visible IUCN
                     range polygons — one table covering Total plus (when a split

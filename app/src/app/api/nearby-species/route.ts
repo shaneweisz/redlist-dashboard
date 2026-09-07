@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { normalizeCategory } from "@/config/taxa";
+import { threatTags } from "@/lib/mapping/nearby-threats";
 import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
 import {
   NEARBY_FACET_LIMIT,
@@ -22,7 +23,6 @@ import {
   type NearbyResult,
   type NearbySpecies,
 } from "@/lib/mapping/nearby-species";
-import { summariseThreats } from "@/lib/mapping/nearby-threats";
 
 /** GBIF facet counts come back as { name: <speciesKey>, count: n }. */
 interface GbifFacetCount {
@@ -67,7 +67,11 @@ export async function GET(request: NextRequest) {
 
     const assessed = await getAssessedByGbifKeys([...byKey.keys()]);
     const species: NearbySpecies[] = assessed
-      .map((a) => ({ ...a, records: byKey.get(a.gbif_species_key) ?? 0 }))
+      .map((a) => ({
+        ...a,
+        records: byKey.get(a.gbif_species_key) ?? 0,
+        threat_tags: threatTags(a.threat_codes),
+      }))
       .sort(
         (a, b) =>
           // How much of it was actually found here, first. Sorting by category
@@ -88,7 +92,6 @@ export async function GET(request: NextRequest) {
       totalRecords: all?.count ?? 0,
       categoryRecords: faceted?.count ?? 0,
       species,
-      threats: summariseThreats(species),
       unmatched: byKey.size - species.length,
       truncated: counts.length >= NEARBY_FACET_LIMIT,
     };

@@ -1,18 +1,18 @@
 "use client";
 
 /**
- * The species recorded around a point, and what their assessments blame.
+ * The species recorded around a record, and what their assessments blame.
  *
- * Opened by right-clicking a record, so the centre is a collection locality
+ * Opened from a record's own panel, so the centre is a collection locality
  * someone actually cares about — this specimen, this observation — rather than
  * wherever the cursor happened to be. It takes the record's own coordinates,
  * not the click's.
  *
- * Threats lead and the species list follows. The summary is the reusable part:
- * "18 of the 41 species recorded within 25 km cite Agriculture" is a line that
- * sends someone to check a threat they hadn't written down, which is the whole
- * point of the panel. The species list underneath is the evidence for it, and
- * is what you read once the summary has told you where to look.
+ * It sits below the map rather than over it. Floated, it covered the very
+ * ground it was describing: you cannot read "twelve species within 10 km" and
+ * look at where they are when the list is on top of them. In flow it also gets
+ * the full width, which is what lets the threats be a column rather than a tab
+ * of their own.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,6 +27,7 @@ import {
   nearbyGbifSiteUrl,
   type NearbyRadiusKm,
   type NearbyResult,
+  type NearbySpecies,
 } from "@/lib/mapping/nearby-species";
 
 interface Props {
@@ -41,36 +42,81 @@ interface Props {
   onRadiusChange: (km: NearbyRadiusKm) => void;
   /** The neighbours the map is drawing, with the colour each was given. */
   picked: { key: string; color: string; drawn: { shown: number; total: number } | null }[];
-  onTogglePick: (species: { key: string; name: string }) => void;
+  onTogglePick: (species: { key: string; name: string; commonName: string | null }) => void;
   onClose: () => void;
+}
+
+/**
+ * Assessment narratives already fetched, for the life of the page.
+ *
+ * The route caches these for an hour and sets cache headers, but that is a
+ * serverless function's memory and it is short. This is the one that stops the
+ * IUCN API being asked twice for the same paragraph because someone closed a
+ * row and opened it again — which, in a panel built for comparing neighbours,
+ * is exactly what people do.
+ */
+const narrativeCache = new Map<number, { text?: string; error?: string }>();
+
+/**
+ * Fetches already in the air, so two mounts of the same row make one request.
+ *
+ * The cache above only helps once an answer has come back. React mounts an
+ * effect twice in development, and re-opening a row while its first fetch is
+ * still running is an ordinary thing to do — both would miss the cache and ask
+ * the IUCN API again. Sharing the promise means the second caller waits on the
+ * first rather than starting another.
+ */
+const narrativeInFlight = new Map<number, Promise<{ text?: string; error?: string }>>();
+
+function fetchNarrative(assessmentId: number) {
+  const running = narrativeInFlight.get(assessmentId);
+  if (running) return running;
+  // No abort signal, deliberately. The promise is shared, so tying it to one
+  // caller's lifetime lets that caller's unmount cancel the fetch the next one
+  // is waiting on — which is exactly what a double-mounted effect does, and it
+  // left the row saying "reading the assessment…" forever. It is one small GET
+  // whose answer is worth caching even if nobody is still looking.
+  const p = fetch(`/api/redlist/assessment/${assessmentId}`)
+    .then(async (r) => {
+      const body = await r.json();
+      if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
+      const next = { text: body.threats ? stripHtml(String(body.threats)) : "" };
+      narrativeCache.set(assessmentId, next);
+      return next;
+    })
+    .finally(() => narrativeInFlight.delete(assessmentId));
+  narrativeInFlight.set(assessmentId, p);
+  return p;
 }
 
 /**
  * What a species' assessors actually wrote about its threats.
  *
- * The codes say which of twelve boxes were ticked; this says what is happening
- * — the plantation, the road, the year the dam went in. It is the sentence an
- * assessor is looking for when they open a neighbour at all, and it is not in
- * any of this dashboard's own data: narratives are fetched one assessment at a
- * time from the IUCN API, which is why this loads on demand rather than coming
- * down with the list.
+ * The codes say which boxes were ticked; this says what is happening — the
+ * plantation, the road, the year the dam went in. Not in this dashboard's own
+ * data: narratives are fetched one assessment at a time from the IUCN API,
+ * which is why this loads on demand rather than coming down with the list.
  */
 function ThreatNarrative({ assessmentId }: { assessmentId: number }) {
-  const [state, setState] = useState<{ text?: string; error?: string } | null>(null);
+  const [state, setState] = useState<{ text?: string; error?: string } | null>(
+    () => narrativeCache.get(assessmentId) ?? null
+  );
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/redlist/assessment/${assessmentId}`, { signal: controller.signal })
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
-        setState({ text: body.threats ? stripHtml(String(body.threats)) : "" });
+    if (narrativeCache.has(assessmentId)) return;
+    let live = true;
+    fetchNarrative(assessmentId)
+      .then((next) => {
+        if (live) setState(next);
       })
       .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setState({ error: e instanceof Error ? e.message : "Could not load" });
+        // Deliberately not cached: a failure is usually the network rather than
+        // the assessment, and should be retryable by opening the row again.
+        if (live) setState({ error: e instanceof Error ? e.message : "Could not load" });
       });
-    return () => controller.abort();
+    return () => {
+      live = false;
+    };
   }, [assessmentId]);
 
   if (state == null) {
@@ -88,16 +134,12 @@ function ThreatNarrative({ assessmentId }: { assessmentId: number }) {
 
 /**
  * The table's column track, shared by the header and every row so the two can't
- * drift apart.
+ * drift apart. Below the map there is width enough for threats to be a column.
  */
-const ROW = "grid grid-cols-[10px_26px_minmax(0,1fr)_58px_54px_30px] gap-1 items-baseline";
+const ROW =
+  "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_5rem_minmax(8rem,2fr)_4.5rem_2.5rem] gap-2 items-baseline px-2";
 
-/**
- * The panel's one busy indicator, used wherever it waits on GBIF.
- *
- * Both waits here are a second or so of nothing — long enough that a static
- * "looking…" reads as a state rather than as progress.
- */
+/** The panel's one busy indicator, used wherever it waits on a service. */
 function Spinner() {
   return (
     <span
@@ -112,83 +154,36 @@ function taxonLabel(taxonGroup: string): string {
   return findNode(taxonGroup)?.name ?? taxonGroup.replace(/_/g, " ");
 }
 
+/** The species' page on iucnredlist.org, where an assessment is read in full. */
+function redListUrl(s: NearbySpecies): string | null {
+  if (s.sis_taxon_id == null) return null;
+  return s.assessment_id == null
+    ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}`
+    : `https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}`;
+}
+
 export default function NearbySpeciesPanel({
   lat, lng, recordName, excludeGbifKey, radiusKm, onRadiusChange,
   picked, onTogglePick, onClose,
 }: Props) {
   const pickedByKey = useMemo(() => new Map(picked.map((p) => [p.key, p])), [picked]);
-  /** Which threat's species are expanded, if any. */
-  const [openThreat, setOpenThreat] = useState<string | null>(null);
-  /** Which species' threat narrative is open under a threat row. */
+  /** Which species' action menu is open. */
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  /** Which species' threat narrative is showing under its row. */
   const [openNarrative, setOpenNarrative] = useState<string | null>(null);
-  /** Rolled up to its header bar, so the map underneath can be read. */
-  const [collapsed, setCollapsed] = useState(false);
-  /**
-   * The size the reader has dragged it to, if any.
-   *
-   * Null means the default — a panel that has never been resized should track
-   * the map's own height rather than being pinned to whatever pixels suited the
-   * window it was first opened in.
-   */
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-
-  /**
-   * Drag the bottom-left corner to resize.
-   *
-   * The corner, because the panel is anchored top-right: those two edges are
-   * fixed, so the free corner is the one that can move without the panel also
-   * having to travel. Pointer capture rather than window listeners, so a drag
-   * that leaves the panel — which is most of them, since resizing means going
-   * outwards — keeps being delivered here.
-   */
-  const startResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const panel = e.currentTarget.parentElement;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    const from = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
-    const onMove = (ev: PointerEvent) => {
-      setSize({
-        // Leftwards is wider, because the right edge is the fixed one.
-        w: Math.max(260, Math.min(760, from.w - (ev.clientX - from.x))),
-        h: Math.max(140, Math.min(window.innerHeight - 80, from.h + (ev.clientY - from.y))),
-      });
-    };
-    const onUp = (ev: PointerEvent) => {
-      e.currentTarget?.releasePointerCapture?.(ev.pointerId);
-      e.currentTarget?.removeEventListener("pointermove", onMove);
-      e.currentTarget?.removeEventListener("pointerup", onUp);
-    };
-    e.currentTarget.addEventListener("pointermove", onMove);
-    e.currentTarget.addEventListener("pointerup", onUp);
-  }, []);
-  /**
-   * Which half of the answer is showing.
-   *
-   * They were stacked, and with a dozen threat rows above it the species list
-   * began below the fold of a panel nobody had reason to scroll — the heading
-   * that would have told you it was there was itself out of view. Tabs put
-   * both counts in permanent sight and give whichever you pick the full
-   * height, which at 320px wide is the only way either list gets read.
-   */
-  const [tab, setTab] = useState<"species" | "threats">("species");
-  /**
-   * Which taxon's neighbours are listed, or null for all of them.
-   *
-   * A hundred-odd species across birds, amphibians and plants is a list nobody
-   * reads end to end, and an assessor almost always wants one of those groups —
-   * the comparable one. Derived from what actually came back rather than from
-   * the full taxonomy, so the row only ever offers groups with something in it.
-   */
+  /** Which taxon's neighbours are listed, or null for all of them. */
   const [taxon, setTaxon] = useState<string | null>(null);
+  /** Rolled up to its header bar, so the map above has the room back. */
+  const [collapsed, setCollapsed] = useState(false);
+  /** The height the reader has dragged it to; null means the default. */
+  const [height, setHeight] = useState<number | null>(null);
 
   /**
    * The answer, tagged with the question it answers.
    *
    * Loading isn't state of its own: it's "what I'm holding doesn't match what's
    * being asked", which the tag makes a comparison rather than a flag to keep in
-   * step. That also settles what the panel shows mid-flight — switching 25 km to
+   * step. That also settles what the panel shows mid-flight — switching 10 km to
    * 50 km blanks the old list instead of leaving it up, labelled 50, until the
    * new one lands.
    */
@@ -218,46 +213,64 @@ export default function NearbySpeciesPanel({
     return () => controller.abort();
   }, [lat, lng, radiusKm, excludeGbifKey, key]);
 
-  // A radius that returns no birds should not keep offering a Birds tab, so the
-  // row is rebuilt from each answer and a selection that no longer exists is
-  // dropped rather than silently filtering everything away.
+  // A radius that returns no birds should not keep offering a Birds chip, so
+  // the row is rebuilt from each answer.
   const taxonCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const s of result?.species ?? []) {
-      counts.set(s.taxon_group, (counts.get(s.taxon_group) ?? 0) + 1);
-    }
+    for (const s of result?.species ?? []) counts.set(s.taxon_group, (counts.get(s.taxon_group) ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [result]);
 
-  // Derived, not corrected after the fact: a group that the new radius no
-  // longer has simply stops being the selection, rather than being stored and
-  // then filtering the whole list away until an effect catches up.
+  // Derived, not corrected after the fact: a group the new radius no longer has
+  // simply stops being the selection.
   const activeTaxon = taxon && taxonCounts.some(([g]) => g === taxon) ? taxon : null;
-
   const shownSpecies = useMemo(
     () => (result?.species ?? []).filter((s) => !activeTaxon || s.taxon_group === activeTaxon),
     [result, activeTaxon]
   );
 
-  // Escape closes it, the way it dismisses every other mode on this map.
+  // Escape backs out of the open menu first, and closes the panel only when
+  // there is nothing smaller to dismiss.
   const onKey = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (openMenu) setOpenMenu(null);
+      else onClose();
     },
-    [onClose]
+    [onClose, openMenu]
   );
   useEffect(() => {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onKey]);
 
+  /**
+   * Drag the bottom edge to make room.
+   *
+   * In flow under the map, width belongs to the layout — height is the only
+   * dimension the reader has an opinion about, and a threat narrative is a
+   * paragraph rather than a field.
+   */
+  const startResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const body = handle.previousElementSibling;
+    if (!body) return;
+    const from = { y: e.clientY, h: body.getBoundingClientRect().height };
+    const onMove = (ev: PointerEvent) =>
+      setHeight(Math.max(120, Math.min(window.innerHeight - 120, from.h + (ev.clientY - from.y))));
+    const onUp = (ev: PointerEvent) => {
+      handle.releasePointerCapture?.(ev.pointerId);
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  }, []);
+
   return (
-    <div
-      className={`absolute top-2 right-2 z-[1001] flex flex-col rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-lg text-[11px] ${
-        size ? "" : "w-[26rem] max-h-[75%]"
-      }`}
-      style={size ? { width: size.w, height: collapsed ? undefined : size.h } : undefined}
-    >
+    <div className="w-full rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-md text-[11px] flex flex-col">
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
         {/* The same colour as the ring on the map, so the panel and the circle
             it drew read as one thing. */}
@@ -266,337 +279,341 @@ export default function NearbySpeciesPanel({
           <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
         </svg>
         <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Recorded near</span>
-        <span className="italic text-zinc-500 dark:text-zinc-400 truncate" title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}>
+        <span
+          className="italic text-zinc-500 dark:text-zinc-400 truncate"
+          title={`${lat.toFixed(5)}, ${lng.toFixed(5)}`}
+        >
           {recordName}
         </span>
-        <button
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? "Show the results again" : "Roll up to the title bar"}
-          className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-        >
-          <svg
-            className={`w-3 h-3 transition-transform ${collapsed ? "" : "rotate-180"}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
+
+        <span className="ml-auto flex items-center gap-1 shrink-0">
+          <span className="text-zinc-500 dark:text-zinc-400">Within</span>
+          {NEARBY_RADII_KM.map((r) => (
+            <button
+              key={r}
+              onClick={() => onRadiusChange(r)}
+              className={`px-1.5 py-0.5 rounded border tabular-nums ${
+                r === radiusKm
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                  : "border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {r} km
+            </button>
+          ))}
+          {loading && (
+            <span className="flex items-center gap-1 pl-1 text-zinc-400">
+              <Spinner />
+              looking…
+            </span>
+          )}
+          <button
+            onClick={() => setCollapsed((v) => !v)}
+            title={collapsed ? "Show the results again" : "Roll up to the title bar"}
+            className="pl-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 15l-7-7-7 7" />
-          </svg>
-        </button>
-        <button
-          onClick={onClose}
-          title="Close"
-          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+            <svg
+              className={`w-3 h-3 transition-transform ${collapsed ? "" : "rotate-180"}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 15l-7-7-7 7" />
+            </svg>
+          </button>
+          <button onClick={onClose} title="Close" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
       </div>
 
       {!collapsed && (
-      <>
-      {/* The radius is the panel's one real control, so it sits above the
-          answer rather than behind a menu. */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
-        <span className="text-zinc-500 dark:text-zinc-400">Within</span>
-        {NEARBY_RADII_KM.map((r) => (
-          <button
-            key={r}
-            onClick={() => onRadiusChange(r)}
-            className={`px-1.5 py-0.5 rounded border tabular-nums ${
-              r === radiusKm
-                ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                : "border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-            }`}
+        <>
+          <div
+            className="overflow-y-auto py-1.5"
+            style={height ? { height } : { maxHeight: "24rem" }}
           >
-            {r} km
-          </button>
-        ))}
-        {loading && (
-          <span className="ml-auto flex items-center gap-1 text-zinc-400">
-            <Spinner />
-            looking…
-          </span>
-        )}
-      </div>
+            {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
-      <div className="overflow-y-auto px-2 py-1.5 space-y-2">
-        {error && <p className="text-amber-600 dark:text-amber-400">{error}</p>}
-
-        {result && !error && (
-          <>
-            <p className="text-zinc-500 dark:text-zinc-400">
-              {result.species.length === 0 ? (
-                <>No assessed threatened species recorded within {result.radiusKm} km.</>
-              ) : (
-                <>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-200">
-                    {result.species.length}
-                  </span>{" "}
-                  threatened or Near Threatened species, from{" "}
-                  <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
-                  <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
-                </>
-              )}
-            </p>
-
-            {result.truncated && (
-              <p className="text-amber-600 dark:text-amber-400">
-                Only the most-recorded {result.species.length} are shown — there are more here.
-              </p>
-            )}
-
-            {/* Both counts always visible, so neither list can be the one
-                nobody knew was there. */}
-            {(result.threats.length > 0 || result.species.length > 0) && (
-              <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-700 -mx-2 px-2">
-                {([
-                  ["species", "Species", result.species.length],
-                  ["threats", "Threats", result.threats.length],
-                ] as const).map(([id, label, n]) => (
-                  <button
-                    key={id}
-                    onClick={() => setTab(id)}
-                    className={`px-1.5 py-1 -mb-px border-b-2 ${
-                      tab === id
-                        ? "border-blue-500 text-zinc-800 dark:text-zinc-100 font-medium"
-                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                    }`}
-                  >
-                    {label} <span className="tabular-nums text-zinc-400">{n}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {tab === "threats" && (<>
-            {result.threats.length > 0 && (
-              <div>
-                {result.threats.map((t) => (
-                  <div key={t.code}>
-                    {/* Each row opens to name the species behind the count:
-                        a bare "18 species" is a prompt, but the names are what
-                        make it checkable. */}
-                    <button
-                      onClick={() => setOpenThreat(openThreat === t.code ? null : t.code)}
-                      className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-blue-600 dark:hover:text-blue-400"
-                    >
-                      <span className="tabular-nums text-zinc-500 dark:text-zinc-400 w-6 text-right shrink-0">
-                        {t.species}
-                      </span>
-                      {/* A bar, because the shape of the list is the finding —
-                          one dominant pressure reads differently from six even
-                          ones, and the counts alone don't show that. */}
-                      <span className="h-2 rounded-sm bg-blue-500/70 dark:bg-blue-400/70 shrink-0"
-                        style={{ width: `${Math.max(4, (t.species / result.threats[0].species) * 72)}px` }}
-                      />
-                      <span className="truncate text-zinc-700 dark:text-zinc-200">{t.label}</span>
-                    </button>
-                    {/* One species per line, not a run-on sentence: these are
-                        things to open, and a comma-joined list gives a reader
-                        nothing to aim at. */}
-                    {openThreat === t.code && (
-                      <div className="pl-8 pb-1 leading-snug">
-                        {t.examples.map((e) => (
-                          <div key={e.key} className="py-px">
-                            <button
-                              onClick={() =>
-                                setOpenNarrative((prev) => (prev === e.key ? null : e.key))
-                              }
-                              disabled={e.assessmentId == null}
-                              title={
-                                e.assessmentId == null
-                                  ? "No assessment to read"
-                                  : openNarrative === e.key
-                                    ? "Hide what its assessment says about threats"
-                                    : "Read what its assessment says about threats"
-                              }
-                              className="italic text-left text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 disabled:hover:text-zinc-600 disabled:opacity-60"
-                            >
-                              {e.name}
-                            </button>
-                            {openNarrative === e.key && e.assessmentId != null && (
-                              <div className="pl-2 mt-0.5 mb-1 border-l-2 border-zinc-200 dark:border-zinc-700 pl-2">
-                                <ThreatNarrative assessmentId={e.assessmentId} />
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {t.species > t.examples.length && (
-                          <div className="text-zinc-400 py-px">
-                            and {t.species - t.examples.length} more
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            </>)}
-
-            {tab === "species" && (<>
-            {/* One row of groups, biggest first. Horizontally scrollable rather
-                than wrapped: a wrapped row of a dozen groups would push the
-                list itself back below the fold, which is the problem the tabs
-                above exist to solve. */}
-            {taxonCounts.length > 1 && (
-              <div className="flex gap-1 overflow-x-auto pb-0.5 -mx-2 px-2">
-                {([[null, "All", result.species.length], ...taxonCounts.map(
-                  ([g, n]) => [g, taxonLabel(g), n] as const
-                )] as readonly (readonly [string | null, string, number])[]).map(([id, label, n]) => (
-                  <button
-                    key={id ?? "all"}
-                    onClick={() => setTaxon(id)}
-                    className={`shrink-0 px-1.5 py-0.5 rounded-full border tabular-nums ${
-                      activeTaxon === id
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                        : "border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                    }`}
-                  >
-                    {label} <span className="text-zinc-400">{n}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {shownSpecies.length > 0 && (
-              <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
-                {/* A table, not a list of paragraphs: the reason to look at a
-                    hundred neighbours at once is to compare them, and comparing
-                    needs the record counts and the years under one another
-                    rather than trailing each name. The header stays put while
-                    the rows scroll under it. */}
-                <div className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}>
-                  <span />
-                  <span />
-                  <span>Species</span>
-                  <span>Taxon</span>
-                  <span className="text-right">Recs</span>
-                  <span className="text-right">Yr</span>
-                </div>
-                {shownSpecies.map((s) => {
-                  const pick = pickedByKey.get(s.gbif_species_key);
-                  return (
-                    <div
-                      key={s.gbif_species_key}
-                      className={`${ROW} py-[3px] border-b border-zinc-50 dark:border-zinc-800/60 ${
-                        pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
-                      }`}
-                    >
-                      {/* The dot the map is drawing it with, in its own colour
-                          — the row and the mark have to be readable as the same
-                          thing without counting positions. */}
-                      <span className="flex items-center h-3">
-                        {pick && (
-                          <span
-                            className="w-2 h-2 rounded-full border border-white"
-                            style={{ backgroundColor: pick.color }}
-                          />
-                        )}
-                      </span>
-                      <span
-                        className="px-1 rounded text-[9px] font-medium text-white tabular-nums text-center"
-                        style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
-                        title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
-                      >
-                        {s.category}
-                      </span>
-                      {/* Two lines. Side by side, the common name and the
-                          binomial each ate the other's width and both ended as
-                          stubs; stacked, the identifier gets the row and the
-                          name most people hold the species by sits under it. */}
-                      <span className="min-w-0">
-                        <span className="flex items-baseline gap-1">
-                          <button
-                            onClick={() => onTogglePick({ key: s.gbif_species_key, name: s.scientific_name })}
-                            title={pick ? "Stop drawing this species" : "Draw this species' records on the map"}
-                            className="italic text-left truncate text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400"
-                          >
-                            {s.scientific_name}
-                          </button>
-                          <a
-                            href={nearbyGbifSiteUrl({ lat, lng, radiusKm: result.radiusKm, speciesKey: s.gbif_species_key })}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Open these records on GBIF"
-                            className="shrink-0 text-zinc-300 hover:text-blue-600 dark:text-zinc-600 dark:hover:text-blue-400"
-                          >
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3" />
-                            </svg>
-                          </a>
+            {result && !error && (
+              <>
+                <p className="px-2 pb-1 text-zinc-500 dark:text-zinc-400">
+                  {result.species.length === 0 ? (
+                    <>No assessed threatened species recorded within {result.radiusKm} km.</>
+                  ) : (
+                    <>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-200">{result.species.length}</span>{" "}
+                      threatened or Near Threatened species, from{" "}
+                      <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
+                      <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
+                      {result.truncated && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {" "}
+                          Only the most-recorded are shown — there are more here.
                         </span>
-                        {s.common_name && (
-                          <span className="block truncate text-zinc-400" title={s.common_name}>
-                            {s.common_name}
-                          </span>
-                        )}
-                      </span>
-                      <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
-                        {taxonLabel(s.taxon_group)}
-                      </span>
-                      <span className="text-right tabular-nums text-zinc-500 dark:text-zinc-400">
-                        {s.records}
-                        {/* Under the count it qualifies: how many of them the
-                            map is actually drawing. */}
-                        {pick && (
-                          <span
-                            className="block whitespace-nowrap"
-                            style={{ color: pick.color }}
-                            title={
-                              pick.drawn == null
-                                ? "Drawing this species' records"
-                                : pick.drawn.total > pick.drawn.shown
-                                  ? `${pick.drawn.shown} of ${pick.drawn.total} records drawn on the map`
-                                  : `All ${pick.drawn.shown} drawn on the map`
-                            }
-                          >
-                            {pick.drawn == null
-                              ? <Spinner />
-                              : pick.drawn.total > pick.drawn.shown
-                                ? `${pick.drawn.shown}/${pick.drawn.total}`
-                                : `${pick.drawn.shown} ✓`}
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-right tabular-nums text-zinc-400">
-                        {s.assessment_year ?? "—"}
-                      </span>
+                      )}
+                    </>
+                  )}
+                </p>
+
+                {taxonCounts.length > 1 && (
+                  <div className="flex flex-wrap gap-1 px-2 pb-1.5">
+                    {(
+                      [
+                        [null, "All", result.species.length],
+                        ...taxonCounts.map(([g, n]) => [g, taxonLabel(g), n] as const),
+                      ] as readonly (readonly [string | null, string, number])[]
+                    ).map(([id, label, n]) => (
+                      <button
+                        key={id ?? "all"}
+                        onClick={() => setTaxon(id)}
+                        className={`shrink-0 px-1.5 py-0.5 rounded-full border tabular-nums ${
+                          activeTaxon === id
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                            : "border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        {label} <span className="text-zinc-400">{n}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {shownSpecies.length > 0 && (
+                  <div>
+                    <div
+                      className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
+                    >
+                      <span />
+                      <span />
+                      <span>Species</span>
+                      <span>Taxon</span>
+                      <span>Threats</span>
+                      <span className="text-right">Records</span>
+                      <span className="text-right">Yr</span>
                     </div>
-                  );
-                })}
-              </div>
+                    {shownSpecies.map((s) => {
+                      const pick = pickedByKey.get(s.gbif_species_key);
+                      const url = redListUrl(s);
+                      return (
+                        <div key={s.gbif_species_key} className="border-b border-zinc-50 dark:border-zinc-800/60">
+                          <div className={`${ROW} py-[3px] ${pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""}`}>
+                            {/* The dot the map is drawing it with, in its own
+                                colour — the row and the mark have to read as the
+                                same thing without counting positions. */}
+                            <span className="flex h-3 items-center">
+                              {pick && (
+                                <span
+                                  className="h-2 w-2 rounded-full border border-white"
+                                  style={{ backgroundColor: pick.color }}
+                                />
+                              )}
+                            </span>
+                            <span
+                              className="rounded px-1 text-center text-[9px] font-medium tabular-nums text-white"
+                              style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
+                              title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
+                            >
+                              {s.category}
+                            </span>
+
+                            {/* The name opens what can be done with this species
+                                rather than doing one of those things. Drawing its
+                                records used to happen on the click itself, which
+                                left the assessment reachable only through a click
+                                that also changed the map. */}
+                            <span className="relative min-w-0">
+                              <button
+                                onClick={() =>
+                                  setOpenMenu((prev) => (prev === s.gbif_species_key ? null : s.gbif_species_key))
+                                }
+                                title="What you can do with this species"
+                                className="w-full truncate text-left italic text-zinc-700 hover:text-blue-600 dark:text-zinc-200 dark:hover:text-blue-400"
+                              >
+                                {s.scientific_name}
+                              </button>
+                              {s.common_name && (
+                                <span className="block truncate text-zinc-400" title={s.common_name}>
+                                  {s.common_name}
+                                </span>
+                              )}
+                              {openMenu === s.gbif_species_key && (
+                                <span className="absolute left-0 top-full z-[1002] mt-0.5 block w-max min-w-[13rem] rounded-md border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                                  <button
+                                    onClick={() => {
+                                      onTogglePick({
+                                        key: s.gbif_species_key,
+                                        name: s.scientific_name,
+                                        commonName: s.common_name,
+                                      });
+                                      setOpenMenu(null);
+                                    }}
+                                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                  >
+                                    <span
+                                      className="h-2 w-2 shrink-0 rounded-full border border-white"
+                                      style={{ backgroundColor: pick?.color ?? "#9ca3af" }}
+                                    />
+                                    {pick ? "Hide records from map" : "Show records on map"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setOpenNarrative((prev) =>
+                                        prev === s.gbif_species_key ? null : s.gbif_species_key
+                                      );
+                                      setOpenMenu(null);
+                                    }}
+                                    disabled={s.assessment_id == null}
+                                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-zinc-100 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-zinc-700"
+                                  >
+                                    <svg
+                                      className="h-3 w-3 shrink-0 text-zinc-400"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path strokeLinecap="round" d="M4 6h16M4 10h16M4 14h10M4 18h7" />
+                                    </svg>
+                                    {openNarrative === s.gbif_species_key
+                                      ? "Hide what it says about threats"
+                                      : "What it says about threats"}
+                                  </button>
+                                  {url && (
+                                    <a
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={() => setOpenMenu(null)}
+                                      className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                    >
+                                      <svg
+                                        className="h-3 w-3 shrink-0 text-zinc-400"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3"
+                                        />
+                                      </svg>
+                                      Open the Red List assessment
+                                    </a>
+                                  )}
+                                  <a
+                                    href={nearbyGbifSiteUrl({
+                                      lat,
+                                      lng,
+                                      radiusKm: result.radiusKm,
+                                      speciesKey: s.gbif_species_key,
+                                    })}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={() => setOpenMenu(null)}
+                                    className="flex w-full items-center gap-1.5 rounded px-1 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                                  >
+                                    <svg
+                                      className="h-3 w-3 shrink-0 text-zinc-400"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3"
+                                      />
+                                    </svg>
+                                    These records on GBIF
+                                  </a>
+                                </span>
+                              )}
+                            </span>
+
+                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
+                              {taxonLabel(s.taxon_group)}
+                            </span>
+
+                            {/* The threats as tags, which is what replaced a tab
+                                of their own: on the row they can be compared down
+                                the column instead of being a second thing to go
+                                and look at. Two levels deep, so "5.4" reads as
+                                Fishing & harvesting rather than as a leaf. */}
+                            <span className="flex flex-wrap gap-0.5">
+                              {s.threat_tags.length === 0 && (
+                                <span className="text-zinc-300 dark:text-zinc-600">—</span>
+                              )}
+                              {s.threat_tags.map((t) => (
+                                <span
+                                  key={t.code}
+                                  title={`${t.code} ${t.label}`}
+                                  className="rounded bg-zinc-100 px-1 tabular-nums text-zinc-500 dark:bg-zinc-700 dark:text-zinc-300"
+                                >
+                                  {t.code}
+                                </span>
+                              ))}
+                            </span>
+
+                            <span className="text-right tabular-nums text-zinc-500 dark:text-zinc-400">
+                              {s.records}
+                              {pick && (
+                                <span
+                                  className="block whitespace-nowrap"
+                                  style={{ color: pick.color }}
+                                  title={
+                                    pick.drawn == null
+                                      ? "Drawing this species' records"
+                                      : pick.drawn.total > pick.drawn.shown
+                                        ? `${pick.drawn.shown} of ${pick.drawn.total} records drawn`
+                                        : `All ${pick.drawn.shown} drawn`
+                                  }
+                                >
+                                  {pick.drawn == null ? (
+                                    <Spinner />
+                                  ) : pick.drawn.total > pick.drawn.shown ? (
+                                    `${pick.drawn.shown}/${pick.drawn.total}`
+                                  ) : (
+                                    `${pick.drawn.shown} ✓`
+                                  )}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-right tabular-nums text-zinc-400">{s.assessment_year ?? "—"}</span>
+                          </div>
+
+                          {openNarrative === s.gbif_species_key && s.assessment_id != null && (
+                            <div className="px-2 pb-1.5 pl-12 leading-snug">
+                              <ThreatNarrative assessmentId={s.assessment_id} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <p className="px-2 pt-1.5 leading-snug text-zinc-400">
+                  {result.unmatched > 0 && `${result.unmatched} more had no assessment in this dashboard's data. `}
+                  {NEARBY_RECORDS_NOTE} {NEARBY_STALENESS_NOTE}
+                </p>
+              </>
             )}
+          </div>
 
-            </>)}
-
-            {result.unmatched > 0 && (
-              <p className="text-zinc-400">
-                {result.unmatched} more had no assessment in this dashboard&rsquo;s data.
-              </p>
-            )}
-
-            <p className="pt-1 border-t border-zinc-100 dark:border-zinc-800 text-zinc-400 leading-snug">
-              {NEARBY_RECORDS_NOTE} {NEARBY_STALENESS_NOTE}
-            </p>
-          </>
-        )}
-      </div>
-      {/* The one corner that can move: the top and right edges are what the
-          panel is anchored by. */}
-      <div
-        onPointerDown={startResize}
-        title="Drag to resize"
-        className="absolute bottom-0 left-0 w-3 h-3 cursor-nesw-resize text-zinc-300 dark:text-zinc-600"
-      >
-        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.2}>
-          <path d="M11 1L1 11M11 5L5 11M11 9l-2 2" />
-        </svg>
-      </div>
-      </>
+          {/* Drag the bottom edge for more room; width belongs to the layout. */}
+          <div
+            onPointerDown={startResize}
+            title="Drag to resize"
+            className="h-1.5 shrink-0 cursor-ns-resize rounded-b-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+          />
+        </>
       )}
     </div>
   );

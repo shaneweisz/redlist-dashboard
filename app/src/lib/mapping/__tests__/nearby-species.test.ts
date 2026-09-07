@@ -3,9 +3,10 @@ import {
   NEARBY_CATEGORIES,
   nearbyFacetUrl,
   nearbyGbifSiteUrl,
+  groupNearbyFeatures,
   type NearbySpecies,
 } from "../nearby-species";
-import { summariseThreats } from "../nearby-threats";
+import { threatTags } from "../nearby-threats";
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
 /** A neighbour, with only the fields the summary reads spelled out. */
@@ -20,6 +21,7 @@ function species(name: string, threat_codes: string[], over: Partial<NearbySpeci
     class_name: "amphibia",
     threat_codes,
     assessment_year: 2020,
+    threat_tags: [],
     assessment_id: 1,
     records: 1,
     sis_taxon_id: 1,
@@ -64,52 +66,63 @@ describe("the GBIF query", () => {
   });
 });
 
-describe("the threat summary", () => {
-  it("rolls leaf codes up to their top-level category", () => {
-    const threats = summariseThreats([species("Aus bus", ["2.1.2", "5.3"])]);
-    expect(threats.map((t) => t.code)).toEqual(["2", "5"]);
+describe("the threat tags", () => {
+  it("trims a leaf code to its sub-code", () => {
+    expect(threatTags(["5.4.1"])).toEqual([{ code: "5.4", label: "Harvesting (Fishing & harvesting)" }]);
   });
 
-  // Two assessors writing 2.1.2 and 2.1.3 are describing the same field. Counted
-  // per leaf, that one species would report as two facing agriculture.
-  it("counts a species once per top-level threat, however many leaves it cites", () => {
-    const threats = summariseThreats([species("Aus bus", ["2.1.2", "2.1.3", "2.3"])]);
-    expect(threats).toHaveLength(1);
-    expect(threats[0]).toMatchObject({ code: "2", species: 1 });
+  // 5.4.1, 5.4.2 and 5.4.3 are one pressure; three tags saying so would be
+  // three ways of reading the same tick.
+  it("collapses several leaves under one sub-code to a single tag", () => {
+    expect(threatTags(["5.4.1", "5.4.2", "5.4.3"]).map((t) => t.code)).toEqual(["5.4"]);
   });
 
-  it("orders by how many species cite it, and names them", () => {
-    const threats = summariseThreats([
-      species("Aus bus", ["2.1"]),
-      species("Cus dus", ["2.1", "5.1"]),
-      species("Eus fus", ["2.1"]),
-    ]);
-    expect(threats[0]).toMatchObject({ code: "2", species: 3 });
-    expect(threats[0].examples.map((e) => e.name)).toEqual(["Aus bus", "Cus dus", "Eus fus"]);
-    expect(threats[1]).toMatchObject({ code: "5", species: 1 });
+  it("keeps distinct sub-codes apart, in the order they were cited", () => {
+    expect(threatTags(["2.1", "5.3", "2.2"]).map((t) => t.code)).toEqual(["2.1", "5.3", "2.2"]);
   });
 
-  it("gives each threat a label rather than a bare number", () => {
-    expect(summariseThreats([species("Aus bus", ["2.1"])])[0].label).toBe("Agriculture");
+  // A bare top-level code is already at the level the tags work at.
+  it("passes a top-level code through", () => {
+    expect(threatTags(["11"])).toEqual([{ code: "11", label: "Climate change" }]);
   });
 
-  // A species with no threats recorded is still a neighbour worth listing; it
-  // just has nothing to contribute to the summary.
-  it("ignores species with no threat codes", () => {
-    expect(summariseThreats([species("Aus bus", [])])).toEqual([]);
+  it("gives every tag a label rather than a bare number", () => {
+    for (const t of threatTags(["1.1", "2.1", "8.1", "9.2"])) expect(t.label).not.toMatch(/^[\d.]+$/);
   });
 
-  // Each listed species carries the assessment behind it, because the row can
-  // be opened to read what that assessment actually says about threats.
-  it("carries each listed species' key and assessment id", () => {
-    const [t] = summariseThreats([species("Aus bus", ["2.1"], { assessment_id: 4242 })]);
-    expect(t.examples[0]).toEqual({ key: "Ausbus", name: "Aus bus", assessmentId: 4242 });
+  it("has nothing to show for a species with no threat codes", () => {
+    expect(threatTags([])).toEqual([]);
+  });
+});
+
+describe("the stack under a click", () => {
+  const pt = (gbifID: number) => ({
+    gbifID, lat: 0, lng: 0, species: null, eventDate: null, year: null, basis: null,
+    recordedBy: null, identifiedBy: null, locality: null, countryCode: null,
+    uncertaintyMetres: null, catalogNumber: null, datasetName: null,
+  });
+  const points = { A: { points: [pt(1), pt(2), pt(3)] }, B: { points: [pt(9)] } };
+  const f = (nearbyKey: string, nearbyIndex: number) => ({ properties: { nearbyKey, nearbyIndex } });
+
+  // The whole point: a locality collected from repeatedly stacks its dots, and
+  // only the topmost was reachable before.
+  it("returns every record under the pointer, in draw order", () => {
+    expect(groupNearbyFeatures([f("A", 0), f("A", 2), f("B", 0)], points).map((p) => p.gbifID))
+      .toEqual([1, 3, 9]);
   });
 
-  it("caps the named examples but keeps the full count", () => {
-    const many = Array.from({ length: 20 }, (_, i) => species(`Sp ${i}`, ["2.1"]));
-    const [agriculture] = summariseThreats(many, 3);
-    expect(agriculture.species).toBe(20);
-    expect(agriculture.examples).toHaveLength(3);
+  // MapLibre hands the same feature back twice where tile boundaries overlap,
+  // which would otherwise page you through the same record repeatedly.
+  it("drops a record handed back more than once", () => {
+    expect(groupNearbyFeatures([f("A", 0), f("A", 0), f("A", 1)], points).map((p) => p.gbifID))
+      .toEqual([1, 2]);
+  });
+
+  it("ignores features whose species isn't drawn, or whose index is gone", () => {
+    expect(groupNearbyFeatures([f("A", 99), f("Z", 0), { properties: {} }], points)).toEqual([]);
+  });
+
+  it("has nothing to show for a click that hit no dot", () => {
+    expect(groupNearbyFeatures([], points)).toEqual([]);
   });
 });
