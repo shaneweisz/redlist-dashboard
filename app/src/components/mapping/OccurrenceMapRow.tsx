@@ -4073,7 +4073,7 @@ export default function OccurrenceMapRow({
               {/* Where the search landed. Pinned rather than just flown to:
                   the point of looking a locality up is to compare it against
                   the records, which means both have to be on screen at once. */}
-              {fullscreen && previewPlace && !pinnedPlaces.some((p) => p.id === previewPlace.id) && (
+              {previewPlace && !pinnedPlaces.some((p) => p.id === previewPlace.id) && (
                 <MapLibreMarker
                   key={`preview-${previewPlace.id}`}
                   longitude={previewPlace.lng}
@@ -4843,7 +4843,13 @@ export default function OccurrenceMapRow({
                 {label}
               </div>
             )}
-            {mounted && !splitView && fullscreen && (
+            {/* On the dashboard's map as well as fullscreen. Looking a locality
+                up is how you check whether a record's coordinates match what
+                its label says, and that question is the same size on either
+                map — the pins it drops are drawn in both modes now, so there is
+                nothing left that only fullscreen could show. Still not in split
+                view, where two maps would race to answer one search. */}
+            {mounted && !splitView && (
               <MapPlaceSearch
                 getCentre={() => {
                   const map = mapRef.current;
