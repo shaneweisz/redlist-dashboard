@@ -1145,6 +1145,8 @@ export default function OccurrenceMapRow({
   const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
   /** Where the browser says the reader is, once they've asked. */
   const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
+  /** Where the browser last said the reader was, marked on the map. */
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   /**
    * Fly to where the reader is.
@@ -1168,6 +1170,7 @@ export default function OccurrenceMapRow({
         // question you then ask of the spot, with the same right click as
         // anywhere else — doing it on arrival made one button do two things,
         // and the second was rarely the one being asked for.
+        setMyLocation({ lat, lng });
         mapRef.current?.flyTo({ center: [lng, lat], zoom: 11, duration: 900 });
       },
       // Denied, or no fix. Either way the map cannot help and says so rather
@@ -3918,6 +3921,34 @@ export default function OccurrenceMapRow({
                   />
                 </Source>
               )}
+              {/* Where the browser says you are. A map that flies somewhere and
+                  marks nothing leaves you to guess which pixel it meant, which
+                  is the one thing a locate button exists to settle. */}
+              {myLocation && (
+                <MapLibreMarker longitude={myLocation.lng} latitude={myLocation.lat} anchor="center">
+                  <span className="relative flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-60" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow" />
+                  </span>
+                </MapLibreMarker>
+              )}
+              {/* The centre the radius is measured from. The ring alone says
+                  roughly where, and "roughly where" is what a reader is trying
+                  to pin down when they ask what is near a point. */}
+              {nearbyAt && (
+                <MapLibreMarker longitude={nearbyAt.lng} latitude={nearbyAt.lat} anchor="bottom">
+                  <svg
+                    className="h-5 w-5 drop-shadow"
+                    viewBox="0 0 24 24"
+                    fill={NEARBY_SEARCH_COLOR}
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                  >
+                    <path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" />
+                    <circle cx="12" cy="10" r="2.4" fill="#ffffff" stroke="none" />
+                  </svg>
+                </MapLibreMarker>
+              )}
               {/* The assessor's own georeferences — drawn above the GBIF points
                   in a colour used nowhere else, with the uncertainty radius to
                   scale. They are never merged into the GBIF layer or into any
@@ -4614,7 +4645,7 @@ export default function OccurrenceMapRow({
                           <circle cx="12" cy="12" r="3" />
                           <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
                         </svg>
-                        Find threatened species near this point
+                        Find nearby threatened species
                       </button>
                     </div>
                   </div>
@@ -6047,7 +6078,7 @@ export default function OccurrenceMapRow({
                       <circle cx="12" cy="12" r="3" />
                       <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
                     </svg>
-                    Search threatened species with GBIF records near here
+                    Find nearby threatened species
                   </button>
                 )}
                 {opts.showInTable && fullscreen && (

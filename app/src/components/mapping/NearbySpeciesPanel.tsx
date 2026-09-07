@@ -15,7 +15,7 @@
  * of their own.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
@@ -430,6 +430,25 @@ function SpeciesDetail({
 const ROW =
   "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_8rem_minmax(8rem,2fr)_5.5rem_5rem] gap-2 items-baseline px-2";
 
+/** One filter chip: the same shape for taxon, category and threat. */
+function Chip({
+  on, onClick, label, n, colour,
+}: { on: boolean; onClick: () => void; label: string; n: number; colour?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 tabular-nums ${
+        on
+          ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+          : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+      }`}
+    >
+      {colour && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colour }} />}
+      {label} <span className="text-zinc-400">{n}</span>
+    </button>
+  );
+}
+
 /** The panel's one busy indicator, used wherever it waits on a service. */
 function Spinner() {
   return (
@@ -464,6 +483,10 @@ export default function NearbySpeciesPanel({
   const [openRow, setOpenRow] = useState<string | null>(null);
   /** Which taxon's neighbours are listed, or null for all of them. */
   const [taxon, setTaxon] = useState<string | null>(null);
+  /** Which category is listed, or null for all three. */
+  const [category, setCategory] = useState<string | null>(null);
+  /** Which top-level threat is listed, or null for any. */
+  const [threat, setThreat] = useState<string | null>(null);
   /** Rolled up to its header bar, so the map above has the room back. */
   const [collapsed, setCollapsed] = useState(false);
   /** The height the reader has dragged it to; null means the default. */
@@ -478,6 +501,19 @@ export default function NearbySpeciesPanel({
    * leaves it drawn — the legend is where a layer is taken off, as it is for
    * every other layer on this map.
    */
+  /**
+   * Bring the panel into view when it opens.
+   *
+   * It renders under the map, and on a tall page the answer to a question you
+   * asked at the top of the screen arrived off the bottom of it — people took
+   * the map for unresponsive. Only on a change of point, so scrolling away to
+   * read something is not undone.
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [lat, lng]);
+
   const openSpecies = useCallback(
     (sp: NearbySpecies) => {
       setOpenRow((prev) => (prev === sp.gbif_species_key ? null : sp.gbif_species_key));
@@ -531,12 +567,45 @@ export default function NearbySpeciesPanel({
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [result]);
 
-  // Derived, not corrected after the fact: a group the new radius no longer has
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of result?.species ?? []) counts.set(s.category, (counts.get(s.category) ?? 0) + 1);
+    return (["CR", "EN", "VU"] as const)
+      .map((c) => [c, counts.get(c) ?? 0] as const)
+      .filter(([, n]) => n > 0);
+  }, [result]);
+
+  /**
+   * The top-level threats these neighbours cite, with how many cite each.
+   *
+   * From the rows' own tags rather than the twelve-category list, so the filter
+   * only ever offers a pressure something here is actually under.
+   */
+  const threatCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of result?.species ?? []) {
+      for (const top of new Set(s.threat_tags.map((t) => t.code.split(".")[0]))) {
+        counts.set(top, (counts.get(top) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => compareThreatCodes(a[0], b[0]));
+  }, [result]);
+
+  // Derived, not corrected after the fact: a value the new radius no longer has
   // simply stops being the selection.
   const activeTaxon = taxon && taxonCounts.some(([g]) => g === taxon) ? taxon : null;
+  const activeCategory = category && categoryCounts.some(([c]) => c === category) ? category : null;
+  const activeThreat = threat && threatCounts.some(([c]) => c === threat) ? threat : null;
+
   const shownSpecies = useMemo(
-    () => (result?.species ?? []).filter((s) => !activeTaxon || s.taxon_group === activeTaxon),
-    [result, activeTaxon]
+    () =>
+      (result?.species ?? []).filter(
+        (s) =>
+          (!activeTaxon || s.taxon_group === activeTaxon) &&
+          (!activeCategory || s.category === activeCategory) &&
+          (!activeThreat || s.threat_tags.some((t) => t.code.split(".")[0] === activeThreat))
+      ),
+    [result, activeTaxon, activeCategory, activeThreat]
   );
 
   // Escape backs out of the open menu first, and closes the panel only when
@@ -580,7 +649,10 @@ export default function NearbySpeciesPanel({
   }, []);
 
   return (
-    <div className="w-full rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-md text-[11px] flex flex-col">
+    <div
+      ref={panelRef}
+      className="w-full rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-md text-[11px] flex flex-col"
+    >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
         {/* The same colour as the ring on the map, so the panel and the circle
             it drew read as one thing. */}
@@ -721,6 +793,16 @@ export default function NearbySpeciesPanel({
           >
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
+            {/* The body says it is working, not just the corner of the header.
+                The panel opens empty while GBIF is asked, and an empty panel
+                below a map reads as a panel with nothing in it. */}
+            {loading && !error && (
+              <p className="flex items-center gap-1.5 px-2 py-3 text-zinc-500 dark:text-zinc-400">
+                <Spinner />
+                Finding threatened species within {radiusKm} km…
+              </p>
+            )}
+
             {result && !error && (
               <>
                 <p className="px-2 pb-1 text-zinc-500 dark:text-zinc-400">
@@ -742,26 +824,52 @@ export default function NearbySpeciesPanel({
                   )}
                 </p>
 
-                {taxonCounts.length > 1 && (
-                  <div className="flex flex-wrap gap-1 px-2 pb-1.5">
-                    {(
-                      [
-                        [null, "All", result.species.length],
-                        ...taxonCounts.map(([g, n]) => [g, taxonLabel(g), n] as const),
-                      ] as readonly (readonly [string | null, string, number])[]
-                    ).map(([id, label, n]) => (
-                      <button
-                        key={id ?? "all"}
-                        onClick={() => setTaxon(id)}
-                        className={`shrink-0 px-1.5 py-0.5 rounded-full border tabular-nums ${
-                          activeTaxon === id
-                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                            : "border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                        }`}
-                      >
-                        {label} <span className="text-zinc-400">{n}</span>
-                      </button>
-                    ))}
+                {/* Three ways to narrow the list, on one row each: the group
+                    you can compare against, the rank, and the pressure. Every
+                    chip is built from what came back, so a filter is never
+                    offered that would empty the table. */}
+                {(taxonCounts.length > 1 || categoryCounts.length > 1 || threatCounts.length > 0) && (
+                  <div className="space-y-1 px-2 pb-1.5">
+                    {taxonCounts.length > 1 && (
+                      <div className="flex flex-wrap items-baseline gap-1">
+                        <span className="w-14 shrink-0 text-zinc-400">Taxon</span>
+                        <Chip on={!activeTaxon} onClick={() => setTaxon(null)} label="All" n={result.species.length} />
+                        {taxonCounts.map(([g, n]) => (
+                          <Chip key={g} on={activeTaxon === g} onClick={() => setTaxon(g)} label={taxonLabel(g)} n={n} />
+                        ))}
+                      </div>
+                    )}
+                    {categoryCounts.length > 1 && (
+                      <div className="flex flex-wrap items-baseline gap-1">
+                        <span className="w-14 shrink-0 text-zinc-400">Category</span>
+                        <Chip on={!activeCategory} onClick={() => setCategory(null)} label="All" n={result.species.length} />
+                        {categoryCounts.map(([c, n]) => (
+                          <Chip
+                            key={c}
+                            on={activeCategory === c}
+                            onClick={() => setCategory(c)}
+                            label={c}
+                            n={n}
+                            colour={CATEGORY_COLORS[normalizeCategory(c)]}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {threatCounts.length > 0 && (
+                      <div className="flex flex-wrap items-baseline gap-1">
+                        <span className="w-14 shrink-0 text-zinc-400">Threat</span>
+                        <Chip on={!activeThreat} onClick={() => setThreat(null)} label="Any" n={result.species.length} />
+                        {threatCounts.map(([c, n]) => (
+                          <Chip
+                            key={c}
+                            on={activeThreat === c}
+                            onClick={() => setThreat(c)}
+                            label={`${c} ${THREAT_TOP_LEVEL[c] ?? ""}`.trim()}
+                            n={n}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
