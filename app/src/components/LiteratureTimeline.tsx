@@ -452,14 +452,29 @@ export default function LiteratureTimeline({
         >
           <table className="w-full table-fixed text-left">
             <thead className="bg-zinc-100 dark:bg-zinc-800">
+              {/* Every column is declared at every width, collapsing to zero
+                  rather than `display: none`. The assessment marker spans the
+                  table with `colSpan`, which makes the column count six
+                  whatever the header shows — and a column the header never
+                  sized takes an equal share of what is left, which crushed the
+                  title to a few characters on a phone. Zero-width columns keep
+                  the model and the header in agreement. */}
               <tr className="text-[10px] uppercase tracking-wider text-zinc-500">
                 <th className="w-20 px-2 py-1.5 font-medium">Date</th>
-                {/* Title takes whatever the fixed columns leave. */}
+                {/* Title takes whatever the sized columns leave. */}
                 <th className="px-2 py-1.5 font-medium">Title</th>
-                <th className="hidden w-44 px-2 py-1.5 font-medium md:table-cell">Published in</th>
-                <th className="hidden w-16 px-2 py-1.5 font-medium lg:table-cell">Type</th>
-                <th className="hidden w-12 px-2 py-1.5 text-right font-medium sm:table-cell">Cited</th>
-                <th className="hidden w-44 px-2 py-1.5 font-medium lg:table-cell">Source</th>
+                <th className="w-0 overflow-hidden p-0 font-medium md:w-44 md:px-2 md:py-1.5">
+                  <span className="hidden md:inline">Published in</span>
+                </th>
+                <th className="w-0 overflow-hidden p-0 font-medium lg:w-16 lg:px-2 lg:py-1.5">
+                  <span className="hidden lg:inline">Type</span>
+                </th>
+                <th className="w-0 overflow-hidden p-0 text-right font-medium sm:w-12 sm:px-2 sm:py-1.5">
+                  <span className="hidden sm:inline">Cited</span>
+                </th>
+                <th className="w-0 overflow-hidden p-0 font-medium lg:w-44 lg:px-2 lg:py-1.5">
+                  <span className="hidden lg:inline">Source</span>
+                </th>
               </tr>
             </thead>
             <tbody>
