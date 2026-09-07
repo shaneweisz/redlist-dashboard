@@ -25,7 +25,25 @@ interface RedListReference {
 
 interface RedListAssessment {
   url?: string | null;
+  year_published?: string | number | null;
+  assessment_date?: string | null;
   references?: RedListReference[] | null;
+}
+
+/**
+ * "Cited by 2020 assessment" rather than a bare "Cited by assessment": a
+ * species can have been assessed several times, and which one cited the work is
+ * the point. Falls back to the unqualified wording when the API gives no year.
+ */
+function provenanceLabel(assessment: RedListAssessment): string {
+  // The assessment *date* is what the rest of the dashboard shows for a
+  // species, and it can differ from the year the assessment was published —
+  // Encephalartos woodii was assessed in 2020 and published in 2022. Match what
+  // the row above the tab says.
+  const year =
+    String(assessment.assessment_date ?? "").match(/^(\d{4})/)?.[1] ??
+    String(assessment.year_published ?? "").match(/^\d{4}$/)?.[0];
+  return year ? `Cited by ${year} assessment` : "Cited by assessment";
 }
 
 /**
@@ -71,8 +89,9 @@ export const redListSource: SourceAdapter = {
         { signal, headers: { Authorization: apiKey } },
       );
       const references = (data.references ?? []).filter((r) => !isSelfCitation(r));
+      const label = provenanceLabel(data);
       const works = references
-        .map((reference, index) => toWork(reference, index, assessmentId, data.url ?? null))
+        .map((reference, index) => toWork(reference, index, assessmentId, data.url ?? null, label))
         .filter((w): w is LiteratureWork => w !== null);
       return { status: "ok", works, upstreamTotal: references.length, note: null };
     } catch (error) {
@@ -86,6 +105,7 @@ function toWork(
   index: number,
   assessmentId: string,
   assessmentUrl: string | null,
+  label: string,
 ): LiteratureWork | null {
   // Some references carry only a formatted citation, with no separate title.
   const title = stripMarkup(raw.title) ?? stripMarkup(raw.citation);
@@ -113,6 +133,6 @@ function toWork(
     openAccessUrl: null,
     // The full formatted citation is the most useful thing to show on expand.
     abstract: citation && citation !== title ? citation : null,
-    sources: [{ id: "redlist", label: "Red List assessment", url: assessmentUrl }],
+    sources: [{ id: "redlist", label, url: assessmentUrl }],
   };
 }

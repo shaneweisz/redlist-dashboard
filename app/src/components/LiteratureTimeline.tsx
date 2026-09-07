@@ -120,16 +120,34 @@ function Spinner({ className = "h-4 w-4" }: { className?: string }) {
 const COLUMN_COUNT = 6;
 
 /**
- * Column labels for the sources that read better as something other than their
- * own name. Everything else uses the source's full label, and the cell carries
- * the whole list on hover when it doesn't fit.
+ * The sources a record came from, each linking to that source's own page for
+ * it — the OpenAlex work, the BHL scan, the assessment that cited it. Rendered
+ * inline so the cell still truncates with the full list on hover.
  */
-const SOURCE_COLUMN_LABELS: Record<string, string> = {
-  redlist: "Cited by assessment",
-};
-
-function sourceColumnLabel(source: WorkProvenance): string {
-  return SOURCE_COLUMN_LABELS[source.id] ?? source.label;
+function SourceLinks({ sources }: { sources: WorkProvenance[] }) {
+  return (
+    <>
+      {sources.map((source, index) => (
+        <Fragment key={source.id}>
+          {index > 0 && ", "}
+          {source.url ? (
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              // The row toggles on click; following a link must not also expand it.
+              onClick={(e) => e.stopPropagation()}
+              className="hover:text-blue-500 hover:underline dark:hover:text-blue-400"
+            >
+              {source.label}
+            </a>
+          ) : (
+            source.label
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 /** The dotted line that says where the assessment sits in the record. */
@@ -212,7 +230,7 @@ function WorkRow({
           className="hidden truncate px-2 py-1 align-top text-[11px] text-zinc-400 lg:table-cell"
           title={work.sources.map((s) => s.label).join(", ")}
         >
-          {work.sources.map(sourceColumnLabel).join(", ")}
+          <SourceLinks sources={work.sources} />
         </td>
       </tr>
 
@@ -228,10 +246,11 @@ function WorkRow({
                 work.venue,
                 TYPE_LABELS[work.type] || null,
                 work.citations ? `${work.citations.toLocaleString()} citations` : null,
-                work.sources.map(sourceColumnLabel).join(", "),
               ]
                 .filter(Boolean)
-                .join(" · ")}
+                .map((part) => `${part} · `)
+                .join("")}
+              <SourceLinks sources={work.sources} />
             </div>
             {work.abstract && <p className="leading-relaxed">{work.abstract}</p>}
             <div className="flex flex-wrap items-center gap-3 pt-1">

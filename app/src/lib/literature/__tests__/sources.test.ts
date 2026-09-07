@@ -214,6 +214,10 @@ describe("zenodoSource", () => {
 describe("redListSource", () => {
   const ASSESSMENT = {
     url: "https://www.iucnredlist.org/species/41881/243434007",
+    assessment_date: "2020-05-19",
+    // Published two years after it was assessed — the label must follow the
+    // assessment date, which is what the rest of the dashboard shows.
+    year_published: "2022",
     references: [
       {
         citation: "Osborne, R. 1986. Focus on <i>Encephalartos woodii</i>. <i>Encephalartos</i> 5: 4-10.",
@@ -282,7 +286,7 @@ describe("redListSource", () => {
       "Osborne, R. 1986. Focus on Encephalartos woodii . Encephalartos 5: 4-10.",
     );
     expect(result.works[0].sources).toEqual([
-      { id: "redlist", label: "Red List assessment", url: ASSESSMENT.url },
+      { id: "redlist", label: "Cited by 2020 assessment", url: ASSESSMENT.url },
     ]);
   });
 
@@ -292,6 +296,12 @@ describe("redListSource", () => {
     expect(result.works[1]).toMatchObject({ title: "IUCN. 2020. Guidelines.", year: 2020 });
     // Citation and title are the same string here, so it isn't repeated.
     expect(result.works[1].abstract).toBeNull();
+  });
+
+  it("falls back to an unqualified label when the API gives no date", async () => {
+    mockFetch({ url: null, references: [{ title: "A work", year: "1990" }] });
+    const result = await redListSource.fetch({ ...QUERY, assessmentId: "1" });
+    expect(result.works[0].sources[0].label).toBe("Cited by assessment");
   });
 
   it("degrades rather than throwing when the Red List API fails", async () => {
