@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
@@ -535,16 +536,56 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
     };
   }, [seen, image, name]);
 
+  /**
+   * Where to hang the big version, once it is being pointed at.
+   *
+   * Fixed to the viewport and rendered through a portal, because the row it
+   * belongs to is inside a panel that scrolls and clips: anything grown in
+   * place is cut off at the panel's edge, which is exactly where a 20px
+   * thumbnail sits. Placed left of the row and flipped above the pointer near
+   * the bottom of the window, so it never opens off screen.
+   */
+  const [preview, setPreview] = useState<{ top: number; left: number } | null>(null);
+  const show = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const size = 176;
+    setPreview({
+      top: Math.max(8, Math.min(window.innerHeight - size - 8, r.top - size / 2 + r.height / 2)),
+      left: Math.max(8, r.left - size - 10),
+    });
+  }, []);
+
   return (
     <span ref={box} className="flex h-5 w-5 shrink-0 items-center justify-center">
       {image?.squareUrl ? (
+        <>
         <img
           src={image.squareUrl}
           alt=""
           title={name}
-          className="h-5 w-5 rounded object-cover"
+          onMouseEnter={show}
+          onMouseLeave={() => setPreview(null)}
+          className="h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
           loading="lazy"
         />
+        {preview &&
+          createPortal(
+            <span
+              style={{ position: "fixed", top: preview.top, left: preview.left, zIndex: 10050 }}
+              className="pointer-events-none block rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+            >
+              <img
+                src={image.mediumUrl ?? image.squareUrl}
+                alt={name}
+                className="block h-40 w-40 rounded object-cover"
+              />
+              <span className="block max-w-40 truncate pt-0.5 text-center text-[10px] italic text-zinc-500 dark:text-zinc-400">
+                {name}
+              </span>
+            </span>,
+            document.body
+          )}
+        </>
       ) : (
         // The taxon's own mark while the photo is coming, and instead of it for
         // a species iNaturalist has no photo of — a grey square that never

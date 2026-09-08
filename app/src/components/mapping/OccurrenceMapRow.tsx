@@ -1213,8 +1213,48 @@ export default function OccurrenceMapRow({
   const [nearbyHidden, setNearbyHidden] = useState<Set<string>>(new Set());
   /** Whether the legend's nearby-species list is rolled up. */
   const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
-  /** Whether the Records legend itself is showing, or rolled up to its title. */
+  /** Whether the legend itself is showing, or rolled up to its title. */
   const [legendOpen, setLegendOpen] = useState(true);
+  /** The size it has been dragged to, or null for "as big as its contents". */
+  const [legendSize, setLegendSize] = useState<{ w: number; h: number } | null>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Drag a corner to resize the legend.
+   *
+   * Measured from the box and the pointer as they were when the drag started,
+   * rather than from the live box, which resizes underneath the pointer and
+   * chases itself. The panel is anchored to the map's bottom-left corner, so
+   * growing it moves its top and right edges; the signs here are what makes
+   * pulling away from the panel's middle mean "bigger" at every corner.
+   */
+  const startLegendResize = useCallback(
+    (e: React.PointerEvent<HTMLSpanElement>, corner: "nw" | "ne" | "sw" | "se") => {
+      e.preventDefault();
+      e.stopPropagation();
+      const box = legendRef.current?.getBoundingClientRect();
+      if (!box) return;
+      const handle = e.currentTarget;
+      handle.setPointerCapture(e.pointerId);
+      const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height };
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - from.x;
+        const dy = ev.clientY - from.y;
+        setLegendSize({
+          w: Math.max(150, Math.min(640, from.w + (corner.endsWith("e") ? dx : -dx))),
+          h: Math.max(60, Math.min(720, from.h + (corner.startsWith("s") ? dy : -dy))),
+        });
+      };
+      const onUp = (ev: PointerEvent) => {
+        handle.releasePointerCapture?.(ev.pointerId);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+    },
+    []
+  );
   /** Where the browser says the reader is, once they've asked. */
   const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
   /** Where the browser last said the reader was, marked on the map. */
@@ -7053,12 +7093,44 @@ export default function OccurrenceMapRow({
     // Wide enough for the GBIF row to carry its name, its colour ramp and its
     // count on one line, which is what that row is: one layer, described.
     // Rolled up it shrinks to its own title, since the point of rolling it up
-    // is the corner of the map it was standing on.
+    // is the corner of the map it was standing on. Open, it can be dragged
+    // bigger from any corner — a species with six neighbours drawn and every
+    // overlay on has more rows than 16rem of a map's corner will hold.
     <div
-      className={`flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 ${
-        legendOpen ? "w-64" : "w-auto"
+      ref={legendRef}
+      className={`group/legend relative flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 ${
+        legendOpen ? (legendSize ? "" : "w-64") : "w-auto"
       }`}
+      style={legendOpen && legendSize ? { width: legendSize.w, height: legendSize.h } : undefined}
     >
+      {/* One grip per corner. The panel is pinned to the map's bottom-left, so
+          what actually moves is its top and right edges — but a reader reaches
+          for whichever corner is nearest, and a panel that only answered to one
+          of them read as not resizable at all. */}
+      {legendOpen &&
+        (["nw", "ne", "sw", "se"] as const).map((corner) => (
+          <span
+            key={corner}
+            onPointerDown={(e) => startLegendResize(e, corner)}
+            title="Drag to resize the legend"
+            className={`absolute z-10 h-3 w-3 opacity-0 group-hover/legend:opacity-100 ${
+              corner === "nw"
+                ? "left-0 top-0 cursor-nwse-resize"
+                : corner === "ne"
+                  ? "right-0 top-0 cursor-nesw-resize"
+                  : corner === "sw"
+                    ? "bottom-0 left-0 cursor-nesw-resize"
+                    : "bottom-0 right-0 cursor-nwse-resize"
+            }`}
+          >
+            <span className="absolute inset-[3px] rounded-sm border-zinc-400 dark:border-zinc-500" style={{
+              borderTopWidth: corner.startsWith("n") ? 1.5 : 0,
+              borderBottomWidth: corner.startsWith("s") ? 1.5 : 0,
+              borderLeftWidth: corner.endsWith("w") ? 1.5 : 0,
+              borderRightWidth: corner.endsWith("e") ? 1.5 : 0,
+            }} />
+          </span>
+        ))}
       {/* The title is the switch. A legend is read once and then in the way —
           it sits over the bottom-left of the map, which on a species with a
           coastal range is where the records are — and every other panel on
@@ -7067,7 +7139,7 @@ export default function OccurrenceMapRow({
         onClick={() => setLegendOpen((v) => !v)}
         title={legendOpen ? "Roll the legend up" : "Show the legend"}
         aria-expanded={legendOpen}
-        className="flex items-center gap-1 px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+        className="flex shrink-0 items-center gap-1 px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
       >
         <svg
           className={`h-2.5 w-2.5 shrink-0 transition-transform ${legendOpen ? "rotate-90" : ""}`}
@@ -7075,10 +7147,10 @@ export default function OccurrenceMapRow({
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        Records
+        Legend
       </button>
       {legendOpen && (
-      <>
+      <div className={legendSize ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
       {/* The assessor's own layers first, GBIF's last. These are the ones you
           are deciding about; GBIF's points are the ground they're decided
           against, and they carry the most explanation, so they anchor the
@@ -7370,7 +7442,7 @@ export default function OccurrenceMapRow({
           })}
         </div>
       )}
-      </>
+      </div>
       )}
     </div>
   );
@@ -8164,11 +8236,14 @@ export default function OccurrenceMapRow({
                       </span>
                     )}
 
-                    {/* Editing tools, on the page that has something to
-                        edit: undo, redo and the CSV import all act on the
-                        record list, and that list only exists in fullscreen. */}
-                    {fullscreen && (
-                      <>
+                    {/* Editing tools: saving and restoring the work, undo,
+                        redo, and the CSV import. On the dashboard as well as
+                        fullscreen — they act on the record list, and that list
+                        is no longer fullscreen's alone. Edits made on either
+                        page are the same edits, held in the same browser
+                        storage, so hiding the undo on one of them meant
+                        finishing a piece of work you could not take back. */}
+                    <>
                       {/* Saving the work, and putting a saved file back. First
                           in the row and not in a menu: the edits live in this
                           browser only, and the button that gets them out of it
@@ -8277,7 +8352,6 @@ export default function OccurrenceMapRow({
                         </svg>
                       </button>
                       </>
-                    )}
                 </div>
                 {/* The map/list arrangement is chosen from the table's own
                     footer, beside the column picker — it's a question about
