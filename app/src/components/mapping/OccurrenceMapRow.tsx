@@ -1394,8 +1394,17 @@ export default function OccurrenceMapRow({
    * moved the other the next time you opened it.
    */
   const [nearbySplitPct, setNearbySplitPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
+  /** How tall the record panel is on the dashboard, in pixels. */
+  const [listHeightPx, setListHeightPx] = useState(448);
   const splitPct = fullscreen ? mapHeightPct : nearbySplitPct;
   const setSplitPct = fullscreen ? setMapHeightPct : setNearbySplitPct;
+  /**
+   * Which way the divider runs.
+   *
+   * Fullscreen lets the reader choose; on the dashboard the panel is always
+   * under the map, so the divider is always the horizontal one.
+   */
+  const dividerLayout = fullscreen ? panelLayout : "rows";
   const [draggingDivider, setDraggingDivider] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitView, setSplitView] = useState(false);
@@ -3251,13 +3260,20 @@ export default function OccurrenceMapRow({
     const container = splitRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
+    if (!fullscreen) {
+      // The dashboard's container grows with its content, so a percentage of it
+      // means nothing: the panel gets a height in pixels instead, measured from
+      // the pointer down to where the row ends.
+      setListHeightPx(Math.min(900, Math.max(160, rect.bottom - e.clientY)));
+      return;
+    }
     const span = panelLayout === "rows" ? rect.height : rect.width;
     if (span === 0) return;
     const pct = panelLayout === "rows"
       ? ((e.clientY - rect.top) / span) * 100
       : ((e.clientX - rect.left) / span) * 100;
     setSplitPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
-  }, [draggingDivider, panelLayout, setSplitPct]);
+  }, [draggingDivider, panelLayout, setSplitPct, fullscreen]);
 
   const handleDividerPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -5604,9 +5620,9 @@ export default function OccurrenceMapRow({
   // takes its list with it, so the reader is left on the one that's still there.
   useEffect(() => {
     if (!listTabs.some((t) => t.key === listTab)) setListTab("gbif");
-    else if (nearbyAt && fullscreen && listTab !== "nearby" && !nearbyTabSeen.current) setListTab("nearby");
+    else if (nearbyAt && listTab !== "nearby" && !nearbyTabSeen.current) setListTab("nearby");
     nearbyTabSeen.current = !!nearbyAt;
-  }, [listTabs, listTab, nearbyAt, fullscreen]);
+  }, [listTabs, listTab, nearbyAt]);
 
   useEffect(() => {
     setConfirmPutAllBack(false);
@@ -8005,7 +8021,11 @@ export default function OccurrenceMapRow({
             className={
               fullscreen
                 ? `flex flex-1 min-h-0 ${panelLayout === "rows" ? "flex-col" : "flex-row"}`
-                : "flex flex-col sm:flex-row sm:items-stretch gap-2"
+                // Wrapping, so the record panel drops to a line of its own under
+                // the photos and the map rather than squeezing in beside them.
+                // Cheaper than restructuring the DOM, and it keeps one set of
+                // children for both modes.
+                : "flex flex-col sm:flex-row sm:flex-wrap sm:items-stretch gap-2"
             }
           >
             {/* Left column — iNat photo gallery only (hidden if no iNat data); narrow
@@ -8015,9 +8035,7 @@ export default function OccurrenceMapRow({
             {/* Hidden in fullscreen — that view is the map and the record list
                 and nothing else, and the photo grid plays the same
                 hover-to-highlight role the list does there. */}
-            {/* Hidden while the nearby search is open: on the dashboard the row
-                has room for two columns, and the panel is the one being read. */}
-            {!fullscreen && !nearbyAt && (!breakdown || breakdown.iNaturalist > 0) && (
+            {!fullscreen && (!breakdown || breakdown.iNaturalist > 0) && (
             <div className="order-2 sm:order-none sm:w-44 shrink-0 flex flex-col gap-2">
               {/* iNat photo grid — only shown when photos exist or loading */}
               {(inatPhotos.length > 0 || loadingInatPhotos) && (
@@ -8205,7 +8223,6 @@ export default function OccurrenceMapRow({
                 and vice versa: the table carries the locality and collection
                 detail, the map carries the position. Stacks below the map on
                 narrow screens. */}
-            {(fullscreen || (nearbyAt && !splitView)) && (
               <div
                 role="separator"
                 aria-orientation="horizontal"
@@ -8221,28 +8238,32 @@ export default function OccurrenceMapRow({
                 onKeyDown={handleDividerKeyDown}
                 title="Drag to resize the map and the list"
                 className={`order-2 sm:order-none group relative shrink-0 touch-none flex items-center justify-center ${
-                  panelLayout === "rows" ? "w-full h-3 cursor-row-resize" : "h-full w-3 cursor-col-resize"
+                  dividerLayout === "rows"
+                    ? "w-full sm:basis-full h-3 cursor-row-resize"
+                    : "h-full w-3 cursor-col-resize"
                 } ${
                   draggingDivider ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 } focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded`}
               >
                 <div
-                  className={`rounded-full transition-colors ${panelLayout === "rows" ? "h-0.5 w-10" : "w-0.5 h-10"} ${
+                  className={`rounded-full transition-colors ${dividerLayout === "rows" ? "h-0.5 w-10" : "w-0.5 h-10"} ${
                     draggingDivider
                       ? "bg-blue-500"
                       : "bg-zinc-300 dark:bg-zinc-600 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-500"
                   }`}
                 />
               </div>
-            )}
-            {/* Beside the map on the dashboard, sharing the row the photo grid
-                gave up. In fullscreen it is a tab on the record list instead —
-                that column is the only one with room for a second table. */}
-            {!fullscreen && nearbyAt && !splitView && (
-              <div className="order-3 sm:order-none flex min-w-0 flex-1 flex-col">{NEARBY_PANEL}</div>
-            )}
-            {fullscreen && (
-              <div className="order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0">
+            {/* The record panel — GBIF records, what you've set aside, an
+                imported file, and the nearby search — in both modes. Which
+                tables exist should not depend on which page you opened. */}
+            <div
+              className={
+                fullscreen
+                  ? "order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0"
+                  : "order-3 sm:order-none flex w-full sm:basis-full flex-col gap-2 min-w-0"
+              }
+              style={fullscreen ? undefined : { height: listHeightPx }}
+            >
                 <div className="flex items-center gap-1 shrink-0 text-[11px] border-b border-zinc-200 dark:border-zinc-700">
                   {listTabs.map((tab) => (
                     <button
@@ -8345,7 +8366,6 @@ export default function OccurrenceMapRow({
                 />
                 )}
               </div>
-            )}
             {/* A restore replaces what's here, so it says what it holds and what
                 it would replace before it does. Undoable either way — but a
                 dialog is cheaper than finding the undo button afterwards. */}
