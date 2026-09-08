@@ -2208,7 +2208,7 @@ export default function OccurrenceListTable({
         document.body
       )}
       {/* Footer: how many rows the filters left, and which columns are shown */}
-      <div className="flex items-center gap-2 px-2 py-1.5 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400">
+      <div className="flex flex-wrap items-center gap-2 px-2 py-1.5 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400">
         <span className="tabular-nums">
           {rows.length === 0 ? "0 records" : `${rows.length.toLocaleString()} records`}
           {variant === "records" && excludedCount > 0 && (

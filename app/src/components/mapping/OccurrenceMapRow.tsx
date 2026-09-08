@@ -7455,6 +7455,133 @@ export default function OccurrenceMapRow({
    * wide. Underneath, across the full width, the map keeps its size and the
    * table gets room for its columns.
    */
+  /**
+   * The editing tools, in the record list's own footer.
+   *
+   * Undo, redo, the point file and the saved work all act on the table they now
+   * sit under; in the toolbar at the top of the page they were three unlabelled
+   * icons among the filters, and the two file buttons there were routinely
+   * mistaken for each other.
+   *
+   * Two files leave this page and two come back, and they are nothing like each
+   * other: the point file is the assessment's own deliverable, a CSV of
+   * records, and the work is this browser's edits as JSON — the georeferences,
+   * the exclusions and their reasons, the pins. So they are two labelled pairs
+   * rather than four buttons in a row.
+   */
+  const EDIT_TOOLS = (
+    <>
+      {/* Undo, redo, and what they'd act on. The count opens the history: the
+          table can hide the very rows an edit touched, so an undo with nothing
+          to say for itself would act off screen. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <button
+          onClick={undoEdit}
+          disabled={!canUndo}
+          title={canUndo ? `Undo ${undoLabel ?? "the last edit"} (\u2318Z)` : "Nothing to undo"}
+          aria-label="Undo"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 9h11a4 4 0 010 8h-5M4 9l4-4M4 9l4 4" />
+          </svg>
+        </button>
+        <button
+          onClick={redoEdit}
+          disabled={!canRedo}
+          title={canRedo ? `Redo ${redoLabel ?? "the last undone edit"} (\u21e7\u2318Z)` : "Nothing to redo"}
+          aria-label="Redo"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed border-l border-zinc-200 dark:border-zinc-700"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 9H9a4 4 0 000 8h5m6-8l-4-4m4 4l-4 4" />
+          </svg>
+        </button>
+        {editHistory.length > 0 && (
+          <button
+            onClick={() => setHistoryOpen((v) => !v)}
+            title="Everything you've changed this session"
+            className="px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+          >
+            {editHistory.filter((h) => !h.undone).length}
+          </button>
+        )}
+      </div>
+
+      {/* The point file: records, as CSV. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <span
+          className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500"
+          style={pointFile ? { color: POINT_FILE_COLOR } : undefined}
+        >
+          Points
+        </span>
+        <button
+          onClick={() => setPointFileOpen(true)}
+          title={
+            pointFile
+              ? `${pointFile.fileName} — ${pointFile.points.length.toLocaleString()} records on the map. Click to compare them against your own, or load a different file.`
+              : "Import a CSV of point records — one row per record, with decimal latitude and longitude columns. It goes on the map as its own layer, to compare against."
+          }
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+        >
+          Import
+        </button>
+        <button
+          onClick={() => setCompilerPrompt(true)}
+          disabled={exportablePoints.length === 0}
+          title={`Save the ${exportablePoints.length.toLocaleString()} counted records that have a position as an IUCN point file (CSV)`}
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          Export
+        </button>
+      </div>
+
+      {/* The work: this browser's edits, as JSON. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <span className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+          Work
+        </span>
+        <button
+          onClick={saveWork}
+          disabled={!hasWorkToSave}
+          title={
+            !hasWorkToSave
+              ? "Nothing to save yet — georeference, date or set aside a record, or pin a place"
+              : `Save your work on this species to a JSON file — ${savableSummary}${
+                  lastSavedAt ? `, last saved ${lastSavedAt.slice(11, 16)}` : ", never saved"
+                }`
+          }
+          className={`px-1.5 py-0.5 text-[10px] border-l border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent ${
+            hasWorkToSave && !lastSavedAt
+              ? "text-amber-600 dark:text-amber-500"
+              : "text-zinc-500 dark:text-zinc-400"
+          }`}
+        >
+          Save
+        </button>
+        <button
+          onClick={() => restoreInputRef.current?.click()}
+          title="Put back the work from a JSON file you saved earlier — it replaces what this browser holds for this species"
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+        >
+          Restore
+        </button>
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) readRestoreFile(file);
+          }}
+        />
+      </div>
+    </>
+  );
+
   const NEARBY_PANEL = nearbyActive ? (
     // Full height of whatever column it is given, so the panel's own body is
     // the thing that scrolls. As a plain `w-full` it sized to its content, the
@@ -8236,122 +8363,9 @@ export default function OccurrenceMapRow({
                       </span>
                     )}
 
-                    {/* Editing tools: saving and restoring the work, undo,
-                        redo, and the CSV import. On the dashboard as well as
-                        fullscreen — they act on the record list, and that list
-                        is no longer fullscreen's alone. Edits made on either
-                        page are the same edits, held in the same browser
-                        storage, so hiding the undo on one of them meant
-                        finishing a piece of work you could not take back. */}
-                    <>
-                      {/* Saving the work, and putting a saved file back. First
-                          in the row and not in a menu: the edits live in this
-                          browser only, and the button that gets them out of it
-                          should be the one you can see. */}
-                      <div className="inline-flex rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-                        <button
-                          onClick={saveWork}
-                          disabled={!hasWorkToSave}
-                          title={
-                            !hasWorkToSave
-                              ? "Nothing to save yet — georeference, date or set aside a record, or pin a place"
-                              : `Save your work for this species to a file — ${savableSummary}${
-                                  lastSavedAt ? `, last saved ${lastSavedAt.slice(11, 16)}` : ", never saved"
-                                }`
-                          }
-                          aria-label="Save your work to a file"
-                          className={`flex items-center gap-1 px-1.5 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed ${
-                            hasWorkToSave && !lastSavedAt ? "text-amber-600 dark:text-amber-500" : "text-zinc-600 dark:text-zinc-300"
-                          }`}
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                          </svg>
-                          {/* Named, where the rest of the toolbar is icons:
-                              this is the one button whose job is to get the
-                              work out of a browser that could lose it, and an
-                              arrow nobody recognises isn't an invitation. */}
-                          <span className="text-xs">Save</span>
-                        </button>
-                        <button
-                          onClick={() => restoreInputRef.current?.click()}
-                          title="Put back the work from a file you saved earlier"
-                          aria-label="Restore your work from a file"
-                          className="px-1.5 py-1 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9m0 0l-4 4m4-4l4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2" />
-                          </svg>
-                        </button>
-                        <input
-                          ref={restoreInputRef}
-                          type="file"
-                          accept="application/json,.json"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            e.target.value = "";
-                            if (file) readRestoreFile(file);
-                          }}
-                        />
-                      </div>
-                      {/* Undo, redo, and what they'd act on. The label matters
-                          more than usual here: the table can hide the very rows an
-                          edit touched, so an unlabelled undo would act off-screen
-                          with nothing to say for itself. */}
-                      <div className="flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-                        <button
-                          onClick={undoEdit}
-                          disabled={!canUndo}
-                          title={canUndo ? `Undo ${undoLabel ?? "the last edit"} (\u2318Z)` : "Nothing to undo"}
-                          className="px-1.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={redoEdit}
-                          disabled={!canRedo}
-                          title={canRedo ? `Redo ${redoLabel ?? "the last undone edit"} (\u21e7\u2318Z)` : "Nothing to redo"}
-                          className="px-1.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed border-l border-zinc-200 dark:border-zinc-700"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3" />
-                          </svg>
-                        </button>
-                        {editHistory.length > 0 && (
-                          <button
-                            onClick={() => setHistoryOpen((v) => !v)}
-                            title="Everything you've changed this session"
-                            className="px-1.5 py-1 text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
-                          >
-                            {editHistory.filter((h) => !h.undone).length}
-                          </button>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => setPointFileOpen(true)}
-                        title={
-                          pointFile
-                            ? `${pointFile.fileName} — ${pointFile.points.length.toLocaleString()} records on the map. Click to compare them against your own, or load a different file.`
-                            : "Import a CSV of point records — one row per record, with decimal latitude and longitude columns. It goes on the map as its own layer, to compare against."
-                        }
-                        aria-label="Import CSV records"
-                        className="inline-flex items-center px-1.5 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-                      >
-                        {/* An upload arrow rather than a map pin: the button's
-                            job is getting the file in, and a pin said "another
-                            layer" beside a row of layer toggles. Icon only, like
-                            the undo and redo it sits beside; it turns the point
-                            file's own colour once one is loaded, which is the
-                            only state it has to report. */}
-                        <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                             style={pointFile ? { color: POINT_FILE_COLOR } : undefined}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
-                        </svg>
-                      </button>
-                      </>
+                    {/* The editing tools — undo, redo, the point file and
+                        the saved work — live in the record list's own footer
+                        now, beside the table they act on. */}
                 </div>
                 {/* The map/list arrangement is chosen from the table's own
                     footer, beside the column picker — it's a question about
@@ -8719,31 +8733,21 @@ export default function OccurrenceMapRow({
                     setRowMenu({ gbifID: feature.properties.gbifID, x: at.x, y: at.y })
                   }
                   footerExtra={
-                    // Only the counted records make a point file, so only that
-                    // list offers to save one.
-                    listTab === "gbif" ? (
-                      <button
-                        onClick={() => setCompilerPrompt(true)}
-                        disabled={exportablePoints.length === 0}
-                        title={`Save the ${exportablePoints.length.toLocaleString()} counted records that have a position as an IUCN point file (CSV)`}
-                        className="p-1 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                        </svg>
-                      </button>
-                    ) : listTab === "excluded" ? (
-                      <button
-                        onClick={() => setConfirmPutAllBack(true)}
-                        title="Count every excluded record again, forgetting the reasons given"
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M4 10a8 8 0 1 1 2 5.3" />
-                        </svg>
-                        Put all back
-                      </button>
-                    ) : undefined
+                    <>
+                      {listTab === "excluded" && (
+                        <button
+                          onClick={() => setConfirmPutAllBack(true)}
+                          title="Count every excluded record again, forgetting the reasons given"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M4 10a8 8 0 1 1 2 5.3" />
+                          </svg>
+                          Put all back
+                        </button>
+                      )}
+                      {EDIT_TOOLS}
+                    </>
                   }
                   excludedIds={excludedIds}
                   exclusions={exclusions}
