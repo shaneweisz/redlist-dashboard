@@ -1386,18 +1386,14 @@ export default function OccurrenceMapRow({
   // thirds by default, dragged from the divider between map and list.
   const [mapHeightPct, setMapHeightPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
   /**
-   * The dashboard's own map/panel split, kept apart from fullscreen's.
+   * How tall the record panel is on the dashboard, in pixels.
    *
-   * They are the same handle but not the same question — how much room the
-   * record list wants against a full-page map is nothing to do with how much
-   * the nearby panel wants beside a dashboard one. Shared, dragging either
-   * moved the other the next time you opened it.
+   * Not a percentage like fullscreen's: the dashboard's container grows with
+   * its content, so a share of it has nothing to be a share of.
    */
-  const [nearbySplitPct, setNearbySplitPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
-  /** How tall the record panel is on the dashboard, in pixels. */
   const [listHeightPx, setListHeightPx] = useState(448);
-  const splitPct = fullscreen ? mapHeightPct : nearbySplitPct;
-  const setSplitPct = fullscreen ? setMapHeightPct : setNearbySplitPct;
+  const splitPct = mapHeightPct;
+  const setSplitPct = setMapHeightPct;
   /**
    * Which way the divider runs.
    *
@@ -2611,32 +2607,16 @@ export default function OccurrenceMapRow({
     return true;
   }, []);
 
-  /**
-   * Bring the nearby radius into view when it is asked for, and when it changes.
+  /*
+   * Asking what is nearby leaves the view alone.
    *
-   * Drawn to scale and left alone, a 10 km circle on a map fitted to a species'
-   * whole range is a few pixels across — technically the answer and no use as
-   * one. Fitting to the circle is what makes "within 10 km" a place rather than
-   * a number. Only when the radius or the point changes, so panning away to
-   * look at something is not undone on the next render.
+   * It used to fit the map to the radius, on the argument that a 10 km circle
+   * on a range-wide map is a few pixels across. But the question is asked from
+   * a point you are already looking at, and the answer arriving by moving the
+   * map underneath you cost more than the zoom was worth — what you were
+   * comparing against went off screen. The ring is drawn to scale where it
+   * falls, and the map is yours to move.
    */
-  const fittedNearbyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!nearbyAt) {
-      fittedNearbyRef.current = null;
-      return;
-    }
-    const key = `${nearbyAt.lng},${nearbyAt.lat},${nearbyRadiusKm}`;
-    if (fittedNearbyRef.current === key) return;
-    // The circle's own bounding box, so the ring sits inside the padding
-    // rather than touching the edges.
-    const ring = uncertaintyCircle(nearbyAt.lat, nearbyAt.lng, nearbyRadiusKm * 1000).coordinates[0];
-    const lons = ring.map((c) => c[0]);
-    const lats = ring.map((c) => c[1]);
-    if (fitMapToBbox([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)])) {
-      fittedNearbyRef.current = key;
-    }
-  }, [nearbyAt, nearbyRadiusKm, fitMapToBbox]);
 
   // Track whether we've fitted bounds for the current bbox
   const fittedBboxRef = useRef<string | null>(null);
@@ -3287,13 +3267,19 @@ export default function OccurrenceMapRow({
 
   // Arrow keys move the divider too, so it isn't mouse-only.
   const handleDividerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowUp" ? -5 : e.key === "ArrowDown" ? 5 : 0;
+    const step = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
     if (step === 0) return;
     e.preventDefault();
+    if (!fullscreen) {
+      // Same direction as the drag: down gives the map more room, so the panel
+      // below it loses some.
+      setListHeightPx((px) => Math.min(900, Math.max(160, px - step * 40)));
+      return;
+    }
     setSplitPct((pct) =>
-      Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step))
+      Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step * 5))
     );
-  }, [setSplitPct]);
+  }, [setSplitPct, fullscreen]);
 
   /**
    * Hovering a row in the record list highlights that record on the map, using
@@ -3590,6 +3576,64 @@ export default function OccurrenceMapRow({
 
     return (
       <div className={`occurrence-map flex-1 flex flex-col rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 relative isolate z-0${fullscreen ? " min-h-0" : ""}`}>
+        {/* What is loaded, in a thin row above the map rather than a badge
+            on top of it. It is a fact about the record set, not about any
+            place on the map — and as an overlay it covered whatever tiles it
+            landed on, in the same corner as the controls that do act on the
+            map. One row, both record sets: the ones the map can draw, and
+            the ones only the list can show. */}
+        {!loadingOccurrences &&
+          ((!splitView && totalOccurrences != null) ||
+            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) && (
+          <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
+            {!splitView && totalOccurrences != null && (
+              <div className="text-emerald-700 dark:text-emerald-400">
+                {isFullSample ? (
+                  <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
+                ) : (
+                  <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
+                )}
+                {!isFullSample && (
+                  <>
+                    {" "}
+                    <button
+                      onClick={loadMoreOverall}
+                      disabled={loadingMoreOverall}
+                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loadingMoreOverall
+                        ? "Loading…"
+                        : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
+                    </button>
+                  </>
+                )}
+                {georeferencedFilteredCount < georeferencedLoadedCount && (
+                  <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
+                )}
+              </div>
+            )}
+            {/* Records with no coordinates only get a line when there are
+                more to fetch. "All N loaded" was a fact with nothing to do
+                about it — they're in the table either way. */}
+            {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
+              <div className="text-amber-700 dark:text-amber-400">
+                <>
+                    Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
+                    <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
+                    <button
+                      onClick={loadMoreMissing}
+                      disabled={loadingMoreMissing}
+                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loadingMoreMissing
+                        ? "Loading…"
+                        : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
+                    </button>
+                </>
+              </div>
+            )}
+          </div>
+        )}
         <div className={`${
           fullscreen
             ? "flex-1 min-h-[240px]"
@@ -5037,74 +5081,11 @@ export default function OccurrenceMapRow({
               />
             )}
           </div>
-          {/* Top-right stack: what's loaded, then the basemap choice. Stacked
-              in a flex column rather than each guessing the other's offset —
-              the counts panel grows a line when there are records without
-              coordinates, and at fixed offsets it covered the first basemap
-              button whenever it did. */}
+          {/* Top-right stack: the basemap choice, then the control that goes
+              to where the reader is. Both act on the map, so they sit on it —
+              unlike the record counts, which describe the data and have their
+              own row above it. */}
           <div className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]">
-            {/* What GBIF holds for this species and how much of it is here.
-                One panel, both record sets: they're two halves of the same
-                answer — the ones the map can draw, and the ones only the list
-                can show — and reading them as two badges made the second look
-                like a warning about the first.
-
-                Solid background (not translucent) in both themes: it sits over
-                arbitrary map tiles, not a plain page background, so a tinted/
-                translucent fill (as used elsewhere in the toolbar) reads with
-                poor contrast in dark mode against light-colored tiles. */}
-            {!loadingOccurrences &&
-              ((!splitView && totalOccurrences != null) ||
-                (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) && (
-              <div className="px-2 py-1 rounded-lg shadow-md bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[11px] space-y-0.5">
-                {!splitView && totalOccurrences != null && (
-                  <div className="text-emerald-700 dark:text-emerald-400">
-                    {isFullSample ? (
-                      <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
-                    ) : (
-                      <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
-                    )}
-                    {!isFullSample && (
-                      <>
-                        {" "}
-                        <button
-                          onClick={loadMoreOverall}
-                          disabled={loadingMoreOverall}
-                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {loadingMoreOverall
-                            ? "Loading…"
-                            : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
-                        </button>
-                      </>
-                    )}
-                    {georeferencedFilteredCount < georeferencedLoadedCount && (
-                      <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
-                    )}
-                  </div>
-                )}
-                {/* Records with no coordinates only get a line when there are
-                    more to fetch. "All N loaded" was a fact with nothing to do
-                    about it — they're in the table either way. */}
-                {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
-                  <div className="text-amber-700 dark:text-amber-400">
-                    <>
-                        Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
-                        <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
-                        <button
-                          onClick={loadMoreMissing}
-                          disabled={loadingMoreMissing}
-                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {loadingMoreMissing
-                            ? "Loading…"
-                            : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
-                        </button>
-                    </>
-                  </div>
-                )}
-              </div>
-            )}
             {/* The basemap, on the map it paints. */}
             {!loadingOccurrences && mounted && (
               basemapOpen ? (
@@ -8113,11 +8094,12 @@ export default function OccurrenceMapRow({
             {/* Map(s) — takes remaining width, stretches to match left column */}
             <div
               className={`order-1 sm:order-none flex-1 min-w-0 flex flex-col gap-2${fullscreen ? " min-h-0" : ""}`}
-              // Two thirds by default, and whatever the divider has been
-              // dragged to after that.
-              style={
-                fullscreen || (nearbyAt && !splitView) ? { flex: `0 0 ${splitPct}%` } : undefined
-              }
+              // Fullscreen shares its width (or height) with the record
+              // panel: two thirds by default, and whatever the divider has been
+              // dragged to after that. On the dashboard the panel sits below
+              // the map, so the map keeps the whole row — a share of it left
+              // dead space to the right of the canvas.
+              style={fullscreen ? { flex: `0 0 ${splitPct}%` } : undefined}
             >
                 {splitView && splitDate ? (
                   <div className="flex flex-col gap-2">
@@ -8225,11 +8207,11 @@ export default function OccurrenceMapRow({
                 narrow screens. */}
               <div
                 role="separator"
-                aria-orientation="horizontal"
+                aria-orientation={dividerLayout === "rows" ? "horizontal" : "vertical"}
                 aria-label="Resize map and record list"
-                aria-valuenow={Math.round(splitPct)}
-                aria-valuemin={FULLSCREEN_MIN_MAP_PCT}
-                aria-valuemax={FULLSCREEN_MAX_MAP_PCT}
+                aria-valuenow={Math.round(fullscreen ? splitPct : listHeightPx)}
+                aria-valuemin={fullscreen ? FULLSCREEN_MIN_MAP_PCT : 160}
+                aria-valuemax={fullscreen ? FULLSCREEN_MAX_MAP_PCT : 900}
                 tabIndex={0}
                 onPointerDown={handleDividerPointerDown}
                 onPointerMove={handleDividerPointerMove}

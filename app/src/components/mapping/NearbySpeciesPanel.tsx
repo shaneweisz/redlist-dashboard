@@ -15,7 +15,7 @@
  * of their own.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
@@ -516,19 +516,6 @@ export default function NearbySpeciesPanel({
    * leaves it drawn — the legend is where a layer is taken off, as it is for
    * every other layer on this map.
    */
-  /**
-   * Bring the panel into view when it opens.
-   *
-   * It renders under the map, and on a tall page the answer to a question you
-   * asked at the top of the screen arrived off the bottom of it — people took
-   * the map for unresponsive. Only on a change of point, so scrolling away to
-   * read something is not undone.
-   */
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    panelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [lat, lng]);
-
   const openSpecies = useCallback(
     (sp: NearbySpecies) => {
       setOpenRow((prev) => (prev === sp.gbif_species_key ? null : sp.gbif_species_key));
@@ -666,7 +653,6 @@ export default function NearbySpeciesPanel({
 
   return (
     <div
-      ref={panelRef}
       className="flex h-full min-h-0 w-full flex-col rounded-lg border border-zinc-200 bg-white text-[11px] shadow-md dark:border-zinc-700 dark:bg-zinc-800"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-700 shrink-0">
@@ -680,7 +666,7 @@ export default function NearbySpeciesPanel({
             about that species — which is the one species it never contains.
             The record it was opened from follows in brackets when there was
             one, because that is provenance rather than subject. */}
-        <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Recorded near</span>
+        <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Threatened species recorded near</span>
         <span className="shrink-0 tabular-nums text-zinc-600 dark:text-zinc-300">
           {lat.toFixed(4)}, {lng.toFixed(4)}
         </span>
