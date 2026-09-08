@@ -4942,7 +4942,7 @@ export default function OccurrenceMapRow({
                           openNearbySearch({ lng: pointQuery.lng, lat: pointQuery.lat, recordName: "" });
                           setPointQuery(null);
                         }}
-                        title="Threatened and Near Threatened species with GBIF records around this point"
+                        title="Threatened species (CR, EN, VU) with GBIF records around this point"
                         className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left"
                       >
                         <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -6331,7 +6331,7 @@ export default function OccurrenceMapRow({
                         recordName: String(record.properties.species || "this record"),
                       });
                     }}
-                    title="Threatened and Near Threatened species with GBIF records around this one, and the threats their assessments cite"
+                    title="Threatened species (CR, EN, VU) with GBIF records around this one, and the threats their assessments cite"
                     className="flex w-full items-center gap-1.5 px-1 py-1 rounded text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <svg className="w-3 h-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
