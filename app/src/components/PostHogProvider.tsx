@@ -88,6 +88,13 @@ function ConsentGate() {
       posthog.set_config({
         persistence: "localStorage+cookie",
         session_recording: RECORDING_MASKING,
+        // The PostHog project has console-log recording switched on, and this
+        // option falls back to that remote setting when left undefined. We tell
+        // people we record "a replay of what happened on your screen — where you
+        // moved, clicked and scrolled"; the browser console is not on screen, and
+        // it carries Sentry breadcrumbs and whatever the app happens to log. Say
+        // no explicitly so what we collect matches what the policy describes.
+        enable_recording_console_log: false,
       });
       // Tie the sessions to the account, so "which searches has a real user
       // made" is answerable rather than a pile of disconnected anonymous ones.
