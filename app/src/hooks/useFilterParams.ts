@@ -7,6 +7,7 @@ import { expandTaxaToken, collapseTaxaToTokens, getViewRootForNode, type FilterR
 import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
+import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
 // checked" (nothing excluded) rather than "nothing checked" — see
@@ -569,6 +570,10 @@ export function useFilterParams(paramSuffix: string = "") {
   useEffect(() => {
     fromPopstateRef.current = true;
     setState(parseParams(window.location.search, paramSuffix)); // eslint-disable-line react-hooks/set-state-in-effect -- hydrate from URL on mount
+    // Whatever filters arrived in the URL are the baseline, not a choice this
+    // user made — see primeFilterBaseline. Without this, opening a shared
+    // filtered link would count every filter in it as freshly applied.
+    primeFilterBaseline(window.location.search, paramSuffix);
     const onPopState = () => {
       fromPopstateRef.current = true;
       setState(parseParams(window.location.search, paramSuffix));
@@ -590,6 +595,11 @@ export function useFilterParams(paramSuffix: string = "") {
     } else {
       window.history.replaceState(null, "", url);
     }
+    // Every filter change routes through here regardless of which setter caused
+    // it, which makes this the one place that sees them all. It only emits on
+    // transitions, so the replace-mode writes (normalisation, view switches)
+    // that change no filter are silent (#524).
+    reportFilterUsage(qs, paramSuffix);
   }, [paramSuffix]);
 
   // --- Setters: update local state instantly, sync URL in background ---

@@ -2,32 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "@/lib/auth/actions";
-
-type Me = { email: string | null; avatarUrl: string | null };
+import { useMe } from "./MeProvider";
 
 export function AuthStatus() {
-  const [me, setMe] = useState<Me | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  // Who is signed in, and whether they have consented to session recording,
+  // both come from MeProvider rather than a fetch of our own — the account menu
+  // and PostHogProvider have to agree about consent at every instant, and two
+  // copies of that state is a recording that outlives the toggle saying it
+  // stopped.
+  const { me, loaded, setAnalyticsConsent } = useMe();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : { email: null, avatarUrl: null }))
-      .then((data: Me) => {
-        if (!cancelled) {
-          setMe(data);
-          setLoaded(true);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -116,7 +101,27 @@ export function AuthStatus() {
           >
             {me.email}
           </p>
-          <form action={signOut}>
+          {/* Withdrawal has to be as easy as consent was (UK GDPR Art. 7(3)), so
+              the switch lives in the account menu permanently — not only in the
+              one-time prompt. It is also the only way back for someone who
+              declined, since that prompt never returns. */}
+          <label className="flex items-start gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 shrink-0"
+              // A never-asked (null) state reads as off, which matches what is
+              // actually happening: nothing is being recorded.
+              checked={me.analyticsConsent === true}
+              onChange={(e) => setAnalyticsConsent(e.target.checked)}
+            />
+            <span>
+              Session recording
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                Record my screen and searches to improve the site
+              </span>
+            </span>
+          </label>
+          <form action={signOut} className="border-t border-zinc-100 dark:border-zinc-700">
             <button
               type="submit"
               className="w-full text-left px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"

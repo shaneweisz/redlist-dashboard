@@ -5,6 +5,10 @@ import { buildQs, type ViewMode } from "../hooks/useFilterParams";
 import { CATEGORY_COLORS } from "../config/taxa";
 import { findNode, getViewRootForNode } from "../lib/taxonomy-utils";
 import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "../lib/habitat-filter";
+import {
+  captureSearchNoResults,
+  captureSearchResultSelected,
+} from "@/lib/analytics/events";
 
 export interface SearchResult {
   /**
@@ -69,6 +73,20 @@ export function SpeciesSearchBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // The query and results as they are RIGHT NOW, for the analytics call in the
+  // select handlers below. Those handlers deliberately keep empty dep arrays —
+  // taking `query` as a dep would rebuild them on every keystroke — so they
+  // cannot close over the live values directly (#524).
+  const queryRef = useRef("");
+  const resultsRef = useRef<SearchResult[]>([]);
+  const taxaResultsRef = useRef<TaxonSuggestion[]>([]);
+  queryRef.current = query;
+  resultsRef.current = results;
+  taxaResultsRef.current = taxaResults;
+  // The last query already reported as finding nothing, so a re-render (or the
+  // user tabbing away and back) doesn't report the same dead end twice.
+  const reportedNoResultsRef = useRef<string | null>(null);
+
   // Warm-start: pre-load the search index on mount so first search is fast
   useEffect(() => {
     fetch("/api/search/warm").catch(() => {});
@@ -116,6 +134,25 @@ export function SpeciesSearchBar() {
     };
   }, [query]);
 
+  // A query that settled and found nothing (#524).
+  //
+  // Waits considerably longer than the 250ms fetch debounce above, and requires
+  // the fetch to have finished: mid-word a query legitimately matches nothing
+  // ("Panthe" before "Panthera"), and reporting those would fill the "failed
+  // searches" list with prefixes of successful ones. 1.2s idle is roughly the
+  // point where someone has stopped typing and is looking at an empty dropdown.
+  useEffect(() => {
+    if (loading || query.trim().length < 2) return;
+    if (results.length > 0 || taxaResults.length > 0) return;
+    if (reportedNoResultsRef.current === query) return;
+
+    const timeout = setTimeout(() => {
+      reportedNoResultsRef.current = query;
+      captureSearchNoResults(query);
+    }, 1200);
+    return () => clearTimeout(timeout);
+  }, [query, loading, results.length, taxaResults.length]);
+
   // Click outside to close
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -129,6 +166,15 @@ export function SpeciesSearchBar() {
 
   const selectResult = useCallback(
     (result: SearchResult) => {
+      captureSearchResultSelected({
+        query: queryRef.current,
+        resultName: result.scientific_name,
+        resultType: "species",
+        resultCategory: result.category ?? null,
+        // Position in the combined dropdown, taxon suggestions included, so the
+        // number matches what the user actually looked down.
+        rank: taxaResultsRef.current.length + resultsRef.current.indexOf(result),
+      });
       lastSelectedResult = result;
       const viewMode: ViewMode = result.category === "NE" ? "new-assessments" : "reassessments";
 
@@ -204,6 +250,13 @@ export function SpeciesSearchBar() {
   // Preserve the current view: from the new-assessments view, browsing a taxon shows
   // its not-evaluated species (charts come from the assessed/reassessments view).
   const selectTaxon = useCallback((t: TaxonSuggestion) => {
+    captureSearchResultSelected({
+      query: queryRef.current,
+      resultName: t.taxon,
+      resultType: "taxon",
+      resultCategory: null,
+      rank: taxaResultsRef.current.indexOf(t),
+    });
     const currentView: ViewMode =
       new URLSearchParams(window.location.search).get("view") === "new-assessments"
         ? "new-assessments"
