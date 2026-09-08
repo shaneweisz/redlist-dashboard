@@ -23,9 +23,11 @@ interface MapPlaceSearchProps {
 /**
  * Finds the locality written on a specimen label.
  *
- * A permanent field at a fixed width, rather than a magnifier that expands
- * into one: a control that changes size when you touch it makes you look at
- * the control instead of the map, and the map is the thing being read.
+ * A magnifier until it is asked for, then a field. It stands over the map's
+ * top-left corner — which on a species with a northern or western range is
+ * where the records are — and it is reached for occasionally, where the map
+ * under it is read constantly. Typed into, it stays open with whatever was
+ * typed still in it; empty, Escape or a click on the map puts it away.
  *
  * Typing a coordinate pair works too — "1.1958, -76.9256" offers to fly
  * straight there. It isn't advertised in the placeholder, because a label
@@ -34,11 +36,16 @@ interface MapPlaceSearchProps {
  */
 export default function MapPlaceSearch({ getCentre, onSelect, onPreview }: MapPlaceSearchProps) {
   const [query, setQuery] = useState("");
+  /** Whether the field is showing, or just the magnifier that opens it. */
+  const [open, setOpen] = useState(false);
   const [results, setResults] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  // Held as a bare element, because it is the button when the field is
+  // closed and the field's wrapper when it is open — the outside-click handler
+  // wants whichever of the two is on screen.
+  const rootRef = useRef<HTMLElement | null>(null);
 
   const coordinates = parseCoordinatePair(query);
 
@@ -82,16 +89,27 @@ export default function MapPlaceSearch({ getCentre, onSelect, onPreview }: MapPl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  /** Clicking away puts the results list away, but leaves the field. */
+  /**
+   * Clicking away puts the results list away, and the field with it when
+   * nothing has been typed — a search you are part way through is not
+   * something to lose by looking at the map it is about.
+   */
   const [showResults, setShowResults] = useState(false);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (rootRef.current?.contains(e.target as Node)) return;
       setShowResults(false);
+      if (query.trim() === "") setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [query]);
+
+  // Opened, it should be ready to type into: the click that opened it was the
+  // reader already reaching for the keyboard.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
 
   const choose = (place: Place) => {
     onPreview(null);
@@ -99,8 +117,25 @@ export default function MapPlaceSearch({ getCentre, onSelect, onPreview }: MapPl
     setShowResults(false);
   };
 
+  if (!open) {
+    return (
+      <button
+        ref={rootRef as React.Ref<HTMLButtonElement>}
+        onClick={() => setOpen(true)}
+        title="Search for a locality"
+        aria-label="Search for a locality"
+        aria-expanded={false}
+        className="p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+        </svg>
+      </button>
+    );
+  }
+
   return (
-    <div ref={rootRef} className="w-56 max-w-[80vw]">
+    <div ref={rootRef as React.Ref<HTMLDivElement>} className="w-56 max-w-[80vw]">
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 shadow-md focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-colors">
         <svg className="w-4 h-4 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
@@ -116,6 +151,10 @@ export default function MapPlaceSearch({ getCentre, onSelect, onPreview }: MapPl
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               setShowResults(false);
+              // The first Escape drops the search, the second the field: a
+              // mistyped locality shouldn't cost the box as well.
+              if (query !== "") setQuery("");
+              else setOpen(false);
               return;
             }
             if (e.key === "Enter") {

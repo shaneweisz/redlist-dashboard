@@ -952,6 +952,79 @@ export async function getSpeciesByGbifKey(gbifSpeciesKey: string): Promise<{
   };
 }
 
+/**
+ * The assessed species behind a batch of GBIF keys, for the map's "recorded
+ * nearby" panel — one scan for the whole facet rather than a request each.
+ *
+ * Assessed rows only. The panel exists to put one assessment's threats beside
+ * another's, and an unassessed neighbour has none to offer; it would also have
+ * no category to sort by and nothing to link to.
+ *
+ * Keys GBIF knows and this data doesn't are simply absent from the result. The
+ * caller counts them (as `unmatched`) rather than treating the gap as an error:
+ * GBIF indexes occurrences well beyond what the Red List has assessed, so a
+ * miss is the normal case, not a fault.
+ */
+export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
+  {
+    gbif_species_key: string;
+    scientific_name: string;
+    common_name: string | null;
+    taxon_group: string;
+    class_name: string | null;
+    category: string;
+    criteria: string | null;
+    threat_codes: string[];
+    /** Year of the assessment itself, not of its publication — the same field
+     *  the dashboard's "outdated" test reads (species-filter.ts). */
+    assessment_year: number | null;
+    /** The assessment behind the row, so its narrative can be fetched. */
+    assessment_id: number | null;
+    sis_taxon_id: number | null;
+    dashboard_row_key: SpeciesRowKey | null;
+  }[]
+> {
+  if (!keys.length) return [];
+  const conn = await getConn();
+  const list = keys.map((k) => `'${String(k).replace(/'/g, "''")}'`).join(",");
+  const rows = (
+    await conn.runAndReadAll(`
+      SELECT id, gbif_species_key, scientific_name, common_name, taxon_group,
+             class_name, iucn_category AS category, criteria, threat_codes,
+             assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date
+      FROM '${parquetUri("assessed.parquet")}'
+      WHERE gbif_species_key IN (${list})`)
+  ).getRowObjects();
+  return rows.map((r) => {
+    const sisTaxonId = Number(r.id) > 0 ? Number(r.id) : null;
+    return {
+      gbif_species_key: str(r.gbif_species_key) ?? "",
+      scientific_name: String(r.scientific_name ?? ""),
+      common_name: (r.common_name as string) ?? null,
+      taxon_group: String(r.taxon_group ?? ""),
+      class_name: str(r.class_name),
+      category: String(r.category ?? ""),
+      criteria: (r.criteria as string) ?? null,
+      // ";"-separated in the parquet, written by fetch-redlist-species.
+      threat_codes: String(r.threat_codes ?? "").split(";").filter(Boolean),
+      // Free to carry: the row is already being read, so this is two more
+      // columns off the same scan rather than another query.
+      assessment_year: yearOf(r.assessment_date as string | null),
+      assessment_id: num(r.assessment_id),
+      sis_taxon_id: sisTaxonId,
+      // Assessed rows always have a SIS id, so the col_id half of a row key is
+      // never needed here — which is what keeps this to a single scan.
+      dashboard_row_key: speciesRowKey({ sis_taxon_id: sisTaxonId, col_id: null }),
+    };
+  });
+}
+
+/** Leading year of an ISO-ish date, or null. */
+function yearOf(date: string | null): number | null {
+  const y = date ? parseInt(date.slice(0, 4), 10) : NaN;
+  return Number.isFinite(y) ? y : null;
+}
+
 export async function getSynonyms(opts: { col?: string | null; sis?: number | null }): Promise<SpeciesSynonyms> {
   const conn = await getConn();
   let colId = opts.col ?? null;

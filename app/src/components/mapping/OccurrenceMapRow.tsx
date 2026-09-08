@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent } from "react-map-gl/maplibre";
+import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent, MapTouchEvent } from "react-map-gl/maplibre";
 import type maplibregl from "maplibre-gl";
 import { InatObservation, getThumbUrl, InatPhotoWithPreview } from "@/components/InatPhotoCard";
 import { QualityFlag, QUALITY_FLAG_LABELS, QUALITY_FLAG_DESCRIPTIONS, QUALITY_FLAG_SOURCES } from "@/lib/mapping/coordinate-cleaning";
@@ -25,6 +25,21 @@ import type { Feature, Polygon, MultiPolygon } from "geojson";
 import YearRangeSlider from "@/components/mapping/YearRangeSlider";
 import ListZoomControl, { LIST_ZOOM_DEFAULT } from "@/components/mapping/ListZoomControl";
 import CompilerDialog from "@/components/mapping/CompilerDialog";
+import NearbySpeciesPanel from "@/components/mapping/NearbySpeciesPanel";
+import {
+  NEARBY_RADIUS_DEFAULT,
+  NEARBY_SEARCH_COLOR,
+  NEARBY_PICKED_COLORS,
+  NEARBY_MAX_PICKED,
+  snapRadiusKm,
+  NEARBY_MAX_SEARCHES,
+  encodeNearbySearches,
+  decodeNearbySearches,
+  groupNearbyFeatures,
+  type NearbyPoint,
+  type NearbyRadiusKm,
+} from "@/lib/mapping/nearby-species";
+import { haversineMetres } from "@/lib/mapping/geo-distance";
 import MapGeoreferenceEditor from "./MapGeoreferenceEditor";
 import type { OccurrenceFeature as OccurrenceFeatureType } from "./OccurrenceListTable";
 // The table's own labels, so a basis of record is worded the same wherever it
@@ -356,6 +371,32 @@ function makeStackedRasterStyle(
 
 // Lazy import for maplibre-gl types
 type MaplibreStyle = ReturnType<typeof makeRasterStyle>;
+/**
+ * One "what is near here" question: where it was asked, how wide, and of what.
+ *
+ * Its id is what the tab, the map's pin and the drawn layers all key off, so a
+ * search can be closed or reordered without any of them following a position.
+ */
+type NearbySearch = {
+  id: string;
+  lat: number;
+  lng: number;
+  /** The record it was opened from, named in the panel. "" when it was ground. */
+  recordName: string;
+  radiusKm: NearbyRadiusKm;
+  /** The neighbours this question has put on the map. */
+  picked: { key: string; name: string; commonName: string | null }[];
+};
+
+/**
+ * What one drawn species is called on the map: the search, its radius and the
+ * species. The radius is part of it because a species' records within 10 km are
+ * a different set from its records within 50, and both are worth keeping.
+ */
+function nearbyLayerKey(search: { id: string; radiusKm: number }, speciesKey: string) {
+  return `${search.id}|${search.radiusKm}|${speciesKey}`;
+}
+
 const BASEMAP_STYLES: Record<string, { label: string; style: MaplibreStyle }> = {
   streets: {
     label: "Streets",
@@ -566,6 +607,9 @@ const FULLSCREEN_MAX_MAP_PCT = 85;
 // next to the "Loaded X of Y" badge (all basis-of-record categories together).
 const OVERALL_LOAD_MORE_BATCH = 200;
 
+/** How many edited records to ask back by id at once; the route caps at 100. */
+const EDITED_IDS_PER_REQUEST = 100;
+
 interface RecordTypeBreakdown {
   humanObservation: number;
   machineObservation: number;
@@ -701,36 +745,6 @@ export function isOutsideNativeRange(
   if (!countryCode || !nativeCountries || nativeCountries.length === 0) return false;
   const upper = countryCode.toUpperCase();
   return !nativeCountries.some((c) => c.toUpperCase() === upper);
-}
-
-/**
- * The flag beside a flagged point, with its reasons on hover.
- *
- * Its own bubble rather than a `title`: over the map a native tooltip never
- * arrived at all — the cursor changed to say there was something to read and
- * then nothing was ever shown — and where it does arrive it is a second late.
- */
-function FlagMark({ marks }: { marks: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      className="relative block text-amber-600 drop-shadow-sm cursor-help"
-    >
-      <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 22V3m0 0h12l-2 4 2 4H5" />
-      </svg>
-      {open && (
-        <span
-          data-occurrence-mark
-          className="absolute left-3 bottom-3 z-[1000] block w-max max-w-[220px] rounded-md bg-zinc-900/95 dark:bg-zinc-700 px-1.5 py-1 text-[10px] leading-snug text-white shadow-lg"
-        >
-          {marks}
-        </span>
-      )}
-    </span>
-  );
 }
 
 /**
@@ -875,7 +889,11 @@ export default function OccurrenceMapRow({
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
   }, [gbifOptionsOpen]);
-  const [basemap, setBasemap] = useState<BasemapKey>("streets");
+  // Hybrid by default: imagery with the place names still on it. A record's
+  // position is judged against what is actually on the ground — the plantation,
+  // the river, the edge of the forest — and the street map draws none of it,
+  // while bare satellite leaves nothing to say where you are looking.
+  const [basemap, setBasemap] = useState<BasemapKey>("hybrid");
   // Overlays — informational map layers, independent of the "Native range only"
   // occurrence filter above: shading which countries a source considers native,
   // regardless of whether occurrences are being filtered by it.
@@ -975,6 +993,8 @@ export default function OccurrenceMapRow({
    * the map is a lot of furniture for a choice most people make once, if ever.
    */
   const [basemapOpen, setBasemapOpen] = useState(false);
+  /** Whether the row above the map saying what's loaded is showing. */
+  const [countsOpen, setCountsOpen] = useState(true);
   /** Whether the map's tools menu — EOO/AOO and measuring — is showing. */
   const [toolsOpen, setToolsOpen] = useState(false);
   /**
@@ -986,7 +1006,9 @@ export default function OccurrenceMapRow({
    * them in the same table would have meant a row that means something
    * different in every column.
    */
-  const [listTab, setListTab] = useState<"gbif" | "excluded" | "file">("gbif");
+  // "gbif" | "excluded" | "file" | `nearby:<search id>` — the last of which
+  // there can be several of at once, one per question asked of the map.
+  const [listTab, setListTab] = useState<string>("gbif");
   /**
    * The record whose menu is open, from clicking its point.
    *
@@ -1115,6 +1137,377 @@ export default function OccurrenceMapRow({
   );
   /** The label being typed in the right-click panel, before the pin exists. */
   const [newPinLabel, setNewPinLabel] = useState("");
+  /**
+   * The spots the "recorded nearby" panel is describing, one per question.
+   *
+   * A list rather than a single point, because the question people actually
+   * arrive with is comparative: what is around this record, and what is around
+   * the site a valley away that is being proposed for something. Each search
+   * keeps its own radius and its own drawn neighbours, takes a tab of its own,
+   * and is marked on the map — the active one's pin filled in, the rest waiting
+   * where they were asked.
+   *
+   * Held here rather than on pointQuery so a search outlives the popup that
+   * opened it: you ask what else is here, then carry on clicking around the map
+   * with the answer still up beside it.
+   */
+  const [nearbySearches, setNearbySearches] = useState<NearbySearch[]>([]);
+  /** The searches as they are now, for handlers that must not chase them. */
+  const nearbySearchesRef = useRef<NearbySearch[]>([]);
+
+  /** Which search the panel and the map are currently answering for. */
+  const [nearbyActiveId, setNearbyActiveId] = useState<string | null>(null);
+  /**
+   * The searches the link that opened this page was carrying.
+   *
+   * Fullscreen is a page of its own, so entering and leaving it is a real
+   * navigation and everything held in this component goes with it. The
+   * questions themselves ride across in `near`, put there by whichever link
+   * was clicked; read once, on mount, because after that this component owns
+   * them. What each search had drawn is not restored — that is a click, and
+   * species keys do not belong in an address bar.
+   */
+  useEffect(() => {
+    const carried = decodeNearbySearches(new URLSearchParams(window.location.search).get("near"));
+    if (carried.length === 0) return;
+    const restored = carried.map((at, i) => ({
+      id: `url${i}`,
+      recordName: "",
+      picked: [],
+      ...at,
+    }));
+    setNearbySearches(restored);
+    setNearbyActiveId(restored[restored.length - 1].id);
+    setListTab(`nearby:${restored[restored.length - 1].id}`);
+  }, []);
+  /**
+   * Each picked species' records, keyed by search, radius and species.
+   *
+   * The radius is in the key rather than being invalidated on change, so going
+   * 10 → 50 → 10 km redraws the first answer instead of asking GBIF for it
+   * again — and two searches over the same species keep their own sets, since
+   * they are different circles.
+   */
+  const [nearbyPoints, setNearbyPoints] = useState<Record<string, { points: NearbyPoint[]; total: number }>>({});
+  /**
+   * What has already been fetched, mirrored for the fetch effect to read.
+   *
+   * The effect must know what it is holding to avoid asking twice, but taking
+   * that as a dependency would restart it on its own results.
+   */
+  const nearbyPointsRef = useRef(nearbyPoints);
+  useEffect(() => {
+    nearbyPointsRef.current = nearbyPoints;
+  }, [nearbyPoints]);
+  /**
+   * The neighbours' records under the last click, and which of them is showing.
+   *
+   * A list rather than one record, because these stack: a locality collected
+   * from repeatedly puts several dots on the same pixel, and with only the top
+   * one clickable the ones underneath were unreachable — the same problem the
+   * map's own records solve by paging, so this pages the same way.
+   */
+  const [nearbyShownGroup, setNearbyShownGroup] = useState<NearbyPoint[]>([]);
+  const [nearbyShownIndex, setNearbyShownIndex] = useState(0);
+  const nearbyShown = nearbyShownGroup[Math.min(nearbyShownIndex, nearbyShownGroup.length - 1)] ?? null;
+  /**
+   * Picked species currently switched off in the legend.
+   *
+   * Hiding is not un-picking: the list in the panel still shows what you chose
+   * and its colour, and the records are already fetched, so switching one back
+   * on is instant. It is the same distinction the map's own layers make between
+   * a checkbox and removing a thing.
+   */
+  const [nearbyHidden, setNearbyHidden] = useState<Set<string>>(new Set());
+  /** Whether the legend's nearby-species list is rolled up. */
+  const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
+  /** Whether the legend itself is showing, or rolled up to its title. */
+  const [legendOpen, setLegendOpen] = useState(true);
+  /**
+   * The search whose ring is being dragged, and whether the pointer is over one.
+   *
+   * The circle is the radius made visible, so it is also the way to change it:
+   * a control that draws the answer and can't be pulled is asking to be pulled.
+   * The buttons stay as the distances people ask for most.
+   */
+  const [draggingRadius, setDraggingRadius] = useState<string | null>(null);
+  /**
+   * The same fact, in a ref.
+   *
+   * The fit-to-the-circle effect has to know that a drag is in progress the
+   * moment it starts, and state reaches an effect a render later — long enough
+   * for the first radius change to refit the map, which moves the ground under
+   * the pointer, which changes the radius again. The ring ran away to the
+   * widest setting every time.
+   */
+  const draggingRadiusRef = useRef<string | null>(null);
+  const [hoveringRing, setHoveringRing] = useState(false);
+
+  /** The size it has been dragged to, or null for "as big as its contents". */
+  const [legendSize, setLegendSize] = useState<{ w: number; h: number } | null>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Drag a corner to resize the legend.
+   *
+   * Measured from the box and the pointer as they were when the drag started,
+   * rather than from the live box, which resizes underneath the pointer and
+   * chases itself. The panel is anchored to the map's bottom-left corner, so
+   * growing it moves its top and right edges; the signs here are what makes
+   * pulling away from the panel's middle mean "bigger" at every corner.
+   */
+  const startLegendResize = useCallback(
+    (e: React.PointerEvent<HTMLSpanElement>, corner: "nw" | "ne" | "sw" | "se") => {
+      e.preventDefault();
+      e.stopPropagation();
+      const box = legendRef.current?.getBoundingClientRect();
+      if (!box) return;
+      const handle = e.currentTarget;
+      handle.setPointerCapture(e.pointerId);
+      const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height };
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - from.x;
+        const dy = ev.clientY - from.y;
+        setLegendSize({
+          w: Math.max(150, Math.min(640, from.w + (corner.endsWith("e") ? dx : -dx))),
+          h: Math.max(60, Math.min(720, from.h + (corner.startsWith("s") ? dy : -dy))),
+        });
+      };
+      const onUp = (ev: PointerEvent) => {
+        handle.releasePointerCapture?.(ev.pointerId);
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+    },
+    []
+  );
+  /** Where the browser says the reader is, once they've asked. */
+  const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
+  /** Where the browser last said the reader was, marked on the map. */
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  /**
+   * Fly to where the reader is.
+   *
+   * The panel's question — what is around this point — has an obvious first
+   * answer the map could not reach: where you are standing. The browser will
+   * not give it without a prompt, so this is a button rather than anything
+   * that happens on load.
+   */
+  const findMe = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocating("denied");
+      return;
+    }
+    setLocating("asking");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating("idle");
+        const { latitude: lat, longitude: lng } = pos.coords;
+        // Takes you there and stops. Listing what is threatened around you is a
+        // question you then ask of the spot, with the same right click as
+        // anywhere else — doing it on arrival made one button do two things,
+        // and the second was rarely the one being asked for.
+        setMyLocation({ lat, lng });
+        mapRef.current?.flyTo({ center: [lng, lat], zoom: 11, duration: 900 });
+      },
+      // Denied, or no fix. Either way the map cannot help and says so rather
+      // than leaving the button spinning.
+      () => setLocating("denied"),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, []);
+
+  /**
+   * A colour per picked species, by pick order.
+   *
+   * Held against the key rather than the list position so that dropping the
+   * first of three doesn't recolour the other two under the reader — the
+   * legend and the map would both change meaning without anything being asked
+   * for. A freed colour is handed to the next species picked.
+   */
+  /** The search the panel is showing, or null when none has been asked. */
+  const nearbyActive = useMemo(
+    () => nearbySearches.find((s) => s.id === nearbyActiveId) ?? null,
+    [nearbySearches, nearbyActiveId]
+  );
+  useEffect(() => {
+    nearbySearchesRef.current = nearbySearches;
+  }, [nearbySearches]);
+
+  const nearbyColors = useMemo(() => {
+    const out: Record<string, string> = {};
+    const taken = new Set<string>();
+    for (const p of nearbyActive?.picked ?? []) {
+      const free = NEARBY_PICKED_COLORS.find((c) => !taken.has(c)) ?? NEARBY_PICKED_COLORS[0];
+      out[p.key] = free;
+      taken.add(free);
+    }
+    return out;
+  }, [nearbyActive]);
+
+  /**
+   * Ask what is near a point.
+   *
+   * The same spot asked twice is the same question, so it comes forward rather
+   * than opening a second tab that would say the same thing — a record's panel
+   * and a right-click on the record's own dot are two ways to the same circle.
+   */
+  const openNearbySearch = useCallback(
+    (at: { lat: number; lng: number; recordName: string }) => {
+      // "The same spot" is generous — 5e-4° is about 50 m, three orders of
+      // magnitude inside the narrowest radius on offer, so two clicks at what
+      // anyone would call the same place ask one question rather than opening
+      // a pair of tabs whose answers are identical.
+      const same = nearbySearches.find(
+        (s) => Math.abs(s.lat - at.lat) < 5e-4 && Math.abs(s.lng - at.lng) < 5e-4
+      );
+      if (same) {
+        setNearbyActiveId(same.id);
+        setListTab(`nearby:${same.id}`);
+        return;
+      }
+      const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      // Past a handful the tab strip stops being readable, so the oldest
+      // question makes way — the same bargain the picked-species palette makes.
+      setNearbySearches((prev) =>
+        [...prev, { id, ...at, radiusKm: NEARBY_RADIUS_DEFAULT, picked: [] }].slice(-NEARBY_MAX_SEARCHES)
+      );
+      setNearbyActiveId(id);
+      setListTab(`nearby:${id}`);
+    },
+    [nearbySearches]
+  );
+
+  /** Close one search; the tab strip falls back to the one beside it. */
+  const closeNearbySearch = useCallback(
+    (id: string) => {
+      const rest = nearbySearches.filter((s) => s.id !== id);
+      setNearbySearches(rest);
+      if (nearbyActiveId !== id) return;
+      const next = rest[rest.length - 1] ?? null;
+      setNearbyActiveId(next?.id ?? null);
+      setListTab(next ? `nearby:${next.id}` : "gbif");
+    },
+    [nearbySearches, nearbyActiveId]
+  );
+
+  const setNearbyRadius = useCallback((id: string, km: NearbyRadiusKm) => {
+    setNearbySearches((prev) => prev.map((s) => (s.id === id ? { ...s, radiusKm: km } : s)));
+  }, []);
+
+  const toggleNearbyPicked = useCallback(
+    (searchId: string, species: { key: string; name: string; commonName: string | null }) => {
+      setNearbySearches((prev) =>
+        prev.map((s) => {
+          if (s.id !== searchId) return s;
+          if (s.picked.some((p) => p.key === species.key)) {
+            setNearbyHidden((hidden) => {
+              const layer = nearbyLayerKey(s, species.key);
+              if (!hidden.has(layer)) return hidden;
+              const next = new Set(hidden);
+              next.delete(layer);
+              return next;
+            });
+            return { ...s, picked: s.picked.filter((p) => p.key !== species.key) };
+          }
+          // Past the palette the map stops being readable, so the oldest pick
+          // makes way rather than the newest being silently refused.
+          return { ...s, picked: [...s.picked, species].slice(-NEARBY_MAX_PICKED) };
+        })
+      );
+    },
+    []
+  );
+
+  /**
+   * One request per newly picked species, across every search.
+   *
+   * Keyed by search, radius and species, so nothing already held is asked for
+   * again: re-picking a species, going back to a radius, or returning to an
+   * earlier tab all draw from what is already here. Every search fetches, not
+   * only the one on screen, so switching tabs shows its neighbours at once.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    for (const search of nearbySearches) {
+      for (const picked of search.picked) {
+        const layer = nearbyLayerKey(search, picked.key);
+        if (nearbyPointsRef.current[layer]) continue;
+        const params = new URLSearchParams({
+          lat: String(search.lat),
+          lng: String(search.lng),
+          radiusKm: String(search.radiusKm),
+          speciesKey: picked.key,
+        });
+        fetch(`/api/nearby-species/points?${params}`, { signal: controller.signal })
+          .then(async (r) => {
+            const body = await r.json();
+            if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
+            setNearbyPoints((prev) => ({
+              ...prev,
+              [layer]: { points: body.points ?? [], total: body.total ?? 0 },
+            }));
+          })
+          .catch((e: unknown) => {
+            if (e instanceof DOMException && e.name === "AbortError") return;
+            // A neighbour that won't draw shouldn't take the list down with it:
+            // its row stops saying "drawing…" and nothing appears.
+            setNearbyPoints((prev) => ({ ...prev, [layer]: { points: [], total: 0 } }));
+          });
+      }
+    }
+    return () => controller.abort();
+  }, [nearbySearches]);
+
+  // The record panel opened from a neighbour's dot belongs to the search that
+  // drew it, so switching search or radius puts it away rather than leaving a
+  // point described that the map is no longer drawing.
+  const nearbyDrawnKey = `${nearbyActiveId},${nearbyActive?.radiusKm}`;
+  const lastNearbyDrawnKey = useRef(nearbyDrawnKey);
+  if (lastNearbyDrawnKey.current !== nearbyDrawnKey) {
+    lastNearbyDrawnKey.current = nearbyDrawnKey;
+    if (nearbyShownGroup.length) setNearbyShownGroup([]);
+  }
+
+  /** Every search's circle, tagged with whether it is the one being read. */
+  const nearbyRingsGeoJson = useMemo<GeoJSON.FeatureCollection>(
+    () => ({
+      type: "FeatureCollection",
+      features: nearbySearches.map((search) => ({
+        type: "Feature" as const,
+        properties: { id: search.id, active: search.id === nearbyActiveId },
+        geometry: uncertaintyCircle(search.lat, search.lng, search.radiusKm * 1000),
+      })),
+    }),
+    [nearbySearches, nearbyActiveId]
+  );
+
+  const nearbyPointsGeoJson = useMemo<GeoJSON.FeatureCollection>(
+    () => ({
+      type: "FeatureCollection",
+      // Keyed and indexed rather than carrying the record: MapLibre flattens
+      // feature properties through its tile encoding, so this pair is what
+      // survives to find the point again on a click. The colour rides along
+      // because one layer draws every picked species.
+      features: (nearbyActive?.picked ?? [])
+        .filter((p) => !nearbyHidden.has(nearbyLayerKey(nearbyActive!, p.key)))
+        .flatMap((p) =>
+        (nearbyPoints[nearbyLayerKey(nearbyActive!, p.key)]?.points ?? []).map((pt, i) => ({
+          type: "Feature" as const,
+          properties: {
+            nearbyKey: nearbyLayerKey(nearbyActive!, p.key),
+            nearbyIndex: i,
+            color: nearbyColors[p.key],
+          },
+          geometry: { type: "Point" as const, coordinates: [pt.lng, pt.lat] },
+        }))
+      ),
+    }),
+    [nearbyActive, nearbyPoints, nearbyColors, nearbyHidden]
+  );
   /** A pin whose label is being renamed in place. */
   const [renamingPin, setRenamingPin] = useState<string | null>(null);
   /**
@@ -1175,11 +1568,17 @@ export default function OccurrenceMapRow({
   // Whether the current hover started on the map — the list scrolls to meet a
   // map hover, but must not yank itself around under the pointer for its own.
 
-  // Which way the two panels sit. Dragging the divider resizes them; this flips
-  // the axis. Side by side by default: a record has sixteen columns and a
-  // screen is wider than it is tall, so beneath the map the table showed four
-  // of them.
-  const [panelLayout, setPanelLayout] = useState<"rows" | "columns">("columns");
+  /*
+   * Fullscreen puts the list beside the map, always.
+   *
+   * It was a toggle in the list's footer, offering the list below the map
+   * instead. Nobody needs both: the map and the table are read together, and
+   * side by side is what makes that possible on a page this wide. A record has
+   * sixteen columns and a screen is wider than it is tall, so beneath the map
+   * the table showed four of them. The dashboard stacks them regardless,
+   * because there the panel goes under the map and the photo grid, and the
+   * divider is not drawn at all.
+   */
   /**
    * How much of the table's own size it's drawn at.
    *
@@ -1206,6 +1605,9 @@ export default function OccurrenceMapRow({
   // The taxon token matters as much as the search text: the Not Evaluated view
   // won't list anything until the tree is narrowed (there are 1.8M unassessed
   // species), so `search=` on its own arrives at an empty dashboard.
+  /** The open searches, as the links carry them. */
+  const nearbyParam = useMemo(() => encodeNearbySearches(nearbySearches), [nearbySearches]);
+
   const dashboardHref = useMemo(() => {
     if (!scientificName) return "/";
     const params = new URLSearchParams({ search: scientificName });
@@ -1217,11 +1619,27 @@ export default function OccurrenceMapRow({
       params.set("species", dashboardSpeciesKey);
       params.set("tab", "gbif");
     }
+    if (nearbyParam) params.set("near", nearbyParam);
     return `/?${params}`;
-  }, [scientificName, category, dashboardTaxonToken, dashboardSpeciesKey]);
+  }, [scientificName, category, dashboardTaxonToken, dashboardSpeciesKey, nearbyParam]);
   // Share of the fullscreen height given to the map, as a percentage. Two
   // thirds by default, dragged from the divider between map and list.
   const [mapHeightPct, setMapHeightPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
+  /**
+   * How tall the record panel is on the dashboard, in pixels.
+   *
+   * Not a percentage like fullscreen's: the dashboard's container grows with
+   * its content, so a share of it has nothing to be a share of.
+   */
+  const [listHeightPx, setListHeightPx] = useState(448);
+  const splitPct = mapHeightPct;
+  const setSplitPct = setMapHeightPct;
+  /**
+   * Which way the divider runs.
+   *
+   * Fullscreen lets the reader choose; on the dashboard the panel is always
+   * under the map, so the divider is always the horizontal one.
+   */
   const [draggingDivider, setDraggingDivider] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitView, setSplitView] = useState(false);
@@ -1571,11 +1989,88 @@ export default function OccurrenceMapRow({
         setTotalOccurrences(data.metadata?.total ?? null);
         setBbox(data.metadata?.bbox ?? null);
         setRecordSetTotals(data.metadata?.totals ?? null);
-        setGeneralOffset(features.length);
+        // Where each record set has been paged to, which is the sample size —
+        // not the number of records that came back. The route fetches the
+        // mapped, flagged and unmapped sets separately and merges them, so
+        // `features.length` counts up to three sets' worth and, used as an
+        // offset, skipped everything between here and there on the next page.
+        setGeneralOffset(sampleSize);
       })
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
   }, [speciesKey, countryCode, sampleSize, includeMissing]);
+
+  /**
+   * The records this assessor has edited, whether or not the sample holds them.
+   *
+   * Edits are kept against a gbifID in this browser and outlive the sample they
+   * were made in — but the sample is the first 300 of each record set, and a
+   * record georeferenced on the fourth page is not in it tomorrow. It was still
+   * held, and still saved to the backup file, but it was not on the map, not in
+   * the table, and — the one that mattered — not in the IUCN point file, which
+   * is built from the loaded records and would have gone out quietly short.
+   *
+   * So they are fetched back by id, in chunks, once the sample has landed.
+   * Asked for by id alone, with none of the filters that might have been the
+   * reason a record was out of the sample in the first place.
+   */
+  const recoveredRef = useRef<{ species: string; ids: Set<number> }>({ species: speciesKey, ids: new Set() });
+  useEffect(() => {
+    if (loadingOccurrences) return;
+    if (recoveredRef.current.species !== speciesKey) {
+      recoveredRef.current = { species: speciesKey, ids: new Set() };
+    }
+    const loaded = new Set(occurrences.map((o) => o.properties.gbifID));
+    const edited = new Set<number>();
+    for (const store of [georeferences, exclusions, assessorDates, assessorNotes]) {
+      for (const key of Object.keys(store)) {
+        const id = Number(key);
+        if (Number.isFinite(id) && id > 0 && !loaded.has(id) && !recoveredRef.current.ids.has(id)) {
+          edited.add(id);
+        }
+      }
+    }
+    if (edited.size === 0) return;
+    const wanted = [...edited];
+    // Marked before the request, not after: a record that comes back missing
+    // (deleted from GBIF, or belonging to another species now) should not be
+    // asked for again on every render.
+    for (const id of wanted) recoveredRef.current.ids.add(id);
+
+    let live = true;
+    (async () => {
+      for (let i = 0; i < wanted.length; i += EDITED_IDS_PER_REQUEST) {
+        const chunk = wanted.slice(i, i + EDITED_IDS_PER_REQUEST);
+        try {
+          const res = await fetch(
+            `/api/occurrences?speciesKey=${encodeURIComponent(speciesKey)}&gbifIds=${chunk.join(",")}`
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          const next: OccurrenceFeature[] = data.features ?? [];
+          if (!live || next.length === 0) continue;
+          setOccurrences((prev) => {
+            const seen = new Set(prev.map((o) => o.properties.gbifID));
+            return [...prev, ...next.filter((f) => !seen.has(f.properties.gbifID))];
+          });
+        } catch {
+          // A record that won't come back is one the assessor can still see in
+          // the saved file; it is not worth taking the page down for.
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [
+    loadingOccurrences,
+    occurrences,
+    speciesKey,
+    georeferences,
+    exclusions,
+    assessorDates,
+    assessorNotes,
+  ]);
 
   // Basis-of-record category currently fetching more records, if any (drives the
   // per-row "Load more" spinner/disabled state in the dropdown).
@@ -1653,17 +2148,30 @@ export default function OccurrenceMapRow({
   // same reason (a record already pulled in by a per-category load may reappear here).
   const loadMoreOverall = useCallback(() => {
     setLoadingMoreOverall(true);
+    // The limit is per record set, and the route fetches each set it is asked
+    // for under it — so asking for 200 with both the mapped and the flagged set
+    // in play brought back 400. The southern elephant seal, whose records are
+    // mostly flagged, jumped by 400 on a button that said 200.
+    //
+    // Split between the sets that still have records to give, so the number on
+    // the button is what arrives either way: half each while both are running,
+    // and the whole batch from one once the other is spent — a species with no
+    // flagged records at all would otherwise get half of what it was promised.
+    const left = (total: number | undefined) => Math.max(0, (total ?? 0) - generalOffset);
+    const running = [recordSetTotals?.mapped, recordSetTotals?.issue].filter((t) => left(t) > 0).length;
+    const perSet = Math.ceil(OVERALL_LOAD_MORE_BATCH / Math.max(1, running));
     const params = new URLSearchParams({
       speciesKey,
-      limit: OVERALL_LOAD_MORE_BATCH.toString(),
+      limit: perSet.toString(),
       offset: generalOffset.toString(),
     });
     if (countryCode) {
       params.set("country", countryCode);
     }
-    // Keep paging the same record sets the user asked for, or the extra sets
-    // would silently drop out of the sample on the first "load more".
-    if (includeMissing) params.set("includeMissing", "true");
+    // The two sets this button's number is about: the ones GBIF has coordinates
+    // for, mapped and flagged. Records without coordinates have their own line
+    // and their own button, which pages them from their own offset — asking for
+    // them here moved a count this button says nothing about.
     params.set("includeIssues", "true");
     fetch(`/api/occurrences?${params}`)
       .then((res) => res.json())
@@ -1674,12 +2182,14 @@ export default function OccurrenceMapRow({
           const toAdd = newFeatures.filter((f) => !seen.has(f.properties.gbifID));
           return [...prev, ...toAdd];
         });
-        setGeneralOffset((prev) => prev + newFeatures.length);
+        // By what each set was asked for, not by how many records the merge
+        // produced: they all page from the same offset.
+        setGeneralOffset((prev) => prev + perSet);
         setTotalOccurrences(data.metadata?.total ?? null);
       })
       .catch(console.error)
       .finally(() => setLoadingMoreOverall(false));
-  }, [generalOffset, speciesKey, countryCode, includeMissing]);
+  }, [generalOffset, speciesKey, countryCode, recordSetTotals]);
 
   // Fetch breakdown data
   useEffect(() => {
@@ -2428,6 +2938,49 @@ export default function OccurrenceMapRow({
     return true;
   }, []);
 
+  /**
+   * Bring the radius into view when it is asked for, and when it changes.
+   *
+   * Drawn to scale and left alone, a 10 km circle on a map fitted to a species'
+   * whole range is a few pixels across — technically the answer and no use as
+   * one. Fitting to the circle is what makes "within 10 km" a place rather than
+   * a number. Keyed on the search and its radius, so switching to another
+   * question's tab takes you to where that question was asked, and panning away
+   * to look at something is not undone on the next render.
+   */
+  const fittedNearbyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nearbyActive) {
+      fittedNearbyRef.current = null;
+      return;
+    }
+    const key = `${nearbyActive.id},${nearbyActive.radiusKm}`;
+    if (fittedNearbyRef.current === key) return;
+    // Not while the ring is being dragged. Fitting to the circle mid-drag zooms
+    // the map out from under the pointer, which makes the pointer further away
+    // in kilometres, which fits the map out again: every drag ran away to the
+    // widest radius on offer. Marked as fitted so letting go doesn't jump the
+    // view either — the reader is already looking at the circle they drew.
+    if (draggingRadiusRef.current) {
+      fittedNearbyRef.current = key;
+      return;
+    }
+    // Twice the circle, not the circle itself. Fitted tight, the ring reaches
+    // the edges of the map and there is nowhere left to drag it out to — a
+    // radius could only ever be made smaller. At half the width it is still
+    // unmistakably the subject, and 10 km can be pulled out to 100.
+    const ring = uncertaintyCircle(
+      nearbyActive.lat,
+      nearbyActive.lng,
+      nearbyActive.radiusKm * 2000
+    ).coordinates[0];
+    const lons = ring.map((c) => c[0]);
+    const lats = ring.map((c) => c[1]);
+    if (fitMapToBbox([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)])) {
+      fittedNearbyRef.current = key;
+    }
+  }, [nearbyActive, fitMapToBbox]);
+
   // Track whether we've fitted bounds for the current bbox
   const fittedBboxRef = useRef<string | null>(null);
   const pendingBboxRef = useRef<[number, number, number, number] | null>(null);
@@ -2562,7 +3115,30 @@ export default function OccurrenceMapRow({
       setMeasure(measure.length < 2 ? [...measure, point] : [measure[1], point]);
       return;
     }
-    const features = e.features;
+    // The ring is interactive so it can be dragged; a click that lands on it is
+    // a click on the map, not on a record.
+    const features = e.features?.filter(
+      (f) => !String(f.layer?.id ?? "").startsWith("nearby-radius-grab-")
+    );
+    // A neighbour's cross, before anything else: it is drawn above the map's
+    // own records, so a click that reaches one is aimed at it rather than at
+    // whatever green circle happens to lie underneath.
+    const crosses = (features ?? []).filter((f) =>
+      String(f.layer?.id ?? "").startsWith(`nearby-points-circle-`)
+    );
+    if (crosses.length > 0) {
+      const group = groupNearbyFeatures(crosses, nearbyPoints);
+      if (group.length > 0) {
+        // Clicking the same stack again closes it, the way a record's own panel
+        // behaves.
+        setNearbyShownGroup((prev) =>
+          prev.length === group.length && prev.every((p, n) => p.gbifID === group[n].gbifID) ? [] : group
+        );
+        setNearbyShownIndex(0);
+        closeTooltip();
+        return;
+      }
+    }
     if (features && features.length > 0) {
       const gbifID = Number(features[0].properties?.gbifID);
       if (gbifID) {
@@ -2698,6 +3274,7 @@ export default function OccurrenceMapRow({
     closeTooltip,
     tooltipPinned,
     hoveredFeature,
+    nearbyPoints,
   ]);
 
   /**
@@ -2708,10 +3285,15 @@ export default function OccurrenceMapRow({
    * Google Maps put it there and everyone learned it — and because the left
    * click is spoken for: a record opens on GBIF, a protected area names itself.
    */
-  const handleMapContextMenu = useCallback((e: MapLayerMouseEvent, panelId: string) => {
-    e.originalEvent?.preventDefault();
+  /**
+   * Ask what a spot is — from a right click, or from a long press.
+   *
+   * Split out from the right-click handler because a phone has no right button:
+   * holding a finger on the map is the gesture that means the same thing, and
+   * both need the identical query rather than a second, thinner one.
+   */
+  const openPointQuery = useCallback((lng: number, lat: number, panelId: string) => {
     if (measure) return;
-    const { lng, lat } = e.lngLat;
     const query = ++pointQueryId.current;
     // A second right-click while the first is in flight wins; without the guard
     // a slow answer would overwrite the panel you're already reading.
@@ -2740,6 +3322,54 @@ export default function OccurrenceMapRow({
       });
 
   }, [measure]);
+
+  const handleMapContextMenu = useCallback(
+    (e: MapLayerMouseEvent, panelId: string) => {
+      e.originalEvent?.preventDefault();
+      openPointQuery(e.lngLat.lng, e.lngLat.lat, panelId);
+    },
+    [openPointQuery]
+  );
+
+  /**
+   * A held finger opens the same panel a right click does.
+   *
+   * Cancelled by movement, because a hold that drifts is a pan — MapLibre is
+   * already interpreting it as one, and answering "what is here" about wherever
+   * the finger started would be an answer to a question nobody asked.
+   */
+  const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const cancelLongPress = useCallback(() => {
+    if (longPress.current) window.clearTimeout(longPress.current.timer);
+    longPress.current = null;
+  }, []);
+  const handleTouchStart = useCallback(
+    (e: MapTouchEvent, panelId: string) => {
+      if (e.points.length !== 1) return cancelLongPress();
+      const { lng, lat } = e.lngLat;
+      const [{ x, y }] = e.points;
+      cancelLongPress();
+      longPress.current = {
+        x,
+        y,
+        timer: window.setTimeout(() => {
+          longPress.current = null;
+          openPointQuery(lng, lat, panelId);
+        }, 550),
+      };
+    },
+    [cancelLongPress, openPointQuery]
+  );
+  const handleTouchMove = useCallback((e: MapTouchEvent) => {
+    const held = longPress.current;
+    if (!held || e.points.length !== 1) return;
+    const [{ x, y }] = e.points;
+    // A few pixels of wobble is a finger resting, not a pan.
+    if (Math.hypot(x - held.x, y - held.y) > 10) {
+      window.clearTimeout(held.timer);
+      longPress.current = null;
+    }
+  }, []);
 
   const copyPoint = useCallback((lat: number, lng: number) => {
     navigator.clipboard?.writeText(`${lat.toFixed(5)}, ${lng.toFixed(5)}`).then(
@@ -2903,7 +3533,18 @@ export default function OccurrenceMapRow({
 
   const handleMapMouseMove = useCallback((e: MapLayerMouseEvent, panelId: string) => {
     if (isTouchDevice) return;
-    const features = e.features;
+    // A ring being dragged owns the pointer, off window listeners of its own.
+    if (draggingRadius) return;
+    setHoveringRing(
+      !!e.features?.some((f) => String(f.layer?.id ?? "").startsWith("nearby-radius-grab-"))
+    );
+    // The ring is interactive so it can be dragged, but it is not a record:
+    // everything below is about what is under the pointer to *read*, and a
+    // polygon handed to it as one arrives with coordinates that are not a
+    // position at all.
+    const features = e.features?.filter(
+      (f) => !String(f.layer?.id ?? "").startsWith("nearby-radius-grab-")
+    );
     // Set from the same hit test that drives the tooltip, so the cursor and
     // the panel can never disagree about whether there's a record here.
     setHoveringPoint(!!features && features.length > 0);
@@ -2955,10 +3596,23 @@ export default function OccurrenceMapRow({
     } else if (!tooltipHeld) {
       clearHoverSoon();
     }
-  }, [isTouchDevice, occurrencesByGbifId, tooltipHeld, hoveredFeature, clearHoverSoon, cancelHoverClear]);
+  }, [
+    isTouchDevice,
+    occurrencesByGbifId,
+    tooltipHeld,
+    hoveredFeature,
+    clearHoverSoon,
+    cancelHoverClear,
+    draggingRadius,
+  ]);
 
   const handleMapMouseLeave = useCallback(() => {
     setHoveringPoint(false);
+    // Not the ring's drag: that one is on the window and ends on pointerup,
+    // wherever the pointer happens to be. Ending it here meant a drag past the
+    // map's edge — the ordinary way to ask for a wider circle — let go of the
+    // ring and handed the map back to the fit, which then chased the pointer.
+    if (!draggingRadiusRef.current) setHoveringRing(false);
     if (tooltipHeld) return;
     clearHoverSoon();
   }, [tooltipHeld, clearHoverSoon]);
@@ -2977,13 +3631,12 @@ export default function OccurrenceMapRow({
     const container = splitRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const span = panelLayout === "rows" ? rect.height : rect.width;
-    if (span === 0) return;
-    const pct = panelLayout === "rows"
-      ? ((e.clientY - rect.top) / span) * 100
-      : ((e.clientX - rect.left) / span) * 100;
-    setMapHeightPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
-  }, [draggingDivider, panelLayout]);
+    // The divider is fullscreen's, and fullscreen is side by side: what it
+    // moves is the boundary between two columns.
+    if (rect.width === 0) return;
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    setSplitPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
+  }, [draggingDivider, setSplitPct]);
 
   const handleDividerPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -3000,9 +3653,42 @@ export default function OccurrenceMapRow({
     const step = e.key === "ArrowUp" ? -5 : e.key === "ArrowDown" ? 5 : 0;
     if (step === 0) return;
     e.preventDefault();
-    setMapHeightPct((pct) =>
+    setSplitPct((pct) =>
       Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step))
     );
+  }, [setSplitPct]);
+
+  /**
+   * The dashboard resizes the record panel from its own bottom edge.
+   *
+   * Stacked vertically there is nothing between the map and the panel to drag:
+   * a handle in the gap looked like it belonged to both and moved the boundary
+   * between them, which on a page that scrolls is not the thing anyone wants
+   * moved. Growing the panel downwards is, and it is where every resizable
+   * pane on the web puts its grip.
+   */
+  const listPanelRef = useRef<HTMLDivElement>(null);
+  const [draggingListEdge, setDraggingListEdge] = useState(false);
+  const handleListEdgeDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDraggingListEdge(true);
+  }, []);
+  const handleListEdgeMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingListEdge) return;
+    const rect = listPanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setListHeightPx(Math.min(1200, Math.max(160, e.clientY - rect.top)));
+  }, [draggingListEdge]);
+  const handleListEdgeUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    setDraggingListEdge(false);
+  }, []);
+  const handleListEdgeKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowUp" ? -40 : e.key === "ArrowDown" ? 40 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    setListHeightPx((px) => Math.min(1200, Math.max(160, px + step)));
   }, []);
 
   /**
@@ -3300,6 +3986,90 @@ export default function OccurrenceMapRow({
 
     return (
       <div className={`occurrence-map flex-1 flex flex-col rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 relative isolate z-0${fullscreen ? " min-h-0" : ""}`}>
+        {/* What is loaded, in a thin row above the map rather than a badge
+            on top of it. It is a fact about the record set, not about any
+            place on the map — and as an overlay it covered whatever tiles it
+            landed on, in the same corner as the controls that do act on the
+            map. One row, both record sets: the ones the map can draw, and
+            the ones only the list can show. */}
+        {!loadingOccurrences &&
+          ((!splitView && totalOccurrences != null) ||
+            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) &&
+          (countsOpen ? (
+          <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
+            {!splitView && totalOccurrences != null && (
+              <div className="text-emerald-700 dark:text-emerald-400">
+                {isFullSample ? (
+                  <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
+                ) : (
+                  <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
+                )}
+                {!isFullSample && (
+                  <>
+                    {" "}
+                    <button
+                      onClick={loadMoreOverall}
+                      disabled={loadingMoreOverall}
+                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loadingMoreOverall
+                        ? "Loading…"
+                        : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
+                    </button>
+                  </>
+                )}
+                {georeferencedFilteredCount < georeferencedLoadedCount && (
+                  <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
+                )}
+              </div>
+            )}
+            {/* Records with no coordinates only get a line when there are
+                more to fetch. "All N loaded" was a fact with nothing to do
+                about it — they're in the table either way. */}
+            {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
+              <div className="text-amber-700 dark:text-amber-400">
+                <>
+                    Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
+                    <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
+                    <button
+                      onClick={loadMoreMissing}
+                      disabled={loadingMoreMissing}
+                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loadingMoreMissing
+                        ? "Loading…"
+                        : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
+                    </button>
+                </>
+              </div>
+            )}
+            {/* Rolled away once it has been read. How much of a species is
+                loaded is a line you read at the start and then keep looking
+                past, and on a short map it was a line of the map. The chevron
+                it leaves behind brings it back. */}
+            <button
+              onClick={() => setCountsOpen(false)}
+              title="Hide what's loaded"
+              aria-label="Hide what's loaded"
+              className="ml-auto shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 15l-7-7-7 7" />
+              </svg>
+            </button>
+          </div>
+          ) : (
+            <button
+              onClick={() => setCountsOpen(true)}
+              title="Show what's loaded"
+              aria-label="Show what's loaded"
+              className="shrink-0 flex w-full items-center px-2 py-0.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 9l7 7 7-7" />
+              </svg>
+            </button>
+          ))}
         <div className={`${
           fullscreen
             ? "flex-1 min-h-[240px]"
@@ -3331,9 +4101,18 @@ export default function OccurrenceMapRow({
               }}
               style={{ width: "100%", height: "100%" }}
               mapStyle={BASEMAP_STYLES[basemap].style}
-              interactiveLayerIds={[`occ-circles-${panelId}`, `georef-point-${panelId}`]}
+              interactiveLayerIds={[
+                `occ-circles-${panelId}`,
+                `georef-point-${panelId}`,
+                `nearby-points-circle-${panelId}`,
+                `nearby-radius-grab-${panelId}`,
+              ]}
               onClick={(e: MapLayerMouseEvent) => handleMapClick(e, panelId)}
               onContextMenu={(e: MapLayerMouseEvent) => handleMapContextMenu(e, panelId)}
+              onTouchStart={(e: MapTouchEvent) => handleTouchStart(e, panelId)}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={cancelLongPress}
+              onTouchCancel={cancelLongPress}
               onMouseMove={(e: MapLayerMouseEvent) => handleMapMouseMove(e, panelId)}
               onMouseLeave={handleMapMouseLeave}
               onLoad={panelId === "main" || panelId === "before" || !splitView ? handleMapLoad : undefined}
@@ -3344,12 +4123,53 @@ export default function OccurrenceMapRow({
               cursor={
                 measure
                   ? "crosshair"
-                  : panning
-                    ? "move"
-                    : hoveringPoint
-                      ? "pointer"
-                      : "default"
+                  : draggingRadius || hoveringRing
+                    ? "ew-resize"
+                    : panning
+                      ? "move"
+                      : hoveringPoint
+                        ? "pointer"
+                        : "default"
               }
+              onMouseDown={(e: MapLayerMouseEvent) => {
+                // Whether the ring is under the pointer comes from the hover,
+                // not from this event: MapLibre hit-tests move and click but
+                // hands mousedown no features at all.
+                if (!nearbyActive || !hoveringRing) return;
+                // The map would otherwise pan under the drag, which is the one
+                // gesture this takes over from it.
+                e.preventDefault();
+                const map = mapRef.current?.getMap();
+                if (!map) return;
+                map.dragPan.disable();
+                draggingRadiusRef.current = nearbyActive.id;
+                setDraggingRadius(nearbyActive.id);
+
+                // The rest of the drag runs off the window, not off the map's
+                // own mousemove: that one is throttled per frame and coalesces
+                // a quick drag down to its first inch, which left the radius
+                // stopping twenty pixels in.
+                const search = nearbyActive;
+                const rect = map.getCanvas().getBoundingClientRect();
+                const onMove = (ev: PointerEvent) => {
+                  // Kept on the map. Unprojecting a point past the edge
+                  // extrapolates, and it extrapolates fast — a drag that
+                  // wandered off the side jumped from 10 km to 100.
+                  const x = Math.min(rect.width, Math.max(0, ev.clientX - rect.left));
+                  const y = Math.min(rect.height, Math.max(0, ev.clientY - rect.top));
+                  const at = map.unproject([x, y]);
+                  const km = haversineMetres([search.lng, search.lat], [at.lng, at.lat]) / 1000;
+                  setNearbyRadius(search.id, snapRadiusKm(km));
+                };
+                const onUp = () => {
+                  window.removeEventListener("pointermove", onMove);
+                  map.dragPan.enable();
+                  draggingRadiusRef.current = null;
+                  setDraggingRadius(null);
+                };
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp, { once: true });
+              }}
               onDragStart={() => setPanning(true)}
               onDragEnd={() => setPanning(false)}
             >
@@ -3604,34 +4424,134 @@ export default function OccurrenceMapRow({
                     </MapLibreMarker>
                   );
                 })}
-              {/* A small flag beside any record the cleaning tests or the
-                  native range have something to say about. What you want from
-                  a flag is to see which records are being questioned across a
-                  whole distribution at once, without opening fifty panels; the
-                  panel's own flag then tells you what was said about the one
-                  you opened. Excluded records carry one too — why a record is
-                  questionable is worth seeing whether or not you've set it
-                  aside, and it is often the answer to why you did.
-
-                  Drawn only while the records themselves are: a flag beside a
-                  point that isn't there is a mark on nothing. */}
-              {showGbif && panelOccurrences.map((o) => {
-                const marks = recordMarks(o);
-                if (!marks) return null;
-                const mine = georeferences[o.properties.gbifID];
-                const position = mine
-                  ? [mine.decimalLongitude, mine.decimalLatitude]
-                  : o.geometry?.coordinates;
-                if (!position) return null;
+                              {/* The radius the nearby panel is describing, drawn to scale.
+                    Under the record layers rather than over them: it is the
+                    question's boundary, not a thing to read. */}
+                {nearbySearches.length > 0 && (
+                  <Source id={`nearby-radius-${panelId}`} type="geojson" data={nearbyRingsGeoJson}>
+                    {/* Every question's circle, the one being read solid and
+                        the rest faint — asking a second question shouldn't take
+                        the first one's ground off the map, and two circles at
+                        equal weight leave you counting tabs to tell which list
+                        you are looking at. */}
+                    <Layer
+                      id={`nearby-radius-fill-${panelId}`}
+                      type="fill"
+                      paint={{
+                        "fill-color": NEARBY_SEARCH_COLOR,
+                        "fill-opacity": ["case", ["get", "active"], 0.08, 0.03],
+                      }}
+                    />
+                    <Layer
+                      id={`nearby-radius-line-${panelId}`}
+                      type="line"
+                      paint={{
+                        "line-color": NEARBY_SEARCH_COLOR,
+                        "line-width": ["case", ["get", "active"], 1.5, 1],
+                        "line-opacity": ["case", ["get", "active"], 1, 0.45],
+                        "line-dasharray": [3, 2],
+                      }}
+                    />
+                    {/* A wide, invisible line over the drawn one: the ring is
+                        dragged to change the radius, and a 1.5px target is not
+                        something anyone can catch. */}
+                    <Layer
+                      id={`nearby-radius-grab-${panelId}`}
+                      type="line"
+                      paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 14, "line-opacity": 0.01 }}
+                    />
+                  </Source>
+                )}
+              {/* The picked neighbour's own records. Above the radius they sit
+                  inside and below everything the assessor is deciding about —
+                  they are context for this map, not one of its own layers. */}
+              {nearbyPointsGeoJson.features.length > 0 && (
+                <Source id={`nearby-points-${panelId}`} type="geojson" data={nearbyPointsGeoJson}>
+                  {/* Dots, in colours no other layer here uses — see
+                      NEARBY_PICKED_COLORS. They sit above the map's own records
+                      and carry a white ring, so a neighbour reads as a separate
+                      thing rather than merging into the points underneath. */}
+                  <Layer
+                    id={`nearby-points-circle-${panelId}`}
+                    type="circle"
+                    paint={{
+                      "circle-radius": 4.5,
+                      // One layer draws every picked species; the colour comes
+                      // off the feature so they don't need a layer each.
+                      "circle-color": ["get", "color"],
+                      "circle-stroke-width": 1.5,
+                      "circle-stroke-color": "#ffffff",
+                    }}
+                  />
+                </Source>
+              )}
+              {/* Where the browser says you are. A map that flies somewhere and
+                  marks nothing leaves you to guess which pixel it meant, which
+                  is the one thing a locate button exists to settle. */}
+              {myLocation && (
+                <MapLibreMarker longitude={myLocation.lng} latitude={myLocation.lat} anchor="center">
+                  <span className="relative flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-60" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow" />
+                  </span>
+                </MapLibreMarker>
+              )}
+              {/* The centre each radius is measured from. The ring alone says
+                  roughly where, and "roughly where" is what a reader is trying
+                  to pin down when they ask what is near a point. The pin for
+                  the tab being read is full size and full colour; the others
+                  are small and faded, and clicking one goes to its tab — which
+                  is the shortest way back to a question asked earlier. */}
+              {nearbySearches.map((search) => {
+                const active = search.id === nearbyActiveId;
                 return (
                   <MapLibreMarker
-                    key={`mark-${o.properties.gbifID}`}
-                    longitude={position[0]}
-                    latitude={position[1]}
-                    anchor="bottom-left"
-                    offset={[3, -3]}
+                    key={`nearby-pin-${search.id}`}
+                    longitude={search.lng}
+                    latitude={search.lat}
+                    anchor="bottom"
+                    // So the close button can be placed against the pin.
+                    className="relative"
                   >
-                    <FlagMark marks={marks} />
+                    <svg
+                      onClick={() => {
+                        setNearbyActiveId(search.id);
+                        setListTab(`nearby:${search.id}`);
+                      }}
+                      aria-label={
+                        active
+                          ? `Within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                          : `Go to the search at ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                      }
+                      className={`cursor-pointer drop-shadow ${active ? "h-5 w-5" : "h-3.5 w-3.5 opacity-60 hover:opacity-100"}`}
+                      viewBox="0 0 24 24"
+                      fill={NEARBY_SEARCH_COLOR}
+                      stroke="#ffffff"
+                      strokeWidth={active ? 1.5 : 2.5}
+                    >
+                      <title>
+                        {active
+                          ? `Within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                          : `Go to the search at ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`}
+                      </title>
+                      <path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" />
+                      <circle cx="12" cy="10" r="2.4" fill="#ffffff" stroke="none" />
+                    </svg>
+                    {/* Closed from the map as well as from the tab: the pin is
+                        where the question is, and having to find its tab to
+                        put it away made a stray right-click a small chore. */}
+                    {active && (
+                      <button
+                        onClick={() => closeNearbySearch(search.id)}
+                        title="Close this search"
+                        aria-label="Close this search"
+                        className="absolute -right-3.5 -top-1 rounded-full border border-zinc-300 bg-white p-0.5 text-zinc-500 shadow hover:text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+                      >
+                        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
                   </MapLibreMarker>
                 );
               })}
@@ -3799,10 +4719,92 @@ export default function OccurrenceMapRow({
                   />
                 );
               })()}
+              {/* A picked neighbour's record, in the same panel the map's own
+                  records get. It is a GBIF occurrence like any other and the
+                  question you have about it is the same one — what is it, who
+                  collected it, where does it say it is — so it should not
+                  answer in some lesser tooltip of its own. The fields are built
+                  here rather than by recordFields, which expects a record this
+                  map is deciding about: no georeference to edit, no cleaning
+                  flags of ours, no exclusion. */}
+              {nearbyShown && (
+                <MapOccurrenceTooltip
+                  lat={nearbyShown.lat}
+                  lng={nearbyShown.lng}
+                  // The same photographs the map's own records show. For a
+                  // great many records the image is the evidence — a herbarium
+                  // sheet, a camera-trap frame — and a neighbour's panel was
+                  // quietly poorer than the one beside it without them.
+                  images={nearbyShown.images}
+                  fields={[
+                    {
+                      label: "Species",
+                      value:
+                        nearbyShown.species ??
+                        (nearbyActive?.picked ?? []).find((p) =>
+                          nearbyPoints[nearbyLayerKey(nearbyActive!, p.key)]?.points.includes(nearbyShown)
+                        )?.name ??
+                        "",
+                    },
+                    ...(nearbyShown.basis
+                      ? [{ label: "Basis", value: nearbyShown.basis.replace(/_/g, " ").toLowerCase() }]
+                      : []),
+                    ...(nearbyShown.eventDate || nearbyShown.year
+                      ? [{ label: "Date", value: nearbyShown.eventDate ?? String(nearbyShown.year) }]
+                      : []),
+                    ...(nearbyShown.locality ? [{ label: "Locality", value: nearbyShown.locality }] : []),
+                    ...(nearbyShown.countryCode ? [{ label: "Country", value: nearbyShown.countryCode }] : []),
+                    {
+                      label: "Coordinates",
+                      value: `${nearbyShown.lat.toFixed(5)}, ${nearbyShown.lng.toFixed(5)}`,
+                    },
+                    ...(nearbyShown.uncertaintyMetres != null
+                      ? [{ label: "GPS uncertainty", value: formatDistance(nearbyShown.uncertaintyMetres) }]
+                      : []),
+                    ...(nearbyShown.catalogNumber
+                      ? [{ label: "Catalogue no.", value: nearbyShown.catalogNumber }]
+                      : []),
+                    ...(nearbyShown.recordedBy ? [{ label: "Recorded by", value: nearbyShown.recordedBy }] : []),
+                    ...(nearbyShown.identifiedBy
+                      ? [{ label: "Identified by", value: nearbyShown.identifiedBy }]
+                      : []),
+                    ...(nearbyShown.datasetName ? [{ label: "Dataset", value: nearbyShown.datasetName }] : []),
+                  ]}
+                  page={
+                    nearbyShownGroup.length > 1
+                      ? {
+                          index: Math.min(nearbyShownIndex, nearbyShownGroup.length - 1),
+                          total: nearbyShownGroup.length,
+                          onPrev: () =>
+                            setNearbyShownIndex(
+                              (i) => (i - 1 + nearbyShownGroup.length) % nearbyShownGroup.length
+                            ),
+                          onNext: () => setNearbyShownIndex((i) => (i + 1) % nearbyShownGroup.length),
+                        }
+                      : undefined
+                  }
+                  onClose={() => setNearbyShownGroup([])}
+                  actions={
+                    nearbyShown.gbifID ? (
+                      <a
+                        href={`https://www.gbif.org/occurrence/${nearbyShown.gbifID}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex w-full items-center gap-1.5 px-1 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        <svg className="w-3 h-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5L10 14M9 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-3" />
+                        </svg>
+                        Open on GBIF
+                      </a>
+                    ) : undefined
+                  }
+                />
+              )}
               {/* Where the search landed. Pinned rather than just flown to:
                   the point of looking a locality up is to compare it against
                   the records, which means both have to be on screen at once. */}
-              {fullscreen && previewPlace && !pinnedPlaces.some((p) => p.id === previewPlace.id) && (
+              {previewPlace && !pinnedPlaces.some((p) => p.id === previewPlace.id) && (
                 <MapLibreMarker
                   key={`preview-${previewPlace.id}`}
                   longitude={previewPlace.lng}
@@ -3819,12 +4821,14 @@ export default function OccurrenceMapRow({
                   </div>
                 </MapLibreMarker>
               )}
-              {/* Pins belong to the page that has the locality search and the
-                  record list: they are placed to be read against a locality
-                  description, and there is none to read outside fullscreen —
-                  where they were furniture on a map answering a different
-                  question. They keep their place in storage either way. */}
-              {fullscreen && showPins && pinnedPlaces.map((place) => (
+              {/* Drawn in either mode. They were fullscreen-only on the
+                  reasoning that a pin is read against a locality description
+                  and there is none outside fullscreen — but a pin you dropped
+                  yourself is worth seeing wherever you dropped it, and the
+                  Records legend carries its toggle in both modes, so it can
+                  still be taken off. They keep their place in storage either
+                  way. */}
+              {showPins && pinnedPlaces.map((place) => (
                 <MapLibreMarker key={place.id} longitude={place.lng} latitude={place.lat} anchor="bottom">
                   <div className="flex flex-col items-center -mb-1">
                     {!place.nameHidden && (
@@ -3914,11 +4918,20 @@ export default function OccurrenceMapRow({
                   type="geojson"
                   data={{ type: "Feature", properties: {}, geometry: rangeMetrics.eoo.hull }}
                 >
-                  <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.07 }} />
+                  <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.12 }} />
+                  {/* A white casing under the hull, as the protected-area
+                      highlights use: a dark blue line on dark imagery was a
+                      line you had to know was there to find, and the hybrid
+                      basemap is now the one people start on. */}
+                  <Layer
+                    id={`eoo-casing-${panelId}`}
+                    type="line"
+                    paint={{ "line-color": "#ffffff", "line-width": 4.5, "line-opacity": 0.85 }}
+                  />
                   <Layer
                     id={`eoo-line-${panelId}`}
                     type="line"
-                    paint={{ "line-color": "#0369a1", "line-width": 1.5, "line-dasharray": [3, 2] }}
+                    paint={{ "line-color": "#0369a1", "line-width": 2.25, "line-dasharray": [3, 2] }}
                   />
                 </Source>
               )}
@@ -3935,8 +4948,16 @@ export default function OccurrenceMapRow({
                     })),
                   }}
                 >
-                  <Layer id={`aoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0369a1", "fill-opacity": 0.35 }} />
-                  <Layer id={`aoo-line-${panelId}`} type="line" paint={{ "line-color": "#0369a1", "line-width": 0.6 }} />
+                  {/* Brighter than the hull's navy and outlined in white:
+                      a 2 km cell is a few pixels across at range-wide zooms,
+                      and at 0.6px of dark navy over dark ground the grid that
+                      the AOO figure counts was invisible. */}
+                  <Layer id={`aoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.45 }} />
+                  <Layer
+                    id={`aoo-line-${panelId}`}
+                    type="line"
+                    paint={{ "line-color": "#ffffff", "line-width": 1.1, "line-opacity": 0.9 }}
+                  />
                 </Source>
               )}
               {/* The measured path. Drawn above everything so the line stays
@@ -4180,8 +5201,11 @@ export default function OccurrenceMapRow({
                     {/* Silent when the point isn't protected: the overlay is
                         already showing you that, and a line saying so on every
                         click is noise on the answer you did ask for. */}
-                    {/* Fullscreen only, like the pins it drops. */}
-                    {fullscreen && (
+                    {/* Offered on the dashboard's map as well as fullscreen.
+                        These were fullscreen-only because a pin dropped outside
+                        it was never drawn and had no legend row to take it off
+                        again — both of which now hold in either mode, so the
+                        tools travel with them. */}
                     <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-1">
                       <input
                         value={newPinLabel}
@@ -4226,7 +5250,27 @@ export default function OccurrenceMapRow({
                         Measure
                       </button>
                     </div>
-                    )}
+                    {/* The same search a record's panel offers, from bare
+                        ground. Anchored to a record it could only answer
+                        "what is near this specimen"; the question people
+                        actually arrive with is often "what is near here" —
+                        a valley, a proposed site, where they are standing. */}
+                    <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
+                      <button
+                        onClick={() => {
+                          openNearbySearch({ lng: pointQuery.lng, lat: pointQuery.lat, recordName: "" });
+                          setPointQuery(null);
+                        }}
+                        title="Threatened species (CR, EN, VU) with GBIF records around this point"
+                        className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left"
+                      >
+                        <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <circle cx="12" cy="12" r="3" />
+                          <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+                        </svg>
+                        Find nearby threatened species
+                      </button>
+                    </div>
                   </div>
                 </MapPopup>
               )}
@@ -4568,7 +5612,13 @@ export default function OccurrenceMapRow({
                 {label}
               </div>
             )}
-            {mounted && !splitView && fullscreen && (
+            {/* On the dashboard's map as well as fullscreen. Looking a locality
+                up is how you check whether a record's coordinates match what
+                its label says, and that question is the same size on either
+                map — the pins it drops are drawn in both modes now, so there is
+                nothing left that only fullscreen could show. Still not in split
+                view, where two maps would race to answer one search. */}
+            {mounted && !splitView && (
               <MapPlaceSearch
                 getCentre={() => {
                   const map = mapRef.current;
@@ -4581,74 +5631,14 @@ export default function OccurrenceMapRow({
               />
             )}
           </div>
-          {/* Top-right stack: what's loaded, then the basemap choice. Stacked
-              in a flex column rather than each guessing the other's offset —
-              the counts panel grows a line when there are records without
-              coordinates, and at fixed offsets it covered the first basemap
-              button whenever it did. */}
-          <div className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]">
-            {/* What GBIF holds for this species and how much of it is here.
-                One panel, both record sets: they're two halves of the same
-                answer — the ones the map can draw, and the ones only the list
-                can show — and reading them as two badges made the second look
-                like a warning about the first.
-
-                Solid background (not translucent) in both themes: it sits over
-                arbitrary map tiles, not a plain page background, so a tinted/
-                translucent fill (as used elsewhere in the toolbar) reads with
-                poor contrast in dark mode against light-colored tiles. */}
-            {!loadingOccurrences &&
-              ((!splitView && totalOccurrences != null) ||
-                (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) && (
-              <div className="px-2 py-1 rounded-lg shadow-md bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[11px] space-y-0.5">
-                {!splitView && totalOccurrences != null && (
-                  <div className="text-emerald-700 dark:text-emerald-400">
-                    {isFullSample ? (
-                      <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
-                    ) : (
-                      <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
-                    )}
-                    {!isFullSample && (
-                      <>
-                        {" "}
-                        <button
-                          onClick={loadMoreOverall}
-                          disabled={loadingMoreOverall}
-                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {loadingMoreOverall
-                            ? "Loading…"
-                            : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
-                        </button>
-                      </>
-                    )}
-                    {georeferencedFilteredCount < georeferencedLoadedCount && (
-                      <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
-                    )}
-                  </div>
-                )}
-                {/* Records with no coordinates only get a line when there are
-                    more to fetch. "All N loaded" was a fact with nothing to do
-                    about it — they're in the table either way. */}
-                {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
-                  <div className="text-amber-700 dark:text-amber-400">
-                    <>
-                        Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
-                        <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
-                        <button
-                          onClick={loadMoreMissing}
-                          disabled={loadingMoreMissing}
-                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {loadingMoreMissing
-                            ? "Loading…"
-                            : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
-                        </button>
-                    </>
-                  </div>
-                )}
-              </div>
-            )}
+          {/* Top-right stack: the basemap choice, then the control that goes
+              to where the reader is. Both act on the map, so they sit on it —
+              unlike the record counts, which describe the data and have their
+              own row above it. */}
+          <div
+            data-map-corner="top-right"
+            className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]"
+          >
             {/* The basemap, on the map it paints. */}
             {!loadingOccurrences && mounted && (
               basemapOpen ? (
@@ -4686,6 +5676,53 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
               )
+            )}
+            {/* Back to the whole species, the way a map app's own button puts
+                you back. Fitting to the records is where the page started and
+                what every other view here is a departure from; getting back to
+                it was a reload. */}
+            {mounted && !splitView && bbox && (
+              <button
+                onClick={() => fitMapToBbox(bbox)}
+                title="Back to all this species' records"
+                aria-label="Back to all this species' records"
+                className="p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                {/* The four corners of a frame drawing in on a point: "fit
+                    this", which is what the button does. */}
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4" />
+                  <circle cx="12" cy="12" r="2.5" />
+                </svg>
+              </button>
+            )}
+            {/* Under the basemap button, in the stack of things that act on the
+                map rather than describe it. The crosshair-in-a-ring every map
+                uses for this, and no label — a control this conventional does
+                not need one. */}
+            {mounted && !splitView && (
+              <button
+                onClick={findMe}
+                disabled={locating === "asking"}
+                title={
+                  locating === "denied"
+                    ? "Your browser wouldn't share a location"
+                    : "Go to your location"
+                }
+                aria-label="Go to your location"
+                className={`p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-60 ${
+                  locating === "denied" ? "text-amber-600 dark:text-amber-400" : "text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                <svg
+                  className={`w-3.5 h-3.5 ${locating === "asking" ? "animate-pulse" : ""}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                >
+                  <circle cx="12" cy="12" r="3.5" />
+                  <circle cx="12" cy="12" r="8" />
+                  <path strokeLinecap="round" d="M12 1.5v2.5M12 20v2.5M1.5 12h2.5M20 12h2.5" />
+                </svg>
+              </button>
             )}
           </div>
         </div>
@@ -5096,7 +6133,7 @@ export default function OccurrenceMapRow({
     [occurrences, exclusions]
   );
   const listTabs = useMemo(() => {
-    const tabs: { key: "gbif" | "excluded" | "file"; label: string; count: number; title: string; dot?: string }[] = [
+    const tabs: { key: string; label: string; count: number; title: string; dot?: string }[] = [
       {
         key: "gbif",
         label: "GBIF records",
@@ -5121,8 +6158,28 @@ export default function OccurrenceMapRow({
         dot: POINT_FILE_COLOR,
       });
     }
+    // The questions asked of the map go last, after the tables that are always
+    // there. They come and go as searches are opened and closed, and in the
+    // middle of the strip every new one shifted Excluded and Imported along
+    // under the pointer.
+    //
+    // Each is named for where it was asked, with as many decimals as it takes
+    // to tell them apart — two for points a kilometre or more apart, more for
+    // questions asked of the same hillside, since a pair of tabs both reading
+    // "Nearby 18.50, 84.00" is exactly the ambiguity coordinates are here to
+    // remove.
+    const places = (dp: number) => nearbySearches.map((s) => `${s.lat.toFixed(dp)}, ${s.lng.toFixed(dp)}`);
+    const dp = [2, 4].find((d) => new Set(places(d)).size === nearbySearches.length) ?? 4;
+    for (const search of nearbySearches) {
+      tabs.push({
+        key: `nearby:${search.id}`,
+        label: `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`,
+        count: 0,
+        title: `Threatened species within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`,
+      });
+    }
     return tabs;
-  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison]);
+  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison, nearbySearches]);
 
   // A tab that empties — the last excluded record put back, the file removed —
   // takes its list with it, so the reader is left on the one that's still there.
@@ -5596,6 +6653,34 @@ export default function OccurrenceMapRow({
                     where a record is, the table says everything else about it.
                     Not offered from a row's own menu, where you are already on
                     the row it would scroll to. */}
+                {/* What else has been assessed around this record. On the
+                    record's own panel because that is what a click opens, and
+                    a click is the gesture for "tell me about this one" — the
+                    right-click answers about the ground, which is a different
+                    question and was the wrong home for this. */}
+                {record && position && (
+                  <button
+                    onClick={() => {
+                      setRowMenu(null);
+                      close();
+                      openNearbySearch({
+                        // The record's own coordinates, so the radius is
+                        // centred on the collection locality itself.
+                        lng: position[0],
+                        lat: position[1],
+                        recordName: String(record.properties.species || "this record"),
+                      });
+                    }}
+                    title="Threatened species (CR, EN, VU) with GBIF records around this one, and the threats their assessments cite"
+                    className="flex w-full items-center gap-1.5 px-1 py-1 rounded text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <svg className="w-3 h-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="12" r="3" />
+                      <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+                    </svg>
+                    Find nearby threatened species
+                  </button>
+                )}
                 {opts.showInTable && fullscreen && (
                   <button
                     onClick={() => showRecordInTable(gbifID)}
@@ -6259,10 +7344,65 @@ export default function OccurrenceMapRow({
   const renderRecordLayers = (label: string | null) => (
     // Wide enough for the GBIF row to carry its name, its colour ramp and its
     // count on one line, which is what that row is: one layer, described.
-    <div className="flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 w-64">
-      <div className="px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-        Records
-      </div>
+    // Rolled up it shrinks to its own title, since the point of rolling it up
+    // is the corner of the map it was standing on. Open, it can be dragged
+    // bigger from any corner — a species with six neighbours drawn and every
+    // overlay on has more rows than 16rem of a map's corner will hold.
+    <div
+      ref={legendRef}
+      className={`group/legend relative flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 ${
+        legendOpen ? (legendSize ? "" : "w-64") : "w-auto"
+      }`}
+      style={legendOpen && legendSize ? { width: legendSize.w, height: legendSize.h } : undefined}
+    >
+      {/* One grip per corner. The panel is pinned to the map's bottom-left, so
+          what actually moves is its top and right edges — but a reader reaches
+          for whichever corner is nearest, and a panel that only answered to one
+          of them read as not resizable at all. */}
+      {legendOpen &&
+        (["nw", "ne", "sw", "se"] as const).map((corner) => (
+          <span
+            key={corner}
+            onPointerDown={(e) => startLegendResize(e, corner)}
+            title="Drag to resize the legend"
+            className={`absolute z-10 h-3 w-3 opacity-0 group-hover/legend:opacity-100 ${
+              corner === "nw"
+                ? "left-0 top-0 cursor-nwse-resize"
+                : corner === "ne"
+                  ? "right-0 top-0 cursor-nesw-resize"
+                  : corner === "sw"
+                    ? "bottom-0 left-0 cursor-nesw-resize"
+                    : "bottom-0 right-0 cursor-nwse-resize"
+            }`}
+          >
+            <span className="absolute inset-[3px] rounded-sm border-zinc-400 dark:border-zinc-500" style={{
+              borderTopWidth: corner.startsWith("n") ? 1.5 : 0,
+              borderBottomWidth: corner.startsWith("s") ? 1.5 : 0,
+              borderLeftWidth: corner.endsWith("w") ? 1.5 : 0,
+              borderRightWidth: corner.endsWith("e") ? 1.5 : 0,
+            }} />
+          </span>
+        ))}
+      {/* The title is the switch. A legend is read once and then in the way —
+          it sits over the bottom-left of the map, which on a species with a
+          coastal range is where the records are — and every other panel on
+          this map already rolls up from its own heading. */}
+      <button
+        onClick={() => setLegendOpen((v) => !v)}
+        title={legendOpen ? "Roll the legend up" : "Show the legend"}
+        aria-expanded={legendOpen}
+        className="flex shrink-0 items-center gap-1 px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        <svg
+          className={`h-2.5 w-2.5 shrink-0 transition-transform ${legendOpen ? "rotate-90" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        Legend
+      </button>
+      {legendOpen && (
+      <div className={legendSize ? "min-h-0 flex-1 overflow-y-auto" : "contents"}>
       {/* The assessor's own layers first, GBIF's last. These are the ones you
           are deciding about; GBIF's points are the ground they're decided
           against, and they carry the most explanation, so they anchor the
@@ -6289,7 +7429,7 @@ export default function OccurrenceMapRow({
           </span>
         </label>
       )}
-      {fullscreen && pinnedPlaces.length > 0 && (
+      {pinnedPlaces.length > 0 && (
         <label className="flex items-center gap-1.5 px-2 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px]">
           <input
             type="checkbox"
@@ -6346,7 +7486,7 @@ export default function OccurrenceMapRow({
           className="w-2.5 h-2.5 rounded-full shrink-0"
           style={{ background: "#4ade80", border: "1.5px solid #16a34a" }}
         />
-        <span className="shrink-0 text-zinc-700 dark:text-zinc-200">GBIF points</span>
+        <span className="shrink-0 text-zinc-700 dark:text-zinc-200">GBIF records</span>
         {/* What to do with this layer, behind one icon: the two colourings and
             the split. They were a link under the row and a card of their own
             below the panel, which spent three lines of a legend on controls
@@ -6362,7 +7502,7 @@ export default function OccurrenceMapRow({
                 setGbifOptionsOpen((v) => !v);
               }}
               title="How these points are coloured, and split view"
-              aria-label="GBIF points options"
+              aria-label="GBIF records options"
               className="block text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
             >
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -6447,7 +7587,7 @@ export default function OccurrenceMapRow({
             className="w-2.5 h-2.5 rounded-full shrink-0 border-[1.5px]"
             style={{ background: "transparent", borderColor: "#6b7280", opacity: 0.85 }}
           />
-          <span className="flex-1 min-w-0 text-zinc-500 dark:text-zinc-400 truncate">Excluded points</span>
+          <span className="flex-1 min-w-0 text-zinc-500 dark:text-zinc-400 truncate">Excluded GBIF records</span>
           <span className="tabular-nums text-[10px] text-zinc-400">
             {struckOutCount.toLocaleString()}
           </span>
@@ -6478,8 +7618,251 @@ export default function OccurrenceMapRow({
           )}
         </div>
       )}
+      {/* The neighbours currently drawn — last, under GBIF's own points.
+          Sitting above them it read as a heading over the whole legend, so
+          "Records / Recorded nearby / <a species> / GBIF points" left it
+          genuinely unclear which rows the heading spoke for. These are the
+          outermost layer here — not this species, not this map's own data — so
+          the bottom is where they belong. */}
+      {nearbyActive && nearbyActive.picked.length > 0 && (
+        <div className="px-2 pt-1 pb-0.5 border-t border-zinc-100 dark:border-zinc-700">
+          {/* Rolled up when the list gets long: opening six neighbours puts six
+              rows in a legend that also has to show the map's own layers. */}
+          <button
+            onClick={() => setNearbyLegendOpen((v) => !v)}
+            className="flex w-full items-center gap-1 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+          >
+            <svg
+              className={`w-2.5 h-2.5 shrink-0 transition-transform ${nearbyLegendOpen ? "rotate-90" : ""}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            Other species nearby
+            <span className="ml-auto tabular-nums">{nearbyActive.picked.length}</span>
+          </button>
+          {nearbyLegendOpen && nearbyActive.picked.map((p) => {
+            const layer = nearbyLayerKey(nearbyActive, p.key);
+            return (
+            <label
+              key={p.key}
+              className="flex items-start gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+            >
+              <input
+                type="checkbox"
+                checked={!nearbyHidden.has(layer)}
+                onChange={() =>
+                  setNearbyHidden((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(layer)) next.delete(layer);
+                    else next.add(layer);
+                    return next;
+                  })
+                }
+                className="w-3 h-3 rounded shrink-0 mt-0.5"
+                style={{ accentColor: nearbyColors[p.key] }}
+              />
+              <span
+                className="shrink-0 w-2 h-2 rounded-full border border-white mt-1"
+                style={{ backgroundColor: nearbyColors[p.key] }}
+              />
+              <span className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-200">
+                <span className="italic">{p.name}</span>
+                {p.commonName && <span className="text-zinc-400"> ({p.commonName})</span>}
+              </span>
+              <span className="shrink-0 tabular-nums text-zinc-400">
+                {nearbyPoints[layer] ? nearbyPoints[layer].points.length : "…"}
+              </span>
+              {/* The checkbox hides a layer; this takes it off the map for
+                  good. Two different things, and a legend that only offered the
+                  first left the list growing with every species opened. */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggleNearbyPicked(nearbyActive.id, p);
+                }}
+                title={`Remove ${p.name} from the map`}
+                className="shrink-0 text-zinc-300 hover:text-red-600 dark:text-zinc-600 dark:hover:text-red-400"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5h6v2m-7 0v12h8V7" />
+                </svg>
+              </button>
+            </label>
+            );
+          })}
+        </div>
+      )}
+      </div>
+      )}
     </div>
   );
+
+  /**
+   * The nearby-species panel, under the map and the iNat column both.
+   *
+   * Beside the map it squeezed the very thing it describes — in fullscreen the
+   * map column is already half the page, and a panel in it left the map 238px
+   * wide. Underneath, across the full width, the map keeps its size and the
+   * table gets room for its columns.
+   */
+  /**
+   * The editing tools, in the record list's own footer.
+   *
+   * Undo, redo, the point file and the saved work all act on the table they now
+   * sit under; in the toolbar at the top of the page they were three unlabelled
+   * icons among the filters, and the two file buttons there were routinely
+   * mistaken for each other.
+   *
+   * Two files leave this page and two come back, and they are nothing like each
+   * other: the point file is the assessment's own deliverable, a CSV of
+   * records, and the work is this browser's edits as JSON — the georeferences,
+   * the exclusions and their reasons, the pins. So they are two labelled pairs
+   * rather than four buttons in a row.
+   */
+  const EDIT_TOOLS = (
+    <>
+      {/* Undo, redo, and what they'd act on. The count opens the history: the
+          table can hide the very rows an edit touched, so an undo with nothing
+          to say for itself would act off screen. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <button
+          onClick={undoEdit}
+          disabled={!canUndo}
+          title={canUndo ? `Undo ${undoLabel ?? "the last edit"} (\u2318Z)` : "Nothing to undo"}
+          aria-label="Undo"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 9h11a4 4 0 010 8h-5M4 9l4-4M4 9l4 4" />
+          </svg>
+        </button>
+        <button
+          onClick={redoEdit}
+          disabled={!canRedo}
+          title={canRedo ? `Redo ${redoLabel ?? "the last undone edit"} (\u21e7\u2318Z)` : "Nothing to redo"}
+          aria-label="Redo"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed border-l border-zinc-200 dark:border-zinc-700"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 9H9a4 4 0 000 8h5m6-8l-4-4m4 4l-4 4" />
+          </svg>
+        </button>
+        {editHistory.length > 0 && (
+          <button
+            onClick={() => setHistoryOpen((v) => !v)}
+            title="Everything you've changed this session"
+            className="px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+          >
+            {editHistory.filter((h) => !h.undone).length}
+          </button>
+        )}
+      </div>
+
+      {/* The point file: records, as CSV. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <span
+          className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500"
+          style={pointFile ? { color: POINT_FILE_COLOR } : undefined}
+        >
+          Points
+        </span>
+        <button
+          onClick={() => setPointFileOpen(true)}
+          title={
+            pointFile
+              ? `${pointFile.fileName} — ${pointFile.points.length.toLocaleString()} records on the map. Click to compare them against your own, or load a different file.`
+              : "Import a CSV of point records — one row per record, with decimal latitude and longitude columns. It goes on the map as its own layer, to compare against."
+          }
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+        >
+          Import
+        </button>
+        <button
+          onClick={() => setCompilerPrompt(true)}
+          disabled={exportablePoints.length === 0}
+          title={`Save the ${exportablePoints.length.toLocaleString()} counted records that have a position as an IUCN point file (CSV)`}
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          Export
+        </button>
+      </div>
+
+      {/* The work: this browser's edits, as JSON. */}
+      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+        <span className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+          Work
+        </span>
+        <button
+          onClick={saveWork}
+          disabled={!hasWorkToSave}
+          title={
+            !hasWorkToSave
+              ? "Nothing to save yet — georeference, date or set aside a record, or pin a place"
+              : `Save your work on this species to a JSON file — ${savableSummary}${
+                  lastSavedAt ? `, last saved ${lastSavedAt.slice(11, 16)}` : ", never saved"
+                }`
+          }
+          className={`px-1.5 py-0.5 text-[10px] border-l border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent ${
+            hasWorkToSave && !lastSavedAt
+              ? "text-amber-600 dark:text-amber-500"
+              : "text-zinc-500 dark:text-zinc-400"
+          }`}
+        >
+          Save
+        </button>
+        <button
+          onClick={() => restoreInputRef.current?.click()}
+          title="Put back the work from a JSON file you saved earlier — it replaces what this browser holds for this species"
+          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+        >
+          Restore
+        </button>
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) readRestoreFile(file);
+          }}
+        />
+      </div>
+    </>
+  );
+
+  const NEARBY_PANEL = nearbyActive ? (
+    // Full height of whatever column it is given, so the panel's own body is
+    // the thing that scrolls. As a plain `w-full` it sized to its content, the
+    // content never overflowed, and the list simply ran past the bottom of the
+    // page with no scrollbar anywhere.
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <NearbySpeciesPanel
+                    key={nearbyActive.id}
+                    lat={nearbyActive.lat}
+                    lng={nearbyActive.lng}
+                    recordName={nearbyActive.recordName}
+                    excludeGbifKey={speciesKey}
+                    radiusKm={nearbyActive.radiusKm}
+                    onRadiusChange={(km) => setNearbyRadius(nearbyActive.id, km)}
+                    picked={nearbyActive.picked.map((p) => {
+                      const layer = nearbyLayerKey(nearbyActive, p.key);
+                      return {
+                        key: p.key,
+                        color: nearbyColors[p.key],
+                        drawn: nearbyPoints[layer]
+                          ? { shown: nearbyPoints[layer].points.length, total: nearbyPoints[layer].total }
+                          : null,
+                      };
+                    })}
+                    onTogglePick={(species) => toggleNearbyPicked(nearbyActive.id, species)}
+                    onClose={() => closeNearbySearch(nearbyActive.id)}
+                  />
+    </div>
+  ) : null;
 
   return (
     <div
@@ -7232,120 +8615,9 @@ export default function OccurrenceMapRow({
                       </span>
                     )}
 
-                    {/* Editing tools, on the page that has something to
-                        edit: undo, redo and the CSV import all act on the
-                        record list, and that list only exists in fullscreen. */}
-                    {fullscreen && (
-                      <>
-                      {/* Saving the work, and putting a saved file back. First
-                          in the row and not in a menu: the edits live in this
-                          browser only, and the button that gets them out of it
-                          should be the one you can see. */}
-                      <div className="inline-flex rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-                        <button
-                          onClick={saveWork}
-                          disabled={!hasWorkToSave}
-                          title={
-                            !hasWorkToSave
-                              ? "Nothing to save yet — georeference, date or set aside a record, or pin a place"
-                              : `Save your work for this species to a file — ${savableSummary}${
-                                  lastSavedAt ? `, last saved ${lastSavedAt.slice(11, 16)}` : ", never saved"
-                                }`
-                          }
-                          aria-label="Save your work to a file"
-                          className={`flex items-center gap-1 px-1.5 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed ${
-                            hasWorkToSave && !lastSavedAt ? "text-amber-600 dark:text-amber-500" : "text-zinc-600 dark:text-zinc-300"
-                          }`}
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                          </svg>
-                          {/* Named, where the rest of the toolbar is icons:
-                              this is the one button whose job is to get the
-                              work out of a browser that could lose it, and an
-                              arrow nobody recognises isn't an invitation. */}
-                          <span className="text-xs">Save</span>
-                        </button>
-                        <button
-                          onClick={() => restoreInputRef.current?.click()}
-                          title="Put back the work from a file you saved earlier"
-                          aria-label="Restore your work from a file"
-                          className="px-1.5 py-1 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9m0 0l-4 4m4-4l4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2" />
-                          </svg>
-                        </button>
-                        <input
-                          ref={restoreInputRef}
-                          type="file"
-                          accept="application/json,.json"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            e.target.value = "";
-                            if (file) readRestoreFile(file);
-                          }}
-                        />
-                      </div>
-                      {/* Undo, redo, and what they'd act on. The label matters
-                          more than usual here: the table can hide the very rows an
-                          edit touched, so an unlabelled undo would act off-screen
-                          with nothing to say for itself. */}
-                      <div className="flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
-                        <button
-                          onClick={undoEdit}
-                          disabled={!canUndo}
-                          title={canUndo ? `Undo ${undoLabel ?? "the last edit"} (\u2318Z)` : "Nothing to undo"}
-                          className="px-1.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={redoEdit}
-                          disabled={!canRedo}
-                          title={canRedo ? `Redo ${redoLabel ?? "the last undone edit"} (\u21e7\u2318Z)` : "Nothing to redo"}
-                          className="px-1.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed border-l border-zinc-200 dark:border-zinc-700"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3" />
-                          </svg>
-                        </button>
-                        {editHistory.length > 0 && (
-                          <button
-                            onClick={() => setHistoryOpen((v) => !v)}
-                            title="Everything you've changed this session"
-                            className="px-1.5 py-1 text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
-                          >
-                            {editHistory.filter((h) => !h.undone).length}
-                          </button>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => setPointFileOpen(true)}
-                        title={
-                          pointFile
-                            ? `${pointFile.fileName} — ${pointFile.points.length.toLocaleString()} records on the map. Click to compare them against your own, or load a different file.`
-                            : "Import a CSV of point records — one row per record, with decimal latitude and longitude columns. It goes on the map as its own layer, to compare against."
-                        }
-                        aria-label="Import CSV records"
-                        className="inline-flex items-center px-1.5 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-                      >
-                        {/* An upload arrow rather than a map pin: the button's
-                            job is getting the file in, and a pin said "another
-                            layer" beside a row of layer toggles. Icon only, like
-                            the undo and redo it sits beside; it turns the point
-                            file's own colour once one is loaded, which is the
-                            only state it has to report. */}
-                        <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                             style={pointFile ? { color: POINT_FILE_COLOR } : undefined}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
-                        </svg>
-                      </button>
-                      </>
-                    )}
+                    {/* The editing tools — undo, redo, the point file and
+                        the saved work — live in the record list's own footer
+                        now, beside the table they act on. */}
                 </div>
                 {/* The map/list arrangement is chosen from the table's own
                     footer, beside the column picker — it's a question about
@@ -7367,7 +8639,9 @@ export default function OccurrenceMapRow({
                   </Link>
                 ) : (
                   <Link
-                    href={`/mapping/${encodeURIComponent(speciesKey)}`}
+                    href={`/mapping/${encodeURIComponent(speciesKey)}${
+                      nearbyParam ? `?near=${encodeURIComponent(nearbyParam)}` : ""
+                    }`}
                     title="Open the map and record list fullscreen, on their own shareable page"
                     className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
                   >
@@ -7386,8 +8660,12 @@ export default function OccurrenceMapRow({
             ref={splitRef}
             className={
               fullscreen
-                ? `flex flex-1 min-h-0 ${panelLayout === "rows" ? "flex-col" : "flex-row"}`
-                : "flex flex-col sm:flex-row sm:items-stretch gap-2"
+                ? "flex flex-1 min-h-0 flex-row"
+                // Wrapping, so the record panel drops to a line of its own under
+                // the photos and the map rather than squeezing in beside them.
+                // Cheaper than restructuring the DOM, and it keeps one set of
+                // children for both modes.
+                : "flex flex-col sm:flex-row sm:flex-wrap sm:items-stretch gap-2"
             }
           >
             {/* Left column — iNat photo gallery only (hidden if no iNat data); narrow
@@ -7475,9 +8753,12 @@ export default function OccurrenceMapRow({
             {/* Map(s) — takes remaining width, stretches to match left column */}
             <div
               className={`order-1 sm:order-none flex-1 min-w-0 flex flex-col gap-2${fullscreen ? " min-h-0" : ""}`}
-              // Two thirds by default, and whatever the divider has been
-              // dragged to after that.
-              style={fullscreen ? { flex: `0 0 ${mapHeightPct}%` } : undefined}
+              // Fullscreen shares its width (or height) with the record
+              // panel: two thirds by default, and whatever the divider has been
+              // dragged to after that. On the dashboard the panel sits below
+              // the map, so the map keeps the whole row — a share of it left
+              // dead space to the right of the canvas.
+              style={fullscreen ? { flex: `0 0 ${splitPct}%` } : undefined}
             >
                 {splitView && splitDate ? (
                   <div className="flex flex-col gap-2">
@@ -7578,17 +8859,17 @@ export default function OccurrenceMapRow({
                 )}
             </div>
 
-            {/* Record list — only in fullscreen, where there's room to read it
-                against the map. Hovering a row highlights that record's point
-                and vice versa: the table carries the locality and collection
-                detail, the map carries the position. Stacks below the map on
-                narrow screens. */}
-            {fullscreen && (
+            {/* The map/list boundary, dragged. Fullscreen only: there the two
+                share a fixed page and moving the line between them is the whole
+                question. On the dashboard they are stacked in a page that
+                scrolls, and the panel is resized from its own bottom edge
+                instead. */}
+              {fullscreen && (
               <div
                 role="separator"
-                aria-orientation="horizontal"
+                aria-orientation="vertical"
                 aria-label="Resize map and record list"
-                aria-valuenow={Math.round(mapHeightPct)}
+                aria-valuenow={Math.round(splitPct)}
                 aria-valuemin={FULLSCREEN_MIN_MAP_PCT}
                 aria-valuemax={FULLSCREEN_MAX_MAP_PCT}
                 tabIndex={0}
@@ -7598,30 +8879,49 @@ export default function OccurrenceMapRow({
                 onPointerCancel={handleDividerPointerUp}
                 onKeyDown={handleDividerKeyDown}
                 title="Drag to resize the map and the list"
-                className={`order-2 sm:order-none group relative shrink-0 touch-none flex items-center justify-center ${
-                  panelLayout === "rows" ? "w-full h-3 cursor-row-resize" : "h-full w-3 cursor-col-resize"
-                } ${
+                className={`order-2 sm:order-none group relative shrink-0 touch-none flex h-full w-3 cursor-col-resize items-center justify-center ${
                   draggingDivider ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 } focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded`}
               >
                 <div
-                  className={`rounded-full transition-colors ${panelLayout === "rows" ? "h-0.5 w-10" : "w-0.5 h-10"} ${
+                  className={`h-10 w-0.5 rounded-full transition-colors ${
                     draggingDivider
                       ? "bg-blue-500"
                       : "bg-zinc-300 dark:bg-zinc-600 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-500"
                   }`}
                 />
               </div>
-            )}
-            {fullscreen && (
-              <div className="order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0">
+              )}
+            {/* The record panel — GBIF records, what you've set aside, an
+                imported file, and the nearby search — in both modes. Which
+                tables exist should not depend on which page you opened. */}
+            <div
+              ref={listPanelRef}
+              className={
+                fullscreen
+                  ? "order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0"
+                  : "order-3 sm:order-none flex w-full sm:basis-full flex-col gap-2 min-w-0"
+              }
+              style={fullscreen ? undefined : { height: listHeightPx }}
+            >
                 <div className="flex items-center gap-1 shrink-0 text-[11px] border-b border-zinc-200 dark:border-zinc-700">
+                  {/* The tabs scroll rather than wrap: several searches open at
+                      once outran the strip, and a second row of tabs would eat
+                      the list's height every time one was opened. The zoom
+                      control stays outside the scroller, where it can always be
+                      reached. */}
+                  <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
                   {listTabs.map((tab) => (
                     <button
                       key={tab.key}
-                      onClick={() => setListTab(tab.key)}
+                      onClick={() => {
+                        setListTab(tab.key);
+                        // A nearby tab is also which question the map is
+                        // answering: its ring goes solid and its pin fills in.
+                        if (tab.key.startsWith("nearby:")) setNearbyActiveId(tab.key.slice("nearby:".length));
+                      }}
                       title={tab.title}
-                      className={`flex items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
+                      className={`flex shrink-0 items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
                         listTab === tab.key
                           ? "border-blue-500 text-zinc-700 dark:text-zinc-200"
                           : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
@@ -7631,12 +8931,44 @@ export default function OccurrenceMapRow({
                         <span className="w-2 h-2 rotate-45 shrink-0" style={{ background: tab.dot }} />
                       )}
                       <span className="truncate">{tab.label}</span>
-                      <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
+                      {tab.key.startsWith("nearby:") ? (
+                        // A question you asked can be put away from the tab
+                        // that holds it, the way a browser closes one. The
+                        // panel's own × does the same for the one on screen.
+                        <span
+                          role="button"
+                          tabIndex={-1}
+                          aria-label={`Close ${tab.label}`}
+                          title="Close this search"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeNearbySearch(tab.key.slice("nearby:".length));
+                          }}
+                          className="-mr-0.5 shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+                        >
+                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
+                      )}
                     </button>
                   ))}
+                  </div>
                   <ListZoomControl zoom={listZoom} onChange={setListZoom} />
                 </div>
-                {pointFile && pointFileComparison && listTab === "file" ? (
+                {listTab.startsWith("nearby:") ? (
+                  // In fullscreen the list column is the only place with room
+                  // for a second table, so the search takes a tab on it rather
+                  // than a third column squeezed beside the map.
+                  <div
+                    className="min-h-0 flex-1 overflow-hidden p-1"
+                    style={listZoom === 1 ? undefined : { zoom: listZoom }}
+                  >
+                    {NEARBY_PANEL}
+                  </div>
+                ) : pointFile && pointFileComparison && listTab === "file" ? (
                   <PointFileTable
                     comparison={pointFileComparison}
                     fileName={pointFile.fileName}
@@ -7668,44 +9000,62 @@ export default function OccurrenceMapRow({
                     setRowMenu({ gbifID: feature.properties.gbifID, x: at.x, y: at.y })
                   }
                   footerExtra={
-                    // Only the counted records make a point file, so only that
-                    // list offers to save one.
-                    listTab === "gbif" ? (
-                      <button
-                        onClick={() => setCompilerPrompt(true)}
-                        disabled={exportablePoints.length === 0}
-                        title={`Save the ${exportablePoints.length.toLocaleString()} counted records that have a position as an IUCN point file (CSV)`}
-                        className="p-1 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                        </svg>
-                      </button>
-                    ) : listTab === "excluded" ? (
-                      <button
-                        onClick={() => setConfirmPutAllBack(true)}
-                        title="Count every excluded record again, forgetting the reasons given"
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                      >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M4 10a8 8 0 1 1 2 5.3" />
-                        </svg>
-                        Put all back
-                      </button>
-                    ) : undefined
+                    <>
+                      {listTab === "excluded" && (
+                        <button
+                          onClick={() => setConfirmPutAllBack(true)}
+                          title="Count every excluded record again, forgetting the reasons given"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M4 10a8 8 0 1 1 2 5.3" />
+                          </svg>
+                          Put all back
+                        </button>
+                      )}
+                      {EDIT_TOOLS}
+                    </>
                   }
                   excludedIds={excludedIds}
                   exclusions={exclusions}
                   onExclude={setPendingExclusion}
                   onInclude={includeAgain}
-                  panelLayout={panelLayout}
-                  onTogglePanelLayout={() => setPanelLayout((v) => (v === "rows" ? "columns" : "rows"))}
                   zoom={listZoom}
                   fillHeight
                 />
                 )}
+                {/* The grip that grows the panel, along its own bottom edge.
+                    Only on the dashboard: fullscreen has the divider, and the
+                    panel there is bounded by the page rather than by a number. */}
+                {!fullscreen && (
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Resize the record list"
+                    aria-valuenow={Math.round(listHeightPx)}
+                    aria-valuemin={160}
+                    aria-valuemax={1200}
+                    tabIndex={0}
+                    onPointerDown={handleListEdgeDown}
+                    onPointerMove={handleListEdgeMove}
+                    onPointerUp={handleListEdgeUp}
+                    onPointerCancel={handleListEdgeUp}
+                    onKeyDown={handleListEdgeKeyDown}
+                    title="Drag to make the list taller"
+                    className={`group -mt-1 flex h-3 w-full shrink-0 cursor-ns-resize touch-none items-center justify-center rounded ${
+                      draggingListEdge ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    } focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500`}
+                  >
+                    <div
+                      className={`h-0.5 w-10 rounded-full transition-colors ${
+                        draggingListEdge
+                          ? "bg-blue-500"
+                          : "bg-zinc-300 dark:bg-zinc-600 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-500"
+                      }`}
+                    />
+                  </div>
+                )}
               </div>
-            )}
             {/* A restore replaces what's here, so it says what it holds and what
                 it would replace before it does. Undoable either way — but a
                 dialog is cheaper than finding the undo button afterwards. */}

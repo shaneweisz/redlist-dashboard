@@ -96,6 +96,26 @@ const ALL_INSECT_GROUPS = [
   "true_bugs", "grasshoppers_crickets_locusts", "dragonflies_and_damselflies", "other_insects",
 ];
 
+/**
+ * How to write the taxon groups that aren't nodes of their own.
+ *
+ * Every other group is a node in the tree below and takes its name from there.
+ * The insect orders are only ever filter values — the tree splits insects by
+ * SSC group rather than by order — so anything printing one had nothing to
+ * print but the id, and "grasshoppers_crickets_locusts" arrived on screen as
+ * "grasshoppers crickets locusts".
+ */
+export const TAXON_GROUP_NAMES: Record<string, string> = {
+  beetles: "Beetles",
+  butterflies_and_moths: "Butterflies & Moths",
+  flies_and_mosquitoes: "Flies & Mosquitoes",
+  bees_wasps_and_ants: "Bees, Wasps & Ants",
+  true_bugs: "True Bugs",
+  grasshoppers_crickets_locusts: "Grasshoppers, Crickets & Locusts",
+  dragonflies_and_damselflies: "Dragonflies & Damselflies",
+  other_insects: "Other Insects",
+};
+
 // ─── Plant taxonomy ──────────────────────────────────────────────────
 //
 // Plant Table 1a groups have no STATIC order/class-level split — unlike

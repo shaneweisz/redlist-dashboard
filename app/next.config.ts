@@ -106,6 +106,11 @@ const nextConfig: NextConfig = {
     // ?country=, since the throw happens before GET() ever runs).
     "/api/redlist/taxa-summary": DUCKDB_TRACE,
     "/api/redlist/taxa-subgroups": DUCKDB_TRACE,
+    // "What else is assessed near here" joins a GBIF radius facet against
+    // assessed.parquet in R2 (getAssessedByGbifKeys) — the same DuckDB-over-R2
+    // query as every route above, so it needs the dlopen'd .so and the sync
+    // pointer too.
+    "/api/nearby-species": DUCKDB_TRACE,
     // Live no-match diagnostic breakdown for dynamic taxonomic-drilldown nodes
     // (live-breakdown.ts) — queries assessed/species_link/species/backbone
     // parquets in R2 via the same DuckDB connection, needs the same trace.
@@ -189,6 +194,14 @@ const nextConfig: NextConfig = {
     // dataset into the function via the shared live-breakdown.ts import,
     // blowing well past Vercel's 250MB uncompressed function-size limit).
     "/api/redlist/col-taxon-ids-live": ["**/data/**"],
+    // Reads assessed.parquet entirely from R2 (httpfs) and otherwise talks only
+    // to GBIF, so nothing under data/ belongs in the bundle. Without this the
+    // shared species-duckdb import traced the whole sync in and the function
+    // came out at 627MB — 2.5x Vercel's cap. It reaches filter-vocab (for the
+    // threat labels), which can read data/vernacular-names.json, but only lazily
+    // from taxonLabel() and behind a try/catch that degrades to the curated
+    // names; threatDisplay() reads a static const and never opens the file.
+    "/api/nearby-species": ["**/data/**"],
     // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
     // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
     // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.

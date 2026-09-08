@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  ASSESSMENT_NARRATIVES,
+  loadAssessment,
+  type LoadedAssessment,
+  type NarrativeField,
+  type RedListAssessment,
+} from "@/lib/redlist/assessment";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
 import { stripHtml, truncateSections } from "@/lib/html-text";
 
@@ -21,30 +28,6 @@ interface PreviousAssessment {
   contributors?: string | null;
   /** The organisation(s) behind the assessment. */
   institutions?: string | null;
-}
-
-interface AssessmentDetail {
-  assessment_id: number;
-  sis_taxon_id: number;
-  url: string;
-  red_list_category: { code: string; description?: string } | string | null;
-  criteria: string | null;
-  assessment_date: string | null;
-  year_published: string | null;
-  possibly_extinct: boolean | null;
-  possibly_extinct_in_the_wild: boolean | null;
-  rationale: string | null;
-  population: string | null;
-  habitat: string | null;
-  threats: string | null;
-  conservation_actions: string | null;
-  use_trade: string | null;
-  range: string | null;
-  population_trend: { code: string; description?: string } | string | null;
-  systems: ({ code: string; description?: string } | string)[] | null;
-  scopes: ({ code: string; description?: string } | string)[] | null;
-  cached?: boolean;
-  error?: string;
 }
 
 interface RedListAssessmentsProps {
@@ -68,14 +51,14 @@ function formatDate(iso: string): string {
 }
 
 // Safely extract category code from red_list_category (can be string or object)
-function getCategoryCode(cat: AssessmentDetail["red_list_category"]): string {
+function getCategoryCode(cat: RedListAssessment["red_list_category"]): string {
   if (!cat) return "?";
   if (typeof cat === "string") return cat;
   return cat.code || "?";
 }
 
 // Safely extract population trend text (can be string or object)
-function getTrendText(trend: AssessmentDetail["population_trend"]): string {
+function getTrendText(trend: RedListAssessment["population_trend"]): string {
   if (!trend) return "";
   if (typeof trend === "string") return trend;
   return trend.description || trend.code || "";
@@ -104,18 +87,26 @@ function CategoryBadge({ code, small }: { code: string; small?: boolean }) {
 const NARRATIVE_WORD_LIMIT = 200;
 
 // The assessment's narrative fields, in display order.
-const NARRATIVE_FIELDS: {
-  title: string;
-  field: "rationale" | "population" | "habitat" | "threats" | "conservation_actions" | "use_trade" | "range";
-}[] = [
-  { title: "Rationale", field: "rationale" },
-  { title: "Population", field: "population" },
-  { title: "Habitat & Ecology", field: "habitat" },
-  { title: "Threats", field: "threats" },
-  { title: "Conservation Actions", field: "conservation_actions" },
-  { title: "Use & Trade", field: "use_trade" },
-  { title: "Geographic Range", field: "range" },
-];
+/**
+ * The narratives, in the order this tab reads them, with the long titles.
+ *
+ * Both the field list and the titles come from the shared module: the
+ * nearby-species panel reads the same assessments in its own order and with
+ * shorter labels, and a field the route starts returning should not be able to
+ * appear in one of them and not the other.
+ */
+const NARRATIVE_FIELDS = ([
+  "rationale",
+  "population",
+  "habitat",
+  "threats",
+  "conservation_actions",
+  "use_trade",
+  "range",
+] as const satisfies readonly NarrativeField[]).map((field) => ({
+  field,
+  title: ASSESSMENT_NARRATIVES.find((n) => n.field === field)!.title,
+}));
 
 // Collapsible section for narrative text. The text arrives already capped;
 // `fullTextUrl` is passed only to the last section shown, where the narrative
@@ -174,8 +165,8 @@ function AssessmentComparison({
   older,
   newer,
 }: {
-  older: AssessmentDetail;
-  newer: AssessmentDetail;
+  older: RedListAssessment;
+  newer: RedListAssessment;
 }) {
   const olderCat = getCategoryCode(older.red_list_category);
   const newerCat = getCategoryCode(newer.red_list_category);
@@ -188,7 +179,7 @@ function AssessmentComparison({
   const improved = newerOrder > olderOrder; // higher order = less threatened
   const worsened = newerOrder < olderOrder;
 
-  const sections: { key: string; title: string; field: keyof AssessmentDetail }[] = [
+  const sections: { key: string; title: string; field: keyof RedListAssessment }[] = [
     { key: "rationale", title: "Rationale", field: "rationale" },
     { key: "population", title: "Population", field: "population" },
     { key: "habitat", title: "Habitat & Ecology", field: "habitat" },
@@ -370,73 +361,86 @@ export default function RedListAssessments({
         ...previousAssessments,
       ].sort((a, b) => (a.year || "0").localeCompare(b.year || "0"));
 
-  const [selectedIndex, setSelectedIndex] = useState(allAssessments.length - 1);
-  // History is fetched lazily, so allAssessments can grow from 1 → N after mount
-  // (and changes when switching species). Default the selection to the newest
-  // assessment whenever the set size changes; manual timeline clicks (which don't
-  // change the size) are preserved.
-  useEffect(() => {
-    setSelectedIndex(allAssessments.length - 1);
-  }, [allAssessments.length]);
+  /**
+   * Which assessment is being read: the newest, or the one clicked.
+   *
+   * History is fetched lazily, so allAssessments grows from 1 → N after mount
+   * and changes again when the species does. The selection is therefore derived
+   * rather than corrected afterwards — a click is remembered along with the
+   * size of the set it was made in, and stops counting when that set changes.
+   * As an effect that reset it, this raced the render that had already drawn
+   * the old index.
+   */
+  const [picked, setPicked] = useState<{ size: number; index: number } | null>(null);
+  const selectedIndex =
+    picked && picked.size === allAssessments.length ? picked.index : allAssessments.length - 1;
+  const setSelectedIndex = useCallback(
+    (index: number) => setPicked({ size: allAssessments.length, index }),
+    [allAssessments.length]
+  );
   const [compareMode, setCompareMode] = useState(false);
-  const [assessmentDetails, setAssessmentDetails] = useState<Record<number, AssessmentDetail>>({});
-  const [loadingIds, setLoadingIds] = useState<Set<number>>(new Set());
-  const [errorIds, setErrorIds] = useState<Set<number>>(new Set());
+  /**
+   * What has been read, keyed by assessment id.
+   *
+   * One map rather than a map plus a loading set plus an error set plus a ref
+   * mirroring each: whether an assessment is loading is not state of its own,
+   * it is "what I hold does not include the one being asked for". The three
+   * sets had to be kept in step with each other by hand, and were written to
+   * from inside an effect, which is what made a stale render show a spinner
+   * over an assessment it already had.
+   */
+  const [held, setHeld] = useState<Record<number, LoadedAssessment>>({});
 
-  // Use refs for the guard check to avoid stale closures in useCallback
-  const detailsRef = useRef(assessmentDetails);
-  detailsRef.current = assessmentDetails;
-  const loadingRef = useRef(loadingIds);
-  loadingRef.current = loadingIds;
-  const errorRef = useRef(errorIds);
-  errorRef.current = errorIds;
+  /** The assessments this view needs: the selected one, and its predecessor
+      when the two are being compared. */
+  const wanted = useMemo(() => {
+    const ids: number[] = [];
+    const selected = allAssessments[selectedIndex];
+    if (selected) ids.push(selected.assessment_id);
+    if (compareMode && selectedIndex > 0) ids.push(allAssessments[selectedIndex - 1].assessment_id);
+    return ids;
+  }, [allAssessments, selectedIndex, compareMode]);
+  const wantedKey = wanted.join(",");
 
-  const fetchAssessment = useCallback(async (assessmentId: number) => {
-    if (detailsRef.current[assessmentId] || loadingRef.current.has(assessmentId) || errorRef.current.has(assessmentId)) return;
-
-    setLoadingIds((prev) => new Set(prev).add(assessmentId));
-    setErrorIds((prev) => {
-      const next = new Set(prev);
-      next.delete(assessmentId);
-      return next;
-    });
-
-    try {
-      const res = await fetch(`/api/redlist/assessment/${assessmentId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: AssessmentDetail = await res.json();
-      setAssessmentDetails((prev) => ({ ...prev, [assessmentId]: data }));
-    } catch {
-      setErrorIds((prev) => new Set(prev).add(assessmentId));
-    } finally {
-      setLoadingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(assessmentId);
-        return next;
+  /**
+   * Fetch what is wanted and not yet held.
+   *
+   * Keyed on the ids rather than on what is held, so arriving results don't
+   * restart it; the shared loader caches and de-dupes, so a re-run of this
+   * effect costs a map lookup rather than a request.
+   */
+  useEffect(() => {
+    let live = true;
+    for (const id of wantedKey ? wantedKey.split(",").map(Number) : []) {
+      loadAssessment(id).then((next) => {
+        if (live) setHeld((prev) => (prev[id] ? prev : { ...prev, [id]: next }));
       });
     }
+    return () => {
+      live = false;
+    };
+  }, [wantedKey]);
+
+  /** Ask again for one that failed — a failure is usually the network. */
+  const retry = useCallback((assessmentId: number) => {
+    setHeld((prev) => {
+      const next = { ...prev };
+      delete next[assessmentId];
+      return next;
+    });
+    loadAssessment(assessmentId).then((next) => setHeld((prev) => ({ ...prev, [assessmentId]: next })));
   }, []);
 
-  // Fetch the selected assessment on mount/selection change
-  useEffect(() => {
-    const selected = allAssessments[selectedIndex];
-    if (selected) {
-      fetchAssessment(selected.assessment_id);
-    }
-    // In compare mode, also fetch the previous (older) assessment
-    if (compareMode && selectedIndex > 0) {
-      fetchAssessment(allAssessments[selectedIndex - 1].assessment_id);
-    }
-  }, [selectedIndex, compareMode, allAssessments, fetchAssessment]);
-
   const selectedAssessment = allAssessments[selectedIndex];
-  const selectedDetail = selectedAssessment ? assessmentDetails[selectedAssessment.assessment_id] : null;
+  const selectedDetail = selectedAssessment ? held[selectedAssessment.assessment_id]?.assessment ?? null : null;
   const olderAssessment = selectedIndex > 0 ? allAssessments[selectedIndex - 1] : null;
-  const olderDetail = olderAssessment ? assessmentDetails[olderAssessment.assessment_id] : null;
+  const olderDetail = olderAssessment ? held[olderAssessment.assessment_id]?.assessment ?? null : null;
 
-  const isLoading = selectedAssessment && loadingIds.has(selectedAssessment.assessment_id);
-  const hasError = selectedAssessment && errorIds.has(selectedAssessment.assessment_id);
-  const isCompareLoading = olderAssessment && loadingIds.has(olderAssessment.assessment_id);
+  // Loading is what is wanted and not yet held; an error is what came back
+  // instead of an assessment.
+  const isLoading = !!selectedAssessment && !held[selectedAssessment.assessment_id];
+  const hasError = !!selectedAssessment && !!held[selectedAssessment.assessment_id]?.error;
+  const isCompareLoading = !!olderAssessment && !held[olderAssessment.assessment_id];
 
   return (
     <div className="p-4 space-y-4">
@@ -522,7 +526,7 @@ export default function RedListAssessments({
           Failed to load assessment details.{" "}
           <button
             className="underline hover:text-red-600"
-            onClick={() => selectedAssessment && fetchAssessment(selectedAssessment.assessment_id)}
+            onClick={() => selectedAssessment && retry(selectedAssessment.assessment_id)}
           >
             Retry
           </button>
@@ -582,7 +586,7 @@ function AssessmentDetailView({
   detail,
   assessment,
 }: {
-  detail: AssessmentDetail;
+  detail: RedListAssessment;
   assessment: PreviousAssessment;
 }) {
   const catCode = getCategoryCode(detail.red_list_category) !== "?" ? getCategoryCode(detail.red_list_category) : assessment.category;

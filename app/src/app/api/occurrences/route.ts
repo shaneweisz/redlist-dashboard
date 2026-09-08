@@ -5,6 +5,15 @@ import { GBIF_CHECKLIST_KEY, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * How many records one by-id request may name.
+ *
+ * GBIF ORs repeated `gbifId` parameters, so a batch is one query — but a URL
+ * has a length and an assessor can have touched thousands of records over a
+ * season. The client chunks; this is the cap on each chunk.
+ */
+const MAX_IDS_PER_REQUEST = 100;
+
 const GBIF_PAGE_LIMIT = 300; // GBIF API max per request
 const GBIF_MAX_RETRIES = 4;
 const GBIF_BACKOFF_MS = 300;
@@ -275,6 +284,93 @@ async function fetchPaginated(
   return { results, totalCount };
 }
 
+/**
+ * GBIF records as the map and the list read them.
+ *
+ * Shared by both ways into this route — a page of a record set, and a handful
+ * of records asked for by id — so a record recovered by id carries the same
+ * coordinate status, quality flags and passed-through fields as one that
+ * arrived in a sample. Anything less and the two would behave differently in
+ * the table that shows them side by side.
+ */
+function toFeatures(results: GbifRecord[]) {
+  // De-duplicated by gbifID: the issue and missing queries overlap for records
+  // whose coordinates were invalid enough that GBIF dropped them entirely.
+  const seen = new Set<number>();
+  const allResults: GbifRecord[] = [];
+  for (const r of results) {
+    if (seen.has(r.key)) continue;
+    seen.add(r.key);
+    allResults.push(r);
+  }
+
+  const geospatialIssuesByKey = new Map<number, string[]>(
+    allResults.map((r) => [r.key, (r.issues ?? []).filter((i) => GBIF_GEOSPATIAL_ISSUES.has(i))])
+  );
+
+  // Coordinate-cleaning checks only mean anything for records that have a
+  // position; the unmapped ones are indexed alongside them as nulls so the two
+  // arrays stay aligned.
+  const positioned = allResults.filter(
+    (r) => r.decimalLatitude != null && r.decimalLongitude != null
+  );
+  // Computed over this request's result set (a single species, per cc_dupl's species
+  // key), not the species' full GBIF record — this route is paginated per-request and
+  // never sees a species' complete point set.
+  const positionedFlags = getQualityFlags(
+    positioned.map((r) => ({ lon: r.decimalLongitude, lat: r.decimalLatitude, countryCode: r.countryCode }))
+  );
+  const qualityFlagsByKey = new Map<number, string[]>(
+    positioned.map((r, i) => [r.key, positionedFlags[i]])
+  );
+
+  return allResults.map((r) => ({
+    type: "Feature",
+    properties: {
+      gbifID: r.key,
+      species: r.species || r.scientificName,
+      eventDate: r.eventDate,
+      recordedBy: r.recordedBy,
+      country: r.country,
+      countryCode: r.countryCode,
+      basisOfRecord: r.basisOfRecord,
+      datasetKey: r.datasetKey,
+      datasetName: r.datasetName,
+      publishingOrgKey: r.publishingOrgKey,
+      coordinateUncertaintyInMeters: r.coordinateUncertaintyInMeters ?? null,
+      year: r.year ?? null,
+      month: r.month ?? null,
+      institutionCode: r.institutionCode,
+      institutionKey: r.institutionKey,
+      qualityFlags: qualityFlagsByKey.get(r.key) ?? [],
+      // List-view-only fields. `locality` is often empty on aggregator records
+      // (iNaturalist, for one, only ships verbatimLocality), so both are sent
+      // and the client falls back.
+      locality: r.locality,
+      verbatimLocality: r.verbatimLocality,
+      stateProvince: r.stateProvince,
+      elevation: r.elevation ?? null,
+      verbatimElevation: r.verbatimElevation,
+      depth: r.depth ?? null,
+      identifiedBy: r.identifiedBy,
+      collectionCode: r.collectionCode,
+      catalogNumber: r.catalogNumber,
+      establishmentMeans: r.establishmentMeans,
+      occurrenceID: r.occurrenceID,
+      coordinateStatus: classify(r, geospatialIssuesByKey.get(r.key) ?? []),
+      gbifIssues: geospatialIssuesByKey.get(r.key) ?? [],
+      ...passThrough(r),
+      images: imagesOf(r),
+    },
+    // null for records with no coordinates — valid GeoJSON, and the signal the
+    // map uses to skip them while the list still shows their locality.
+    geometry:
+      r.decimalLatitude != null && r.decimalLongitude != null
+        ? { type: "Point", coordinates: [r.decimalLongitude, r.decimalLatitude] }
+        : null,
+  }));
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const speciesKey = searchParams.get("speciesKey");
@@ -296,6 +392,20 @@ export async function GET(request: NextRequest) {
   // "Load more records without coordinates": pages that set alone, from its own
   // offset, so it can't disturb where the mapped set has got to.
   const onlyMissing = searchParams.get("onlyMissing") === "true";
+  /**
+   * Named records, whatever page of the species they would otherwise fall on.
+   *
+   * An assessor's edits are held against a gbifID and outlive the sample they
+   * were made in: georeference a record on the fourth page, come back
+   * tomorrow, and the default sample no longer contains it. This is how the
+   * page gets those records back — asked for by id, and normalised like every
+   * other record here.
+   */
+  const ids = (searchParams.get("gbifIds") ?? "")
+    .split(",")
+    .map((v) => parseInt(v, 10))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .slice(0, MAX_IDS_PER_REQUEST);
 
   if (!speciesKey) {
     return NextResponse.json(
@@ -327,6 +437,23 @@ export async function GET(request: NextRequest) {
     // GBIF default order: year descending, then month ascending within each year,
     // then by gbifID ascending. No custom sort is available via the API.
     //
+    // By id: one query with the keys ORed together, and none of the bucket
+    // machinery — which set a record belongs to is decided by what it carries,
+    // exactly as it is for the rest.
+    if (ids.length > 0) {
+      const byId = new URLSearchParams(baseParams);
+      for (const id of ids) byId.append("gbifId", String(id));
+      const named = await fetchPaginated(byId, ids.length, 0);
+      return NextResponse.json(
+        {
+          type: "FeatureCollection",
+          features: toFeatures(named.results),
+          metadata: { speciesKey, count: named.results.length, requested: ids.length },
+        },
+        { headers: CACHE_5M }
+      );
+    }
+
     // Each requested set is fetched under its own bounded limit rather than by
     // dropping the filters and taking whatever comes back, so a species with
     // thousands of mapped records can't crowd out the handful of unmapped ones
@@ -350,81 +477,11 @@ export async function GET(request: NextRequest) {
       missing ? Promise.resolve(missing.totalCount) : countBucket(baseParams, "missing"),
     ]);
 
-    // De-duplicated by gbifID: the issue and missing queries overlap for records
-    // whose coordinates were invalid enough that GBIF dropped them entirely.
-    const seen = new Set<number>();
-    const allResults: GbifRecord[] = [];
-    for (const r of [...mapped.results, ...(issues?.results ?? []), ...(missing?.results ?? [])]) {
-      if (seen.has(r.key)) continue;
-      seen.add(r.key);
-      allResults.push(r);
-    }
-
-    const geospatialIssuesByKey = new Map<number, string[]>(
-      allResults.map((r) => [r.key, (r.issues ?? []).filter((i) => GBIF_GEOSPATIAL_ISSUES.has(i))])
-    );
-
-    // Coordinate-cleaning checks only mean anything for records that have a
-    // position; the unmapped ones are indexed alongside them as nulls so the two
-    // arrays stay aligned.
-    const positioned = allResults.filter(
-      (r) => r.decimalLatitude != null && r.decimalLongitude != null
-    );
-    // Computed over this request's result set (a single species, per cc_dupl's species
-    // key), not the species' full GBIF record — this route is paginated per-request and
-    // never sees a species' complete point set.
-    const positionedFlags = getQualityFlags(
-      positioned.map((r) => ({ lon: r.decimalLongitude, lat: r.decimalLatitude, countryCode: r.countryCode }))
-    );
-    const qualityFlagsByKey = new Map<number, string[]>(
-      positioned.map((r, i) => [r.key, positionedFlags[i]])
-    );
-
-    const features = allResults.map((r) => ({
-      type: "Feature",
-      properties: {
-        gbifID: r.key,
-        species: r.species || r.scientificName,
-        eventDate: r.eventDate,
-        recordedBy: r.recordedBy,
-        country: r.country,
-        countryCode: r.countryCode,
-        basisOfRecord: r.basisOfRecord,
-        datasetKey: r.datasetKey,
-        datasetName: r.datasetName,
-        publishingOrgKey: r.publishingOrgKey,
-        coordinateUncertaintyInMeters: r.coordinateUncertaintyInMeters ?? null,
-        year: r.year ?? null,
-        month: r.month ?? null,
-        institutionCode: r.institutionCode,
-        institutionKey: r.institutionKey,
-        qualityFlags: qualityFlagsByKey.get(r.key) ?? [],
-        // List-view-only fields. `locality` is often empty on aggregator records
-        // (iNaturalist, for one, only ships verbatimLocality), so both are sent
-        // and the client falls back.
-        locality: r.locality,
-        verbatimLocality: r.verbatimLocality,
-        stateProvince: r.stateProvince,
-        elevation: r.elevation ?? null,
-        verbatimElevation: r.verbatimElevation,
-        depth: r.depth ?? null,
-        identifiedBy: r.identifiedBy,
-        collectionCode: r.collectionCode,
-        catalogNumber: r.catalogNumber,
-        establishmentMeans: r.establishmentMeans,
-        occurrenceID: r.occurrenceID,
-        coordinateStatus: classify(r, geospatialIssuesByKey.get(r.key) ?? []),
-        gbifIssues: geospatialIssuesByKey.get(r.key) ?? [],
-        ...passThrough(r),
-        images: imagesOf(r),
-      },
-      // null for records with no coordinates — valid GeoJSON, and the signal the
-      // map uses to skip them while the list still shows their locality.
-      geometry:
-        r.decimalLatitude != null && r.decimalLongitude != null
-          ? { type: "Point", coordinates: [r.decimalLongitude, r.decimalLatitude] }
-          : null,
-    }));
+    const features = toFeatures([
+      ...mapped.results,
+      ...(issues?.results ?? []),
+      ...(missing?.results ?? []),
+    ]);
 
     // Calculate bbox from the mapped features only. Flagged records are exactly
     // the ones whose coordinates can't be trusted — this species' single flagged
