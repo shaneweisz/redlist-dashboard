@@ -366,6 +366,35 @@ function makeStackedRasterStyle(
 
 // Lazy import for maplibre-gl types
 type MaplibreStyle = ReturnType<typeof makeRasterStyle>;
+/**
+ * One "what is near here" question: where it was asked, how wide, and of what.
+ *
+ * Its id is what the tab, the map's pin and the drawn layers all key off, so a
+ * search can be closed or reordered without any of them following a position.
+ */
+type NearbySearch = {
+  id: string;
+  lat: number;
+  lng: number;
+  /** The record it was opened from, named in the panel. "" when it was ground. */
+  recordName: string;
+  radiusKm: NearbyRadiusKm;
+  /** The neighbours this question has put on the map. */
+  picked: { key: string; name: string; commonName: string | null }[];
+};
+
+/** Past this the tab strip stops being readable; the oldest question goes. */
+const NEARBY_MAX_SEARCHES = 4;
+
+/**
+ * What one drawn species is called on the map: the search, its radius and the
+ * species. The radius is part of it because a species' records within 10 km are
+ * a different set from its records within 50, and both are worth keeping.
+ */
+function nearbyLayerKey(search: { id: string; radiusKm: number }, speciesKey: string) {
+  return `${search.id}|${search.radiusKm}|${speciesKey}`;
+}
+
 const BASEMAP_STYLES: Record<string, { label: string; style: MaplibreStyle }> = {
   streets: {
     label: "Streets",
@@ -855,7 +884,11 @@ export default function OccurrenceMapRow({
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
   }, [gbifOptionsOpen]);
-  const [basemap, setBasemap] = useState<BasemapKey>("streets");
+  // Hybrid by default: imagery with the place names still on it. A record's
+  // position is judged against what is actually on the ground — the plantation,
+  // the river, the edge of the forest — and the street map draws none of it,
+  // while bare satellite leaves nothing to say where you are looking.
+  const [basemap, setBasemap] = useState<BasemapKey>("hybrid");
   // Overlays — informational map layers, independent of the "Native range only"
   // occurrence filter above: shading which countries a source considers native,
   // regardless of whether occurrences are being filtered by it.
@@ -966,9 +999,9 @@ export default function OccurrenceMapRow({
    * them in the same table would have meant a row that means something
    * different in every column.
    */
-  const [listTab, setListTab] = useState<"gbif" | "excluded" | "file" | "nearby">("gbif");
-  /** Whether the nearby tab has already been brought forward for this search. */
-  const nearbyTabSeen = useRef(false);
+  // "gbif" | "excluded" | "file" | `nearby:<search id>` — the last of which
+  // there can be several of at once, one per question asked of the map.
+  const [listTab, setListTab] = useState<string>("gbif");
   /**
    * The record whose menu is open, from clicking its point.
    *
@@ -1098,31 +1131,41 @@ export default function OccurrenceMapRow({
   /** The label being typed in the right-click panel, before the pin exists. */
   const [newPinLabel, setNewPinLabel] = useState("");
   /**
-   * The spot the "recorded nearby" panel is describing, once asked for.
+   * The spots the "recorded nearby" panel is describing, one per question.
    *
-   * Held here rather than on pointQuery so the panel outlives the popup that
-   * opened it — you ask what else is here, then carry on clicking around the
-   * map with the answer still up beside it.
-   */
-  const [nearbyAt, setNearbyAt] = useState<{ lng: number; lat: number; recordName: string } | null>(null);
-  /**
-   * The radius the nearby panel is asking about, held here because the map
-   * draws it: "within 10 km" is a claim about the ground, and a list that says
-   * it without showing it leaves you to guess whether the next valley is in or
-   * out. Opening it on a different record starts from the default again.
-   */
-  const [nearbyRadiusKm, setNearbyRadiusKm] = useState<NearbyRadiusKm>(NEARBY_RADIUS_DEFAULT);
-  /**
-   * One neighbour from the list, drawn on the map.
+   * A list rather than a single point, because the question people actually
+   * arrive with is comparative: what is around this record, and what is around
+   * the site a valley away that is being proposed for something. Each search
+   * keeps its own radius and its own drawn neighbours, takes a tab of its own,
+   * and is marked on the map — the active one's pin filled in, the rest waiting
+   * where they were asked.
    *
-   * One at a time on purpose: every neighbour at once is a thousand anonymous
-   * dots over the records the assessor came to look at, where one species is a
-   * shape that can be read — a valley, a roadside, a single locality everything
-   * came from.
+   * Held here rather than on pointQuery so a search outlives the popup that
+   * opened it: you ask what else is here, then carry on clicking around the map
+   * with the answer still up beside it.
    */
-  const [nearbyPicked, setNearbyPicked] = useState<{ key: string; name: string; commonName: string | null }[]>([]);
-  /** Each picked species' records, by GBIF key, as they arrive. */
+  const [nearbySearches, setNearbySearches] = useState<NearbySearch[]>([]);
+  /** Which search the panel and the map are currently answering for. */
+  const [nearbyActiveId, setNearbyActiveId] = useState<string | null>(null);
+  /**
+   * Each picked species' records, keyed by search, radius and species.
+   *
+   * The radius is in the key rather than being invalidated on change, so going
+   * 10 → 50 → 10 km redraws the first answer instead of asking GBIF for it
+   * again — and two searches over the same species keep their own sets, since
+   * they are different circles.
+   */
   const [nearbyPoints, setNearbyPoints] = useState<Record<string, { points: NearbyPoint[]; total: number }>>({});
+  /**
+   * What has already been fetched, mirrored for the fetch effect to read.
+   *
+   * The effect must know what it is holding to avoid asking twice, but taking
+   * that as a dependency would restart it on its own results.
+   */
+  const nearbyPointsRef = useRef(nearbyPoints);
+  useEffect(() => {
+    nearbyPointsRef.current = nearbyPoints;
+  }, [nearbyPoints]);
   /**
    * The neighbours' records under the last click, and which of them is showing.
    *
@@ -1190,76 +1233,159 @@ export default function OccurrenceMapRow({
    * legend and the map would both change meaning without anything being asked
    * for. A freed colour is handed to the next species picked.
    */
+  /** The search the panel is showing, or null when none has been asked. */
+  const nearbyActive = useMemo(
+    () => nearbySearches.find((s) => s.id === nearbyActiveId) ?? null,
+    [nearbySearches, nearbyActiveId]
+  );
+
   const nearbyColors = useMemo(() => {
     const out: Record<string, string> = {};
     const taken = new Set<string>();
-    for (const p of nearbyPicked) {
+    for (const p of nearbyActive?.picked ?? []) {
       const free = NEARBY_PICKED_COLORS.find((c) => !taken.has(c)) ?? NEARBY_PICKED_COLORS[0];
       out[p.key] = free;
       taken.add(free);
     }
     return out;
-  }, [nearbyPicked]);
+  }, [nearbyActive]);
 
-  const toggleNearbyPicked = useCallback((species: { key: string; name: string; commonName: string | null }) => {
-    setNearbyPicked((prev) => {
-      if (prev.some((p) => p.key === species.key)) {
-        setNearbyHidden((hidden) => {
-          if (!hidden.has(species.key)) return hidden;
-          const next = new Set(hidden);
-          next.delete(species.key);
-          return next;
-        });
-        return prev.filter((p) => p.key !== species.key);
+  /**
+   * Ask what is near a point.
+   *
+   * The same spot asked twice is the same question, so it comes forward rather
+   * than opening a second tab that would say the same thing — a record's panel
+   * and a right-click on the record's own dot are two ways to the same circle.
+   */
+  const openNearbySearch = useCallback(
+    (at: { lat: number; lng: number; recordName: string }) => {
+      // "The same spot" is generous — 5e-4° is about 50 m, three orders of
+      // magnitude inside the narrowest radius on offer, so two clicks at what
+      // anyone would call the same place ask one question rather than opening
+      // a pair of tabs whose answers are identical.
+      const same = nearbySearches.find(
+        (s) => Math.abs(s.lat - at.lat) < 5e-4 && Math.abs(s.lng - at.lng) < 5e-4
+      );
+      if (same) {
+        setNearbyActiveId(same.id);
+        setListTab(`nearby:${same.id}`);
+        return;
       }
-      // Past the palette the map stops being readable, so the oldest pick makes
-      // way rather than the newest being silently refused.
-      return [...prev, species].slice(-NEARBY_MAX_PICKED);
-    });
+      const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      // Past a handful the tab strip stops being readable, so the oldest
+      // question makes way — the same bargain the picked-species palette makes.
+      setNearbySearches((prev) =>
+        [...prev, { id, ...at, radiusKm: NEARBY_RADIUS_DEFAULT, picked: [] }].slice(-NEARBY_MAX_SEARCHES)
+      );
+      setNearbyActiveId(id);
+      setListTab(`nearby:${id}`);
+    },
+    [nearbySearches]
+  );
+
+  /** Close one search; the tab strip falls back to the one beside it. */
+  const closeNearbySearch = useCallback(
+    (id: string) => {
+      const rest = nearbySearches.filter((s) => s.id !== id);
+      setNearbySearches(rest);
+      if (nearbyActiveId !== id) return;
+      const next = rest[rest.length - 1] ?? null;
+      setNearbyActiveId(next?.id ?? null);
+      setListTab(next ? `nearby:${next.id}` : "gbif");
+    },
+    [nearbySearches, nearbyActiveId]
+  );
+
+  const setNearbyRadius = useCallback((id: string, km: NearbyRadiusKm) => {
+    setNearbySearches((prev) => prev.map((s) => (s.id === id ? { ...s, radiusKm: km } : s)));
   }, []);
 
-  // One request per newly picked species; a species already fetched at this
-  // radius is not asked for again, so re-picking one is instant.
-  useEffect(() => {
-    if (!nearbyAt || nearbyPicked.length === 0) {
-      setNearbyPoints({});
-      return;
-    }
-    const controller = new AbortController();
-    for (const picked of nearbyPicked) {
-      const params = new URLSearchParams({
-        lat: String(nearbyAt.lat),
-        lng: String(nearbyAt.lng),
-        radiusKm: String(nearbyRadiusKm),
-        speciesKey: picked.key,
-      });
-      fetch(`/api/nearby-species/points?${params}`, { signal: controller.signal })
-        .then(async (r) => {
-          const body = await r.json();
-          if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
-          setNearbyPoints((prev) => ({
-            ...prev,
-            [picked.key]: { points: body.points ?? [], total: body.total ?? 0 },
-          }));
+  const toggleNearbyPicked = useCallback(
+    (searchId: string, species: { key: string; name: string; commonName: string | null }) => {
+      setNearbySearches((prev) =>
+        prev.map((s) => {
+          if (s.id !== searchId) return s;
+          if (s.picked.some((p) => p.key === species.key)) {
+            setNearbyHidden((hidden) => {
+              const layer = nearbyLayerKey(s, species.key);
+              if (!hidden.has(layer)) return hidden;
+              const next = new Set(hidden);
+              next.delete(layer);
+              return next;
+            });
+            return { ...s, picked: s.picked.filter((p) => p.key !== species.key) };
+          }
+          // Past the palette the map stops being readable, so the oldest pick
+          // makes way rather than the newest being silently refused.
+          return { ...s, picked: [...s.picked, species].slice(-NEARBY_MAX_PICKED) };
         })
-        .catch((e: unknown) => {
-          if (e instanceof DOMException && e.name === "AbortError") return;
-          // A neighbour that won't draw shouldn't take the list down with it:
-          // its row stops saying "drawing…" and nothing appears.
-          setNearbyPoints((prev) => ({ ...prev, [picked.key]: { points: [], total: 0 } }));
+      );
+    },
+    []
+  );
+
+  /**
+   * One request per newly picked species, across every search.
+   *
+   * Keyed by search, radius and species, so nothing already held is asked for
+   * again: re-picking a species, going back to a radius, or returning to an
+   * earlier tab all draw from what is already here. Every search fetches, not
+   * only the one on screen, so switching tabs shows its neighbours at once.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    for (const search of nearbySearches) {
+      for (const picked of search.picked) {
+        const layer = nearbyLayerKey(search, picked.key);
+        if (nearbyPointsRef.current[layer]) continue;
+        const params = new URLSearchParams({
+          lat: String(search.lat),
+          lng: String(search.lng),
+          radiusKm: String(search.radiusKm),
+          speciesKey: picked.key,
         });
+        fetch(`/api/nearby-species/points?${params}`, { signal: controller.signal })
+          .then(async (r) => {
+            const body = await r.json();
+            if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
+            setNearbyPoints((prev) => ({
+              ...prev,
+              [layer]: { points: body.points ?? [], total: body.total ?? 0 },
+            }));
+          })
+          .catch((e: unknown) => {
+            if (e instanceof DOMException && e.name === "AbortError") return;
+            // A neighbour that won't draw shouldn't take the list down with it:
+            // its row stops saying "drawing…" and nothing appears.
+            setNearbyPoints((prev) => ({ ...prev, [layer]: { points: [], total: 0 } }));
+          });
+      }
     }
     return () => controller.abort();
-  }, [nearbyAt, nearbyPicked, nearbyRadiusKm]);
+  }, [nearbySearches]);
 
-  // Changing the radius invalidates every drawn set at once.
-  const nearbyFetchKey = `${nearbyAt?.lat},${nearbyAt?.lng},${nearbyRadiusKm}`;
-  const lastNearbyFetchKey = useRef(nearbyFetchKey);
-  if (lastNearbyFetchKey.current !== nearbyFetchKey) {
-    lastNearbyFetchKey.current = nearbyFetchKey;
-    if (Object.keys(nearbyPoints).length) setNearbyPoints({});
+  // The record panel opened from a neighbour's dot belongs to the search that
+  // drew it, so switching search or radius puts it away rather than leaving a
+  // point described that the map is no longer drawing.
+  const nearbyDrawnKey = `${nearbyActiveId},${nearbyActive?.radiusKm}`;
+  const lastNearbyDrawnKey = useRef(nearbyDrawnKey);
+  if (lastNearbyDrawnKey.current !== nearbyDrawnKey) {
+    lastNearbyDrawnKey.current = nearbyDrawnKey;
     if (nearbyShownGroup.length) setNearbyShownGroup([]);
   }
+
+  /** Every search's circle, tagged with whether it is the one being read. */
+  const nearbyRingsGeoJson = useMemo<GeoJSON.FeatureCollection>(
+    () => ({
+      type: "FeatureCollection",
+      features: nearbySearches.map((search) => ({
+        type: "Feature" as const,
+        properties: { id: search.id, active: search.id === nearbyActiveId },
+        geometry: uncertaintyCircle(search.lat, search.lng, search.radiusKm * 1000),
+      })),
+    }),
+    [nearbySearches, nearbyActiveId]
+  );
 
   const nearbyPointsGeoJson = useMemo<GeoJSON.FeatureCollection>(
     () => ({
@@ -1268,15 +1394,21 @@ export default function OccurrenceMapRow({
       // feature properties through its tile encoding, so this pair is what
       // survives to find the point again on a click. The colour rides along
       // because one layer draws every picked species.
-      features: nearbyPicked.filter((p) => !nearbyHidden.has(p.key)).flatMap((p) =>
-        (nearbyPoints[p.key]?.points ?? []).map((pt, i) => ({
+      features: (nearbyActive?.picked ?? [])
+        .filter((p) => !nearbyHidden.has(nearbyLayerKey(nearbyActive!, p.key)))
+        .flatMap((p) =>
+        (nearbyPoints[nearbyLayerKey(nearbyActive!, p.key)]?.points ?? []).map((pt, i) => ({
           type: "Feature" as const,
-          properties: { nearbyKey: p.key, nearbyIndex: i, color: nearbyColors[p.key] },
+          properties: {
+            nearbyKey: nearbyLayerKey(nearbyActive!, p.key),
+            nearbyIndex: i,
+            color: nearbyColors[p.key],
+          },
           geometry: { type: "Point" as const, coordinates: [pt.lng, pt.lat] },
         }))
       ),
     }),
-    [nearbyPicked, nearbyPoints, nearbyColors, nearbyHidden]
+    [nearbyActive, nearbyPoints, nearbyColors, nearbyHidden]
   );
   /** A pin whose label is being renamed in place. */
   const [renamingPin, setRenamingPin] = useState<string | null>(null);
@@ -2607,16 +2739,37 @@ export default function OccurrenceMapRow({
     return true;
   }, []);
 
-  /*
-   * Asking what is nearby leaves the view alone.
+  /**
+   * Bring the radius into view when it is asked for, and when it changes.
    *
-   * It used to fit the map to the radius, on the argument that a 10 km circle
-   * on a range-wide map is a few pixels across. But the question is asked from
-   * a point you are already looking at, and the answer arriving by moving the
-   * map underneath you cost more than the zoom was worth — what you were
-   * comparing against went off screen. The ring is drawn to scale where it
-   * falls, and the map is yours to move.
+   * Drawn to scale and left alone, a 10 km circle on a map fitted to a species'
+   * whole range is a few pixels across — technically the answer and no use as
+   * one. Fitting to the circle is what makes "within 10 km" a place rather than
+   * a number. Keyed on the search and its radius, so switching to another
+   * question's tab takes you to where that question was asked, and panning away
+   * to look at something is not undone on the next render.
    */
+  const fittedNearbyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nearbyActive) {
+      fittedNearbyRef.current = null;
+      return;
+    }
+    const key = `${nearbyActive.id},${nearbyActive.radiusKm}`;
+    if (fittedNearbyRef.current === key) return;
+    // The circle's own bounding box, so the ring sits inside the padding
+    // rather than touching the edges.
+    const ring = uncertaintyCircle(
+      nearbyActive.lat,
+      nearbyActive.lng,
+      nearbyActive.radiusKm * 1000
+    ).coordinates[0];
+    const lons = ring.map((c) => c[0]);
+    const lats = ring.map((c) => c[1]);
+    if (fitMapToBbox([Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)])) {
+      fittedNearbyRef.current = key;
+    }
+  }, [nearbyActive, fitMapToBbox]);
 
   // Track whether we've fitted bounds for the current bbox
   const fittedBboxRef = useRef<string | null>(null);
@@ -3240,20 +3393,13 @@ export default function OccurrenceMapRow({
     const container = splitRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    if (!fullscreen) {
-      // The dashboard's container grows with its content, so a percentage of it
-      // means nothing: the panel gets a height in pixels instead, measured from
-      // the pointer down to where the row ends.
-      setListHeightPx(Math.min(900, Math.max(160, rect.bottom - e.clientY)));
-      return;
-    }
     const span = panelLayout === "rows" ? rect.height : rect.width;
     if (span === 0) return;
     const pct = panelLayout === "rows"
       ? ((e.clientY - rect.top) / span) * 100
       : ((e.clientX - rect.left) / span) * 100;
     setSplitPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
-  }, [draggingDivider, panelLayout, setSplitPct, fullscreen]);
+  }, [draggingDivider, panelLayout, setSplitPct]);
 
   const handleDividerPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -3267,19 +3413,46 @@ export default function OccurrenceMapRow({
 
   // Arrow keys move the divider too, so it isn't mouse-only.
   const handleDividerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+    const step = e.key === "ArrowUp" ? -5 : e.key === "ArrowDown" ? 5 : 0;
     if (step === 0) return;
     e.preventDefault();
-    if (!fullscreen) {
-      // Same direction as the drag: down gives the map more room, so the panel
-      // below it loses some.
-      setListHeightPx((px) => Math.min(900, Math.max(160, px - step * 40)));
-      return;
-    }
     setSplitPct((pct) =>
-      Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step * 5))
+      Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct + step))
     );
-  }, [setSplitPct, fullscreen]);
+  }, [setSplitPct]);
+
+  /**
+   * The dashboard resizes the record panel from its own bottom edge.
+   *
+   * Stacked vertically there is nothing between the map and the panel to drag:
+   * a handle in the gap looked like it belonged to both and moved the boundary
+   * between them, which on a page that scrolls is not the thing anyone wants
+   * moved. Growing the panel downwards is, and it is where every resizable
+   * pane on the web puts its grip.
+   */
+  const listPanelRef = useRef<HTMLDivElement>(null);
+  const [draggingListEdge, setDraggingListEdge] = useState(false);
+  const handleListEdgeDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDraggingListEdge(true);
+  }, []);
+  const handleListEdgeMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingListEdge) return;
+    const rect = listPanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setListHeightPx(Math.min(1200, Math.max(160, e.clientY - rect.top)));
+  }, [draggingListEdge]);
+  const handleListEdgeUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    setDraggingListEdge(false);
+  }, []);
+  const handleListEdgeKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowUp" ? -40 : e.key === "ArrowDown" ? 40 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    setListHeightPx((px) => Math.min(1200, Math.max(160, px + step)));
+  }, []);
 
   /**
    * Hovering a row in the record list highlights that record on the map, using
@@ -3949,32 +4122,37 @@ export default function OccurrenceMapRow({
                               {/* The radius the nearby panel is describing, drawn to scale.
                     Under the record layers rather than over them: it is the
                     question's boundary, not a thing to read. */}
-                {nearbyAt && (
-                  <Source
-                    id={`nearby-radius-${panelId}`}
-                    type="geojson"
-                    data={{
-                      type: "Feature",
-                      properties: {},
-                      geometry: uncertaintyCircle(nearbyAt.lat, nearbyAt.lng, nearbyRadiusKm * 1000),
-                    }}
-                  >
+                {nearbySearches.length > 0 && (
+                  <Source id={`nearby-radius-${panelId}`} type="geojson" data={nearbyRingsGeoJson}>
+                    {/* Every question's circle, the one being read solid and
+                        the rest faint — asking a second question shouldn't take
+                        the first one's ground off the map, and two circles at
+                        equal weight leave you counting tabs to tell which list
+                        you are looking at. */}
                     <Layer
                       id={`nearby-radius-fill-${panelId}`}
                       type="fill"
-                      paint={{ "fill-color": NEARBY_SEARCH_COLOR, "fill-opacity": 0.08 }}
+                      paint={{
+                        "fill-color": NEARBY_SEARCH_COLOR,
+                        "fill-opacity": ["case", ["get", "active"], 0.08, 0.03],
+                      }}
                     />
                     <Layer
                       id={`nearby-radius-line-${panelId}`}
                       type="line"
-                      paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 1.5, "line-dasharray": [3, 2] }}
+                      paint={{
+                        "line-color": NEARBY_SEARCH_COLOR,
+                        "line-width": ["case", ["get", "active"], 1.5, 1],
+                        "line-opacity": ["case", ["get", "active"], 1, 0.45],
+                        "line-dasharray": [3, 2],
+                      }}
                     />
                   </Source>
                 )}
               {/* The picked neighbour's own records. Above the radius they sit
                   inside and below everything the assessor is deciding about —
                   they are context for this map, not one of its own layers. */}
-              {nearbyAt && nearbyPicked.length > 0 && nearbyPointsGeoJson.features.length > 0 && (
+              {nearbyPointsGeoJson.features.length > 0 && (
                 <Source id={`nearby-points-${panelId}`} type="geojson" data={nearbyPointsGeoJson}>
                   {/* Dots, in colours no other layer here uses — see
                       NEARBY_PICKED_COLORS. They sit above the map's own records
@@ -4005,23 +4183,48 @@ export default function OccurrenceMapRow({
                   </span>
                 </MapLibreMarker>
               )}
-              {/* The centre the radius is measured from. The ring alone says
+              {/* The centre each radius is measured from. The ring alone says
                   roughly where, and "roughly where" is what a reader is trying
-                  to pin down when they ask what is near a point. */}
-              {nearbyAt && (
-                <MapLibreMarker longitude={nearbyAt.lng} latitude={nearbyAt.lat} anchor="bottom">
-                  <svg
-                    className="h-5 w-5 drop-shadow"
-                    viewBox="0 0 24 24"
-                    fill={NEARBY_SEARCH_COLOR}
-                    stroke="#ffffff"
-                    strokeWidth={1.5}
+                  to pin down when they ask what is near a point. The pin for
+                  the tab being read is full size and full colour; the others
+                  are small and faded, and clicking one goes to its tab — which
+                  is the shortest way back to a question asked earlier. */}
+              {nearbySearches.map((search) => {
+                const active = search.id === nearbyActiveId;
+                return (
+                  <MapLibreMarker
+                    key={`nearby-pin-${search.id}`}
+                    longitude={search.lng}
+                    latitude={search.lat}
+                    anchor="bottom"
                   >
-                    <path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" />
-                    <circle cx="12" cy="10" r="2.4" fill="#ffffff" stroke="none" />
-                  </svg>
-                </MapLibreMarker>
-              )}
+                    <svg
+                      onClick={() => {
+                        setNearbyActiveId(search.id);
+                        setListTab(`nearby:${search.id}`);
+                      }}
+                      aria-label={
+                        active
+                          ? `Within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                          : `Go to the search at ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                      }
+                      className={`cursor-pointer drop-shadow ${active ? "h-5 w-5" : "h-3.5 w-3.5 opacity-60 hover:opacity-100"}`}
+                      viewBox="0 0 24 24"
+                      fill={NEARBY_SEARCH_COLOR}
+                      stroke="#ffffff"
+                      strokeWidth={active ? 1.5 : 2.5}
+                    >
+                      <title>
+                        {active
+                          ? `Within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`
+                          : `Go to the search at ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`}
+                      </title>
+                      <path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" />
+                      <circle cx="12" cy="10" r="2.4" fill="#ffffff" stroke="none" />
+                    </svg>
+                  </MapLibreMarker>
+                );
+              })}
               {/* The assessor's own georeferences — drawn above the GBIF points
                   in a colour used nowhere else, with the uncertainty radius to
                   scale. They are never merged into the GBIF layer or into any
@@ -4208,7 +4411,9 @@ export default function OccurrenceMapRow({
                       label: "Species",
                       value:
                         nearbyShown.species ??
-                        nearbyPicked.find((p) => nearbyPoints[p.key]?.points.includes(nearbyShown))?.name ??
+                        (nearbyActive?.picked ?? []).find((p) =>
+                          nearbyPoints[nearbyLayerKey(nearbyActive!, p.key)]?.points.includes(nearbyShown)
+                        )?.name ??
                         "",
                     },
                     ...(nearbyShown.basis
@@ -4706,9 +4911,7 @@ export default function OccurrenceMapRow({
                     <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
                       <button
                         onClick={() => {
-                          setNearbyAt({ lng: pointQuery.lng, lat: pointQuery.lat, recordName: "" });
-                          setNearbyRadiusKm(NEARBY_RADIUS_DEFAULT);
-                          setNearbyPicked([]);
+                          openNearbySearch({ lng: pointQuery.lng, lat: pointQuery.lat, recordName: "" });
                           setPointQuery(null);
                         }}
                         title="Threatened and Near Threatened species with GBIF records around this point"
@@ -5561,7 +5764,7 @@ export default function OccurrenceMapRow({
     [occurrences, exclusions]
   );
   const listTabs = useMemo(() => {
-    const tabs: { key: "gbif" | "excluded" | "file" | "nearby"; label: string; count: number; title: string; dot?: string }[] = [
+    const tabs: { key: string; label: string; count: number; title: string; dot?: string }[] = [
       {
         key: "gbif",
         label: "GBIF records",
@@ -5569,12 +5772,25 @@ export default function OccurrenceMapRow({
         title: "The records being counted",
       },
     ];
-    if (nearbyAt) {
+    // One tab per question. A single search is named for what it is; two or
+    // more take their coordinates, because "Nearby threatened species" twice
+    // over says nothing about which of the two circles you are reading.
+    //
+    // As many decimals as it takes to tell them apart, which is two for points
+    // a kilometre or more apart and more for questions asked of the same
+    // hillside — a pair of tabs reading "Nearby 18.50, 84.00" would be exactly
+    // the ambiguity the coordinates are here to remove.
+    const places = (dp: number) => nearbySearches.map((s) => `${s.lat.toFixed(dp)}, ${s.lng.toFixed(dp)}`);
+    const dp = [2, 4].find((d) => new Set(places(d)).size === nearbySearches.length) ?? 4;
+    for (const search of nearbySearches) {
       tabs.push({
-        key: "nearby",
-        label: "Nearby threatened species",
+        key: `nearby:${search.id}`,
+        label:
+          nearbySearches.length > 1
+            ? `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`
+            : "Nearby threatened species",
         count: 0,
-        title: "Threatened species with GBIF records around the point you asked about",
+        title: `Threatened species within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`,
       });
     }
     if (excludedOccurrences.length > 0) {
@@ -5595,15 +5811,13 @@ export default function OccurrenceMapRow({
       });
     }
     return tabs;
-  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison, nearbyAt]);
+  }, [countedOccurrences, excludedOccurrences, pointFile, pointFileComparison, nearbySearches]);
 
   // A tab that empties — the last excluded record put back, the file removed —
   // takes its list with it, so the reader is left on the one that's still there.
   useEffect(() => {
     if (!listTabs.some((t) => t.key === listTab)) setListTab("gbif");
-    else if (nearbyAt && listTab !== "nearby" && !nearbyTabSeen.current) setListTab("nearby");
-    nearbyTabSeen.current = !!nearbyAt;
-  }, [listTabs, listTab, nearbyAt]);
+  }, [listTabs, listTab]);
 
   useEffect(() => {
     setConfirmPutAllBack(false);
@@ -6081,15 +6295,13 @@ export default function OccurrenceMapRow({
                     onClick={() => {
                       setRowMenu(null);
                       close();
-                      setNearbyAt({
+                      openNearbySearch({
                         // The record's own coordinates, so the radius is
                         // centred on the collection locality itself.
                         lng: position[0],
                         lat: position[1],
                         recordName: String(record.properties.species || "this record"),
                       });
-                      setNearbyRadiusKm(NEARBY_RADIUS_DEFAULT);
-                      setNearbyPicked([]);
                     }}
                     title="Threatened and Near Threatened species with GBIF records around this one, and the threats their assessments cite"
                     className="flex w-full items-center gap-1.5 px-1 py-1 rounded text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -6989,7 +7201,7 @@ export default function OccurrenceMapRow({
           genuinely unclear which rows the heading spoke for. These are the
           outermost layer here — not this species, not this map's own data — so
           the bottom is where they belong. */}
-      {nearbyPicked.length > 0 && (
+      {nearbyActive && nearbyActive.picked.length > 0 && (
         <div className="px-2 pt-1 pb-0.5 border-t border-zinc-100 dark:border-zinc-700">
           {/* Rolled up when the list gets long: opening six neighbours puts six
               rows in a legend that also has to show the map's own layers. */}
@@ -7004,21 +7216,23 @@ export default function OccurrenceMapRow({
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
             Other species nearby
-            <span className="ml-auto tabular-nums">{nearbyPicked.length}</span>
+            <span className="ml-auto tabular-nums">{nearbyActive.picked.length}</span>
           </button>
-          {nearbyLegendOpen && nearbyPicked.map((p) => (
+          {nearbyLegendOpen && nearbyActive.picked.map((p) => {
+            const layer = nearbyLayerKey(nearbyActive, p.key);
+            return (
             <label
               key={p.key}
               className="flex items-start gap-1.5 px-0 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
             >
               <input
                 type="checkbox"
-                checked={!nearbyHidden.has(p.key)}
+                checked={!nearbyHidden.has(layer)}
                 onChange={() =>
                   setNearbyHidden((prev) => {
                     const next = new Set(prev);
-                    if (next.has(p.key)) next.delete(p.key);
-                    else next.add(p.key);
+                    if (next.has(layer)) next.delete(layer);
+                    else next.add(layer);
                     return next;
                   })
                 }
@@ -7034,7 +7248,7 @@ export default function OccurrenceMapRow({
                 {p.commonName && <span className="text-zinc-400"> ({p.commonName})</span>}
               </span>
               <span className="shrink-0 tabular-nums text-zinc-400">
-                {nearbyPoints[p.key] ? nearbyPoints[p.key].points.length : "…"}
+                {nearbyPoints[layer] ? nearbyPoints[layer].points.length : "…"}
               </span>
               {/* The checkbox hides a layer; this takes it off the map for
                   good. Two different things, and a legend that only offered the
@@ -7043,7 +7257,7 @@ export default function OccurrenceMapRow({
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  toggleNearbyPicked(p);
+                  toggleNearbyPicked(nearbyActive.id, p);
                 }}
                 title={`Remove ${p.name} from the map`}
                 className="shrink-0 text-zinc-300 hover:text-red-600 dark:text-zinc-600 dark:hover:text-red-400"
@@ -7053,7 +7267,8 @@ export default function OccurrenceMapRow({
                 </svg>
               </button>
             </label>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -7067,31 +7282,32 @@ export default function OccurrenceMapRow({
    * wide. Underneath, across the full width, the map keeps its size and the
    * table gets room for its columns.
    */
-  const NEARBY_PANEL = nearbyAt ? (
+  const NEARBY_PANEL = nearbyActive ? (
     // Full height of whatever column it is given, so the panel's own body is
     // the thing that scrolls. As a plain `w-full` it sized to its content, the
     // content never overflowed, and the list simply ran past the bottom of the
     // page with no scrollbar anywhere.
     <div className="flex h-full min-h-0 w-full flex-col">
       <NearbySpeciesPanel
-                    lat={nearbyAt.lat}
-                    lng={nearbyAt.lng}
-                    recordName={nearbyAt.recordName}
+                    key={nearbyActive.id}
+                    lat={nearbyActive.lat}
+                    lng={nearbyActive.lng}
+                    recordName={nearbyActive.recordName}
                     excludeGbifKey={speciesKey}
-                    radiusKm={nearbyRadiusKm}
-                    onRadiusChange={setNearbyRadiusKm}
-                    picked={nearbyPicked.map((p) => ({
-                      key: p.key,
-                      color: nearbyColors[p.key],
-                      drawn: nearbyPoints[p.key]
-                        ? { shown: nearbyPoints[p.key].points.length, total: nearbyPoints[p.key].total }
-                        : null,
-                    }))}
-                    onTogglePick={toggleNearbyPicked}
-                    onClose={() => {
-                      setNearbyAt(null);
-                      setNearbyPicked([]);
-                    }}
+                    radiusKm={nearbyActive.radiusKm}
+                    onRadiusChange={(km) => setNearbyRadius(nearbyActive.id, km)}
+                    picked={nearbyActive.picked.map((p) => {
+                      const layer = nearbyLayerKey(nearbyActive, p.key);
+                      return {
+                        key: p.key,
+                        color: nearbyColors[p.key],
+                        drawn: nearbyPoints[layer]
+                          ? { shown: nearbyPoints[layer].points.length, total: nearbyPoints[layer].total }
+                          : null,
+                      };
+                    })}
+                    onTogglePick={(species) => toggleNearbyPicked(nearbyActive.id, species)}
+                    onClose={() => closeNearbySearch(nearbyActive.id)}
                   />
     </div>
   ) : null;
@@ -8200,11 +8416,12 @@ export default function OccurrenceMapRow({
                 )}
             </div>
 
-            {/* Record list — only in fullscreen, where there's room to read it
-                against the map. Hovering a row highlights that record's point
-                and vice versa: the table carries the locality and collection
-                detail, the map carries the position. Stacks below the map on
-                narrow screens. */}
+            {/* The map/list boundary, dragged. Fullscreen only: there the two
+                share a fixed page and moving the line between them is the whole
+                question. On the dashboard they are stacked in a page that
+                scrolls, and the panel is resized from its own bottom edge
+                instead. */}
+              {fullscreen && (
               <div
                 role="separator"
                 aria-orientation={dividerLayout === "rows" ? "horizontal" : "vertical"}
@@ -8235,10 +8452,12 @@ export default function OccurrenceMapRow({
                   }`}
                 />
               </div>
+              )}
             {/* The record panel — GBIF records, what you've set aside, an
                 imported file, and the nearby search — in both modes. Which
                 tables exist should not depend on which page you opened. */}
             <div
+              ref={listPanelRef}
               className={
                 fullscreen
                   ? "order-3 sm:order-none flex flex-col gap-2 min-w-0 flex-1 min-h-0"
@@ -8250,7 +8469,12 @@ export default function OccurrenceMapRow({
                   {listTabs.map((tab) => (
                     <button
                       key={tab.key}
-                      onClick={() => setListTab(tab.key)}
+                      onClick={() => {
+                        setListTab(tab.key);
+                        // A nearby tab is also which question the map is
+                        // answering: its ring goes solid and its pin fills in.
+                        if (tab.key.startsWith("nearby:")) setNearbyActiveId(tab.key.slice("nearby:".length));
+                      }}
                       title={tab.title}
                       className={`flex items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
                         listTab === tab.key
@@ -8262,14 +8486,14 @@ export default function OccurrenceMapRow({
                         <span className="w-2 h-2 rotate-45 shrink-0" style={{ background: tab.dot }} />
                       )}
                       <span className="truncate">{tab.label}</span>
-                      {tab.key !== "nearby" && (
+                      {!tab.key.startsWith("nearby:") && (
                         <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
                       )}
                     </button>
                   ))}
                   <ListZoomControl zoom={listZoom} onChange={setListZoom} />
                 </div>
-                {listTab === "nearby" ? (
+                {listTab.startsWith("nearby:") ? (
                   // In fullscreen the list column is the only place with room
                   // for a second table, so the search takes a tab on it rather
                   // than a third column squeezed beside the map.
@@ -8346,6 +8570,37 @@ export default function OccurrenceMapRow({
                   zoom={listZoom}
                   fillHeight
                 />
+                )}
+                {/* The grip that grows the panel, along its own bottom edge.
+                    Only on the dashboard: fullscreen has the divider, and the
+                    panel there is bounded by the page rather than by a number. */}
+                {!fullscreen && (
+                  <div
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Resize the record list"
+                    aria-valuenow={Math.round(listHeightPx)}
+                    aria-valuemin={160}
+                    aria-valuemax={1200}
+                    tabIndex={0}
+                    onPointerDown={handleListEdgeDown}
+                    onPointerMove={handleListEdgeMove}
+                    onPointerUp={handleListEdgeUp}
+                    onPointerCancel={handleListEdgeUp}
+                    onKeyDown={handleListEdgeKeyDown}
+                    title="Drag to make the list taller"
+                    className={`group -mt-1 flex h-3 w-full shrink-0 cursor-ns-resize touch-none items-center justify-center rounded ${
+                      draggingListEdge ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    } focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500`}
+                  >
+                    <div
+                      className={`h-0.5 w-10 rounded-full transition-colors ${
+                        draggingListEdge
+                          ? "bg-blue-500"
+                          : "bg-zinc-300 dark:bg-zinc-600 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-500"
+                      }`}
+                    />
+                  </div>
                 )}
               </div>
             {/* A restore replaces what's here, so it says what it holds and what

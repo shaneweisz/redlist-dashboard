@@ -314,14 +314,11 @@ function SpeciesDetail({
         ))}
       </div>
 
-      {text ? (
-        <Prose text={text} references={refs} />
-      ) : (
-        <span className="block text-zinc-400">
-          This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
-        </span>
-      )}
-
+      {/* What was ticked comes before what was written about it. The
+          classification is the assessment's own answer to "what is threatening
+          this?" — a line of it — where the narrative is several paragraphs of
+          argument, and a reader comparing neighbours wants the answer first and
+          the argument underneath. */}
       {summary.length > 0 && (
         <div>
           <button
@@ -339,13 +336,18 @@ function SpeciesDetail({
             </svg>
             <span className="flex flex-wrap gap-1">
               {summary.map(([code, t]) => (
+                // Just the pressure, named: "Pollution", "Climate change".
+                // The code and the tally are what the table below is for, and
+                // in the summary they turned a plain-English line into
+                // something to be decoded.
                 <span
                   key={code}
                   className="rounded bg-zinc-100 px-1 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
-                  title={t.worst ? `${t.leaves} scored — worst ${t.worst}` : `${t.leaves} scored`}
+                  title={
+                    `${code}. ${t.label} — ${t.leaves} scored` + (t.worst ? `, worst ${t.worst}` : "")
+                  }
                 >
-                  <span className="tabular-nums text-zinc-400">{code}</span> {t.label}
-                  {t.leaves > 1 && <span className="tabular-nums text-zinc-400"> ×{t.leaves}</span>}
+                  {t.label}
                 </span>
               ))}
             </span>
@@ -407,6 +409,14 @@ function SpeciesDetail({
         </div>
       )}
 
+      {text ? (
+        <Prose text={text} references={refs} />
+      ) : (
+        <span className="block text-zinc-400">
+          This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
+        </span>
+      )}
+
       {/* Last, after everything this panel can tell you: the point of the link
           is what to do once the panel has run out. */}
       {redListHref && (
@@ -428,39 +438,54 @@ function SpeciesDetail({
  * drift apart. Below the map there is width enough for threats to be a column.
  */
 const ROW =
-  "grid grid-cols-[12px_28px_minmax(9rem,1.4fr)_8rem_minmax(8rem,2fr)_5.5rem_5rem] gap-2 items-baseline px-2";
+  // The last two tracks are sized for their headers rather than their numbers:
+  // "GBIF Records" and "Assessment Year" wrapped onto a second line at the old
+  // widths, which put the header row out of step with every row under it.
+  "grid grid-cols-[12px_28px_minmax(8rem,1.4fr)_6.5rem_minmax(7rem,2fr)_6.5rem_7.5rem] gap-2 items-baseline px-2";
 
-/** One labelled dropdown, the same shape for taxon, category and threat. */
-function Picker({
+/**
+ * One filter as a row of pills, in the header.
+ *
+ * Every value is named and counted where it can be seen, which is what a
+ * dropdown hides: you had to open it to learn there were seven birds and one
+ * plant here, and that split is most of what the reader wants from the filter
+ * in the first place. In the header rather than over the table because the
+ * table is the thing there is never enough room for.
+ */
+function Pills({
   label, value, onChange, all, options,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   all: string;
-  options: [string, string][];
+  /** [value, text, dot colour] — the dot is how a category keeps its colour. */
+  options: [string, string, string?][];
 }) {
   if (options.length < 2) return null;
+  const pill = (on: boolean) =>
+    `rounded border px-1.5 py-0.5 ${
+      on
+        ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+        : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+    }`;
   return (
-    <label className="flex items-center gap-1">
+    <span className="flex flex-wrap items-center gap-1">
       <span className="text-zinc-400">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={`max-w-[11rem] rounded border px-1 py-0.5 ${
-          value
-            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-            : "border-zinc-300 bg-white text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-        }`}
-      >
-        <option value="">{all}</option>
-        {options.map(([v, text]) => (
-          <option key={v} value={v}>
-            {text}
-          </option>
-        ))}
-      </select>
-    </label>
+      <button onClick={() => onChange("")} className={pill(!value)}>
+        {all}
+      </button>
+      {options.map(([v, text, dot]) => (
+        <button
+          key={v}
+          onClick={() => onChange(value === v ? "" : v)}
+          className={`flex items-center gap-1 ${pill(value === v)}`}
+        >
+          {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dot }} />}
+          {text}
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -500,12 +525,8 @@ export default function NearbySpeciesPanel({
   const [taxon, setTaxon] = useState<string | null>(null);
   /** Which category is listed, or null for all three. */
   const [category, setCategory] = useState<string | null>(null);
-  /** Which top-level threat is listed, or null for any. */
-  const [threat, setThreat] = useState<string | null>(null);
   /** Rolled up to its header bar, so the map above has the room back. */
   const [collapsed, setCollapsed] = useState(false);
-  /** The height the reader has dragged it to; null means the default. */
-  const [height, setHeight] = useState<number | null>(null);
 
   /**
    * Opening a row also puts the species on the map.
@@ -577,37 +598,19 @@ export default function NearbySpeciesPanel({
       .filter(([, n]) => n > 0);
   }, [result]);
 
-  /**
-   * The top-level threats these neighbours cite, with how many cite each.
-   *
-   * From the rows' own tags rather than the twelve-category list, so the filter
-   * only ever offers a pressure something here is actually under.
-   */
-  const threatCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const s of result?.species ?? []) {
-      for (const top of new Set(s.threat_tags.map((t) => t.code.split(".")[0]))) {
-        counts.set(top, (counts.get(top) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()].sort((a, b) => compareThreatCodes(a[0], b[0]));
-  }, [result]);
-
   // Derived, not corrected after the fact: a value the new radius no longer has
   // simply stops being the selection.
   const activeTaxon = taxon && taxonCounts.some(([g]) => g === taxon) ? taxon : null;
   const activeCategory = category && categoryCounts.some(([c]) => c === category) ? category : null;
-  const activeThreat = threat && threatCounts.some(([c]) => c === threat) ? threat : null;
 
   const shownSpecies = useMemo(
     () =>
       (result?.species ?? []).filter(
         (s) =>
           (!activeTaxon || s.taxon_group === activeTaxon) &&
-          (!activeCategory || s.category === activeCategory) &&
-          (!activeThreat || s.threat_tags.some((t) => t.code.split(".")[0] === activeThreat))
+          (!activeCategory || s.category === activeCategory)
       ),
-    [result, activeTaxon, activeCategory, activeThreat]
+    [result, activeTaxon, activeCategory]
   );
 
 
@@ -626,30 +629,14 @@ export default function NearbySpeciesPanel({
     return () => document.removeEventListener("keydown", onKey);
   }, [onKey]);
 
-  /**
-   * Drag the bottom edge to make room.
+  /*
+   * No resize grip of its own.
    *
-   * In flow under the map, width belongs to the layout — height is the only
-   * dimension the reader has an opinion about, and a threat narrative is a
-   * paragraph rather than a field.
+   * The panel is a tab of the record panel now, and that panel is what the
+   * reader sizes — from the divider in fullscreen, from its bottom edge on the
+   * dashboard. A second grip inside it fought the first: dragging one left the
+   * other holding a height nothing could see.
    */
-  const startResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const body = handle.previousElementSibling;
-    if (!body) return;
-    const from = { y: e.clientY, h: body.getBoundingClientRect().height };
-    const onMove = (ev: PointerEvent) =>
-      setHeight(Math.max(120, Math.min(window.innerHeight - 120, from.h + (ev.clientY - from.y))));
-    const onUp = (ev: PointerEvent) => {
-      handle.releasePointerCapture?.(ev.pointerId);
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-  }, []);
 
   return (
     <div
@@ -671,9 +658,35 @@ export default function NearbySpeciesPanel({
           {lat.toFixed(4)}, {lng.toFixed(4)}
         </span>
         {recordName && (
-          <span className="min-w-[4rem] flex-1 truncate italic text-zinc-400" title={recordName}>
+          <span className="max-w-[12rem] truncate italic text-zinc-400" title={recordName}>
             ({recordName})
           </span>
+        )}
+
+        {/* The filters, where the header has room the table hasn't. Built from
+            what came back, so one is never offered that would empty the list,
+            and dropped entirely when there is only one value to choose. */}
+        {result && (
+          <>
+            <Pills
+              label="Taxon"
+              value={activeTaxon ?? ""}
+              onChange={(v) => setTaxon(v || null)}
+              all={`All (${result.species.length})`}
+              options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} (${n})`])}
+            />
+            <Pills
+              label="Category"
+              value={activeCategory ?? ""}
+              onChange={(v) => setCategory(v || null)}
+              all={`All (${result.species.length})`}
+              options={categoryCounts.map(([c, n]) => [
+                c,
+                `${c} (${n})`,
+                CATEGORY_COLORS[normalizeCategory(c)],
+              ])}
+            />
+          </>
         )}
 
         <span className="ml-auto flex items-center gap-1 shrink-0">
@@ -789,10 +802,7 @@ export default function NearbySpeciesPanel({
 
       {!collapsed && (
         <>
-          <div
-            className="flex-1 min-h-0 overflow-y-auto py-1.5"
-            style={height ? { height } : undefined}
-          >
+          <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
             {/* The body says it is working, not just the corner of the header.
@@ -807,35 +817,6 @@ export default function NearbySpeciesPanel({
 
             {result && !error && (
               <>
-                {/* Three dropdowns rather than three rows of pills. The pills
-                    named every value up front, which read well at four taxa and
-                    pushed the table off the panel at twelve. Every option is
-                    built from what came back, so a filter is never offered that
-                    would empty the table. */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pb-1.5">
-                  <Picker
-                    label="Taxon"
-                    value={activeTaxon ?? ""}
-                    onChange={(v) => setTaxon(v || null)}
-                    all={`All (${result.species.length})`}
-                    options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} (${n})`])}
-                  />
-                  <Picker
-                    label="Category"
-                    value={activeCategory ?? ""}
-                    onChange={(v) => setCategory(v || null)}
-                    all={`All (${result.species.length})`}
-                    options={categoryCounts.map(([c, n]) => [c, `${c} (${n})`])}
-                  />
-                  <Picker
-                    label="Threat"
-                    value={activeThreat ?? ""}
-                    onChange={(v) => setThreat(v || null)}
-                    all={`Any (${result.species.length})`}
-                    options={threatCounts.map(([c, n]) => [c, `${`${c} ${THREAT_TOP_LEVEL[c] ?? ""}`.trim()} (${n})`])}
-                  />
-                </div>
-
                 {shownSpecies.length > 0 && (
                   <div>
                     <div
@@ -843,11 +824,11 @@ export default function NearbySpeciesPanel({
                     >
                       <span />
                       <span />
-                      <span>Species</span>
-                      <span>Taxon</span>
-                      <span>Threats</span>
-                      <span className="text-right">GBIF Records</span>
-                      <span className="text-right">Assessment Year</span>
+                      <span className="whitespace-nowrap">Species</span>
+                      <span className="whitespace-nowrap">Taxon</span>
+                      <span className="whitespace-nowrap">Threats</span>
+                      <span className="whitespace-nowrap text-right">GBIF Records</span>
+                      <span className="whitespace-nowrap text-right">Assessment Year</span>
                     </div>
                     {shownSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
@@ -1019,12 +1000,6 @@ export default function NearbySpeciesPanel({
             )}
           </div>
 
-          {/* Drag the bottom edge for more room; width belongs to the layout. */}
-          <div
-            onPointerDown={startResize}
-            title="Drag to resize"
-            className="h-1.5 shrink-0 cursor-ns-resize rounded-b-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
-          />
         </>
       )}
     </div>
