@@ -437,14 +437,15 @@ function SpeciesDetail({
  * The table's column track, shared by the header and every row so the two can't
  * drift apart. Below the map there is width enough for threats to be a column.
  *
- * Name, then what it was assessed as, when, on how many records, under what,
- * and what kind of thing it is — the order the questions are actually asked in.
+ * Name, what kind of thing it is, what it was assessed as, when, on how many
+ * records, and under what — the order the questions are actually asked in, with
+ * the taxon beside the name it qualifies.
  * The tracks carrying "Assessment Year" and "GBIF Records" are sized for those
  * headers rather than for their numbers, since a header that wraps puts the
  * whole row out of step with the rows under it.
  */
 const ROW =
-  "grid grid-cols-[12px_minmax(7.5rem,1fr)_2.25rem_6rem_5rem_minmax(9rem,2.6fr)_5rem] gap-2 items-baseline px-2";
+  "grid grid-cols-[minmax(7.5rem,1fr)_5rem_2.25rem_6rem_5rem_minmax(9rem,2.6fr)] gap-2 items-baseline px-2";
 
 /**
  * One filter as a dropdown of checkboxes, in the header.
@@ -922,13 +923,12 @@ export default function NearbySpeciesPanel({
                     <div
                       className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
                     >
-                      <span />
                       <span className="whitespace-nowrap">Species</span>
+                      <span className="whitespace-nowrap">Taxon</span>
                       <span className="whitespace-nowrap">Category</span>
                       <span className="whitespace-nowrap text-right">Assessment Year</span>
                       <span className="whitespace-nowrap text-right">GBIF Records</span>
                       <span className="whitespace-nowrap">Threats</span>
-                      <span className="whitespace-nowrap">Taxon</span>
                     </div>
                     {shownSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
@@ -960,29 +960,15 @@ export default function NearbySpeciesPanel({
                             // Kept for the menu below, which needs the row it
                             // was opened on without re-finding it.
                             data-species={s.gbif_species_key}
+                            // A picked species keeps its map colour on the row,
+                            // now as the row's own left edge rather than on a
+                            // chevron — it is what ties a row to the dots it put
+                            // on the map without either having to be counted.
+                            style={pick ? { boxShadow: `inset 2px 0 0 ${pick.color}` } : undefined}
                             className={`${ROW} cursor-pointer py-[3px] hover:bg-zinc-50 dark:hover:bg-zinc-700/40 ${
                               pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
                             }`}
                           >
-                            {/* A chevron, so a row reads as something that opens
-                                — a table of names gives no sign of it otherwise.
-                                It carries the drawn dot's colour when the species
-                                is on the map, which is also how the row and the
-                                mark are tied together without counting positions. */}
-                            <span className="flex h-3 items-center">
-                              <svg
-                                className={`h-3 w-3 shrink-0 transition-transform ${
-                                  openRow === s.gbif_species_key ? "rotate-90" : ""
-                                }`}
-                                style={{ color: pick?.color ?? undefined }}
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={2}
-                              >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                              </svg>
-                            </span>
                             <span className="min-w-0">
                               <span className="block truncate italic text-zinc-700 dark:text-zinc-200">
                                 {s.scientific_name}
@@ -992,6 +978,10 @@ export default function NearbySpeciesPanel({
                                   {s.common_name}
                                 </span>
                               )}
+                            </span>
+
+                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
+                              {taxonLabel(s.taxon_group)}
                             </span>
 
                             <span>
@@ -1051,14 +1041,10 @@ export default function NearbySpeciesPanel({
                                 </span>
                               ))}
                             </span>
-
-                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
-                              {taxonLabel(s.taxon_group)}
-                            </span>
                           </div>
 
                           {openRow === s.gbif_species_key && (
-                            <div className="px-2 pb-2 pl-6 leading-snug">
+                            <div className="px-2 pb-2 leading-snug">
                               {s.assessment_id == null ? (
                                 <span className="text-zinc-400">
                                   This dashboard holds no assessment id for it, so there is nothing to read.
