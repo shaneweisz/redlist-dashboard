@@ -55,7 +55,12 @@ export default function PrivacyPage() {
           >
             Sentry
           </a>{" "}
-          to record technical error reports so we can fix problems.
+          to record technical error reports so we can fix problems. If you have
+          turned session recording on (see below), those error reports are
+          linked to your account and to the recording of what you were doing
+          when the error happened, so we can see what caused it; if you
+          have not, they carry only a temporary id that exists for that
+          one visit and identifies nobody.
         </p>
 
         <p>
