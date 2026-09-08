@@ -5,7 +5,9 @@ import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { ThemeProvider } from "../components/ThemeProvider";
 import { BrandProvider } from "../components/BrandProvider";
+import { MeProvider } from "../components/MeProvider";
 import { PostHogProvider } from "../components/PostHogProvider";
+import { AnalyticsConsentPrompt } from "../components/AnalyticsConsentPrompt";
 import { brandForHost } from "../config/brand";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -45,9 +47,17 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <BrandProvider brand={brand}>
-          <PostHogProvider>
-            <ThemeProvider>{children}</ThemeProvider>
-          </PostHogProvider>
+          {/* MeProvider wraps PostHogProvider because the latter reads the
+              signed-in user's analytics consent from it to decide whether to
+              record (#524). */}
+          <MeProvider>
+            <PostHogProvider>
+              <ThemeProvider>
+                {children}
+                <AnalyticsConsentPrompt />
+              </ThemeProvider>
+            </PostHogProvider>
+          </MeProvider>
         </BrandProvider>
         <Analytics />
         <SpeedInsights />
