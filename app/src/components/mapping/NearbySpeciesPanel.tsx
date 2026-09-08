@@ -20,6 +20,8 @@ import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
 import { linkCitations, type AssessmentReference } from "@/lib/mapping/nearby-citations";
+import TaxaIcon from "@/components/TaxaIcon";
+import { cachedThumbnail, loadThumbnail, type InatThumbnail } from "@/lib/redlist/inat-thumbnail";
 import {
   cachedAssessment,
   loadAssessment,
@@ -395,7 +397,7 @@ function SpeciesDetail({
  * whole row out of step with the rows under it.
  */
 const ROW =
-  "grid grid-cols-[minmax(7.5rem,1fr)_5rem_2.25rem_6rem_5rem_minmax(9rem,2.6fr)] gap-2 items-baseline px-2";
+  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_2.25rem_6rem_5rem_minmax(9rem,2.6fr)] gap-2 items-center px-2";
 
 /**
  * One filter as a dropdown of checkboxes, in the header.
@@ -485,6 +487,71 @@ function FilterMenu({
             </label>
           ))}
         </div>
+      )}
+    </span>
+  );
+}
+
+/**
+ * A species' iNaturalist photo, fetched when its row is scrolled to.
+ *
+ * The same thumbnail the dashboard's species table shows, from the same route
+ * and now the same cache — a neighbour you recognise on sight is worth more
+ * than the binomial beside it, and this list is full of names an assessor
+ * works next to without ever having seen.
+ *
+ * Only when the row comes into view: the list is not paginated, so a 50 km
+ * radius in a well-collected place is a hundred rows, and asking iNaturalist
+ * for a hundred photos to show the twelve on screen is most of a request
+ * budget spent on nothing.
+ */
+function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
+  const [image, setImage] = useState<InatThumbnail | undefined>(() => cachedThumbnail(name));
+  const [seen, setSeen] = useState(() => cachedThumbnail(name) !== undefined);
+  const box = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    if (seen || !box.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setSeen(true);
+      },
+      // A little ahead of the scroll, so a row is usually holding its photo by
+      // the time it arrives rather than filling in under the reader.
+      { rootMargin: "200px" }
+    );
+    observer.observe(box.current);
+    return () => observer.disconnect();
+  }, [seen]);
+
+  useEffect(() => {
+    if (!seen || image !== undefined) return;
+    let live = true;
+    loadThumbnail(name).then((next) => {
+      if (live) setImage(next);
+    });
+    return () => {
+      live = false;
+    };
+  }, [seen, image, name]);
+
+  return (
+    <span ref={box} className="flex h-5 w-5 shrink-0 items-center justify-center">
+      {image?.squareUrl ? (
+        <img
+          src={image.squareUrl}
+          alt=""
+          title={name}
+          className="h-5 w-5 rounded object-cover"
+          loading="lazy"
+        />
+      ) : (
+        // The taxon's own mark while the photo is coming, and instead of it for
+        // a species iNaturalist has no photo of — a grey square that never
+        // resolves reads as something broken.
+        <span className="text-zinc-300 dark:text-zinc-600">
+          <TaxaIcon taxonId={taxonGroup} size={13} />
+        </span>
       )}
     </span>
   );
@@ -873,6 +940,7 @@ export default function NearbySpeciesPanel({
                     <div
                       className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
                     >
+                      <span />
                       <span className="whitespace-nowrap">Species</span>
                       <span className="whitespace-nowrap">Taxon</span>
                       <span className="whitespace-nowrap">Category</span>
@@ -919,6 +987,8 @@ export default function NearbySpeciesPanel({
                               pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
                             }`}
                           >
+                            <Thumbnail name={s.scientific_name} taxonGroup={s.taxon_group} />
+
                             <span className="min-w-0">
                               <span className="block truncate italic text-zinc-700 dark:text-zinc-200">
                                 {s.scientific_name}
