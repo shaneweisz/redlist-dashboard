@@ -605,6 +605,9 @@ const FULLSCREEN_MAX_MAP_PCT = 85;
 // next to the "Loaded X of Y" badge (all basis-of-record categories together).
 const OVERALL_LOAD_MORE_BATCH = 200;
 
+/** How many edited records to ask back by id at once; the route caps at 100. */
+const EDITED_IDS_PER_REQUEST = 100;
+
 interface RecordTypeBreakdown {
   humanObservation: number;
   machineObservation: number;
@@ -1968,6 +1971,78 @@ export default function OccurrenceMapRow({
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
   }, [speciesKey, countryCode, sampleSize, includeMissing]);
+
+  /**
+   * The records this assessor has edited, whether or not the sample holds them.
+   *
+   * Edits are kept against a gbifID in this browser and outlive the sample they
+   * were made in — but the sample is the first 300 of each record set, and a
+   * record georeferenced on the fourth page is not in it tomorrow. It was still
+   * held, and still saved to the backup file, but it was not on the map, not in
+   * the table, and — the one that mattered — not in the IUCN point file, which
+   * is built from the loaded records and would have gone out quietly short.
+   *
+   * So they are fetched back by id, in chunks, once the sample has landed.
+   * Asked for by id alone, with none of the filters that might have been the
+   * reason a record was out of the sample in the first place.
+   */
+  const recoveredRef = useRef<{ species: string; ids: Set<number> }>({ species: speciesKey, ids: new Set() });
+  useEffect(() => {
+    if (loadingOccurrences) return;
+    if (recoveredRef.current.species !== speciesKey) {
+      recoveredRef.current = { species: speciesKey, ids: new Set() };
+    }
+    const loaded = new Set(occurrences.map((o) => o.properties.gbifID));
+    const edited = new Set<number>();
+    for (const store of [georeferences, exclusions, assessorDates, assessorNotes]) {
+      for (const key of Object.keys(store)) {
+        const id = Number(key);
+        if (Number.isFinite(id) && id > 0 && !loaded.has(id) && !recoveredRef.current.ids.has(id)) {
+          edited.add(id);
+        }
+      }
+    }
+    if (edited.size === 0) return;
+    const wanted = [...edited];
+    // Marked before the request, not after: a record that comes back missing
+    // (deleted from GBIF, or belonging to another species now) should not be
+    // asked for again on every render.
+    for (const id of wanted) recoveredRef.current.ids.add(id);
+
+    let live = true;
+    (async () => {
+      for (let i = 0; i < wanted.length; i += EDITED_IDS_PER_REQUEST) {
+        const chunk = wanted.slice(i, i + EDITED_IDS_PER_REQUEST);
+        try {
+          const res = await fetch(
+            `/api/occurrences?speciesKey=${encodeURIComponent(speciesKey)}&gbifIds=${chunk.join(",")}`
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          const next: OccurrenceFeature[] = data.features ?? [];
+          if (!live || next.length === 0) continue;
+          setOccurrences((prev) => {
+            const seen = new Set(prev.map((o) => o.properties.gbifID));
+            return [...prev, ...next.filter((f) => !seen.has(f.properties.gbifID))];
+          });
+        } catch {
+          // A record that won't come back is one the assessor can still see in
+          // the saved file; it is not worth taking the page down for.
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [
+    loadingOccurrences,
+    occurrences,
+    speciesKey,
+    georeferences,
+    exclusions,
+    assessorDates,
+    assessorNotes,
+  ]);
 
   // Basis-of-record category currently fetching more records, if any (drives the
   // per-row "Load more" spinner/disabled state in the dropdown).
