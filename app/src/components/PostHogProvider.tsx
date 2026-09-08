@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import posthog from "posthog-js";
 import { PostHogProvider as PHProvider } from "posthog-js/react";
 import { useMe } from "./MeProvider";
@@ -62,6 +62,12 @@ const RECORDING_MASKING = {
 function ConsentGate() {
   const { me, loaded } = useMe();
   const consented = me.analyticsConsent === true && !!me.id;
+  // Whether THIS page load ever turned recording on. Without it the teardown
+  // branch below runs on first load for everyone who has not consented — the
+  // overwhelmingly common case — and posthog.reset() there swaps the anonymous
+  // distinct_id partway through the page, splitting one visitor's events across
+  // two ids for no reason. Tearing down is only meaningful after a setup.
+  const wasRecording = useRef(false);
 
   useEffect(() => {
     if (!process.env.NEXT_PUBLIC_POSTHOG_KEY) return;
@@ -87,7 +93,11 @@ function ConsentGate() {
       // made" is answerable rather than a pile of disconnected anonymous ones.
       posthog.identify(me.id!);
       posthog.startSessionRecording();
+      wasRecording.current = true;
     } else {
+      // Nothing to undo on a fresh, never-consented page load.
+      if (!wasRecording.current) return;
+      wasRecording.current = false;
       posthog.stopSessionRecording();
       // Order matters: reset() clears the stored id and PostHog's own cookies,
       // so it has to run while the persistent store is still the active one.
