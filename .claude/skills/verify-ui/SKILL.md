@@ -84,3 +84,34 @@ Write the driver script inside `app/` (not `/tmp`) so Node's module resolution f
 - **React controlled inputs**: use Playwright's `fill`/`click`, not `eval el.value = ...` — the latter skips React's onChange.
 - **Slow first paint**: Turbopack compiles routes on demand; the first `page.goto` can take several seconds. Use `waitForSelector`, not a fixed `waitForTimeout`.
 - **Data-dependent UI**: most of the dashboard's summary tables (Table 1a mode, SSC groups mode, taxa subgroups) read from precomputed `app/data/*.json` files, not live queries. If a feature shows zeros/empty after a code change, check whether the underlying data file needs regenerating (`npx tsx scripts/build-taxa-summary.ts`) before assuming the UI is broken — see the main README's "Data Sync Pipeline" section.
+
+- **PostHog events never transmit under Playwright — and fail *silently*.** `posthog.capture()`
+  returns without queueing anything, sends no request, and logs nothing even with
+  `posthog.debug(true)`. This is not a bug in the app: posthog-js's `isLikelyBot`
+  (`src/utils/blocked-uas.ts`) blocks `headlesschrome` by user agent **and** ends with
+  `return !!navigator.webdriver`, so *any* WebDriver-controlled browser is classed as a bot
+  and every event is dropped by a silent `return` inside `capture()`. Do not conclude from a
+  Playwright run that analytics are broken in production. To verify analytics for real, defeat
+  both signals:
+
+  ```js
+  const ctx = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+               "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",   // no "HeadlessChrome"
+  });
+  await ctx.addInitScript(() =>
+    Object.defineProperty(navigator, "webdriver", { get: () => false })
+  );
+  ```
+
+  Then intercept `**/ingest/**` and fulfil the POSTs locally so test events never reach the
+  real PostHog project. The bodies are **raw gzip bytes in a `text/plain` request**, so read
+  them with `request.postDataBuffer()` (the string `postData()` mangles the binary) and
+  `zlib.gunzipSync`:
+
+  ```js
+  const buf = route.request().postDataBuffer();
+  const txt = buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf).toString("utf8")
+                                                 : buf.toString("utf8");
+  JSON.parse(txt).batch?.forEach((e) => console.log(e.event));
+  ```
