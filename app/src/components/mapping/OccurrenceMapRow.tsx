@@ -1537,11 +1537,17 @@ export default function OccurrenceMapRow({
   // Whether the current hover started on the map — the list scrolls to meet a
   // map hover, but must not yank itself around under the pointer for its own.
 
-  // Which way the two panels sit. Dragging the divider resizes them; this flips
-  // the axis. Side by side by default: a record has sixteen columns and a
-  // screen is wider than it is tall, so beneath the map the table showed four
-  // of them.
-  const [panelLayout, setPanelLayout] = useState<"rows" | "columns">("columns");
+  /*
+   * Fullscreen puts the list beside the map, always.
+   *
+   * It was a toggle in the list's footer, offering the list below the map
+   * instead. Nobody needs both: the map and the table are read together, and
+   * side by side is what makes that possible on a page this wide. A record has
+   * sixteen columns and a screen is wider than it is tall, so beneath the map
+   * the table showed four of them. The dashboard stacks them regardless,
+   * because there the panel goes under the map and the photo grid, and the
+   * divider is not drawn at all.
+   */
   /**
    * How much of the table's own size it's drawn at.
    *
@@ -1603,7 +1609,6 @@ export default function OccurrenceMapRow({
    * Fullscreen lets the reader choose; on the dashboard the panel is always
    * under the map, so the divider is always the horizontal one.
    */
-  const dividerLayout = fullscreen ? panelLayout : "rows";
   const [draggingDivider, setDraggingDivider] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
   const [splitView, setSplitView] = useState(false);
@@ -1953,7 +1958,12 @@ export default function OccurrenceMapRow({
         setTotalOccurrences(data.metadata?.total ?? null);
         setBbox(data.metadata?.bbox ?? null);
         setRecordSetTotals(data.metadata?.totals ?? null);
-        setGeneralOffset(features.length);
+        // Where each record set has been paged to, which is the sample size —
+        // not the number of records that came back. The route fetches the
+        // mapped, flagged and unmapped sets separately and merges them, so
+        // `features.length` counts up to three sets' worth and, used as an
+        // offset, skipped everything between here and there on the next page.
+        setGeneralOffset(sampleSize);
       })
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
@@ -2035,17 +2045,30 @@ export default function OccurrenceMapRow({
   // same reason (a record already pulled in by a per-category load may reappear here).
   const loadMoreOverall = useCallback(() => {
     setLoadingMoreOverall(true);
+    // The limit is per record set, and the route fetches each set it is asked
+    // for under it — so asking for 200 with both the mapped and the flagged set
+    // in play brought back 400. The southern elephant seal, whose records are
+    // mostly flagged, jumped by 400 on a button that said 200.
+    //
+    // Split between the sets that still have records to give, so the number on
+    // the button is what arrives either way: half each while both are running,
+    // and the whole batch from one once the other is spent — a species with no
+    // flagged records at all would otherwise get half of what it was promised.
+    const left = (total: number | undefined) => Math.max(0, (total ?? 0) - generalOffset);
+    const running = [recordSetTotals?.mapped, recordSetTotals?.issue].filter((t) => left(t) > 0).length;
+    const perSet = Math.ceil(OVERALL_LOAD_MORE_BATCH / Math.max(1, running));
     const params = new URLSearchParams({
       speciesKey,
-      limit: OVERALL_LOAD_MORE_BATCH.toString(),
+      limit: perSet.toString(),
       offset: generalOffset.toString(),
     });
     if (countryCode) {
       params.set("country", countryCode);
     }
-    // Keep paging the same record sets the user asked for, or the extra sets
-    // would silently drop out of the sample on the first "load more".
-    if (includeMissing) params.set("includeMissing", "true");
+    // The two sets this button's number is about: the ones GBIF has coordinates
+    // for, mapped and flagged. Records without coordinates have their own line
+    // and their own button, which pages them from their own offset — asking for
+    // them here moved a count this button says nothing about.
     params.set("includeIssues", "true");
     fetch(`/api/occurrences?${params}`)
       .then((res) => res.json())
@@ -2056,12 +2079,14 @@ export default function OccurrenceMapRow({
           const toAdd = newFeatures.filter((f) => !seen.has(f.properties.gbifID));
           return [...prev, ...toAdd];
         });
-        setGeneralOffset((prev) => prev + newFeatures.length);
+        // By what each set was asked for, not by how many records the merge
+        // produced: they all page from the same offset.
+        setGeneralOffset((prev) => prev + perSet);
         setTotalOccurrences(data.metadata?.total ?? null);
       })
       .catch(console.error)
       .finally(() => setLoadingMoreOverall(false));
-  }, [generalOffset, speciesKey, countryCode, includeMissing]);
+  }, [generalOffset, speciesKey, countryCode, recordSetTotals]);
 
   // Fetch breakdown data
   useEffect(() => {
@@ -3464,13 +3489,12 @@ export default function OccurrenceMapRow({
     const container = splitRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const span = panelLayout === "rows" ? rect.height : rect.width;
-    if (span === 0) return;
-    const pct = panelLayout === "rows"
-      ? ((e.clientY - rect.top) / span) * 100
-      : ((e.clientX - rect.left) / span) * 100;
+    // The divider is fullscreen's, and fullscreen is side by side: what it
+    // moves is the boundary between two columns.
+    if (rect.width === 0) return;
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
     setSplitPct(Math.min(FULLSCREEN_MAX_MAP_PCT, Math.max(FULLSCREEN_MIN_MAP_PCT, pct)));
-  }, [draggingDivider, panelLayout, setSplitPct]);
+  }, [draggingDivider, setSplitPct]);
 
   const handleDividerPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -8408,7 +8432,7 @@ export default function OccurrenceMapRow({
             ref={splitRef}
             className={
               fullscreen
-                ? `flex flex-1 min-h-0 ${panelLayout === "rows" ? "flex-col" : "flex-row"}`
+                ? "flex flex-1 min-h-0 flex-row"
                 // Wrapping, so the record panel drops to a line of its own under
                 // the photos and the map rather than squeezing in beside them.
                 // Cheaper than restructuring the DOM, and it keeps one set of
@@ -8615,11 +8639,11 @@ export default function OccurrenceMapRow({
               {fullscreen && (
               <div
                 role="separator"
-                aria-orientation={dividerLayout === "rows" ? "horizontal" : "vertical"}
+                aria-orientation="vertical"
                 aria-label="Resize map and record list"
-                aria-valuenow={Math.round(fullscreen ? splitPct : listHeightPx)}
-                aria-valuemin={fullscreen ? FULLSCREEN_MIN_MAP_PCT : 160}
-                aria-valuemax={fullscreen ? FULLSCREEN_MAX_MAP_PCT : 900}
+                aria-valuenow={Math.round(splitPct)}
+                aria-valuemin={FULLSCREEN_MIN_MAP_PCT}
+                aria-valuemax={FULLSCREEN_MAX_MAP_PCT}
                 tabIndex={0}
                 onPointerDown={handleDividerPointerDown}
                 onPointerMove={handleDividerPointerMove}
@@ -8627,16 +8651,12 @@ export default function OccurrenceMapRow({
                 onPointerCancel={handleDividerPointerUp}
                 onKeyDown={handleDividerKeyDown}
                 title="Drag to resize the map and the list"
-                className={`order-2 sm:order-none group relative shrink-0 touch-none flex items-center justify-center ${
-                  dividerLayout === "rows"
-                    ? "w-full sm:basis-full h-3 cursor-row-resize"
-                    : "h-full w-3 cursor-col-resize"
-                } ${
+                className={`order-2 sm:order-none group relative shrink-0 touch-none flex h-full w-3 cursor-col-resize items-center justify-center ${
                   draggingDivider ? "bg-blue-100 dark:bg-blue-900/40" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 } focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded`}
               >
                 <div
-                  className={`rounded-full transition-colors ${dividerLayout === "rows" ? "h-0.5 w-10" : "w-0.5 h-10"} ${
+                  className={`h-10 w-0.5 rounded-full transition-colors ${
                     draggingDivider
                       ? "bg-blue-500"
                       : "bg-zinc-300 dark:bg-zinc-600 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-500"
@@ -8753,8 +8773,6 @@ export default function OccurrenceMapRow({
                   exclusions={exclusions}
                   onExclude={setPendingExclusion}
                   onInclude={includeAgain}
-                  panelLayout={panelLayout}
-                  onTogglePanelLayout={() => setPanelLayout((v) => (v === "rows" ? "columns" : "rows"))}
                   zoom={listZoom}
                   fillHeight
                 />

@@ -712,8 +712,6 @@ interface OccurrenceListTableProps {
   /** How the map and this table are arranged, when the caller offers a choice.
    *  The control lives here, beside the column picker, because both are
    *  questions about how you want to read the table. */
-  panelLayout?: "rows" | "columns";
-  onTogglePanelLayout?: () => void;
 }
 
 /**
@@ -753,8 +751,6 @@ export default function OccurrenceListTable({
   onExclude,
   onInclude,
   fillHeight = false,
-  panelLayout,
-  onTogglePanelLayout,
 }: OccurrenceListTableProps) {
   // Default sort: newest first, matching GBIF's own default result order.
   /** The record whose Coordinates cell is open for typing, if any. */
@@ -2297,27 +2293,6 @@ export default function OccurrenceListTable({
         </div>
         <div className="ml-auto flex items-center gap-1.5">
           {footerExtra}
-          {onTogglePanelLayout && (
-            <button
-              onClick={onTogglePanelLayout}
-              title={
-                panelLayout === "rows"
-                  ? "Put the list beside the map"
-                  : "Put the list below the map"
-              }
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <rect x="3" y="4" width="18" height="16" rx="1.5" />
-                {panelLayout === "rows" ? (
-                  <path strokeLinecap="round" d="M3 13h18" />
-                ) : (
-                  <path strokeLinecap="round" d="M13 4v16" />
-                )}
-              </svg>
-              {panelLayout === "rows" ? "Side by side" : "Stacked"}
-            </button>
-          )}
           <button
             ref={columnButtonRef}
             onClick={() => setColumnPickerOpen((v) => !v)}
