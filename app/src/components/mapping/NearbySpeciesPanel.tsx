@@ -21,6 +21,14 @@ import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
 import { linkCitations, type AssessmentReference } from "@/lib/mapping/nearby-citations";
 import {
+  cachedAssessment,
+  loadAssessment,
+  narrativeLabel,
+  type LoadedAssessment,
+  type NarrativeField,
+  type RedListAssessment,
+} from "@/lib/redlist/assessment";
+import {
   NEARBY_RADII_KM,
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
@@ -50,73 +58,13 @@ interface Props {
   onClose: () => void;
 }
 
-/**
- * Assessment narratives already fetched, for the life of the page.
- *
- * The route caches these for an hour and sets cache headers, but that is a
- * serverless function's memory and it is short. This is the one that stops the
- * IUCN API being asked twice for the same paragraph because someone closed a
- * row and opened it again — which, in a panel built for comparing neighbours,
- * is exactly what people do.
+/*
+ * One assessment's prose, threats and bibliography come from
+ * `lib/redlist/assessment` — the same module the dashboard's Red List
+ * Assessments tab reads, so the response's shape, the names of its narrative
+ * fields and the cache in front of the IUCN API are settled in one place. What
+ * each of them does with it is their own business, and differs.
  */
-/** One assessment's prose and structured threats, as the route returns them. */
-interface Assessment {
-  rationale?: string | null;
-  range?: string | null;
-  habitat?: string | null;
-  use_trade?: string | null;
-  conservation_actions?: string | null;
-  threats?: string | null;
-  threat_classification?:
-    | {
-        code: string;
-        name: string;
-        timing: string | null;
-        scope: string | null;
-        severity: string | null;
-        score: string | null;
-        named?: string | null;
-      }[]
-    | null;
-  references?: AssessmentReference[];
-}
-
-type Loaded = { assessment?: Assessment; error?: string };
-
-/**
- * Assessments already fetched, for the life of the page.
- *
- * One request brings every section down together, so opening a row pays once
- * and the tabs are free after that. The route caches for an hour and sets cache
- * headers, but that is a serverless function's memory and it is short; this is
- * the one that stops the IUCN API being asked twice because a row was closed
- * and opened again — which, in a panel built for comparing neighbours, is
- * exactly what people do.
- */
-const assessmentCache = new Map<number, Loaded>();
-
-/** Requests already in the air, so two mounts of a row make one request. */
-const assessmentInFlight = new Map<number, Promise<Loaded>>();
-
-function fetchAssessment(assessmentId: number) {
-  const running = assessmentInFlight.get(assessmentId);
-  if (running) return running;
-  // No abort signal, deliberately. The promise is shared, so tying it to one
-  // caller's lifetime lets that caller's unmount cancel the fetch the next one
-  // is waiting on — which is what a double-mounted effect does, and it left the
-  // row loading forever. It is one small GET worth caching either way.
-  const p = fetch(`/api/redlist/assessment/${assessmentId}`)
-    .then(async (r) => {
-      const body = await r.json();
-      if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
-      const next: Loaded = { assessment: body as Assessment };
-      assessmentCache.set(assessmentId, next);
-      return next;
-    })
-    .finally(() => assessmentInFlight.delete(assessmentId));
-  assessmentInFlight.set(assessmentId, p);
-  return p;
-}
 
 /**
  * The sections of an assessment worth reading beside a neighbour's row.
@@ -125,15 +73,23 @@ function fetchAssessment(assessmentId: number) {
  * because once the request has been made they cost nothing, and an assessor
  * comparing neighbours wants the range and the habitat as often as not.
  */
-const SECTIONS = [
-  ["threats", "Threats"],
-  ["rationale", "Rationale"],
-  ["range", "Range"],
-  ["habitat", "Habitat"],
-  ["use_trade", "Use & trade"],
-  ["conservation_actions", "Actions"],
-] as const;
-type SectionKey = (typeof SECTIONS)[number][0];
+/**
+ * The tabs, in this panel's order: threats first, because the question the
+ * panel exists to answer is what the neighbours are up against. The labels are
+ * the short ones — a tab is a few characters wide — and both they and the field
+ * list come from the shared module, so a narrative the route starts returning
+ * cannot appear in the dashboard's tab and be missing here.
+ */
+const SECTION_ORDER = [
+  "threats",
+  "rationale",
+  "range",
+  "habitat",
+  "use_trade",
+  "conservation_actions",
+] as const satisfies readonly NarrativeField[];
+type SectionKey = (typeof SECTION_ORDER)[number];
+const SECTIONS = SECTION_ORDER.map((field) => [field, narrativeLabel(field)] as const);
 
 /** Prose with its in-text citations turned into things you can open. */
 function Prose({ text, references }: { text: string; references: AssessmentReference[] }) {
@@ -224,23 +180,17 @@ function SpeciesDetail({
   assessmentYear: number | null;
   redListHref: string | null;
 }) {
-  const [state, setState] = useState<Loaded | null>(() => assessmentCache.get(assessmentId) ?? null);
+  const [state, setState] = useState<LoadedAssessment | null>(() => cachedAssessment(assessmentId) ?? null);
   const [section, setSection] = useState<SectionKey>("threats");
   /** Whether the scoring behind the threat summary is showing. */
   const [tableOpen, setTableOpen] = useState(false);
 
   useEffect(() => {
-    if (assessmentCache.has(assessmentId)) return;
+    if (cachedAssessment(assessmentId)) return;
     let live = true;
-    fetchAssessment(assessmentId)
-      .then((next) => {
-        if (live) setState(next);
-      })
-      .catch((e: unknown) => {
-        // Not cached: a failure is usually the network rather than the
-        // assessment, and should be retryable by opening the row again.
-        if (live) setState({ error: e instanceof Error ? e.message : "Could not load" });
-      });
+    loadAssessment(assessmentId).then((next) => {
+      if (live) setState(next);
+    });
     return () => {
       live = false;
     };
@@ -256,7 +206,7 @@ function SpeciesDetail({
   }
   if (state.error) return <span className="text-amber-600 dark:text-amber-400">{state.error}</span>;
 
-  const a = state.assessment ?? {};
+  const a = (state.assessment ?? {}) as Partial<RedListAssessment>;
   const refs = a.references ?? [];
   const rows =
     section === "threats"

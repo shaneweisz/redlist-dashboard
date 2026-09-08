@@ -1,5 +1,6 @@
 "use client";
 
+import { loadAssessment } from "@/lib/redlist/assessment";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
@@ -3262,26 +3263,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const existing = speciesDetails[s.species_key];
     if (!existing || existing.criteriaFetched) return;
 
+    // Through the shared loader, which the Red List Assessments tab and the
+    // nearby-species panel also read: the same assessment was being fetched
+    // several times over on one row — three times here, because this effect
+    // re-runs as the details it writes arrive, and again by the tab when it was
+    // opened. One request now serves all of them, for the life of the page.
     async function fetchCriteria() {
       if (!s || !s.assessment_id) return;
-      try {
-        const res = await fetch(
-          `/api/redlist/assessment/${s.assessment_id}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setSpeciesDetails((prev) => ({
-            ...prev,
-            [s.species_key]: {
-              ...prev[s.species_key],
-              criteria: data.criteria || null,
-              criteriaFetched: true,
-            },
-          }));
-        }
-      } catch {
-        // Ignore errors
-      }
+      const { assessment } = await loadAssessment(s.assessment_id);
+      if (!assessment) return;
+      setSpeciesDetails((prev) => ({
+        ...prev,
+        [s.species_key]: {
+          ...prev[s.species_key],
+          criteria: assessment.criteria || null,
+          criteriaFetched: true,
+        },
+      }));
     }
 
     fetchCriteria();
