@@ -1213,6 +1213,8 @@ export default function OccurrenceMapRow({
   const [nearbyHidden, setNearbyHidden] = useState<Set<string>>(new Set());
   /** Whether the legend's nearby-species list is rolled up. */
   const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
+  /** Whether the Records legend itself is showing, or rolled up to its title. */
+  const [legendOpen, setLegendOpen] = useState(true);
   /** Where the browser says the reader is, once they've asked. */
   const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
   /** Where the browser last said the reader was, marked on the map. */
@@ -7050,10 +7052,33 @@ export default function OccurrenceMapRow({
   const renderRecordLayers = (label: string | null) => (
     // Wide enough for the GBIF row to carry its name, its colour ramp and its
     // count on one line, which is what that row is: one layer, described.
-    <div className="flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 w-64">
-      <div className="px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+    // Rolled up it shrinks to its own title, since the point of rolling it up
+    // is the corner of the map it was standing on.
+    <div
+      className={`flex flex-col bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 ${
+        legendOpen ? "w-64" : "w-auto"
+      }`}
+    >
+      {/* The title is the switch. A legend is read once and then in the way —
+          it sits over the bottom-left of the map, which on a species with a
+          coastal range is where the records are — and every other panel on
+          this map already rolls up from its own heading. */}
+      <button
+        onClick={() => setLegendOpen((v) => !v)}
+        title={legendOpen ? "Roll the legend up" : "Show the legend"}
+        aria-expanded={legendOpen}
+        className="flex items-center gap-1 px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+      >
+        <svg
+          className={`h-2.5 w-2.5 shrink-0 transition-transform ${legendOpen ? "rotate-90" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
         Records
-      </div>
+      </button>
+      {legendOpen && (
+      <>
       {/* The assessor's own layers first, GBIF's last. These are the ones you
           are deciding about; GBIF's points are the ground they're decided
           against, and they carry the most explanation, so they anchor the
@@ -7344,6 +7369,8 @@ export default function OccurrenceMapRow({
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );
