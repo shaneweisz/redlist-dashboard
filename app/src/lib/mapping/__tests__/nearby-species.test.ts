@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   NEARBY_CATEGORIES,
+  NEARBY_MAX_SEARCHES,
+  NEARBY_RADIUS_DEFAULT,
+  encodeNearbySearches,
+  decodeNearbySearches,
   nearbyFacetUrl,
   nearbyGbifSiteUrl,
   groupNearbyFeatures,
@@ -141,5 +145,46 @@ describe("ordering threat codes", () => {
 
   it("puts a bare parent before its own children", () => {
     expect(["5.4.1", "5"].sort(compareThreatCodes)).toEqual(["5", "5.4.1"]);
+  });
+});
+
+describe("carrying the open searches in a URL", () => {
+  it("round-trips a search list", () => {
+    const searches = [
+      { lat: 22.1597, lng: 86.6058, radiusKm: 50 as const },
+      { lat: -33.9249, lng: 18.4241, radiusKm: 10 as const },
+    ];
+    expect(decodeNearbySearches(encodeNearbySearches(searches))).toEqual(searches);
+  });
+
+  it("keeps five decimals — about a metre — and no more", () => {
+    expect(encodeNearbySearches([{ lat: 1.123456789, lng: -2.9876543, radiusKm: 25 }]))
+      .toBe("1.12346,-2.98765,25");
+  });
+
+  it("is empty for nothing, and for junk", () => {
+    expect(encodeNearbySearches([])).toBe("");
+    for (const junk of [null, undefined, "", "abc", ";;", "1,2"]) {
+      expect(decodeNearbySearches(junk as string)).toEqual(
+        junk === "1,2" ? [{ lat: 1, lng: 2, radiusKm: NEARBY_RADIUS_DEFAULT }] : []
+      );
+    }
+  });
+
+  it("drops the parts that don't parse and keeps the ones that do", () => {
+    expect(decodeNearbySearches("91,0,10;10,20,25;0,181,10")).toEqual([
+      { lat: 10, lng: 20, radiusKm: 25 },
+    ]);
+  });
+
+  it("falls back to the default for a radius nothing offers", () => {
+    expect(decodeNearbySearches("10,20,999")).toEqual([
+      { lat: 10, lng: 20, radiusKm: NEARBY_RADIUS_DEFAULT },
+    ]);
+  });
+
+  it("never returns more searches than the tab strip holds", () => {
+    const many = Array.from({ length: 9 }, (_, i) => `${i},${i},10`).join(";");
+    expect(decodeNearbySearches(many)).toHaveLength(NEARBY_MAX_SEARCHES);
   });
 });

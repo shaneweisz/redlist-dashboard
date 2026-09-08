@@ -403,3 +403,50 @@ export function nearbyGbifSiteUrl(opts: {
   if (opts.speciesKey) params.set("taxonKey", opts.speciesKey);
   return `https://www.gbif.org/occurrence/search?${params}`;
 }
+
+/**
+ * The open searches, small enough to travel in a URL.
+ *
+ * Fullscreen is a page of its own, so going into it — or back out — is a real
+ * navigation, and everything the component was holding goes with it. The
+ * questions being asked of the map are the part worth carrying across: they
+ * were typed, or clicked, or found, and having to ask them again on the other
+ * side made fullscreen something you avoided once a search was open.
+ *
+ * `lat,lng,radius` per search, separated by `;`. Five decimals is about a
+ * metre, which is finer than any radius on offer and short enough that four
+ * searches fit in a param without dominating the URL. What is drawn from each
+ * search — the picked neighbours — is left behind deliberately: it is a click
+ * to restore, and encoding it would put species keys in the address bar.
+ */
+export function encodeNearbySearches(
+  searches: { lat: number; lng: number; radiusKm: number }[]
+): string {
+  return searches
+    .map((s) => `${s.lat.toFixed(5)},${s.lng.toFixed(5)},${s.radiusKm}`)
+    .join(";");
+}
+
+/**
+ * The reverse, defensively: a hand-edited or truncated param yields the
+ * searches that do parse and drops the rest, rather than failing the page.
+ */
+export function decodeNearbySearches(
+  param: string | null | undefined
+): { lat: number; lng: number; radiusKm: NearbyRadiusKm }[] {
+  if (!param) return [];
+  const out: { lat: number; lng: number; radiusKm: NearbyRadiusKm }[] = [];
+  for (const part of param.split(";")) {
+    const [lat, lng, km] = part.split(",").map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    const radiusKm = (NEARBY_RADII_KM as readonly number[]).includes(km)
+      ? (km as NearbyRadiusKm)
+      : NEARBY_RADIUS_DEFAULT;
+    out.push({ lat, lng, radiusKm });
+  }
+  return out.slice(0, NEARBY_MAX_SEARCHES);
+}
+
+/** Past this the tab strip stops being readable; the oldest question goes. */
+export const NEARBY_MAX_SEARCHES = 4;

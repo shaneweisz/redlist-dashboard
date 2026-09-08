@@ -31,6 +31,9 @@ import {
   NEARBY_SEARCH_COLOR,
   NEARBY_PICKED_COLORS,
   NEARBY_MAX_PICKED,
+  NEARBY_MAX_SEARCHES,
+  encodeNearbySearches,
+  decodeNearbySearches,
   groupNearbyFeatures,
   type NearbyPoint,
   type NearbyRadiusKm,
@@ -382,9 +385,6 @@ type NearbySearch = {
   /** The neighbours this question has put on the map. */
   picked: { key: string; name: string; commonName: string | null }[];
 };
-
-/** Past this the tab strip stops being readable; the oldest question goes. */
-const NEARBY_MAX_SEARCHES = 4;
 
 /**
  * What one drawn species is called on the map: the search, its radius and the
@@ -1150,6 +1150,29 @@ export default function OccurrenceMapRow({
   /** Which search the panel and the map are currently answering for. */
   const [nearbyActiveId, setNearbyActiveId] = useState<string | null>(null);
   /**
+   * The searches the link that opened this page was carrying.
+   *
+   * Fullscreen is a page of its own, so entering and leaving it is a real
+   * navigation and everything held in this component goes with it. The
+   * questions themselves ride across in `near`, put there by whichever link
+   * was clicked; read once, on mount, because after that this component owns
+   * them. What each search had drawn is not restored — that is a click, and
+   * species keys do not belong in an address bar.
+   */
+  useEffect(() => {
+    const carried = decodeNearbySearches(new URLSearchParams(window.location.search).get("near"));
+    if (carried.length === 0) return;
+    const restored = carried.map((at, i) => ({
+      id: `url${i}`,
+      recordName: "",
+      picked: [],
+      ...at,
+    }));
+    setNearbySearches(restored);
+    setNearbyActiveId(restored[restored.length - 1].id);
+    setListTab(`nearby:${restored[restored.length - 1].id}`);
+  }, []);
+  /**
    * Each picked species' records, keyed by search, radius and species.
    *
    * The radius is in the key rather than being invalidated on change, so going
@@ -1503,6 +1526,9 @@ export default function OccurrenceMapRow({
   // The taxon token matters as much as the search text: the Not Evaluated view
   // won't list anything until the tree is narrowed (there are 1.8M unassessed
   // species), so `search=` on its own arrives at an empty dashboard.
+  /** The open searches, as the links carry them. */
+  const nearbyParam = useMemo(() => encodeNearbySearches(nearbySearches), [nearbySearches]);
+
   const dashboardHref = useMemo(() => {
     if (!scientificName) return "/";
     const params = new URLSearchParams({ search: scientificName });
@@ -1514,8 +1540,9 @@ export default function OccurrenceMapRow({
       params.set("species", dashboardSpeciesKey);
       params.set("tab", "gbif");
     }
+    if (nearbyParam) params.set("near", nearbyParam);
     return `/?${params}`;
-  }, [scientificName, category, dashboardTaxonToken, dashboardSpeciesKey]);
+  }, [scientificName, category, dashboardTaxonToken, dashboardSpeciesKey, nearbyParam]);
   // Share of the fullscreen height given to the map, as a percentage. Two
   // thirds by default, dragged from the divider between map and list.
   const [mapHeightPct, setMapHeightPct] = useState(FULLSCREEN_DEFAULT_MAP_PCT);
@@ -4616,11 +4643,20 @@ export default function OccurrenceMapRow({
                   type="geojson"
                   data={{ type: "Feature", properties: {}, geometry: rangeMetrics.eoo.hull }}
                 >
-                  <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.07 }} />
+                  <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.12 }} />
+                  {/* A white casing under the hull, as the protected-area
+                      highlights use: a dark blue line on dark imagery was a
+                      line you had to know was there to find, and the hybrid
+                      basemap is now the one people start on. */}
+                  <Layer
+                    id={`eoo-casing-${panelId}`}
+                    type="line"
+                    paint={{ "line-color": "#ffffff", "line-width": 4.5, "line-opacity": 0.85 }}
+                  />
                   <Layer
                     id={`eoo-line-${panelId}`}
                     type="line"
-                    paint={{ "line-color": "#0369a1", "line-width": 1.5, "line-dasharray": [3, 2] }}
+                    paint={{ "line-color": "#0369a1", "line-width": 2.25, "line-dasharray": [3, 2] }}
                   />
                 </Source>
               )}
@@ -4637,8 +4673,16 @@ export default function OccurrenceMapRow({
                     })),
                   }}
                 >
-                  <Layer id={`aoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0369a1", "fill-opacity": 0.35 }} />
-                  <Layer id={`aoo-line-${panelId}`} type="line" paint={{ "line-color": "#0369a1", "line-width": 0.6 }} />
+                  {/* Brighter than the hull's navy and outlined in white:
+                      a 2 km cell is a few pixels across at range-wide zooms,
+                      and at 0.6px of dark navy over dark ground the grid that
+                      the AOO figure counts was invisible. */}
+                  <Layer id={`aoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.45 }} />
+                  <Layer
+                    id={`aoo-line-${panelId}`}
+                    type="line"
+                    paint={{ "line-color": "#ffffff", "line-width": 1.1, "line-opacity": 0.9 }}
+                  />
                 </Source>
               )}
               {/* The measured path. Drawn above everything so the line stays
@@ -5803,24 +5847,6 @@ export default function OccurrenceMapRow({
         title: "The records being counted",
       },
     ];
-    // One tab per question, each named for where it was asked — the first one
-    // too, so a second search adds a tab rather than renaming the one already
-    // being read.
-    //
-    // As many decimals as it takes to tell them apart, which is two for points
-    // a kilometre or more apart and more for questions asked of the same
-    // hillside — a pair of tabs reading "Nearby 18.50, 84.00" would be exactly
-    // the ambiguity the coordinates are here to remove.
-    const places = (dp: number) => nearbySearches.map((s) => `${s.lat.toFixed(dp)}, ${s.lng.toFixed(dp)}`);
-    const dp = [2, 4].find((d) => new Set(places(d)).size === nearbySearches.length) ?? 4;
-    for (const search of nearbySearches) {
-      tabs.push({
-        key: `nearby:${search.id}`,
-        label: `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`,
-        count: 0,
-        title: `Threatened species within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`,
-      });
-    }
     if (excludedOccurrences.length > 0) {
       tabs.push({
         key: "excluded",
@@ -5836,6 +5862,26 @@ export default function OccurrenceMapRow({
         count: pointFile.points.length,
         title: `The rows of ${pointFile.fileName}, as imported`,
         dot: POINT_FILE_COLOR,
+      });
+    }
+    // The questions asked of the map go last, after the tables that are always
+    // there. They come and go as searches are opened and closed, and in the
+    // middle of the strip every new one shifted Excluded and Imported along
+    // under the pointer.
+    //
+    // Each is named for where it was asked, with as many decimals as it takes
+    // to tell them apart — two for points a kilometre or more apart, more for
+    // questions asked of the same hillside, since a pair of tabs both reading
+    // "Nearby 18.50, 84.00" is exactly the ambiguity coordinates are here to
+    // remove.
+    const places = (dp: number) => nearbySearches.map((s) => `${s.lat.toFixed(dp)}, ${s.lng.toFixed(dp)}`);
+    const dp = [2, 4].find((d) => new Set(places(d)).size === nearbySearches.length) ?? 4;
+    for (const search of nearbySearches) {
+      tabs.push({
+        key: `nearby:${search.id}`,
+        label: `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`,
+        count: 0,
+        title: `Threatened species within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`,
       });
     }
     return tabs;
@@ -7091,7 +7137,7 @@ export default function OccurrenceMapRow({
           className="w-2.5 h-2.5 rounded-full shrink-0"
           style={{ background: "#4ade80", border: "1.5px solid #16a34a" }}
         />
-        <span className="shrink-0 text-zinc-700 dark:text-zinc-200">GBIF points</span>
+        <span className="shrink-0 text-zinc-700 dark:text-zinc-200">GBIF records</span>
         {/* What to do with this layer, behind one icon: the two colourings and
             the split. They were a link under the row and a card of their own
             below the panel, which spent three lines of a legend on controls
@@ -7107,7 +7153,7 @@ export default function OccurrenceMapRow({
                 setGbifOptionsOpen((v) => !v);
               }}
               title="How these points are coloured, and split view"
-              aria-label="GBIF points options"
+              aria-label="GBIF records options"
               className="block text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
             >
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -7192,7 +7238,7 @@ export default function OccurrenceMapRow({
             className="w-2.5 h-2.5 rounded-full shrink-0 border-[1.5px]"
             style={{ background: "transparent", borderColor: "#6b7280", opacity: 0.85 }}
           />
-          <span className="flex-1 min-w-0 text-zinc-500 dark:text-zinc-400 truncate">Excluded points</span>
+          <span className="flex-1 min-w-0 text-zinc-500 dark:text-zinc-400 truncate">Excluded GBIF records</span>
           <span className="tabular-nums text-[10px] text-zinc-400">
             {struckOutCount.toLocaleString()}
           </span>
@@ -8226,7 +8272,9 @@ export default function OccurrenceMapRow({
                   </Link>
                 ) : (
                   <Link
-                    href={`/mapping/${encodeURIComponent(speciesKey)}`}
+                    href={`/mapping/${encodeURIComponent(speciesKey)}${
+                      nearbyParam ? `?near=${encodeURIComponent(nearbyParam)}` : ""
+                    }`}
                     title="Open the map and record list fullscreen, on their own shareable page"
                     className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
                   >
@@ -8494,6 +8542,12 @@ export default function OccurrenceMapRow({
               style={fullscreen ? undefined : { height: listHeightPx }}
             >
                 <div className="flex items-center gap-1 shrink-0 text-[11px] border-b border-zinc-200 dark:border-zinc-700">
+                  {/* The tabs scroll rather than wrap: several searches open at
+                      once outran the strip, and a second row of tabs would eat
+                      the list's height every time one was opened. The zoom
+                      control stays outside the scroller, where it can always be
+                      reached. */}
+                  <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
                   {listTabs.map((tab) => (
                     <button
                       key={tab.key}
@@ -8504,7 +8558,7 @@ export default function OccurrenceMapRow({
                         if (tab.key.startsWith("nearby:")) setNearbyActiveId(tab.key.slice("nearby:".length));
                       }}
                       title={tab.title}
-                      className={`flex items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
+                      className={`flex shrink-0 items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
                         listTab === tab.key
                           ? "border-blue-500 text-zinc-700 dark:text-zinc-200"
                           : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
@@ -8519,6 +8573,7 @@ export default function OccurrenceMapRow({
                       )}
                     </button>
                   ))}
+                  </div>
                   <ListZoomControl zoom={listZoom} onChange={setListZoom} />
                 </div>
                 {listTab.startsWith("nearby:") ? (
