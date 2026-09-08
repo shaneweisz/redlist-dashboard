@@ -3,6 +3,8 @@ import {
   NEARBY_CATEGORIES,
   NEARBY_MAX_SEARCHES,
   NEARBY_RADIUS_DEFAULT,
+  NEARBY_RADII_KM,
+  snapRadiusKm,
   encodeNearbySearches,
   decodeNearbySearches,
   nearbyFacetUrl,
@@ -177,8 +179,14 @@ describe("carrying the open searches in a URL", () => {
     ]);
   });
 
-  it("falls back to the default for a radius nothing offers", () => {
-    expect(decodeNearbySearches("10,20,999")).toEqual([
+  it("snaps a radius that isn't one of the four to the nearest that is", () => {
+    expect(decodeNearbySearches("10,20,999")).toEqual([{ lat: 10, lng: 20, radiusKm: 100 }]);
+    expect(decodeNearbySearches("10,20,0")).toEqual([{ lat: 10, lng: 20, radiusKm: 10 }]);
+    expect(decodeNearbySearches("10,20,30")).toEqual([{ lat: 10, lng: 20, radiusKm: 25 }]);
+  });
+
+  it("takes the default for a radius that is not a number at all", () => {
+    expect(decodeNearbySearches("10,20,abc")).toEqual([
       { lat: 10, lng: 20, radiusKm: NEARBY_RADIUS_DEFAULT },
     ]);
   });
@@ -186,5 +194,29 @@ describe("carrying the open searches in a URL", () => {
   it("never returns more searches than the tab strip holds", () => {
     const many = Array.from({ length: 9 }, (_, i) => `${i},${i},10`).join(";");
     expect(decodeNearbySearches(many)).toHaveLength(NEARBY_MAX_SEARCHES);
+  });
+});
+
+describe("snapRadiusKm", () => {
+  it("lands on the nearest radius the panel offers", () => {
+    expect(snapRadiusKm(1)).toBe(10);
+    expect(snapRadiusKm(17)).toBe(10);
+    expect(snapRadiusKm(18)).toBe(25);
+    expect(snapRadiusKm(40)).toBe(50);
+    expect(snapRadiusKm(74)).toBe(50);
+    expect(snapRadiusKm(76)).toBe(100);
+    expect(snapRadiusKm(4000)).toBe(100);
+  });
+
+  it("only ever returns a radius that is on offer", () => {
+    for (const km of [0, 3, 12, 37, 63, 99, 1e6]) {
+      expect(NEARBY_RADII_KM).toContain(snapRadiusKm(km));
+    }
+  });
+
+  it("falls back to the default for nonsense", () => {
+    expect(snapRadiusKm("abc")).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(null)).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(undefined)).toBe(NEARBY_RADIUS_DEFAULT);
   });
 });

@@ -31,6 +31,7 @@ import {
   NEARBY_SEARCH_COLOR,
   NEARBY_PICKED_COLORS,
   NEARBY_MAX_PICKED,
+  snapRadiusKm,
   NEARBY_MAX_SEARCHES,
   encodeNearbySearches,
   decodeNearbySearches,
@@ -38,6 +39,7 @@ import {
   type NearbyPoint,
   type NearbyRadiusKm,
 } from "@/lib/mapping/nearby-species";
+import { haversineMetres } from "@/lib/mapping/geo-distance";
 import MapGeoreferenceEditor from "./MapGeoreferenceEditor";
 import type { OccurrenceFeature as OccurrenceFeatureType } from "./OccurrenceListTable";
 // The table's own labels, so a basis of record is worded the same wherever it
@@ -1150,6 +1152,9 @@ export default function OccurrenceMapRow({
    * with the answer still up beside it.
    */
   const [nearbySearches, setNearbySearches] = useState<NearbySearch[]>([]);
+  /** The searches as they are now, for handlers that must not chase them. */
+  const nearbySearchesRef = useRef<NearbySearch[]>([]);
+
   /** Which search the panel and the map are currently answering for. */
   const [nearbyActiveId, setNearbyActiveId] = useState<string | null>(null);
   /**
@@ -1218,6 +1223,26 @@ export default function OccurrenceMapRow({
   const [nearbyLegendOpen, setNearbyLegendOpen] = useState(true);
   /** Whether the legend itself is showing, or rolled up to its title. */
   const [legendOpen, setLegendOpen] = useState(true);
+  /**
+   * The search whose ring is being dragged, and whether the pointer is over one.
+   *
+   * The circle is the radius made visible, so it is also the way to change it:
+   * a control that draws the answer and can't be pulled is asking to be pulled.
+   * The buttons stay as the distances people ask for most.
+   */
+  const [draggingRadius, setDraggingRadius] = useState<string | null>(null);
+  /**
+   * The same fact, in a ref.
+   *
+   * The fit-to-the-circle effect has to know that a drag is in progress the
+   * moment it starts, and state reaches an effect a render later — long enough
+   * for the first radius change to refit the map, which moves the ground under
+   * the pointer, which changes the radius again. The ring ran away to the
+   * widest setting every time.
+   */
+  const draggingRadiusRef = useRef<string | null>(null);
+  const [hoveringRing, setHoveringRing] = useState(false);
+
   /** The size it has been dragged to, or null for "as big as its contents". */
   const [legendSize, setLegendSize] = useState<{ w: number; h: number } | null>(null);
   const legendRef = useRef<HTMLDivElement>(null);
@@ -1308,6 +1333,9 @@ export default function OccurrenceMapRow({
     () => nearbySearches.find((s) => s.id === nearbyActiveId) ?? null,
     [nearbySearches, nearbyActiveId]
   );
+  useEffect(() => {
+    nearbySearchesRef.current = nearbySearches;
+  }, [nearbySearches]);
 
   const nearbyColors = useMemo(() => {
     const out: Record<string, string> = {};
@@ -2928,12 +2956,23 @@ export default function OccurrenceMapRow({
     }
     const key = `${nearbyActive.id},${nearbyActive.radiusKm}`;
     if (fittedNearbyRef.current === key) return;
-    // The circle's own bounding box, so the ring sits inside the padding
-    // rather than touching the edges.
+    // Not while the ring is being dragged. Fitting to the circle mid-drag zooms
+    // the map out from under the pointer, which makes the pointer further away
+    // in kilometres, which fits the map out again: every drag ran away to the
+    // widest radius on offer. Marked as fitted so letting go doesn't jump the
+    // view either — the reader is already looking at the circle they drew.
+    if (draggingRadiusRef.current) {
+      fittedNearbyRef.current = key;
+      return;
+    }
+    // Twice the circle, not the circle itself. Fitted tight, the ring reaches
+    // the edges of the map and there is nowhere left to drag it out to — a
+    // radius could only ever be made smaller. At half the width it is still
+    // unmistakably the subject, and 10 km can be pulled out to 100.
     const ring = uncertaintyCircle(
       nearbyActive.lat,
       nearbyActive.lng,
-      nearbyActive.radiusKm * 1000
+      nearbyActive.radiusKm * 2000
     ).coordinates[0];
     const lons = ring.map((c) => c[0]);
     const lats = ring.map((c) => c[1]);
@@ -3076,7 +3115,11 @@ export default function OccurrenceMapRow({
       setMeasure(measure.length < 2 ? [...measure, point] : [measure[1], point]);
       return;
     }
-    const features = e.features;
+    // The ring is interactive so it can be dragged; a click that lands on it is
+    // a click on the map, not on a record.
+    const features = e.features?.filter(
+      (f) => !String(f.layer?.id ?? "").startsWith("nearby-radius-grab-")
+    );
     // A neighbour's cross, before anything else: it is drawn above the map's
     // own records, so a click that reaches one is aimed at it rather than at
     // whatever green circle happens to lie underneath.
@@ -3490,7 +3533,18 @@ export default function OccurrenceMapRow({
 
   const handleMapMouseMove = useCallback((e: MapLayerMouseEvent, panelId: string) => {
     if (isTouchDevice) return;
-    const features = e.features;
+    // A ring being dragged owns the pointer, off window listeners of its own.
+    if (draggingRadius) return;
+    setHoveringRing(
+      !!e.features?.some((f) => String(f.layer?.id ?? "").startsWith("nearby-radius-grab-"))
+    );
+    // The ring is interactive so it can be dragged, but it is not a record:
+    // everything below is about what is under the pointer to *read*, and a
+    // polygon handed to it as one arrives with coordinates that are not a
+    // position at all.
+    const features = e.features?.filter(
+      (f) => !String(f.layer?.id ?? "").startsWith("nearby-radius-grab-")
+    );
     // Set from the same hit test that drives the tooltip, so the cursor and
     // the panel can never disagree about whether there's a record here.
     setHoveringPoint(!!features && features.length > 0);
@@ -3542,10 +3596,23 @@ export default function OccurrenceMapRow({
     } else if (!tooltipHeld) {
       clearHoverSoon();
     }
-  }, [isTouchDevice, occurrencesByGbifId, tooltipHeld, hoveredFeature, clearHoverSoon, cancelHoverClear]);
+  }, [
+    isTouchDevice,
+    occurrencesByGbifId,
+    tooltipHeld,
+    hoveredFeature,
+    clearHoverSoon,
+    cancelHoverClear,
+    draggingRadius,
+  ]);
 
   const handleMapMouseLeave = useCallback(() => {
     setHoveringPoint(false);
+    // Not the ring's drag: that one is on the window and ends on pointerup,
+    // wherever the pointer happens to be. Ending it here meant a drag past the
+    // map's edge — the ordinary way to ask for a wider circle — let go of the
+    // ring and handed the map back to the fit, which then chased the pointer.
+    if (!draggingRadiusRef.current) setHoveringRing(false);
     if (tooltipHeld) return;
     clearHoverSoon();
   }, [tooltipHeld, clearHoverSoon]);
@@ -4038,6 +4105,7 @@ export default function OccurrenceMapRow({
                 `occ-circles-${panelId}`,
                 `georef-point-${panelId}`,
                 `nearby-points-circle-${panelId}`,
+                `nearby-radius-grab-${panelId}`,
               ]}
               onClick={(e: MapLayerMouseEvent) => handleMapClick(e, panelId)}
               onContextMenu={(e: MapLayerMouseEvent) => handleMapContextMenu(e, panelId)}
@@ -4055,12 +4123,53 @@ export default function OccurrenceMapRow({
               cursor={
                 measure
                   ? "crosshair"
-                  : panning
-                    ? "move"
-                    : hoveringPoint
-                      ? "pointer"
-                      : "default"
+                  : draggingRadius || hoveringRing
+                    ? "ew-resize"
+                    : panning
+                      ? "move"
+                      : hoveringPoint
+                        ? "pointer"
+                        : "default"
               }
+              onMouseDown={(e: MapLayerMouseEvent) => {
+                // Whether the ring is under the pointer comes from the hover,
+                // not from this event: MapLibre hit-tests move and click but
+                // hands mousedown no features at all.
+                if (!nearbyActive || !hoveringRing) return;
+                // The map would otherwise pan under the drag, which is the one
+                // gesture this takes over from it.
+                e.preventDefault();
+                const map = mapRef.current?.getMap();
+                if (!map) return;
+                map.dragPan.disable();
+                draggingRadiusRef.current = nearbyActive.id;
+                setDraggingRadius(nearbyActive.id);
+
+                // The rest of the drag runs off the window, not off the map's
+                // own mousemove: that one is throttled per frame and coalesces
+                // a quick drag down to its first inch, which left the radius
+                // stopping twenty pixels in.
+                const search = nearbyActive;
+                const rect = map.getCanvas().getBoundingClientRect();
+                const onMove = (ev: PointerEvent) => {
+                  // Kept on the map. Unprojecting a point past the edge
+                  // extrapolates, and it extrapolates fast — a drag that
+                  // wandered off the side jumped from 10 km to 100.
+                  const x = Math.min(rect.width, Math.max(0, ev.clientX - rect.left));
+                  const y = Math.min(rect.height, Math.max(0, ev.clientY - rect.top));
+                  const at = map.unproject([x, y]);
+                  const km = haversineMetres([search.lng, search.lat], [at.lng, at.lat]) / 1000;
+                  setNearbyRadius(search.id, snapRadiusKm(km));
+                };
+                const onUp = () => {
+                  window.removeEventListener("pointermove", onMove);
+                  map.dragPan.enable();
+                  draggingRadiusRef.current = null;
+                  setDraggingRadius(null);
+                };
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp, { once: true });
+              }}
               onDragStart={() => setPanning(true)}
               onDragEnd={() => setPanning(false)}
             >
@@ -4343,6 +4452,14 @@ export default function OccurrenceMapRow({
                         "line-dasharray": [3, 2],
                       }}
                     />
+                    {/* A wide, invisible line over the drawn one: the ring is
+                        dragged to change the radius, and a 1.5px target is not
+                        something anyone can catch. */}
+                    <Layer
+                      id={`nearby-radius-grab-${panelId}`}
+                      type="line"
+                      paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 14, "line-opacity": 0.01 }}
+                    />
                   </Source>
                 )}
               {/* The picked neighbour's own records. Above the radius they sit
@@ -4393,6 +4510,8 @@ export default function OccurrenceMapRow({
                     longitude={search.lng}
                     latitude={search.lat}
                     anchor="bottom"
+                    // So the close button can be placed against the pin.
+                    className="relative"
                   >
                     <svg
                       onClick={() => {
@@ -4418,6 +4537,21 @@ export default function OccurrenceMapRow({
                       <path d="M12 22s7-6.2 7-12a7 7 0 10-14 0c0 5.8 7 12 7 12z" />
                       <circle cx="12" cy="10" r="2.4" fill="#ffffff" stroke="none" />
                     </svg>
+                    {/* Closed from the map as well as from the tab: the pin is
+                        where the question is, and having to find its tab to
+                        put it away made a stray right-click a small chore. */}
+                    {active && (
+                      <button
+                        onClick={() => closeNearbySearch(search.id)}
+                        title="Close this search"
+                        aria-label="Close this search"
+                        className="absolute -right-3.5 -top-1 rounded-full border border-zinc-300 bg-white p-0.5 text-zinc-500 shadow hover:text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+                      >
+                        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
                   </MapLibreMarker>
                 );
               })}
@@ -5542,6 +5676,25 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
               )
+            )}
+            {/* Back to the whole species, the way a map app's own button puts
+                you back. Fitting to the records is where the page started and
+                what every other view here is a departure from; getting back to
+                it was a reload. */}
+            {mounted && !splitView && bbox && (
+              <button
+                onClick={() => fitMapToBbox(bbox)}
+                title="Back to all this species' records"
+                aria-label="Back to all this species' records"
+                className="p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                {/* The four corners of a frame drawing in on a point: "fit
+                    this", which is what the button does. */}
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4" />
+                  <circle cx="12" cy="12" r="2.5" />
+                </svg>
+              </button>
             )}
             {/* Under the basemap button, in the stack of things that act on the
                 map rather than describe it. The crosshair-in-a-ring every map
@@ -8778,7 +8931,26 @@ export default function OccurrenceMapRow({
                         <span className="w-2 h-2 rotate-45 shrink-0" style={{ background: tab.dot }} />
                       )}
                       <span className="truncate">{tab.label}</span>
-                      {!tab.key.startsWith("nearby:") && (
+                      {tab.key.startsWith("nearby:") ? (
+                        // A question you asked can be put away from the tab
+                        // that holds it, the way a browser closes one. The
+                        // panel's own × does the same for the one on screen.
+                        <span
+                          role="button"
+                          tabIndex={-1}
+                          aria-label={`Close ${tab.label}`}
+                          title="Close this search"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeNearbySearch(tab.key.slice("nearby:".length));
+                          }}
+                          className="-mr-0.5 shrink-0 rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+                        >
+                          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </span>
+                      ) : (
                         <span className="tabular-nums text-[10px] text-zinc-400">{tab.count.toLocaleString()}</span>
                       )}
                     </button>

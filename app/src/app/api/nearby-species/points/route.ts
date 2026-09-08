@@ -13,8 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
 import {
   NEARBY_POINTS_LIMIT,
-  NEARBY_RADII_KM,
-  NEARBY_RADIUS_DEFAULT,
+  snapRadiusKm,
   nearbyPointsUrl,
   type NearbyPoint,
 } from "@/lib/mapping/nearby-species";
@@ -51,8 +50,7 @@ export async function GET(request: NextRequest) {
   if (!speciesKey) {
     return NextResponse.json({ error: "speciesKey is required" }, { status: 400 });
   }
-  const asked = Number(sp.get("radiusKm"));
-  const radiusKm = (NEARBY_RADII_KM as readonly number[]).includes(asked) ? asked : NEARBY_RADIUS_DEFAULT;
+  const radiusKm = snapRadiusKm(sp.get("radiusKm"));
 
   try {
     const res = await fetch(nearbyPointsUrl({ lat, lng, radiusKm, speciesKey }), {

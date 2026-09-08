@@ -18,8 +18,7 @@ import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
 import {
   NEARBY_CATEGORIES,
   NEARBY_FACET_LIMIT,
-  NEARBY_RADII_KM,
-  NEARBY_RADIUS_DEFAULT,
+  snapRadiusKm,
   nearbyFacetUrl,
   type NearbyResult,
   type NearbySpecies,
@@ -42,8 +41,7 @@ export async function GET(request: NextRequest) {
   }
   // Anything outside the offered set would be a radius the panel can't label
   // and the cache would never be asked for twice.
-  const asked = Number(sp.get("radiusKm"));
-  const radiusKm = (NEARBY_RADII_KM as readonly number[]).includes(asked) ? asked : NEARBY_RADIUS_DEFAULT;
+  const radiusKm = snapRadiusKm(sp.get("radiusKm"));
 
   try {
     // Two counts, one purpose: the threatened facet is the panel, and the

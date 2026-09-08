@@ -33,8 +33,27 @@
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
 /** Radii offered in the panel. Beyond ~50 km "near here" stops meaning much. */
-export const NEARBY_RADII_KM = [10, 25, 50] as const;
+/**
+ * The radii on offer.
+ *
+ * Four, not a slider: the answer to "what is near here" is read against the
+ * distance it was asked over, and a table of neighbours at 37 km is harder to
+ * hold in mind than one at 25 or 50. Dragging the ring on the map snaps to
+ * these, so the circle can be pulled about freely and still land on a number
+ * that means something. 100 km is the outer edge — past it the facet is
+ * answering a question about a region rather than a locality.
+ */
+export const NEARBY_RADII_KM = [10, 25, 50, 100] as const;
 export type NearbyRadiusKm = (typeof NEARBY_RADII_KM)[number];
+
+/** The nearest radius on offer to a distance dragged out on the map. */
+export function snapRadiusKm(km: unknown): NearbyRadiusKm {
+  const n = Number(km);
+  if (!Number.isFinite(n)) return NEARBY_RADIUS_DEFAULT;
+  return NEARBY_RADII_KM.reduce((best, r) =>
+    Math.abs(r - n) < Math.abs(best - n) ? r : best
+  );
+}
 
 /**
  * Opens at the tightest radius, because the panel now hangs off a record.
@@ -440,9 +459,9 @@ export function decodeNearbySearches(
     const [lat, lng, km] = part.split(",").map(Number);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-    const radiusKm = (NEARBY_RADII_KM as readonly number[]).includes(km)
-      ? (km as NearbyRadiusKm)
-      : NEARBY_RADIUS_DEFAULT;
+    // A radius that is not one of the four is snapped to the nearest, so an
+    // old link or a hand-edited param still asks a question this can answer.
+    const radiusKm = Number.isFinite(km) ? snapRadiusKm(km) : NEARBY_RADIUS_DEFAULT;
     out.push({ lat, lng, radiusKm });
   }
   return out.slice(0, NEARBY_MAX_SEARCHES);

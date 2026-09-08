@@ -1,7 +1,12 @@
 import fs from "fs";
 import path from "path";
 import { describe, it, expect } from "vitest";
-import { TAXONOMY_TREE, type TaxonomyNode } from "../taxonomy-tree";
+import {
+  ALL_TAXON_GROUPS,
+  TAXON_GROUP_NAMES,
+  TAXONOMY_TREE,
+  type TaxonomyNode,
+} from "../taxonomy-tree";
 import {
   NODE_INDEX,
   PARENT_INDEX,
@@ -1506,5 +1511,18 @@ describe("flat taxa-token mapping is a bijection over the default view", () => {
     const { taxa, subgroup } = expandTaxaToken(tokens[0]);
     expect(taxa).toBe("mammals");
     expect(subgroup).toBe("ssc-bear");
+  });
+});
+
+describe("every taxon group has a name to print", () => {
+  it("resolves to a node's name or to TAXON_GROUP_NAMES", () => {
+    for (const group of ALL_TAXON_GROUPS) {
+      const name = findNode(group)?.name ?? TAXON_GROUP_NAMES[group];
+      expect(name, `no display name for "${group}"`).toBeTruthy();
+      // Capitalised, and without the underscores of the id it came from:
+      // these are printed in tables beside scientific names.
+      expect(name).toMatch(/^[A-Z]/);
+      expect(name).not.toContain("_");
+    }
   });
 });

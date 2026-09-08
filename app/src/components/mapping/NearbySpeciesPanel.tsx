@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
+import { TAXON_GROUP_NAMES } from "@/config/taxonomy-tree";
 import { stripHtml } from "@/lib/html-text";
 import { linkCitations, type AssessmentReference } from "@/lib/mapping/nearby-citations";
 import TaxaIcon from "@/components/TaxaIcon";
@@ -390,15 +391,16 @@ function SpeciesDetail({
  * The table's column track, shared by the header and every row so the two can't
  * drift apart. Below the map there is width enough for threats to be a column.
  *
- * Name, what kind of thing it is, what it was assessed as, when, on how many
- * records, and under what — the order the questions are actually asked in, with
- * the taxon beside the name it qualifies.
+ * Name, how much GBIF holds for it, what kind of thing it is, what it was
+ * assessed as, when, and under what — the order the questions are actually
+ * asked in. The record count sits beside the name because it is the first thing
+ * asked of a neighbour: whether there is enough here to mean anything.
  * The tracks carrying "Assessment Year" and "GBIF Records" are sized for those
  * headers rather than for their numbers, since a header that wraps puts the
  * whole row out of step with the rows under it.
  */
 const ROW =
-  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_2.25rem_6rem_5rem_minmax(9rem,2.6fr)] gap-2 items-center px-2";
+  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_7.5rem_2.25rem_6rem_minmax(8rem,2.4fr)] gap-2 items-center px-2";
 
 /**
  * One filter as a dropdown of checkboxes, in the header.
@@ -625,9 +627,20 @@ function topThreats(s: NearbySpecies): [string, string, string][] {
     .map(([code, under]) => [code, THREAT_TOP_LEVEL[code] ?? code, under.join("\n")]);
 }
 
-/** "flowering_plants" → "Flowering Plants", falling back to the raw group. */
+/**
+ * "flowering_plants" → "Flowering Plants".
+ *
+ * From the taxonomy tree where the group is a node of its own, and from the
+ * names beside it where it isn't — the insect orders are only filter values,
+ * and printed raw they arrived as "grasshoppers crickets locusts". Anything
+ * unknown is at least given capitals rather than its underscores.
+ */
 function taxonLabel(taxonGroup: string): string {
-  return findNode(taxonGroup)?.name ?? taxonGroup.replace(/_/g, " ");
+  return (
+    findNode(taxonGroup)?.name ??
+    TAXON_GROUP_NAMES[taxonGroup] ??
+    taxonGroup.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 /** The species' page on iucnredlist.org, where an assessment is read in full. */
@@ -655,8 +668,6 @@ export default function NearbySpeciesPanel({
   const [taxa, setTaxa] = useState<Set<string>>(new Set());
   const [categories, setCategories] = useState<Set<string>>(new Set());
   const [threats, setThreats] = useState<Set<string>>(new Set());
-  /** Rolled up to its header bar, so the map above has the room back. */
-  const [collapsed, setCollapsed] = useState(false);
 
   /**
    * Opening a row also puts the species on the map.
@@ -697,19 +708,27 @@ export default function NearbySpeciesPanel({
     // A radius switched twice quickly would otherwise be free to land in the
     // order the network felt like, not the order it was asked in.
     const controller = new AbortController();
-    const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radiusKm: String(radiusKm) });
-    if (excludeGbifKey) params.set("exclude", excludeGbifKey);
-    fetch(`/api/nearby-species?${params}`, { signal: controller.signal })
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
-        setAnswer({ key, result: body as NearbyResult });
-      })
-      .catch((e: unknown) => {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setAnswer({ key, error: e instanceof Error ? e.message : "Lookup failed" });
-      });
-    return () => controller.abort();
+    // Held for a moment first. The radius is dragged on the map a kilometre at
+    // a time, and asking GBIF to facet a radius search for every frame of that
+    // is dozens of queries to answer the one the reader stops on.
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radiusKm: String(radiusKm) });
+      if (excludeGbifKey) params.set("exclude", excludeGbifKey);
+      fetch(`/api/nearby-species?${params}`, { signal: controller.signal })
+        .then(async (r) => {
+          const body = await r.json();
+          if (!r.ok) throw new Error(body?.error ?? `Request failed (${r.status})`);
+          setAnswer({ key, result: body as NearbyResult });
+        })
+        .catch((e: unknown) => {
+          if (e instanceof DOMException && e.name === "AbortError") return;
+          setAnswer({ key, error: e instanceof Error ? e.message : "Lookup failed" });
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [lat, lng, radiusKm, excludeGbifKey, key]);
 
   // A radius that returns no birds should not keep offering a Birds chip, so
@@ -869,21 +888,6 @@ export default function NearbySpeciesPanel({
               looking…
             </span>
           )}
-          <button
-            onClick={() => setCollapsed((v) => !v)}
-            title={collapsed ? "Show the results again" : "Roll up to the title bar"}
-            className="pl-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-          >
-            <svg
-              className={`w-3 h-3 transition-transform ${collapsed ? "" : "rotate-180"}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 15l-7-7-7 7" />
-            </svg>
-          </button>
           <button onClick={onClose} title="Close" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
@@ -959,8 +963,6 @@ export default function NearbySpeciesPanel({
         </>
       )}
 
-      {!collapsed && (
-        <>
           <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
@@ -983,10 +985,10 @@ export default function NearbySpeciesPanel({
                     >
                       <span />
                       <span className="whitespace-nowrap">Species</span>
+                      <span className="whitespace-nowrap text-right">GBIF Records</span>
                       <span className="whitespace-nowrap">Taxon</span>
                       <span className="whitespace-nowrap">Category</span>
                       <span className="whitespace-nowrap text-right">Assessment Year</span>
-                      <span className="whitespace-nowrap text-right">GBIF Records</span>
                       <span className="whitespace-nowrap">Threats</span>
                     </div>
                     {shownSpecies.map((s) => {
@@ -1041,22 +1043,6 @@ export default function NearbySpeciesPanel({
                               )}
                             </span>
 
-                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
-                              {taxonLabel(s.taxon_group)}
-                            </span>
-
-                            <span>
-                              <span
-                                className="rounded px-1 text-center text-[9px] font-medium tabular-nums text-white"
-                                style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
-                                title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
-                              >
-                                {s.category}
-                              </span>
-                            </span>
-
-                            <span className="text-right tabular-nums text-zinc-400">{s.assessment_year ?? "—"}</span>
-
                             <span className="text-right tabular-nums text-zinc-500 dark:text-zinc-400">
                               {s.records}
                               {pick && (
@@ -1081,6 +1067,22 @@ export default function NearbySpeciesPanel({
                                 </span>
                               )}
                             </span>
+
+                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
+                              {taxonLabel(s.taxon_group)}
+                            </span>
+
+                            <span>
+                              <span
+                                className="rounded px-1 text-center text-[9px] font-medium tabular-nums text-white"
+                                style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
+                                title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
+                              >
+                                {s.category}
+                              </span>
+                            </span>
+
+                            <span className="text-right tabular-nums text-zinc-400">{s.assessment_year ?? "—"}</span>
 
                             {/* The threats named, at the top level only. The
                                 codes read as a filing reference — the reader had
@@ -1151,8 +1153,6 @@ export default function NearbySpeciesPanel({
             )}
           </div>
 
-        </>
-      )}
     </div>
   );
 }
