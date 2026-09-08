@@ -988,6 +988,8 @@ export default function OccurrenceMapRow({
    * the map is a lot of furniture for a choice most people make once, if ever.
    */
   const [basemapOpen, setBasemapOpen] = useState(false);
+  /** Whether the row above the map saying what's loaded is showing. */
+  const [countsOpen, setCountsOpen] = useState(true);
   /** Whether the map's tools menu — EOO/AOO and measuring — is showing. */
   const [toolsOpen, setToolsOpen] = useState(false);
   /**
@@ -3757,7 +3759,8 @@ export default function OccurrenceMapRow({
             the ones only the list can show. */}
         {!loadingOccurrences &&
           ((!splitView && totalOccurrences != null) ||
-            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) && (
+            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) &&
+          (countsOpen ? (
           <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
             {!splitView && totalOccurrences != null && (
               <div className="text-emerald-700 dark:text-emerald-400">
@@ -3805,8 +3808,33 @@ export default function OccurrenceMapRow({
                 </>
               </div>
             )}
+            {/* Rolled away once it has been read. How much of a species is
+                loaded is a line you read at the start and then keep looking
+                past, and on a short map it was a line of the map. The chevron
+                it leaves behind brings it back. */}
+            <button
+              onClick={() => setCountsOpen(false)}
+              title="Hide what's loaded"
+              aria-label="Hide what's loaded"
+              className="ml-auto shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 15l-7-7-7 7" />
+              </svg>
+            </button>
           </div>
-        )}
+          ) : (
+            <button
+              onClick={() => setCountsOpen(true)}
+              title="Show what's loaded"
+              aria-label="Show what's loaded"
+              className="shrink-0 flex w-full items-center px-2 py-0.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 9l7 7 7-7" />
+              </svg>
+            </button>
+          ))}
         <div className={`${
           fullscreen
             ? "flex-1 min-h-[240px]"
@@ -5288,7 +5316,10 @@ export default function OccurrenceMapRow({
               to where the reader is. Both act on the map, so they sit on it —
               unlike the record counts, which describe the data and have their
               own row above it. */}
-          <div className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]">
+          <div
+            data-map-corner="top-right"
+            className="absolute top-2 right-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]"
+          >
             {/* The basemap, on the map it paints. */}
             {!loadingOccurrences && mounted && (
               basemapOpen ? (
@@ -5772,9 +5803,9 @@ export default function OccurrenceMapRow({
         title: "The records being counted",
       },
     ];
-    // One tab per question. A single search is named for what it is; two or
-    // more take their coordinates, because "Nearby threatened species" twice
-    // over says nothing about which of the two circles you are reading.
+    // One tab per question, each named for where it was asked — the first one
+    // too, so a second search adds a tab rather than renaming the one already
+    // being read.
     //
     // As many decimals as it takes to tell them apart, which is two for points
     // a kilometre or more apart and more for questions asked of the same
@@ -5785,10 +5816,7 @@ export default function OccurrenceMapRow({
     for (const search of nearbySearches) {
       tabs.push({
         key: `nearby:${search.id}`,
-        label:
-          nearbySearches.length > 1
-            ? `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`
-            : "Nearby threatened species",
+        label: `Nearby ${search.lat.toFixed(dp)}, ${search.lng.toFixed(dp)}`,
         count: 0,
         title: `Threatened species within ${search.radiusKm} km of ${search.lat.toFixed(4)}, ${search.lng.toFixed(4)}`,
       });

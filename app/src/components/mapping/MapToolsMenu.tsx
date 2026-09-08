@@ -4,16 +4,19 @@ import { useEffect, useState } from "react";
 import { useMap } from "react-map-gl/maplibre";
 
 /**
- * The map's tools, behind a cog above its bottom-right controls.
+ * The map's tools, behind one button under the basemap and locate controls.
  *
  * EOO/AOO and measuring are both things an assessor reaches for occasionally
  * and neither is worth a permanent panel — between them they had two corners
  * of the map, the metrics standing open whether or not they were switched on.
  *
- * The offset is measured rather than fixed. The control column below holds the
- * scale bar and the attribution, and the attribution's height depends on how
- * many layers are crediting themselves: one line for a bare basemap, more once
- * protected areas, habitat, ecoregions and tree cover loss are all on.
+ * Top right, below the other two: everything that acts on the map is in one
+ * column now, and the bottom right is left to the scale bar and the
+ * attribution — which grow by a line whenever another layer credits itself, so
+ * anything anchored above them moved about as layers went on and off.
+ *
+ * The offset is still measured rather than fixed, because the column above is
+ * two buttons tall until the basemap list is opened.
  */
 export default function MapToolsMenu({
   open,
@@ -29,35 +32,54 @@ export default function MapToolsMenu({
   children?: React.ReactNode;
 }) {
   const { current: map } = useMap();
-  const [offset, setOffset] = useState(40);
+  const [offset, setOffset] = useState(80);
   /**
-   * How tall the open panel may be before it runs off the top of the map. The
-   * map is 450px on a desktop but 300px in the tab on a phone, and the EOO/AOO
-   * figures alone are 235px, so on a phone the panel was starting above the
-   * map's own top edge.
+   * How tall the open panel may be before it runs off the bottom of the map.
+   * The map is 450px on a desktop but 300px in the tab on a phone, and the
+   * EOO/AOO figures alone are 235px.
    */
   const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!map) return;
     const container = map.getContainer();
-    const column = container.querySelector(".maplibregl-ctrl-bottom-right");
-    if (!column) return;
+    const column = container.parentElement?.querySelector('[data-map-corner="top-right"]');
     const measure = () => {
-      const bottom = column.getBoundingClientRect().height + 8;
-      setOffset(bottom);
-      // Leave room for the cog itself and a margin at the map's top edge.
-      setMaxHeight(Math.max(120, container.getBoundingClientRect().height - bottom - 52));
+      // The column's own top inset, its height, and a gap under it.
+      const top = 8 + (column?.getBoundingClientRect().height ?? 68) + 6;
+      setOffset(top);
+      // Leave room for the button itself and a margin at the map's bottom edge.
+      setMaxHeight(Math.max(120, container.getBoundingClientRect().height - top - 52));
     };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(column);
+    if (column) observer.observe(column);
     observer.observe(container);
     return () => observer.disconnect();
   }, [map]);
 
   return (
-    <div className="absolute right-2 z-[1000] flex flex-col items-end gap-1.5" style={{ bottom: offset }}>
+    <div className="absolute right-2 z-[999] flex flex-col items-end gap-1.5" style={{ top: offset }}>
+      <button
+        onClick={onToggle}
+        title={open ? "Hide the map tools" : "Map tools: EOO/AOO and measuring"}
+        aria-label="Map tools"
+        className={`p-1.5 rounded-lg shadow-md border transition-colors ${
+          open || measuring
+            ? "bg-blue-600 border-blue-700 text-white"
+            : "bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        }`}
+      >
+        {/* A ruler and pencil, not a cog. A cog means settings — the things
+            that change how a tool behaves — and these are the tools: measure
+            this, compute that. */}
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 3.5l6 6L8 22H2v-6L14.5 3.5z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6l6 6M9.5 8.5l2 2M7 11l2 2M4.5 13.5l2 2" />
+        </svg>
+      </button>
+      {/* Under the button, not above it: the column it belongs to runs down
+          from the map's top-right corner. */}
       {open && (
         <div
           className="w-56 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 p-2 space-y-2"
@@ -79,24 +101,6 @@ export default function MapToolsMenu({
           </button>
         </div>
       )}
-      <button
-        onClick={onToggle}
-        title={open ? "Hide the map tools" : "Map tools: EOO/AOO and measuring"}
-        aria-label="Map tools"
-        className={`p-1.5 rounded-lg shadow-md border transition-colors ${
-          open || measuring
-            ? "bg-blue-600 border-blue-700 text-white"
-            : "bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-        }`}
-      >
-        {/* A ruler and pencil, not a cog. A cog means settings — the things
-            that change how a tool behaves — and these are the tools: measure
-            this, compute that. */}
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 3.5l6 6L8 22H2v-6L14.5 3.5z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6l6 6M9.5 8.5l2 2M7 11l2 2M4.5 13.5l2 2" />
-        </svg>
-      </button>
     </div>
   );
 }

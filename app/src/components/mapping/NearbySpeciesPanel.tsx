@@ -15,7 +15,7 @@
  * of their own.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { stripHtml } from "@/lib/html-text";
@@ -436,55 +436,105 @@ function SpeciesDetail({
 /**
  * The table's column track, shared by the header and every row so the two can't
  * drift apart. Below the map there is width enough for threats to be a column.
+ *
+ * Name, then what it was assessed as, when, on how many records, under what,
+ * and what kind of thing it is — the order the questions are actually asked in.
+ * The tracks carrying "Assessment Year" and "GBIF Records" are sized for those
+ * headers rather than for their numbers, since a header that wraps puts the
+ * whole row out of step with the rows under it.
  */
 const ROW =
-  // The last two tracks are sized for their headers rather than their numbers:
-  // "GBIF Records" and "Assessment Year" wrapped onto a second line at the old
-  // widths, which put the header row out of step with every row under it.
-  "grid grid-cols-[12px_28px_minmax(8rem,1.4fr)_6.5rem_minmax(7rem,2fr)_6.5rem_7.5rem] gap-2 items-baseline px-2";
+  "grid grid-cols-[12px_minmax(7.5rem,1fr)_2.25rem_6rem_5rem_minmax(9rem,2.6fr)_5rem] gap-2 items-baseline px-2";
 
 /**
- * One filter as a row of pills, in the header.
+ * One filter as a dropdown of checkboxes, in the header.
  *
- * Every value is named and counted where it can be seen, which is what a
- * dropdown hides: you had to open it to learn there were seven birds and one
- * plant here, and that split is most of what the reader wants from the filter
- * in the first place. In the header rather than over the table because the
- * table is the thing there is never enough room for.
+ * Several values at once, because the questions are: birds and mammals, or
+ * everything citing agriculture and everything citing harvesting. Nothing
+ * ticked means everything — the same convention the record list's own filters
+ * use, and it keeps "no filter" from needing a row of its own.
  */
-function Pills({
-  label, value, onChange, all, options,
+function FilterMenu({
+  label, selected, onChange, options, total,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
-  all: string;
-  /** [value, text, dot colour] — the dot is how a category keeps its colour. */
-  options: [string, string, string?][];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  /** [value, text, count, dot colour] — the dot is how a category keeps its. */
+  options: [string, string, number, string?][];
+  total: number;
 }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+
   if (options.length < 2) return null;
-  const pill = (on: boolean) =>
-    `rounded border px-1.5 py-0.5 ${
-      on
-        ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-        : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
-    }`;
+  const chosen = options.filter(([v]) => selected.has(v));
+  const summary =
+    chosen.length === 0
+      ? `All (${total})`
+      : chosen.length === 1
+        ? `${chosen[0][1]} (${chosen[0][2]})`
+        : `${chosen.length} of ${options.length} (${chosen.reduce((n, o) => n + o[2], 0)})`;
+
   return (
-    <span className="flex flex-wrap items-center gap-1">
+    <span ref={box} className="relative flex items-center gap-1">
       <span className="text-zinc-400">{label}</span>
-      <button onClick={() => onChange("")} className={pill(!value)}>
-        {all}
-      </button>
-      {options.map(([v, text, dot]) => (
-        <button
-          key={v}
-          onClick={() => onChange(value === v ? "" : v)}
-          className={`flex items-center gap-1 ${pill(value === v)}`}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={chosen.length ? chosen.map((o) => o[1]).join(", ") : `All ${label.toLowerCase()}`}
+        className={`flex max-w-[11rem] items-center gap-1 rounded border px-1.5 py-0.5 ${
+          chosen.length
+            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+            : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+        }`}
+      >
+        <span className="truncate">{summary}</span>
+        <svg
+          className={`h-2.5 w-2.5 shrink-0 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
         >
-          {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dot }} />}
-          {text}
-        </button>
-      ))}
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-[10001] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          <button
+            onClick={() => onChange(new Set())}
+            className="w-full px-2 pb-1 text-left text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            {selected.size ? "Clear" : "All"}
+          </button>
+          {options.map(([value, text, count, dot]) => (
+            <label
+              key={value}
+              className="flex cursor-pointer items-center gap-1.5 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(value)}
+                onChange={() => {
+                  const next = new Set(selected);
+                  if (next.has(value)) next.delete(value);
+                  else next.add(value);
+                  onChange(next);
+                }}
+                className="h-3 w-3 shrink-0 rounded"
+              />
+              {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dot }} />}
+              <span className="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-200">{text}</span>
+              <span className="shrink-0 tabular-nums text-zinc-400">{count}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </span>
   );
 }
@@ -497,6 +547,23 @@ function Spinner() {
       aria-hidden
     />
   );
+}
+
+/**
+ * A species' threats rolled up to the twelve top-level categories.
+ *
+ * Returns [code, label, what it covers] — the third being the sub-level tags
+ * that rolled into it, so the detail is a hover away rather than gone.
+ */
+function topThreats(s: NearbySpecies): [string, string, string][] {
+  const byTop = new Map<string, string[]>();
+  for (const t of s.threat_tags) {
+    const top = t.code.split(".")[0];
+    byTop.set(top, [...(byTop.get(top) ?? []), `${t.code} ${t.label}`]);
+  }
+  return [...byTop.entries()]
+    .sort((a, b) => compareThreatCodes(a[0], b[0]))
+    .map(([code, under]) => [code, THREAT_TOP_LEVEL[code] ?? code, under.join("\n")]);
 }
 
 /** "flowering_plants" → "Flowering Plants", falling back to the raw group. */
@@ -521,10 +588,14 @@ export default function NearbySpeciesPanel({
   /** The row whose right-click menu is open, and where to draw it. */
   const [rowMenu, setRowMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [openRow, setOpenRow] = useState<string | null>(null);
-  /** Which taxon's neighbours are listed, or null for all of them. */
-  const [taxon, setTaxon] = useState<string | null>(null);
-  /** Which category is listed, or null for all three. */
-  const [category, setCategory] = useState<string | null>(null);
+  /**
+   * What is being filtered to. Empty means everything, and several values in
+   * one set are an "or" — birds and mammals — while the three sets are an
+   * "and": birds and mammals, that are CR, that cite agriculture.
+   */
+  const [taxa, setTaxa] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<Set<string>>(new Set());
+  const [threats, setThreats] = useState<Set<string>>(new Set());
   /** Rolled up to its header bar, so the map above has the room back. */
   const [collapsed, setCollapsed] = useState(false);
 
@@ -590,6 +661,22 @@ export default function NearbySpeciesPanel({
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [result]);
 
+  /**
+   * The top-level threats these neighbours cite, with how many cite each.
+   *
+   * From the rows' own tags rather than the twelve-category list, so the filter
+   * only ever offers a pressure something here is actually under.
+   */
+  const threatCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of result?.species ?? []) {
+      for (const top of new Set(s.threat_tags.map((t) => t.code.split(".")[0]))) {
+        counts.set(top, (counts.get(top) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => compareThreatCodes(a[0], b[0]));
+  }, [result]);
+
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const s of result?.species ?? []) counts.set(s.category, (counts.get(s.category) ?? 0) + 1);
@@ -598,19 +685,26 @@ export default function NearbySpeciesPanel({
       .filter(([, n]) => n > 0);
   }, [result]);
 
-  // Derived, not corrected after the fact: a value the new radius no longer has
-  // simply stops being the selection.
-  const activeTaxon = taxon && taxonCounts.some(([g]) => g === taxon) ? taxon : null;
-  const activeCategory = category && categoryCounts.some(([c]) => c === category) ? category : null;
+  // Derived, not corrected after the fact: a value the new radius no longer
+  // offers simply stops counting as part of the selection.
+  const keep = (chosen: Set<string>, offered: [string, number][]) =>
+    new Set([...chosen].filter((v) => offered.some(([o]) => o === v)));
+  const activeTaxa = keep(taxa, taxonCounts);
+  const activeCategories = keep(categories, categoryCounts as [string, number][]);
+  const activeThreats = keep(threats, threatCounts);
 
   const shownSpecies = useMemo(
     () =>
       (result?.species ?? []).filter(
         (s) =>
-          (!activeTaxon || s.taxon_group === activeTaxon) &&
-          (!activeCategory || s.category === activeCategory)
+          (activeTaxa.size === 0 || activeTaxa.has(s.taxon_group)) &&
+          (activeCategories.size === 0 || activeCategories.has(s.category)) &&
+          (activeThreats.size === 0 ||
+            s.threat_tags.some((t) => activeThreats.has(t.code.split(".")[0])))
       ),
-    [result, activeTaxon, activeCategory]
+    // Sets rebuilt each render, so the contents are the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [result, [...activeTaxa].join(), [...activeCategories].join(), [...activeThreats].join()]
   );
 
 
@@ -663,28 +757,34 @@ export default function NearbySpeciesPanel({
           </span>
         )}
 
-        {/* The filters, where the header has room the table hasn't. Built from
-            what came back, so one is never offered that would empty the list,
-            and dropped entirely when there is only one value to choose. */}
+        {/* The filters, where the header has room the table hasn't. Every
+            option is built from what came back, so one is never offered that
+            would empty the table, and a filter with a single value to choose
+            is not shown at all. */}
         {result && (
           <>
-            <Pills
+            <FilterMenu
               label="Taxon"
-              value={activeTaxon ?? ""}
-              onChange={(v) => setTaxon(v || null)}
-              all={`All (${result.species.length})`}
-              options={taxonCounts.map(([g, n]) => [g, `${taxonLabel(g)} (${n})`])}
+              selected={activeTaxa}
+              onChange={setTaxa}
+              total={result.species.length}
+              options={taxonCounts.map(([g, n]) => [g, taxonLabel(g), n])}
             />
-            <Pills
+            <FilterMenu
               label="Category"
-              value={activeCategory ?? ""}
-              onChange={(v) => setCategory(v || null)}
-              all={`All (${result.species.length})`}
-              options={categoryCounts.map(([c, n]) => [
-                c,
-                `${c} (${n})`,
-                CATEGORY_COLORS[normalizeCategory(c)],
-              ])}
+              selected={activeCategories}
+              onChange={setCategories}
+              total={result.species.length}
+              options={categoryCounts.map(([c, n]) => [c, c, n, CATEGORY_COLORS[normalizeCategory(c)]])}
+            />
+            <FilterMenu
+              label="Threat"
+              selected={activeThreats}
+              onChange={setThreats}
+              total={result.species.length}
+              // The pressure named, not its code: the number is the Red List's
+              // filing system, and in a filter it was one more thing to decode.
+              options={threatCounts.map(([c, n]) => [c, THREAT_TOP_LEVEL[c] ?? c, n])}
             />
           </>
         )}
@@ -823,12 +923,12 @@ export default function NearbySpeciesPanel({
                       className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
                     >
                       <span />
-                      <span />
                       <span className="whitespace-nowrap">Species</span>
-                      <span className="whitespace-nowrap">Taxon</span>
-                      <span className="whitespace-nowrap">Threats</span>
-                      <span className="whitespace-nowrap text-right">GBIF Records</span>
+                      <span className="whitespace-nowrap">Category</span>
                       <span className="whitespace-nowrap text-right">Assessment Year</span>
+                      <span className="whitespace-nowrap text-right">GBIF Records</span>
+                      <span className="whitespace-nowrap">Threats</span>
+                      <span className="whitespace-nowrap">Taxon</span>
                     </div>
                     {shownSpecies.map((s) => {
                       const pick = pickedByKey.get(s.gbif_species_key);
@@ -883,14 +983,6 @@ export default function NearbySpeciesPanel({
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                               </svg>
                             </span>
-                            <span
-                              className="rounded px-1 text-center text-[9px] font-medium tabular-nums text-white"
-                              style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
-                              title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
-                            >
-                              {s.category}
-                            </span>
-
                             <span className="min-w-0">
                               <span className="block truncate italic text-zinc-700 dark:text-zinc-200">
                                 {s.scientific_name}
@@ -902,29 +994,17 @@ export default function NearbySpeciesPanel({
                               )}
                             </span>
 
-                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
-                              {taxonLabel(s.taxon_group)}
+                            <span>
+                              <span
+                                className="rounded px-1 text-center text-[9px] font-medium tabular-nums text-white"
+                                style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(s.category)] ?? "#6b7280" }}
+                                title={s.criteria ? `Assessed ${s.category} under ${s.criteria}` : `Assessed ${s.category}`}
+                              >
+                                {s.category}
+                              </span>
                             </span>
 
-                            {/* The threats as tags, which is what replaced a tab
-                                of their own: on the row they can be compared down
-                                the column instead of being a second thing to go
-                                and look at. Two levels deep, so "5.4" reads as
-                                Fishing & harvesting rather than as a leaf. */}
-                            <span className="flex flex-wrap gap-0.5">
-                              {s.threat_tags.length === 0 && (
-                                <span className="text-zinc-300 dark:text-zinc-600">—</span>
-                              )}
-                              {s.threat_tags.map((t) => (
-                                <span
-                                  key={t.code}
-                                  title={`${t.code} ${t.label}`}
-                                  className="rounded bg-zinc-100 px-1 tabular-nums text-zinc-500 dark:bg-zinc-700 dark:text-zinc-300"
-                                >
-                                  {t.code}
-                                </span>
-                              ))}
-                            </span>
+                            <span className="text-right tabular-nums text-zinc-400">{s.assessment_year ?? "—"}</span>
 
                             <span className="text-right tabular-nums text-zinc-500 dark:text-zinc-400">
                               {s.records}
@@ -950,7 +1030,31 @@ export default function NearbySpeciesPanel({
                                 </span>
                               )}
                             </span>
-                            <span className="text-right tabular-nums text-zinc-400">{s.assessment_year ?? "—"}</span>
+
+                            {/* The threats named, at the top level only. The
+                                codes read as a filing reference — the reader had
+                                to hold twelve numbers to compare two rows — and
+                                the sub-levels multiplied the tags without
+                                changing the answer to "what is this up
+                                against?". The scoring is a row-opening away. */}
+                            <span className="flex flex-wrap gap-0.5">
+                              {topThreats(s).length === 0 && (
+                                <span className="text-zinc-300 dark:text-zinc-600">—</span>
+                              )}
+                              {topThreats(s).map(([code, label, detail]) => (
+                                <span
+                                  key={code}
+                                  title={detail}
+                                  className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-zinc-700 dark:text-zinc-300"
+                                >
+                                  {label}
+                                </span>
+                              ))}
+                            </span>
+
+                            <span className="truncate text-zinc-400" title={taxonLabel(s.taxon_group)}>
+                              {taxonLabel(s.taxon_group)}
+                            </span>
                           </div>
 
                           {openRow === s.gbif_species_key && (
