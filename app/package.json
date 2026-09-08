@@ -14,7 +14,8 @@
     "upload-data-to-r2": "npx tsx scripts/upload-data-to-r2.ts",
     "fetch-data-from-r2": "npx tsx scripts/fetch-data-from-r2.ts",
     "diff-data-vs-r2": "npx tsx scripts/diff-data-vs-r2.ts",
-    "fetch-duckdb-ext": "npx tsx scripts/fetch-duckdb-ext.ts"
+    "fetch-duckdb-ext": "npx tsx scripts/fetch-duckdb-ext.ts",
+    "build-narratives": "npx tsx scripts/build-narratives.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1020.0",
@@ -31,6 +32,7 @@
     "mcp-handler": "^1.1.0",
     "next": "16.0.7",
     "next-themes": "^0.4.6",
+    "pg-cursor": "^2.22.0",
     "posthog-js": "^1.360.2",
     "react": "19.2.1",
     "react-dom": "19.2.1",
@@ -44,6 +46,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.16.0",
+    "@types/pg-cursor": "^2.7.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-simple-maps": "^3.0.6",
