@@ -57,7 +57,22 @@ const LATEST_SYNC_FILE = path.join(__dirname, "..", "latest-sync.txt");
 // It does not go stale: the weekly workflow runs Phase 13a and commits the
 // regenerated file alongside latest-sync.txt, so a sync still refreshes it —
 // through git, where the diff is reviewable, rather than around it.
-const EXCLUDE_FROM_SYNC = new Set(["search-index.json", "col-revisions.json"]);
+//
+// The two narrative parquets are excluded for a third reason: they are not sync
+// data at all. ~170 MB of assessment prose that changes when the Red List
+// publishes a release, not when a sync runs — so they live at
+// narratives/<release>/ in the same bucket, written once by
+// scripts/upload-narratives-to-r2.ts. Left in, every weekly sync would carry
+// another copy of a file nobody changed, and every serverless function would
+// bundle them against a 250 MB cap for a route that reads them from R2 anyway.
+const EXCLUDE_FROM_SYNC = new Set([
+  "search-index.json",
+  "col-revisions.json",
+  "narratives.parquet",
+  "narrative-index.parquet",
+  "narrative-terms.parquet",
+  "narrative-lengths.parquet",
+]);
 
 function getR2Client(): S3Client {
   const accountId = process.env.R2_ACCOUNT_ID;

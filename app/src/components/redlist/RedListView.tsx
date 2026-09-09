@@ -5418,7 +5418,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {taxonomicRevisionCard}
                   </div>
                 )}
-
             </>
           )}
 
