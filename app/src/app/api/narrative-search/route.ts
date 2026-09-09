@@ -2,8 +2,9 @@
  * GET /api/narrative-search?q=&limit=&offset=&phrase=
  *
  * The assessments whose narratives mention every word of `q`, with the field
- * and the words around the first mention. `phrase=true` keeps only those where
- * the words appear together, as typed.
+ * and the words around the first mention. `phrase=true` asks instead for the
+ * assessments that say those words together, in that order, in one sentence —
+ * matched in the index, so the count and the paging are exact.
  *
  * See lib/data/narratives-duckdb.ts for why this reads a term index rather than
  * the prose, and scripts/build-narratives.ts for how both are built.

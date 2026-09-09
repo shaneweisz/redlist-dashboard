@@ -12,8 +12,9 @@
  *      fields as they were written, sorted by assessment_id and cut into small
  *      row groups. This is what a result reads to show its snippet, and it is
  *      only ever read for the handful of assessments a search matched.
- *  - narrative-index.parquet — one row per (term, assessment), sorted by term.
- *      This is what a search reads. Sorted, so DuckDB's row-group statistics
+ *  - narrative-index.parquet — one row per (term, assessment) with every
+ *      position that word appears at, sorted by term. This is what a search
+ *      reads. Sorted, so DuckDB's row-group statistics
  *      prune every group whose term range excludes the word being looked for:
  *      a query touches a few hundred kilobytes of a file that indexes half a
  *      gigabyte of prose.
@@ -29,7 +30,7 @@ import * as path from "path";
 import { Client } from "pg";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "./utils";
-import { indexTerms } from "../src/lib/redlist/narrative-terms";
+import { indexPostings } from "../src/lib/redlist/narrative-terms";
 
 /** The narrative fields, in the order the Red List website reads them. */
 export const NARRATIVE_FIELDS = [
@@ -121,7 +122,7 @@ export async function run(): Promise<void> {
   rowsFile.write(
     ["assessment_id", "sis_taxon_id", "scientific_name", ...NARRATIVE_FIELDS].join(",") + "\n"
   );
-  indexFile.write("term,assessment_id\n");
+  indexFile.write("term,assessment_id,positions\n");
 
   const csv = (v: string | number | null): string => {
     if (v == null) return "";
@@ -153,8 +154,11 @@ export async function run(): Promise<void> {
         ].join(",") + "\n"
       );
       rows += 1;
-      for (const term of indexTerms(fields.join(" "))) {
-        indexFile.write(`${csv(term)},${id}\n`);
+      for (const [term, at] of indexPostings(fields)) {
+        // Positions as one space-separated string per posting: a CSV column
+        // DuckDB casts to INTEGER[] on the way into the parquet, without
+        // needing 67 million rows of (term, assessment, position) in between.
+        indexFile.write(`${csv(term)},${id},"${at.join(" ")}"\n`);
         postings += 1;
       }
     }
@@ -192,11 +196,16 @@ export async function run(): Promise<void> {
    * touches the one group whose range covers it and skips the rest of the file.
    * Unsorted, every group's range is [a…z] and the reader has to open all of
    * them — which over R2 means downloading the index to answer one word.
+   *
+   * `positions` is a separate column, so a search that only asks which
+   * assessments hold a word never reads it: parquet is columnar, and DuckDB
+   * projects before it fetches. The phrase search is what pays for it.
    */
   await conn.run(`
     COPY (
-      SELECT term, assessment_id
-      FROM read_csv('${indexCsv}', header=true, auto_detect=true, quote='"')
+      SELECT term, assessment_id, CAST(str_split(positions, ' ') AS INTEGER[]) AS positions
+      FROM read_csv('${indexCsv}', header=true, quote='"',
+                    columns={'term': 'VARCHAR', 'assessment_id': 'BIGINT', 'positions': 'VARCHAR'})
       ORDER BY term, assessment_id
     ) TO '${indexOut}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 100000)
   `);
