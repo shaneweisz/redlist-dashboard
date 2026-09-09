@@ -160,7 +160,7 @@ export function queryTerms(q: string): string[] {
  * "mining in caves" — is exactly that many words of anything in between.
  */
 export function phrasePattern(tokens: Token[]): RegExp {
-  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const esc = escapeForPattern;
   const word = `[${WORD_CHARS}]+`;
   let src = esc(tokens[0].word);
   for (let i = 1; i < tokens.length; i++) {
@@ -176,4 +176,18 @@ export function phrasePattern(tokens: Token[]): RegExp {
     src += esc(tokens[i].word);
   }
   return new RegExp(`(?<![${WORD_CHARS}])${src}(?![${WORD_CHARS}])`, "i");
+}
+
+/** Finds a whole word in the prose — never a fragment of a longer one. */
+export function wordPattern(word: string): RegExp {
+  return new RegExp(`(?<![${WORD_CHARS}])${escapeForPattern(word)}(?![${WORD_CHARS}])`, "i");
+}
+
+/** Finds a word and whatever it continues into: `quarr` catches `quarrying`. */
+export function prefixPattern(word: string): RegExp {
+  return new RegExp(`(?<![${WORD_CHARS}])${escapeForPattern(word)}[${WORD_CHARS}]*`, "i");
+}
+
+function escapeForPattern(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

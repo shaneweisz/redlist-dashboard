@@ -19,7 +19,6 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
-import { NarrativeSearchPanel } from "@/components/redlist/NarrativeSearchPanel";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
@@ -5419,13 +5418,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {taxonomicRevisionCard}
                   </div>
                 )}
-
-                {/* Search what the assessors wrote — full width, because what it
-                    returns is sentences rather than a bar chart. Assessed-only
-                    for the same reason the card above it is: a Not Evaluated
-                    species has no assessment, so there is no prose to search. */}
-                {!isNewAssessments && <NarrativeSearchPanel />}
-
             </>
           )}
 

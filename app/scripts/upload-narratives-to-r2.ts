@@ -13,6 +13,7 @@
  *
  *   <bucket>/narratives/2026-1/narratives.parquet
  *   <bucket>/narratives/2026-1/narrative-index.parquet
+ *   <bucket>/narratives/2026-1/narrative-terms.parquet
  *
  * The pointer is a constant, not a file: NARRATIVE_RELEASE in
  * src/lib/redlist/narrative-release.ts. Production reads whatever it names, so
@@ -30,7 +31,11 @@ import { loadEnvFiles, DATA_DIR } from "./utils";
 import { NARRATIVE_RELEASE, narrativeKey } from "../src/lib/redlist/narrative-release";
 
 /** The files the search reads. Both, or neither — they index each other. */
-export const NARRATIVE_FILES = ["narratives.parquet", "narrative-index.parquet"];
+export const NARRATIVE_FILES = [
+  "narratives.parquet",
+  "narrative-index.parquet",
+  "narrative-terms.parquet",
+];
 
 async function main(): Promise<void> {
   loadEnvFiles();
@@ -60,24 +65,28 @@ async function main(): Promise<void> {
 
   // A release's narratives are written once and then read for six months.
   // Overwriting them in place is how a deployed search starts disagreeing with
-  // itself mid-request — half its row groups from the old file — so say so and
-  // stop, and let a re-publish be a deliberate `--force`.
+  // itself mid-request — half its row groups from the old file — so a file that
+  // is already published is left alone, and replacing one is a deliberate
+  // `--force`. Per file, not per release: adding a fourth file to a release
+  // that already has three is a normal thing to want.
   const force = process.argv.includes("--force");
-  for (const { name } of local) {
-    const key = narrativeKey(name);
+  const todo: typeof local = [];
+  for (const entry of local) {
+    const key = narrativeKey(entry.name);
     const exists = await client
       .send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
       .then(() => true)
       .catch(() => false);
-    if (exists && !force) {
-      throw new Error(
-        `s3://${bucket}/${key} already exists. Bump NARRATIVE_RELEASE for a new release, ` +
-          `or pass --force to replace this one.`
-      );
-    }
+    if (exists && !force) console.log(`  already published, skipping: ${key}`);
+    else todo.push(entry);
+  }
+  if (todo.length === 0) {
+    console.log(`\nEverything for ${NARRATIVE_RELEASE} is already published.`);
+    console.log("Bump NARRATIVE_RELEASE for a new release, or pass --force to replace this one.");
+    return;
   }
 
-  for (const { name, file } of local) {
+  for (const { name, file } of todo) {
     const key = narrativeKey(name);
     const body = fs.readFileSync(file);
     process.stdout.write(`  ${(body.length / 1e6).toFixed(1).padStart(6)} MB → ${key} … `);

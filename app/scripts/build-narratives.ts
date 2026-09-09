@@ -12,6 +12,9 @@
  *      fields as they were written, sorted by assessment_id and cut into small
  *      row groups. This is what a result reads to show its snippet, and it is
  *      only ever read for the handful of assessments a search matched.
+ *  - narrative-terms.parquet — the word list, with how many assessments use
+ *      each word. Two megabytes that make ranking and did-you-mean possible
+ *      without opening the index at all.
  *  - narrative-index.parquet — one row per (term, assessment) with every
  *      position that word appears at, sorted by term. This is what a search
  *      reads. Sorted, so DuckDB's row-group statistics
@@ -73,6 +76,7 @@ export async function run(): Promise<void> {
   loadEnvFiles();
   const narrativesOut = path.join(DATA_DIR, "narratives.parquet");
   const indexOut = path.join(DATA_DIR, "narrative-index.parquet");
+  const dictOut = path.join(DATA_DIR, "narrative-terms.parquet");
   const scratch = path.join(DATA_DIR, "narrative-scratch");
   fs.mkdirSync(scratch, { recursive: true });
 
@@ -210,9 +214,31 @@ export async function run(): Promise<void> {
     ) TO '${indexOut}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 100000)
   `);
 
+  /**
+   * The word list, on its own: every term and how many assessments use it.
+   *
+   * Two megabytes, against a 159 MB index, and it answers the two questions
+   * that would otherwise mean reading the index to learn nothing:
+   *
+   *  - how rare is this word? — which is what ranks results, so that a search
+   *    for "limestone quarrying" leads with the assessments about quarrying
+   *    rather than the lowest assessment id that happens to hold both words.
+   *  - what else looks like this word? — an edit-distance scan over 413,618
+   *    terms takes 30 ms here and would be unthinkable over the postings.
+   */
+  await conn.run(`
+    COPY (
+      SELECT term, count(*)::INTEGER AS df
+      FROM read_parquet('${indexOut}')
+      GROUP BY term
+      ORDER BY term
+    ) TO '${dictOut}' (FORMAT parquet, COMPRESSION zstd)
+  `);
+
   const size = (p: string) => `${(fs.statSync(p).size / 1e6).toFixed(1)} MB`;
   console.log(`\nnarratives.parquet     ${size(narrativesOut)}`);
   console.log(`narrative-index.parquet ${size(indexOut)}`);
+  console.log(`narrative-terms.parquet ${size(dictOut)}`);
 
   const [distinct] = (
     await conn.runAndReadAll(

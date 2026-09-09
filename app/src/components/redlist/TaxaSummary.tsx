@@ -1636,6 +1636,14 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             router.push("/compare");
             return;
           }
+          // Not a layout of this table but a view of the same data from the
+          // other end — the assessors' own words rather than the counts. Its
+          // own route for the same reason Comparison Mode is: it needs the
+          // whole page, and it has nothing to say about a taxon selection.
+          if (v === "text") {
+            router.push("/narrative-search");
+            return;
+          }
           onLayoutModeChange(v === "taxonomic" ? null : (v as "table1a" | "ssc" | "country"));
         }}
         className="text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1646,6 +1654,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         </option>
         <option value="ssc">By SSC Specialist Group (WIP)</option>
         <option value="compare">Comparison Mode</option>
+        <option value="text">By Assessment Text (search)</option>
         <option value="table1a">Table 1a</option>
       </select>
     </span>

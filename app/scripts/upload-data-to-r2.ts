@@ -70,6 +70,7 @@ const EXCLUDE_FROM_SYNC = new Set([
   "col-revisions.json",
   "narratives.parquet",
   "narrative-index.parquet",
+  "narrative-terms.parquet",
 ]);
 
 function getR2Client(): S3Client {

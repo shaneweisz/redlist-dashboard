@@ -111,10 +111,12 @@ const nextConfig: NextConfig = {
     // query as every route above, so it needs the dlopen'd .so and the sync
     // pointer too.
     "/api/nearby-species": DUCKDB_TRACE,
-    // Free-text search across assessment narratives — reads narrative-index and
-    // narratives parquets from R2 over the same DuckDB connection, so it needs
+    // Free-text search across assessment narratives — reads the narrative
+    // index, word list and prose from R2 over the same DuckDB connection
+    // (the [assessmentId] route expands one result), so both need
     // the dlopen'd .so and the sync pointer like every route above.
     "/api/narrative-search": DUCKDB_TRACE,
+    "/api/narrative-search/[assessmentId]": DUCKDB_TRACE,
     // Live no-match diagnostic breakdown for dynamic taxonomic-drilldown nodes
     // (live-breakdown.ts) — queries assessed/species_link/species/backbone
     // parquets in R2 via the same DuckDB connection, needs the same trace.
@@ -206,10 +208,11 @@ const nextConfig: NextConfig = {
     // from taxonLabel() and behind a try/catch that degrades to the curated
     // names; threatDisplay() reads a static const and never opens the file.
     "/api/nearby-species": ["**/data/**"],
-    // Same bargain: every byte it reads comes from R2, and the two narrative
+    // Same bargain: every byte it reads comes from R2, and the narrative
     // parquets are 170 MB between them — bundling either would put the function
     // straight past Vercel's cap, and flip USE_R2 off into the bargain.
     "/api/narrative-search": ["**/data/**"],
+    "/api/narrative-search/[assessmentId]": ["**/data/**"],
     // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
     // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
     // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.
