@@ -10,6 +10,11 @@
  *
  * `renderText` is how a caller decorates the prose in between the citations —
  * the search marks the words it was asked about. Left out, the text is text.
+ *
+ * `className` is the caller's typography. The default is the nearby-species
+ * panel's, which is where this started; the assessments tab passes an inline
+ * one, because the "read the full assessment" link has to keep flowing after
+ * the last sentence rather than dropping to a line of its own.
  */
 import { useCallback, useState, type ReactNode } from "react";
 import { stripHtml } from "@/lib/html-text";
@@ -20,10 +25,12 @@ export function CitationProse({
   text,
   references,
   renderText,
+  className = "block whitespace-pre-wrap text-zinc-600 dark:text-zinc-300",
 }: {
   text: string;
   references: AssessmentReference[];
   renderText?: (text: string) => ReactNode;
+  className?: string;
 }) {
   const [open, setOpen] = useState<number | null>(null);
   /**
@@ -44,7 +51,7 @@ export function CitationProse({
 
   const segments = linkCitations(text, references);
   return (
-    <span className="block whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
+    <span className={className}>
       {segments.map((seg, i) =>
         seg.reference ? (
           <span key={i} className="relative">

@@ -10,6 +10,8 @@ import {
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
 import { stripHtml, truncateSections } from "@/lib/html-text";
+import { CitationProse } from "@/components/redlist/CitationProse";
+import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
 
 interface PreviousAssessment {
   year: string;
@@ -114,10 +116,12 @@ const NARRATIVE_FIELDS = ([
 function NarrativeSection({
   title,
   text,
+  references,
   fullTextUrl,
 }: {
   title: string;
   text: string;
+  references: AssessmentReference[];
   fullTextUrl?: string;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -139,7 +143,11 @@ function NarrativeSection({
       </button>
       {expanded && (
         <div className="pb-3 pl-5 text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-line leading-relaxed">
-          {text}
+          {/* "(Oldfield 1997)" means nothing on its own, and the bibliography
+              that resolves it is on this same assessment — the same component
+              the nearby-species panel and the text search read it with. Inline
+              and colourless on purpose, so this section keeps its own type. */}
+          <CitationProse text={text} references={references} className="whitespace-pre-line" />
           {fullTextUrl && "\u2026"}
           {fullTextUrl && (
             <>
@@ -675,6 +683,7 @@ function AssessmentDetailView({
             key={n.title}
             title={n.title}
             text={n.text}
+            references={detail.references ?? []}
             fullTextUrl={narrativeCutShort && i === narratives.length - 1 ? assessmentUrl : undefined}
           />
         ))}
