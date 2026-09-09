@@ -287,6 +287,10 @@ export default function NarrativeSearchPage() {
                       type="button"
                       onClick={() => toggle(hit.assessment_id)}
                       aria-expanded={open.has(hit.assessment_id)}
+                      // Without this the button's name is the whole snippet,
+                      // which is a paragraph to read out before you learn what
+                      // pressing it does.
+                      aria-label={`${open.has(hit.assessment_id) ? "Collapse" : "Expand"} ${hit.scientific_name}`}
                       className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                     >
                       <span className="flex flex-wrap items-center gap-x-2">
