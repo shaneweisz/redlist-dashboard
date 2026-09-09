@@ -16,14 +16,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { TAXON_GROUP_NAMES } from "@/config/taxonomy-tree";
 import { stripHtml } from "@/lib/html-text";
-import { linkCitations, type AssessmentReference } from "@/lib/mapping/nearby-citations";
-import TaxaIcon from "@/components/TaxaIcon";
-import { cachedThumbnail, loadThumbnail, type InatThumbnail } from "@/lib/redlist/inat-thumbnail";
+import { CitationProse } from "@/components/redlist/CitationProse";
+import { SpeciesThumbnail } from "@/components/redlist/SpeciesThumbnail";
 import {
   cachedAssessment,
   loadAssessment,
@@ -95,78 +93,6 @@ const SECTION_ORDER = [
 type SectionKey = (typeof SECTION_ORDER)[number];
 const SECTIONS = SECTION_ORDER.map((field) => [field, narrativeLabel(field)] as const);
 
-/** Prose with its in-text citations turned into things you can open. */
-function Prose({ text, references }: { text: string; references: AssessmentReference[] }) {
-  const [open, setOpen] = useState<number | null>(null);
-  /**
-   * Keep the reference on screen.
-   *
-   * A citation near the right edge opens a tooltip that runs off it, and
-   * nothing in CSS alone knows how far. Measured in a ref callback rather than
-   * an effect: it needs the laid-out box, and this way there is no state to
-   * keep in step with it.
-   */
-  const place = useCallback((el: HTMLSpanElement | null) => {
-    if (!el) return;
-    el.style.transform = "";
-    const r = el.getBoundingClientRect();
-    const overhang = r.right - (window.innerWidth - 12);
-    if (overhang > 0) el.style.transform = `translateX(${-Math.min(overhang, r.left - 12)}px)`;
-  }, []);
-
-  const segments = linkCitations(text, references);
-  return (
-    <span className="block whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">
-      {segments.map((seg, i) =>
-        seg.reference ? (
-          <span key={i} className="relative">
-            <button
-              onClick={() => setOpen((prev) => (prev === i ? null : i))}
-              title="Show this reference"
-              className={`underline decoration-dotted underline-offset-2 ${
-                open === i
-                  ? "bg-blue-50 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200"
-                  : "text-blue-700 hover:text-blue-500 dark:text-blue-400"
-              }`}
-            >
-              {seg.text}
-            </button>
-            {/* Beside the citation that asked for it: in prose this dense, a
-                block at the foot of the paragraph left you working out which of
-                six citations it had answered. Selectable, because the point of
-                reaching a reference is usually to put it somewhere else. */}
-            {open === i && (
-              <span
-                ref={place}
-                className="absolute left-0 top-full z-[1003] mt-1 block w-max max-w-[26rem] rounded-md border border-zinc-200 bg-white p-1.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-              >
-                <span className="block select-text text-zinc-700 dark:text-zinc-200">
-                  {stripHtml(seg.reference.citation)}
-                </span>
-                <span className="mt-1 flex items-center gap-1">
-                  <button
-                    onClick={() => navigator.clipboard?.writeText(stripHtml(seg.reference!.citation))}
-                    className="rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                  >
-                    Copy
-                  </button>
-                  <button
-                    onClick={() => setOpen(null)}
-                    className="rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  >
-                    Close
-                  </button>
-                </span>
-              </span>
-            )}
-          </span>
-        ) : (
-          <span key={i}>{seg.text}</span>
-        )
-      )}
-    </span>
-  );
-}
 
 /**
  * What an assessment says about a neighbour, under its row.
@@ -364,7 +290,7 @@ function SpeciesDetail({
       )}
 
       {text ? (
-        <Prose text={text} references={refs} />
+        <CitationProse text={text} references={refs} />
       ) : (
         <span className="block text-zinc-400">
           This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
@@ -495,110 +421,6 @@ function FilterMenu({
   );
 }
 
-/**
- * A species' iNaturalist photo, fetched when its row is scrolled to.
- *
- * The same thumbnail the dashboard's species table shows, from the same route
- * and now the same cache — a neighbour you recognise on sight is worth more
- * than the binomial beside it, and this list is full of names an assessor
- * works next to without ever having seen.
- *
- * Only when the row comes into view: the list is not paginated, so a 50 km
- * radius in a well-collected place is a hundred rows, and asking iNaturalist
- * for a hundred photos to show the twelve on screen is most of a request
- * budget spent on nothing.
- */
-function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
-  const [image, setImage] = useState<InatThumbnail | undefined>(() => cachedThumbnail(name));
-  const [seen, setSeen] = useState(() => cachedThumbnail(name) !== undefined);
-  const box = useRef<HTMLSpanElement | null>(null);
-
-  useEffect(() => {
-    if (seen || !box.current) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) setSeen(true);
-      },
-      // A little ahead of the scroll, so a row is usually holding its photo by
-      // the time it arrives rather than filling in under the reader.
-      { rootMargin: "200px" }
-    );
-    observer.observe(box.current);
-    return () => observer.disconnect();
-  }, [seen]);
-
-  useEffect(() => {
-    if (!seen || image !== undefined) return;
-    let live = true;
-    loadThumbnail(name).then((next) => {
-      if (live) setImage(next);
-    });
-    return () => {
-      live = false;
-    };
-  }, [seen, image, name]);
-
-  /**
-   * Where to hang the big version, once it is being pointed at.
-   *
-   * Fixed to the viewport and rendered through a portal, because the row it
-   * belongs to is inside a panel that scrolls and clips: anything grown in
-   * place is cut off at the panel's edge, which is exactly where a 20px
-   * thumbnail sits. Placed left of the row and flipped above the pointer near
-   * the bottom of the window, so it never opens off screen.
-   */
-  const [preview, setPreview] = useState<{ top: number; left: number } | null>(null);
-  const show = useCallback((e: React.MouseEvent<HTMLElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const size = 176;
-    setPreview({
-      top: Math.max(8, Math.min(window.innerHeight - size - 8, r.top - size / 2 + r.height / 2)),
-      left: Math.max(8, r.left - size - 10),
-    });
-  }, []);
-
-  return (
-    <span ref={box} className="flex h-5 w-5 shrink-0 items-center justify-center">
-      {image?.squareUrl ? (
-        <>
-        <img
-          src={image.squareUrl}
-          alt=""
-          title={name}
-          onMouseEnter={show}
-          onMouseLeave={() => setPreview(null)}
-          className="h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
-          loading="lazy"
-        />
-        {preview &&
-          createPortal(
-            <span
-              style={{ position: "fixed", top: preview.top, left: preview.left, zIndex: 10050 }}
-              className="pointer-events-none block rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-            >
-              <img
-                src={image.mediumUrl ?? image.squareUrl}
-                alt={name}
-                className="block h-40 w-40 rounded object-cover"
-              />
-              <span className="block max-w-40 truncate pt-0.5 text-center text-[10px] italic text-zinc-500 dark:text-zinc-400">
-                {name}
-              </span>
-            </span>,
-            document.body
-          )}
-        </>
-      ) : (
-        // The taxon's own mark while the photo is coming, and instead of it for
-        // a species iNaturalist has no photo of — a grey square that never
-        // resolves reads as something broken.
-        <span className="text-zinc-300 dark:text-zinc-600">
-          <TaxaIcon taxonId={taxonGroup} size={13} />
-        </span>
-      )}
-    </span>
-  );
-}
 
 /** The panel's one busy indicator, used wherever it waits on a service. */
 function Spinner() {
@@ -1030,7 +852,7 @@ export default function NearbySpeciesPanel({
                               pick ? "bg-zinc-50 dark:bg-zinc-700/40" : ""
                             }`}
                           >
-                            <Thumbnail name={s.scientific_name} taxonGroup={s.taxon_group} />
+                            <SpeciesThumbnail name={s.scientific_name} taxonGroup={s.taxon_group} />
 
                             <span className="min-w-0">
                               <span className="block truncate italic text-zinc-700 dark:text-zinc-200">

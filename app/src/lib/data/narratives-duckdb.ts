@@ -5,7 +5,7 @@
  * a habitat type, a threat nobody has a code for, a place — and show where in
  * the text they mention it.
  *
- * Three parquets, built by `scripts/build-narratives.ts` and published once per
+ * Four parquets, built by `scripts/build-narratives.ts` and published once per
  * Red List release (see narrative-release.ts — they are not sync data):
  *
  *  - `narrative-index.parquet`, sorted by term, is what a search reads. Sorted,
@@ -18,6 +18,8 @@
  *  - `narrative-terms.parquet`, 2 MB, is the word list and how many assessments
  *    use each word. It answers "how rare is this word" (ranking) and "what else
  *    looks like this word" (fuzzy, did-you-mean) without opening the index.
+ *  - `narrative-lengths.parquet`, half a megabyte, is how long each assessment
+ *    is — what keeps a long one from outranking a short one on wordcount.
  *  - `narratives.parquet`, sorted by assessment_id in small row groups, is what
  *    a *result* reads — only for the assessments already matched, and only for
  *    the page being shown, or one assessment when a reader expands it.
@@ -27,7 +29,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { getConn } from "./species-duckdb";
+import { getConn, parquetUri } from "./species-duckdb";
 import { NARRATIVE_FIELDS, type NarrativeField } from "@/lib/redlist/narrative-fields";
 import { narrativeKey } from "@/lib/redlist/narrative-release";
 import { phrasePattern, wordPattern, prefixPattern } from "@/lib/redlist/narrative-terms";
@@ -42,6 +44,10 @@ export interface NarrativeHit {
   assessment_id: number;
   sis_taxon_id: number | null;
   scientific_name: string;
+  common_name: string | null;
+  category: string | null;
+  /** The IUCN Table 1a group, for the icon a species with no photo falls back to. */
+  taxon_group: string | null;
   /** The field the search was answered in, and the words around the match. */
   field: NarrativeField | null;
   snippet: string | null;
@@ -189,6 +195,77 @@ function ensureTermTable(): Promise<void> {
   return termTablePromise;
 }
 
+/**
+ * How long each assessment is, and how long they are on average.
+ *
+ * Half a megabyte, loaded once for the same reason the word list is. Without
+ * it, ranking is a popularity contest between long assessments: a thorough,
+ * repetitive account of a well-studied species beats a short one squarely
+ * about the thing being searched for, purely by saying the word more often.
+ * The corpus makes that concrete — a median assessment is 175 indexed words
+ * and the longest is 17,323.
+ */
+let lengthsPromise: Promise<number> | null = null;
+function ensureLengths(): Promise<number> {
+  if (!lengthsPromise) {
+    lengthsPromise = (async () => {
+      const conn = await getConn();
+      await conn.run(
+        `CREATE TEMP TABLE IF NOT EXISTS narrative_lengths AS
+         SELECT assessment_id, n_words FROM read_parquet(${lit(narrativeUri("narrative-lengths.parquet"))})`
+      );
+      const rows = (
+        await conn.runAndReadAll(`SELECT avg(n_words) AS avg FROM narrative_lengths`)
+      ).getRowObjects() as unknown as { avg: number }[];
+      return Number(rows[0].avg) || 1;
+    })().catch((e) => {
+      lengthsPromise = null;
+      throw e;
+    });
+  }
+  return lengthsPromise;
+}
+
+/**
+ * The common name, category and taxon group of every assessed species.
+ *
+ * From the sync's `assessed.parquet` rather than the narratives, because that
+ * is where those live — and as a temp table for the same reason as the word
+ * list, since a result page needs ten rows of it and a scan per search would
+ * be the most expensive part of a search. The two files come from different
+ * places (a release, a sync) so the join is a LEFT one: a species the sync has
+ * dropped still has narratives worth finding, just without a common name.
+ */
+let namesPromise: Promise<void> | null = null;
+function ensureCommonNames(): Promise<void> {
+  if (!namesPromise) {
+    namesPromise = (async () => {
+      const conn = await getConn();
+      await conn.run(
+        `CREATE TEMP TABLE IF NOT EXISTS narrative_species AS
+         SELECT assessment_id, common_name, iucn_category AS category, taxon_group
+         FROM read_parquet(${lit(parquetUri("assessed.parquet"))})
+         WHERE assessment_id IS NOT NULL`
+      );
+    })().catch((e) => {
+      namesPromise = null;
+      throw e;
+    });
+  }
+  return namesPromise;
+}
+
+/**
+ * The two knobs of BM25, at the values everyone uses.
+ *
+ * `K1` is how fast repetition stops counting: the tenth mention of a word says
+ * much less than the second. `B` is how hard length is held against a document
+ * — 0.75 leaves a long assessment able to win, but only on merit rather than
+ * on wordcount.
+ */
+const K1 = 1.2;
+const B = 0.75;
+
 /** What the dictionary knows about the words in a query. */
 interface WordStats {
   /** Exact document frequency, 0 if the word is in no assessment. */
@@ -272,7 +349,7 @@ async function statsFor(parsed: ParsedQuery): Promise<WordStats> {
 
 /** Postings for one word: which assessments hold it, how often, and where. */
 function termRows(index: string, word: string, weight: number, clause: number): string {
-  return `SELECT assessment_id, ${clause} AS c, ${weight.toFixed(4)} * ln(1 + len(positions)) AS s
+  return `SELECT assessment_id, ${clause} AS c, len(positions) AS tf, ${weight.toFixed(4)} AS w
           FROM read_parquet(${lit(index)}) WHERE term = ${lit(word)}`;
 }
 
@@ -285,7 +362,7 @@ function termRows(index: string, word: string, weight: number, clause: number): 
  * that says "quarried" once.
  */
 function prefixRows(index: string, word: string, weight: number, clause: number): string {
-  return `SELECT assessment_id, ${clause} AS c, ${weight.toFixed(4)} * ln(1 + sum(len(positions))) AS s
+  return `SELECT assessment_id, ${clause} AS c, sum(len(positions)) AS tf, ${weight.toFixed(4)} AS w
           FROM read_parquet(${lit(index)}) WHERE term LIKE ${likeLit(word)}
           GROUP BY assessment_id`;
 }
@@ -312,7 +389,7 @@ function phraseRows(index: string, atom: Atom, weight: number, clause: number): 
     .join("\n            ");
   let shared = "t0.anchors";
   for (let i = 1; i < atom.tokens.length; i++) shared = `list_intersect(${shared}, t${i}.anchors)`;
-  return `SELECT t0.assessment_id, ${clause} AS c, ${weight.toFixed(4)} * ln(1 + len(${shared})) AS s
+  return `SELECT t0.assessment_id, ${clause} AS c, len(${shared}) AS tf, ${weight.toFixed(4)} AS w
           FROM ${parts[0]}
             ${joins}
           WHERE len(${shared}) > 0`;
@@ -385,7 +462,12 @@ export async function searchNarratives(opts: {
   const narratives = narrativeUri("narratives.parquet");
   const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
   const offset = Math.max(0, opts.offset ?? 0);
-  const [stats, total] = await Promise.all([statsFor(parsed), assessmentCount()]);
+  const [stats, total, avgLength] = await Promise.all([
+    statsFor(parsed),
+    assessmentCount(),
+    ensureLengths(),
+    ensureCommonNames(),
+  ]);
   const fuzzy = opts.fuzzy === true;
 
   // What the search silently did, or would have done, to a word — said out
@@ -417,13 +499,21 @@ export async function searchNarratives(opts: {
       rows.push(...atomRows(index, atom, i, stats, total, fuzzy));
     }
   });
-  const excludeSql = parsed.excluded.map((a) => atomDocs(index, a, stats)).join("\n      UNION\n      ");
+  const excludeSql = parsed.excluded
+    .map((a) => atomDocs(index, a, stats))
+    .join("\n      UNION\n      ");
+  // BM25: each match is worth how rare its word is, damped by how often this
+  // assessment repeats it and by how long the assessment is. The length join is
+  // a LEFT one — an assessment with no indexed words cannot be in the postings
+  // at all, but a scoring query is the wrong place to discover that.
+  const norm = `(${K1} * (${1 - B} + ${B} * coalesce(l.n_words, ${avgLength.toFixed(1)}) / ${avgLength.toFixed(1)}))`;
   const matched = `
-    SELECT assessment_id, sum(s) AS score
-    FROM (${rows.join("\n      UNION ALL\n      ")})
-    ${excludeSql ? `WHERE assessment_id NOT IN (${excludeSql})` : ""}
-    GROUP BY assessment_id
-    HAVING count(DISTINCT c) = ${parsed.required.length}
+    SELECT m.assessment_id, sum(m.w * (m.tf * ${(K1 + 1).toFixed(1)}) / (m.tf + ${norm})) AS score
+    FROM (${rows.join("\n      UNION ALL\n      ")}) m
+    LEFT JOIN narrative_lengths l ON l.assessment_id = m.assessment_id
+    ${excludeSql ? `WHERE m.assessment_id NOT IN (${excludeSql})` : ""}
+    GROUP BY m.assessment_id
+    HAVING count(DISTINCT m.c) = ${parsed.required.length}
   `;
 
   const page = (
@@ -453,9 +543,12 @@ export async function searchNarratives(opts: {
   const idList = [...order.keys()].join(",");
   const prose = (
     await conn.runAndReadAll(`
-      SELECT assessment_id, sis_taxon_id, scientific_name, ${NARRATIVE_FIELDS.join(", ")}
-      FROM read_parquet(${lit(narratives)})
-      WHERE assessment_id IN (${idList})
+      SELECT n.assessment_id, n.sis_taxon_id, n.scientific_name,
+             s.common_name, s.category, s.taxon_group,
+             ${NARRATIVE_FIELDS.map((f) => `n.${f}`).join(", ")}
+      FROM read_parquet(${lit(narratives)}) n
+      LEFT JOIN narrative_species s ON s.assessment_id = n.assessment_id
+      WHERE n.assessment_id IN (${idList})
     `)
   ).getRowObjects() as unknown as Record<string, unknown>[];
 
@@ -467,6 +560,9 @@ export async function searchNarratives(opts: {
         assessment_id: Number(row.assessment_id),
         sis_taxon_id: row.sis_taxon_id == null ? null : Number(row.sis_taxon_id),
         scientific_name: String(row.scientific_name ?? ""),
+        common_name: row.common_name == null ? null : String(row.common_name),
+        category: row.category == null ? null : String(row.category),
+        taxon_group: row.taxon_group == null ? null : String(row.taxon_group),
         field: found?.field ?? null,
         snippet: found?.snippet ?? null,
       };

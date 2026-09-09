@@ -15,6 +15,8 @@
  *  - narrative-terms.parquet — the word list, with how many assessments use
  *      each word. Two megabytes that make ranking and did-you-mean possible
  *      without opening the index at all.
+ *  - narrative-lengths.parquet — how long each assessment is, so that ranking
+ *      can hold a long assessment to the same standard as a short one.
  *  - narrative-index.parquet — one row per (term, assessment) with every
  *      position that word appears at, sorted by term. This is what a search
  *      reads. Sorted, so DuckDB's row-group statistics
@@ -77,6 +79,7 @@ export async function run(): Promise<void> {
   const narrativesOut = path.join(DATA_DIR, "narratives.parquet");
   const indexOut = path.join(DATA_DIR, "narrative-index.parquet");
   const dictOut = path.join(DATA_DIR, "narrative-terms.parquet");
+  const lengthsOut = path.join(DATA_DIR, "narrative-lengths.parquet");
   const scratch = path.join(DATA_DIR, "narrative-scratch");
   fs.mkdirSync(scratch, { recursive: true });
 
@@ -235,10 +238,32 @@ export async function run(): Promise<void> {
     ) TO '${dictOut}' (FORMAT parquet, COMPRESSION zstd)
   `);
 
+  /**
+   * How long each assessment is, in indexed words.
+   *
+   * A megabyte, and what stops ranking from being a popularity contest between
+   * long assessments: without it a thorough, repetitive account of a well-
+   * studied species outranks a short one that is squarely about the thing
+   * being searched for, purely because it says the word more times.
+   *
+   * Counted from the index rather than the prose, so it counts exactly what
+   * scoring counts — the words that made it into the index, stop words and all
+   * the rest excluded.
+   */
+  await conn.run(`
+    COPY (
+      SELECT assessment_id, sum(len(positions))::INTEGER AS n_words
+      FROM read_parquet('${indexOut}')
+      GROUP BY assessment_id
+      ORDER BY assessment_id
+    ) TO '${lengthsOut}' (FORMAT parquet, COMPRESSION zstd)
+  `);
+
   const size = (p: string) => `${(fs.statSync(p).size / 1e6).toFixed(1)} MB`;
   console.log(`\nnarratives.parquet     ${size(narrativesOut)}`);
   console.log(`narrative-index.parquet ${size(indexOut)}`);
   console.log(`narrative-terms.parquet ${size(dictOut)}`);
+  console.log(`narrative-lengths.parquet ${size(lengthsOut)}`);
 
   const [distinct] = (
     await conn.runAndReadAll(

@@ -17,12 +17,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FaArrowLeft, FaChevronDown, FaChevronRight } from "react-icons/fa";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { CitationProse } from "@/components/redlist/CitationProse";
+import { SpeciesThumbnail } from "@/components/redlist/SpeciesThumbnail";
 import { NARRATIVE_LABELS, type NarrativeField } from "@/lib/redlist/narrative-fields";
+import { loadAssessment } from "@/lib/redlist/assessment";
+import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
+import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 
 interface Hit {
   assessment_id: number;
   sis_taxon_id: number | null;
   scientific_name: string;
+  common_name: string | null;
+  category: string | null;
+  taxon_group: string | null;
   field: NarrativeField | null;
   snippet: string | null;
 }
@@ -60,6 +68,16 @@ export default function NarrativeSearchPage() {
   /** Which results are open, and the full text once it has been fetched. */
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [full, setFull] = useState<Map<number, Narrative | "loading" | "error">>(new Map());
+  /**
+   * The bibliography each expanded assessment's citations point into.
+   *
+   * A second request, and deliberately: the text comes from the parquet the
+   * search actually matched, so what a reader expands is exactly what was
+   * indexed — while the references live on the assessment itself, behind the
+   * one loader the rest of the app uses. Missing references are not an error;
+   * the prose renders either way.
+   */
+  const [refs, setRefs] = useState<Map<number, AssessmentReference[]>>(new Map());
 
   const key = asked ? `${asked.q}|${asked.fuzzy}|${asked.page}` : "";
   const loading = asked != null && answer?.key !== key;
@@ -124,6 +142,9 @@ export default function NarrativeSearchPage() {
           setFull((m) => new Map(m).set(id, body));
         })
         .catch(() => setFull((m) => new Map(m).set(id, "error" as const)));
+      loadAssessment(id)
+        .then(({ assessment }) => setRefs((m) => new Map(m).set(id, assessment?.references ?? [])))
+        .catch(() => setRefs((m) => new Map(m).set(id, [])));
       return next;
     });
   }, []);
@@ -178,7 +199,7 @@ export default function NarrativeSearchPage() {
               }}
               className="h-3.5 w-3.5 rounded accent-red-600"
             />
-            Close spellings
+            Include close/similar spellings
           </label>
           <button
             type="submit"
@@ -253,7 +274,7 @@ export default function NarrativeSearchPage() {
 
             {data.total === 0 ? (
               <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
-                Nothing matched. Try fewer words, drop the quotes, or tick “Close spellings”.
+                Nothing matched. Try fewer words, drop the quotes, or tick “Include close/similar spellings”.
               </p>
             ) : (
               <ul className="mt-3 space-y-2">
@@ -268,15 +289,32 @@ export default function NarrativeSearchPage() {
                       aria-expanded={open.has(hit.assessment_id)}
                       className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                     >
-                      <span className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="flex flex-wrap items-center gap-x-2">
                         {open.has(hit.assessment_id) ? (
-                          <FaChevronDown className="h-2.5 w-2.5 text-zinc-400 self-center" />
+                          <FaChevronDown className="h-2.5 w-2.5 text-zinc-400" />
                         ) : (
-                          <FaChevronRight className="h-2.5 w-2.5 text-zinc-400 self-center" />
+                          <FaChevronRight className="h-2.5 w-2.5 text-zinc-400" />
                         )}
+                        <SpeciesThumbnail
+                          name={hit.scientific_name}
+                          taxonGroup={hit.taxon_group ?? ""}
+                        />
                         <span className="text-sm italic text-zinc-900 dark:text-zinc-100">
                           {hit.scientific_name}
                         </span>
+                        {hit.common_name && (
+                          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                            ({hit.common_name})
+                          </span>
+                        )}
+                        {hit.category && (
+                          <span
+                            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                            style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(hit.category)] }}
+                          >
+                            {hit.category}
+                          </span>
+                        )}
                         {hit.field && (
                           <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                             {NARRATIVE_LABELS[hit.field]}
@@ -293,6 +331,7 @@ export default function NarrativeSearchPage() {
                     {open.has(hit.assessment_id) && (
                       <FullNarrative
                         state={full.get(hit.assessment_id)}
+                        references={refs.get(hit.assessment_id) ?? []}
                         hit={hit}
                         terms={data.terms}
                         prefixes={data.prefixes}
@@ -338,11 +377,13 @@ export default function NarrativeSearchPage() {
 /** The rest of the assessment, once a reader asks for it. */
 function FullNarrative({
   state,
+  references,
   hit,
   terms,
   prefixes,
 }: {
   state: Narrative | "loading" | "error" | undefined;
+  references: AssessmentReference[];
   hit: Hit;
   terms: string[];
   prefixes: string[];
@@ -376,9 +417,16 @@ function FullNarrative({
                 </span>
               )}
             </h3>
-            <p className="mt-0.5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-              <Marked text={text} terms={terms} prefixes={prefixes} />
-            </p>
+            {/* The searched words marked, and the citations openable — the
+                same reference tooltips the nearby-species panel shows, since
+                "(Oldfield 1997)" is exactly as unresolvable here. */}
+            <div className="mt-0.5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+              <CitationProse
+                text={text}
+                references={references}
+                renderText={(part) => <Marked text={part} terms={terms} prefixes={prefixes} />}
+              />
+            </div>
           </div>
         ))}
       </div>

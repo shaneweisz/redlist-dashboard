@@ -14,6 +14,7 @@
  *   <bucket>/narratives/2026-1/narratives.parquet
  *   <bucket>/narratives/2026-1/narrative-index.parquet
  *   <bucket>/narratives/2026-1/narrative-terms.parquet
+ *   <bucket>/narratives/2026-1/narrative-lengths.parquet
  *
  * The pointer is a constant, not a file: NARRATIVE_RELEASE in
  * src/lib/redlist/narrative-release.ts. Production reads whatever it names, so
@@ -35,6 +36,7 @@ export const NARRATIVE_FILES = [
   "narratives.parquet",
   "narrative-index.parquet",
   "narrative-terms.parquet",
+  "narrative-lengths.parquet",
 ];
 
 async function main(): Promise<void> {

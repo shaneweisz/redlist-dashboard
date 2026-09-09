@@ -71,6 +71,7 @@ const EXCLUDE_FROM_SYNC = new Set([
   "narratives.parquet",
   "narrative-index.parquet",
   "narrative-terms.parquet",
+  "narrative-lengths.parquet",
 ]);
 
 function getR2Client(): S3Client {
