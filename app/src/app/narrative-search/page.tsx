@@ -18,19 +18,15 @@ import Link from "next/link";
 import { FaArrowLeft, FaChevronDown, FaChevronRight } from "react-icons/fa";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CitationProse } from "@/components/redlist/CitationProse";
-import { SpeciesThumbnail } from "@/components/redlist/SpeciesThumbnail";
 import { NARRATIVE_LABELS, type NarrativeField } from "@/lib/redlist/narrative-fields";
 import { loadAssessment } from "@/lib/redlist/assessment";
 import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
-import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 
 interface Hit {
   assessment_id: number;
   sis_taxon_id: number | null;
   scientific_name: string;
   common_name: string | null;
-  category: string | null;
-  taxon_group: string | null;
   field: NarrativeField | null;
   snippet: string | null;
 }
@@ -299,24 +295,12 @@ export default function NarrativeSearchPage() {
                         ) : (
                           <FaChevronRight className="h-2.5 w-2.5 text-zinc-400" />
                         )}
-                        <SpeciesThumbnail
-                          name={hit.scientific_name}
-                          taxonGroup={hit.taxon_group ?? ""}
-                        />
                         <span className="text-sm italic text-zinc-900 dark:text-zinc-100">
                           {hit.scientific_name}
                         </span>
                         {hit.common_name && (
                           <span className="text-sm text-zinc-500 dark:text-zinc-400">
                             ({hit.common_name})
-                          </span>
-                        )}
-                        {hit.category && (
-                          <span
-                            className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                            style={{ backgroundColor: CATEGORY_COLORS[normalizeCategory(hit.category)] }}
-                          >
-                            {hit.category}
                           </span>
                         )}
                         {hit.field && (

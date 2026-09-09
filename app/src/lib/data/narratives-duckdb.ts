@@ -45,9 +45,6 @@ export interface NarrativeHit {
   sis_taxon_id: number | null;
   scientific_name: string;
   common_name: string | null;
-  category: string | null;
-  /** The IUCN Table 1a group, for the icon a species with no photo falls back to. */
-  taxon_group: string | null;
   /** The field the search was answered in, and the words around the match. */
   field: NarrativeField | null;
   snippet: string | null;
@@ -227,10 +224,10 @@ function ensureLengths(): Promise<number> {
 }
 
 /**
- * The common name, category and taxon group of every assessed species.
+ * The common name of every assessed species, by assessment.
  *
  * From the sync's `assessed.parquet` rather than the narratives, because that
- * is where those live — and as a temp table for the same reason as the word
+ * is where it lives — and as a temp table for the same reason as the word
  * list, since a result page needs ten rows of it and a scan per search would
  * be the most expensive part of a search. The two files come from different
  * places (a release, a sync) so the join is a LEFT one: a species the sync has
@@ -243,7 +240,7 @@ function ensureCommonNames(): Promise<void> {
       const conn = await getConn();
       await conn.run(
         `CREATE TEMP TABLE IF NOT EXISTS narrative_species AS
-         SELECT assessment_id, common_name, iucn_category AS category, taxon_group
+         SELECT assessment_id, common_name
          FROM read_parquet(${lit(parquetUri("assessed.parquet"))})
          WHERE assessment_id IS NOT NULL`
       );
@@ -544,7 +541,7 @@ export async function searchNarratives(opts: {
   const prose = (
     await conn.runAndReadAll(`
       SELECT n.assessment_id, n.sis_taxon_id, n.scientific_name,
-             s.common_name, s.category, s.taxon_group,
+             s.common_name,
              ${NARRATIVE_FIELDS.map((f) => `n.${f}`).join(", ")}
       FROM read_parquet(${lit(narratives)}) n
       LEFT JOIN narrative_species s ON s.assessment_id = n.assessment_id
@@ -561,8 +558,6 @@ export async function searchNarratives(opts: {
         sis_taxon_id: row.sis_taxon_id == null ? null : Number(row.sis_taxon_id),
         scientific_name: String(row.scientific_name ?? ""),
         common_name: row.common_name == null ? null : String(row.common_name),
-        category: row.category == null ? null : String(row.category),
-        taxon_group: row.taxon_group == null ? null : String(row.taxon_group),
         field: found?.field ?? null,
         snippet: found?.snippet ?? null,
       };
