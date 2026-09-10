@@ -2000,11 +2000,11 @@ export default function OccurrenceMapRow({
         setTotalOccurrences(data.metadata?.total ?? null);
         setBbox(data.metadata?.bbox ?? null);
         setRecordSetTotals(data.metadata?.totals ?? null);
-        // Where each record set has been paged to, which is the sample size —
-        // not the number of records that came back. The route fetches the
-        // mapped, flagged and unmapped sets separately and merges them, so
-        // `features.length` counts up to three sets' worth and, used as an
-        // offset, skipped everything between here and there on the next page.
+        // How far the records-with-coordinates list has been paged, which is
+        // the sample size — not the number of records that came back. The
+        // unmapped set is fetched under its own limit and merged in, so
+        // `features.length` counts both lists' worth and, used as an offset,
+        // skipped everything between here and there on the next page.
         setGeneralOffset(sampleSize);
       })
       .catch(console.error)
@@ -2159,28 +2159,21 @@ export default function OccurrenceMapRow({
   // same reason (a record already pulled in by a per-category load may reappear here).
   const loadMoreOverall = useCallback(() => {
     setLoadingMoreOverall(true);
-    // The limit is per record set, and the route fetches each set it is asked
-    // for under it — so asking for 200 with both the mapped and the flagged set
-    // in play brought back 400. The southern elephant seal, whose records are
-    // mostly flagged, jumped by 400 on a button that said 200.
-    //
-    // Split between the sets that still have records to give, so the number on
-    // the button is what arrives either way: half each while both are running,
-    // and the whole batch from one once the other is spent — a species with no
-    // flagged records at all would otherwise get half of what it was promised.
-    const left = (total: number | undefined) => Math.max(0, (total ?? 0) - generalOffset);
-    const running = [recordSetTotals?.mapped, recordSetTotals?.issue].filter((t) => left(t) > 0).length;
-    const perSet = Math.ceil(OVERALL_LOAD_MORE_BATCH / Math.max(1, running));
+    // One batch, not one per record set: the route pages the mapped and flagged
+    // sets as a single list under a single limit (see fetchGeoreferenced), so
+    // asking for 200 brings back 200 however they divide. It used to bring back
+    // 400 — the southern elephant seal, whose records are mostly flagged,
+    // jumped by 400 on a button that said 200.
     const params = new URLSearchParams({
       speciesKey,
-      limit: perSet.toString(),
+      limit: OVERALL_LOAD_MORE_BATCH.toString(),
       offset: generalOffset.toString(),
     });
     if (countryCode) {
       params.set("country", countryCode);
     }
-    // The two sets this button's number is about: the ones GBIF has coordinates
-    // for, mapped and flagged. Records without coordinates have their own line
+    // The set this button's number is about: everything GBIF has coordinates
+    // for, flagged or not. Records without coordinates have their own clause
     // and their own button, which pages them from their own offset — asking for
     // them here moved a count this button says nothing about.
     params.set("includeIssues", "true");
@@ -2193,14 +2186,15 @@ export default function OccurrenceMapRow({
           const toAdd = newFeatures.filter((f) => !seen.has(f.properties.gbifID));
           return [...prev, ...toAdd];
         });
-        // By what each set was asked for, not by how many records the merge
-        // produced: they all page from the same offset.
-        setGeneralOffset((prev) => prev + perSet);
+        // By what the route returned rather than by what was asked for: the
+        // last page of a species is short, and walking the cursor past its end
+        // would ask GBIF for records that aren't there.
+        setGeneralOffset((prev) => prev + newFeatures.length);
         setTotalOccurrences(data.metadata?.total ?? null);
       })
       .catch(console.error)
       .finally(() => setLoadingMoreOverall(false));
-  }, [generalOffset, speciesKey, countryCode, recordSetTotals]);
+  }, [generalOffset, speciesKey, countryCode]);
 
   // Fetch breakdown data
   useEffect(() => {
@@ -2338,9 +2332,12 @@ export default function OccurrenceMapRow({
     }
     // 3. Coordinate-cleaning checks (zero/equal coords, GBIF HQ, duplicates)
     result = result.filter((o) => !o.properties.qualityFlags?.some((f) => appliedChecks[f as QualityFlag]));
-    // 3b. GBIF's own geospatial issues, treated as one more cleaning check
+    // 3b. GBIF's own verdict, treated as one more cleaning check. On
+    // coordinateStatus rather than on gbifIssues: the flags column also carries
+    // notes GBIF reports without excluding the record over, and a record is
+    // only in the flagged set if GBIF put it there.
     if (hideGbifFlagged) {
-      result = result.filter((o) => !(o.properties.gbifIssues?.length));
+      result = result.filter((o) => o.properties.coordinateStatus !== "issue");
     }
     // 4. Native range only — hide occurrences reported outside this species' native countries
     if (nativeRangeOnly) {
@@ -2617,7 +2614,7 @@ export default function OccurrenceMapRow({
   // (i.e. they pass every other active filter) — same "shown of loaded" reading
   // as the other cleaning rows.
   const gbifFlaggedCounts = useMemo(() => {
-    const flagged = occurrences.filter((o) => o.properties.gbifIssues?.length);
+    const flagged = occurrences.filter((o) => o.properties.coordinateStatus === "issue");
     const others = new Set(filteredOccurrences.map((o) => o.properties.gbifID));
     return {
       loaded: flagged.length,
@@ -4004,56 +4001,63 @@ export default function OccurrenceMapRow({
             map. One row, both record sets: the ones the map can draw, and
             the ones only the list can show. */}
         {!loadingOccurrences &&
-          ((!splitView && totalOccurrences != null) ||
-            (recordSetTotals?.missing ?? 0) > 0) &&
+          ((!splitView && totalOccurrences != null) || missingToLoad > 0) &&
           (countsOpen ? (
           <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
-            {!splitView && totalOccurrences != null && (
-              <div className="text-emerald-700 dark:text-emerald-400">
-                {isFullSample ? (
-                  <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
+            {/* One sentence, both record sets. As two lines they said the same
+                thing twice — "Loaded", a count, a link reading "Click to load
+                N more" — and read as two facts about two things rather than
+                one fact about this species. The links go in brackets, where a
+                parenthetical belongs, instead of ending the sentence and
+                starting the next one without a full stop between them. */}
+            <div className="text-emerald-700 dark:text-emerald-400">
+              {!splitView && totalOccurrences != null && (
+                isFullSample ? (
+                  <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded</>
                 ) : (
-                  <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
-                )}
-                {!isFullSample && (
                   <>
-                    {" "}
+                    Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of{" "}
+                    <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates{" "}
+                    (
                     <button
                       onClick={loadMoreOverall}
                       disabled={loadingMoreOverall}
                       className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {loadingMoreOverall
-                        ? "Loading…"
-                        : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
+                        ? "loading…"
+                        : `click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
                     </button>
+                    )
                   </>
-                )}
-                {georeferencedFilteredCount < georeferencedLoadedCount && (
-                  <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
-                )}
-              </div>
-            )}
-            {/* Records with no coordinates only get a line when there are
-                more to fetch. "All N loaded" was a fact with nothing to do
-                about it — they're in the table either way. */}
-            {missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
-              <div className="text-amber-700 dark:text-amber-400">
-                <>
-                    Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
-                    <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
-                    <button
-                      onClick={loadMoreMissing}
-                      disabled={loadingMoreMissing}
-                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loadingMoreMissing
-                        ? "Loading…"
-                        : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
-                    </button>
-                </>
-              </div>
-            )}
+                )
+              )}
+              {missingToLoad > 0 && (
+                <span className="text-amber-700 dark:text-amber-400">
+                  {!splitView && totalOccurrences != null ? ", and " : "Loaded "}
+                  <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
+                  <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates{" "}
+                  (
+                  <button
+                    onClick={loadMoreMissing}
+                    disabled={loadingMoreMissing}
+                    className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingMoreMissing
+                      ? "loading…"
+                      : `click to load ${Math.min(sampleSize, missingToLoad).toLocaleString()} more`}
+                  </button>
+                  )
+                </span>
+              )}
+              .
+              {/* Kept, and kept last: with the flagged records hidden by
+                  default this is often the only line saying that what the map
+                  draws is smaller than what was loaded. */}
+              {georeferencedFilteredCount < georeferencedLoadedCount && (
+                <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
+              )}
+            </div>
             {/* Rolled away once it has been read. How much of a species is
                 loaded is a line you read at the start and then keep looking
                 past, and on a short map it was a line of the map. The chevron
@@ -5753,6 +5757,10 @@ export default function OccurrenceMapRow({
     () => occurrences.filter((o) => o.properties.coordinateStatus === "missing").length,
     [occurrences]
   );
+  /** Records with no coordinates still to fetch. The counts line only names
+   *  that set when there are some: "all N loaded" was a fact with nothing to
+   *  do about it, and they are in the table either way. */
+  const missingToLoad = Math.max(0, (recordSetTotals?.missing ?? 0) - missingLoadedCount);
   const georeferencedTotal = recordSetTotals
     ? recordSetTotals.mapped + recordSetTotals.issue
     : totalOccurrences;
