@@ -699,6 +699,11 @@ interface OccurrenceListTableProps {
   onRowContextMenu?: (feature: OccurrenceFeature, at: { x: number; y: number }) => void;
   /** Drawn at the right of the footer — the save button, where there is one. */
   footerExtra?: React.ReactNode;
+  /** Drawn beside the row count, in the same "· clause" idiom: a word about
+   *  what isn't in the table yet. Beside the count rather than in footerExtra,
+   *  which sits among the save and export buttons and would make it read as a
+   *  tool rather than as a fact about the rows. */
+  footerCountExtra?: React.ReactNode;
   /** Scales the table, so more of it fits without shrinking the controls. */
   zoom?: number;
   /** Records struck out by hand, with the reason given for each. */
@@ -746,6 +751,7 @@ export default function OccurrenceListTable({
   onMarkDuplicate,
   onRowContextMenu,
   footerExtra,
+  footerCountExtra,
   zoom = 1,
   exclusions,
   onExclude,
@@ -2213,6 +2219,7 @@ export default function OccurrenceListTable({
               {showExcluded ? "" : " (hidden)"}
             </span>
           )}
+          {footerCountExtra}
         </span>
         {/* The rows the filters took out are greyed in place by default — a
             record you can't see is a record you can't reconsider — and this

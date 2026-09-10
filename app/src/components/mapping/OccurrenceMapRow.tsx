@@ -18,6 +18,7 @@ import {
   type EditsBackup,
 } from "@/lib/mapping/edits-backup";
 import { duplicatesByPrimary as groupDuplicates, keepRecord as keepRecordIn } from "@/lib/mapping/duplicates";
+import { taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { FaInfoCircle } from "react-icons/fa";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
@@ -675,22 +676,30 @@ interface OccurrenceMapRowProps {
 /**
  * Which record types are selected when the viewer opens.
  *
- * Every kingdom now starts with every record type but two, rather than only
- * plants and fungi: a herbarium sheet, a museum skin or a literature citation
- * is evidence of where the species was, and a default that quietly drops
- * record types hides the very evidence an assessment gets written from.
+ * Every record type but three: a literature citation or a bare "occurrence"
+ * record is evidence of where the species was, and a default that quietly
+ * drops record types hides the very evidence an assessment gets written from.
  *
- * The two exceptions are the ones that say where an individual *ended up*
- * rather than where the species lives: a living specimen is a zoo or botanic
+ * Two of the three say where an individual *ended up* rather than where the
+ * species lives, whatever the kingdom: a living specimen is a zoo or botanic
  * garden animal or plant, and a fossil specimen is a range from a different
  * epoch. Both are off until asked for.
+ *
+ * The third, preserved specimens, follows the taxon — on for plants and fungi
+ * (and the brown algae filed with them), off for animals. It is the same rule
+ * `taxonGroupCountsPreservedSpecimens` applies to the dashboard's own GBIF
+ * counts, and the viewer opening on a different record set from the count that
+ * sent you to it is the confusion worth avoiding: a plant is known mostly from
+ * collected, preserved material, an animal mostly from observation, and a
+ * mammal's herbarium-equivalent museum skins are a small tail of records whose
+ * localities are the oldest and vaguest in the set.
  */
-export function defaultCheckedTypes() {
+export function defaultCheckedTypes(taxonGroup?: string) {
   return {
     humanObservation: true,
     machineObservation: true,
     observation: true,
-    preservedSpecimen: true,
+    preservedSpecimen: taxonGroupCountsPreservedSpecimens(taxonGroup),
     fossilSpecimen: false,
     livingSpecimen: false,
     materialSample: true,
@@ -833,7 +842,7 @@ export default function OccurrenceMapRow({
   const [loadingOccurrences, setLoadingOccurrences] = useState(true);
   const [loadingBreakdown, setLoadingBreakdown] = useState(true);
 
-  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes());
+  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes(taxonGroup));
 
   // Advanced filter state
   const [maxUncertainty, setMaxUncertainty] = useState<number | null>(null);
@@ -889,11 +898,13 @@ export default function OccurrenceMapRow({
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
   }, [gbifOptionsOpen]);
-  // Hybrid by default: imagery with the place names still on it. A record's
-  // position is judged against what is actually on the ground — the plantation,
-  // the river, the edge of the forest — and the street map draws none of it,
-  // while bare satellite leaves nothing to say where you are looking.
-  const [basemap, setBasemap] = useState<BasemapKey>("hybrid");
+  // The street map by default. Imagery answers a question you ask about one
+  // record — what is on the ground where this point sits — and the map opens
+  // on a species' whole range, where the question is where the records are at
+  // all. Coastlines, borders and place names answer that at a glance and a
+  // satellite mosaic doesn't; hybrid is one click away for the moment the
+  // question changes.
+  const [basemap, setBasemap] = useState<BasemapKey>("streets");
   // Overlays — informational map layers, independent of the "Native range only"
   // occurrence filter above: shading which countries a source considers native,
   // regardless of whether occurrences are being filtered by it.
@@ -1937,22 +1948,19 @@ export default function OccurrenceMapRow({
   // unfiltered ordering actually considers "next" if reused here.
   const [generalOffset, setGeneralOffset] = useState(0);
 
-  // Opt-in record sets the viewer has always filtered out: records GBIF has no
-  // coordinates for, and records whose coordinates GBIF flags. Both are only
-  // useful in the list (one can't be drawn at all, the other shouldn't be
-  // trusted where it's drawn), and both are what an assessor georeferences by
-  // hand — so they're off until asked for, and their totals are always fetched
-  // so the toggles can name what's being hidden.
-  // Fetched automatically in fullscreen — the list is the only place they can
-  // be read, and it's the whole point of that page. Off elsewhere, where
-  // there's no list to put them in.
-  const includeMissing = !!fullscreenProp;
-  // Records GBIF flags are always fetched now: they have coordinates, so they
+  // Records GBIF flags are always fetched: they have coordinates, so they
   // belong with the rest and are hidden (or not) by a coordinate-cleaning check
   // like any other suspect point, rather than by a separate opt-in.
-  // Off by default — the same rule the other cleaning checks follow, since
-  // this is now one of them.
-  const [hideGbifFlagged, setHideGbifFlagged] = useState(false);
+  //
+  // On by default, unlike the other cleaning checks. Those are this project's
+  // own plausibility heuristics with real false-positive rates, so they stay
+  // opt-in; this one is GBIF's verdict on its own record — a zero coordinate, a
+  // country that doesn't match the point, a swapped latitude — and a map an
+  // assessor reads a range off shouldn't open on positions the aggregator that
+  // published them won't vouch for. Unchecking it puts them back on the map in
+  // amber, and they are in the list either way: greyed, and counted in the
+  // footer's "N removed by your filters".
+  const [hideGbifFlagged, setHideGbifFlagged] = useState(true);
   const [recordSetTotals, setRecordSetTotals] = useState<{ mapped: number; issue: number; missing: number } | null>(null);
 
   /**
@@ -1979,7 +1987,12 @@ export default function OccurrenceMapRow({
     if (countryCode) {
       params.set("country", countryCode);
     }
-    if (includeMissing) params.set("includeMissing", "true");
+    // Both of the sets that aren't plain mapped points: the ones GBIF flags,
+    // and the ones it has no coordinates for at all. Fetched in both modes —
+    // the record panel exists on the dashboard as well as fullscreen, and a
+    // herbarium sheet waiting to be georeferenced is exactly as readable in
+    // one as in the other.
+    params.set("includeMissing", "true");
     params.set("includeIssues", "true");
     fetch(`/api/occurrences?${params}`)
       .then((res) => res.json())
@@ -1989,16 +2002,16 @@ export default function OccurrenceMapRow({
         setTotalOccurrences(data.metadata?.total ?? null);
         setBbox(data.metadata?.bbox ?? null);
         setRecordSetTotals(data.metadata?.totals ?? null);
-        // Where each record set has been paged to, which is the sample size —
-        // not the number of records that came back. The route fetches the
-        // mapped, flagged and unmapped sets separately and merges them, so
-        // `features.length` counts up to three sets' worth and, used as an
-        // offset, skipped everything between here and there on the next page.
+        // How far the records-with-coordinates list has been paged, which is
+        // the sample size — not the number of records that came back. The
+        // unmapped set is fetched under its own limit and merged in, so
+        // `features.length` counts both lists' worth and, used as an offset,
+        // skipped everything between here and there on the next page.
         setGeneralOffset(sampleSize);
       })
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
-  }, [speciesKey, countryCode, sampleSize, includeMissing]);
+  }, [speciesKey, countryCode, sampleSize]);
 
   /**
    * The records this assessor has edited, whether or not the sample holds them.
@@ -2083,7 +2096,8 @@ export default function OccurrenceMapRow({
 
   // Records with no coordinates arrive as their own bounded sample, so a
   // species with hundreds of unlocalised sheets doesn't stall the first paint.
-  // This pages that set alone, from however many are already loaded.
+  // This pages that set alone, from however many are already loaded — driven
+  // from the record list's footer, which is the only place they can be read.
   const loadMoreMissing = useCallback(() => {
     setLoadingMoreMissing(true);
     const loaded = occurrences.filter((o) => o.properties.coordinateStatus === "missing").length;
@@ -2148,28 +2162,21 @@ export default function OccurrenceMapRow({
   // same reason (a record already pulled in by a per-category load may reappear here).
   const loadMoreOverall = useCallback(() => {
     setLoadingMoreOverall(true);
-    // The limit is per record set, and the route fetches each set it is asked
-    // for under it — so asking for 200 with both the mapped and the flagged set
-    // in play brought back 400. The southern elephant seal, whose records are
-    // mostly flagged, jumped by 400 on a button that said 200.
-    //
-    // Split between the sets that still have records to give, so the number on
-    // the button is what arrives either way: half each while both are running,
-    // and the whole batch from one once the other is spent — a species with no
-    // flagged records at all would otherwise get half of what it was promised.
-    const left = (total: number | undefined) => Math.max(0, (total ?? 0) - generalOffset);
-    const running = [recordSetTotals?.mapped, recordSetTotals?.issue].filter((t) => left(t) > 0).length;
-    const perSet = Math.ceil(OVERALL_LOAD_MORE_BATCH / Math.max(1, running));
+    // One batch, not one per record set: the route pages the mapped and flagged
+    // sets as a single list under a single limit (see fetchGeoreferenced), so
+    // asking for 200 brings back 200 however they divide. It used to bring back
+    // 400 — the southern elephant seal, whose records are mostly flagged,
+    // jumped by 400 on a button that said 200.
     const params = new URLSearchParams({
       speciesKey,
-      limit: perSet.toString(),
+      limit: OVERALL_LOAD_MORE_BATCH.toString(),
       offset: generalOffset.toString(),
     });
     if (countryCode) {
       params.set("country", countryCode);
     }
-    // The two sets this button's number is about: the ones GBIF has coordinates
-    // for, mapped and flagged. Records without coordinates have their own line
+    // The set this button's number is about: everything GBIF has coordinates
+    // for, flagged or not. Records without coordinates have their own clause
     // and their own button, which pages them from their own offset — asking for
     // them here moved a count this button says nothing about.
     params.set("includeIssues", "true");
@@ -2182,14 +2189,15 @@ export default function OccurrenceMapRow({
           const toAdd = newFeatures.filter((f) => !seen.has(f.properties.gbifID));
           return [...prev, ...toAdd];
         });
-        // By what each set was asked for, not by how many records the merge
-        // produced: they all page from the same offset.
-        setGeneralOffset((prev) => prev + perSet);
+        // By what the route returned rather than by what was asked for: the
+        // last page of a species is short, and walking the cursor past its end
+        // would ask GBIF for records that aren't there.
+        setGeneralOffset((prev) => prev + newFeatures.length);
         setTotalOccurrences(data.metadata?.total ?? null);
       })
       .catch(console.error)
       .finally(() => setLoadingMoreOverall(false));
-  }, [generalOffset, speciesKey, countryCode, recordSetTotals]);
+  }, [generalOffset, speciesKey, countryCode]);
 
   // Fetch breakdown data
   useEffect(() => {
@@ -2327,9 +2335,12 @@ export default function OccurrenceMapRow({
     }
     // 3. Coordinate-cleaning checks (zero/equal coords, GBIF HQ, duplicates)
     result = result.filter((o) => !o.properties.qualityFlags?.some((f) => appliedChecks[f as QualityFlag]));
-    // 3b. GBIF's own geospatial issues, treated as one more cleaning check
+    // 3b. GBIF's own verdict, treated as one more cleaning check. On
+    // coordinateStatus rather than on gbifIssues: the flags column also carries
+    // notes GBIF reports without excluding the record over, and a record is
+    // only in the flagged set if GBIF put it there.
     if (hideGbifFlagged) {
-      result = result.filter((o) => !(o.properties.gbifIssues?.length));
+      result = result.filter((o) => o.properties.coordinateStatus !== "issue");
     }
     // 4. Native range only — hide occurrences reported outside this species' native countries
     if (nativeRangeOnly) {
@@ -2606,7 +2617,7 @@ export default function OccurrenceMapRow({
   // (i.e. they pass every other active filter) — same "shown of loaded" reading
   // as the other cleaning rows.
   const gbifFlaggedCounts = useMemo(() => {
-    const flagged = occurrences.filter((o) => o.properties.gbifIssues?.length);
+    const flagged = occurrences.filter((o) => o.properties.coordinateStatus === "issue");
     const others = new Set(filteredOccurrences.map((o) => o.properties.gbifID));
     return {
       loaded: flagged.length,
@@ -3990,59 +4001,42 @@ export default function OccurrenceMapRow({
             on top of it. It is a fact about the record set, not about any
             place on the map — and as an overlay it covered whatever tiles it
             landed on, in the same corner as the controls that do act on the
-            map. One row, both record sets: the ones the map can draw, and
-            the ones only the list can show. */}
-        {!loadingOccurrences &&
-          ((!splitView && totalOccurrences != null) ||
-            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) &&
+            map.
+
+            The records the map can draw, and only those. The ones GBIF has no
+            coordinates for are in the list either way, and a second count and
+            a second link for a set this row's own number says nothing about
+            made the line read as two facts about two things. */}
+        {!loadingOccurrences && !splitView && totalOccurrences != null &&
           (countsOpen ? (
           <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
-            {!splitView && totalOccurrences != null && (
-              <div className="text-emerald-700 dark:text-emerald-400">
-                {isFullSample ? (
-                  <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
-                ) : (
-                  <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
-                )}
-                {!isFullSample && (
-                  <>
-                    {" "}
-                    <button
-                      onClick={loadMoreOverall}
-                      disabled={loadingMoreOverall}
-                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loadingMoreOverall
-                        ? "Loading…"
-                        : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
-                    </button>
-                  </>
-                )}
-                {georeferencedFilteredCount < georeferencedLoadedCount && (
-                  <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
-                )}
-              </div>
-            )}
-            {/* Records with no coordinates only get a line when there are
-                more to fetch. "All N loaded" was a fact with nothing to do
-                about it — they're in the table either way. */}
-            {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
-              <div className="text-amber-700 dark:text-amber-400">
+            <div className="text-emerald-700 dark:text-emerald-400">
+              {isFullSample ? (
+                <>All <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates loaded.</>
+              ) : (
+                <>Loaded <strong>{georeferencedLoadedCount.toLocaleString()}</strong> of <strong>{(georeferencedTotal ?? 0).toLocaleString()}</strong> GBIF records with coordinates.</>
+              )}
+              {!isFullSample && (
                 <>
-                    Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
-                    <strong>{(recordSetTotals?.missing ?? 0).toLocaleString()}</strong> without coordinates.{" "}
-                    <button
-                      onClick={loadMoreMissing}
-                      disabled={loadingMoreMissing}
-                      className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {loadingMoreMissing
-                        ? "Loading…"
-                        : `Click to load ${Math.min(sampleSize, (recordSetTotals?.missing ?? 0) - missingLoadedCount).toLocaleString()} more`}
-                    </button>
+                  {" "}
+                  <button
+                    onClick={loadMoreOverall}
+                    disabled={loadingMoreOverall}
+                    className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingMoreOverall
+                      ? "Loading…"
+                      : `Click to load ${Math.min(OVERALL_LOAD_MORE_BATCH, (georeferencedTotal ?? 0) - georeferencedLoadedCount).toLocaleString()} more`}
+                  </button>
                 </>
-              </div>
-            )}
+              )}
+              {/* Kept, and kept last: with the flagged records hidden by
+                  default this is often the only line saying that what the map
+                  draws is smaller than what was loaded. */}
+              {georeferencedFilteredCount < georeferencedLoadedCount && (
+                <> Showing <strong>{georeferencedFilteredCount.toLocaleString()}</strong> after filters.</>
+              )}
+            </div>
             {/* Rolled away once it has been read. How much of a species is
                 loaded is a line you read at the start and then keep looking
                 past, and on a short map it was a line of the map. The chevron
@@ -4921,8 +4915,8 @@ export default function OccurrenceMapRow({
                   <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.12 }} />
                   {/* A white casing under the hull, as the protected-area
                       highlights use: a dark blue line on dark imagery was a
-                      line you had to know was there to find, and the hybrid
-                      basemap is now the one people start on. */}
+                      line you had to know was there to find, and imagery is a
+                      click away whatever the map opens on. */}
                   <Layer
                     id={`eoo-casing-${panelId}`}
                     type="line"
@@ -5742,6 +5736,10 @@ export default function OccurrenceMapRow({
     () => occurrences.filter((o) => o.properties.coordinateStatus === "missing").length,
     [occurrences]
   );
+  /** Records with no coordinates still to fetch. Named in the list's footer
+   *  only when there are some — "all N loaded" is a fact with nothing to do
+   *  about it, and they are in the table either way. */
+  const missingToLoad = Math.max(0, (recordSetTotals?.missing ?? 0) - missingLoadedCount);
   const georeferencedTotal = recordSetTotals
     ? recordSetTotals.mapped + recordSetTotals.issue
     : totalOccurrences;
@@ -9015,6 +9013,23 @@ export default function OccurrenceMapRow({
                       )}
                       {EDIT_TOOLS}
                     </>
+                  }
+                  footerCountExtra={
+                    listTab === "gbif" && missingToLoad > 0 ? (
+                      <>
+                        {" "}·{" "}
+                        <button
+                          onClick={loadMoreMissing}
+                          disabled={loadingMoreMissing}
+                          title={`GBIF has no coordinates for ${(recordSetTotals?.missing ?? 0).toLocaleString()} records of this species — a locality description and nothing to map. ${missingLoadedCount.toLocaleString()} are in this table; the rest are a click away.`}
+                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingMoreMissing
+                            ? "Loading…"
+                            : `Load ${Math.min(sampleSize, missingToLoad).toLocaleString()} more without coordinates`}
+                        </button>
+                      </>
+                    ) : undefined
                   }
                   excludedIds={excludedIds}
                   exclusions={exclusions}

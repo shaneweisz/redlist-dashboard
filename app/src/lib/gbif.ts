@@ -86,28 +86,53 @@ export function includedBasisOfRecord(includePreservedSpecimens: boolean): reado
 }
 
 /**
- * The GBIF occurrence issues that concern a record's position — the set behind
- * GBIF's own `hasGeospatialIssue` filter (https://techdocs.gbif.org/en/openapi/,
- * OccurrenceIssue). A record carrying one of these still has coordinates; GBIF
- * just doesn't trust them, which is exactly what makes it a candidate for
- * manual re-georeferencing rather than something to silently drop.
+ * The GBIF occurrence issues that make `hasGeospatialIssue` true — the ones
+ * GBIF distrusts a record's position enough to exclude it over. A record
+ * carrying one still has coordinates; GBIF just doesn't trust them, which is
+ * exactly what makes it a candidate for manual re-georeferencing rather than
+ * something to silently drop.
  *
- * Occurrence records also carry non-geospatial issues (fuzzy taxon matches,
- * invalid dates); those are filtered out rather than shipped to the client,
- * since nothing in the occurrence viewer acts on them.
+ * This set has to be exactly GBIF's, because the viewer fetches the two sides
+ * of that filter separately and in order — every record `hasGeospatialIssue=false`
+ * returns, then the ones it excludes. A code in here that GBIF does not act on
+ * puts records the "trusted" query already returned into the flagged bucket,
+ * where they get painted as suspect and hidden by a check the assessor never
+ * aimed at them.
+ *
+ * Two used to be in here that GBIF doesn't act on — see GBIF_COORDINATE_NOTES.
+ * Membership was checked against the API rather than read off the docs, per
+ * code: `issue=<code>&hasGeospatialIssue=false` returns nothing for every code
+ * below, and returns records for both of the two.
+ *
+ * Occurrence records also carry issues with nothing to do with position (fuzzy
+ * taxon matches, invalid dates); those are filtered out rather than shipped to
+ * the client, since nothing in the occurrence viewer acts on them.
  */
 export const GBIF_GEOSPATIAL_ISSUES = new Set([
   "ZERO_COORDINATE",
   "COORDINATE_INVALID",
   "COORDINATE_OUT_OF_RANGE",
   "COORDINATE_REPROJECTION_FAILED",
-  "COORDINATE_REPROJECTION_SUSPICIOUS",
   "COUNTRY_COORDINATE_MISMATCH",
   "CONTINENT_COORDINATE_MISMATCH",
-  "GEODETIC_DATUM_INVALID",
   "PRESUMED_NEGATED_LATITUDE",
   "PRESUMED_NEGATED_LONGITUDE",
   "PRESUMED_SWAPPED_COORDINATE",
+]);
+
+/**
+ * Position-related issues GBIF reports but does not exclude a record over: an
+ * unparseable datum string (GBIF reads the coordinates as WGS84 and says so),
+ * and a reprojection that moved the point further than expected.
+ *
+ * Shown in the record list's Flags column, because they are worth knowing when
+ * you are reading a locality — but not treated as GBIF flagging the record,
+ * because GBIF didn't. Seven of the cheetah's first page carried the datum one
+ * and were being hidden as flagged while sitting in the trusted set.
+ */
+export const GBIF_COORDINATE_NOTES = new Set([
+  "GEODETIC_DATUM_INVALID",
+  "COORDINATE_REPROJECTION_SUSPICIOUS",
 ]);
 
 /** Human-readable label for a GBIF issue code, e.g. "Country coordinate mismatch". */

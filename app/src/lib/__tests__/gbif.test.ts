@@ -7,6 +7,8 @@ import {
   includedBasisOfRecord,
   kingdomCountsPreservedSpecimens,
   taxonGroupCountsPreservedSpecimens,
+  GBIF_GEOSPATIAL_ISSUES,
+  GBIF_COORDINATE_NOTES,
 } from "../gbif";
 import { TAXA } from "@/config/taxa";
 import { TAXA_DEFINITIONS } from "../../../scripts/taxa";
@@ -105,6 +107,45 @@ describe("preserved specimens", () => {
         kingdomCountsPreservedSpecimens(taxon.kingdomKey),
         `"${taxon.id}" (kingdom ${taxon.kingdomKey}) disagrees between the kingdom and group rules`,
       ).toBe(taxonGroupCountsPreservedSpecimens(taxon.id));
+    }
+  });
+});
+
+describe("GBIF_GEOSPATIAL_ISSUES", () => {
+  /**
+   * The viewer fetches the two sides of GBIF's `hasGeospatialIssue` filter
+   * separately and in order: everything it returns for `false`, then the
+   * records it excludes. This set is how the response is read back, so it has
+   * to be exactly what GBIF acts on — anything extra puts records the trusted
+   * query already returned into the flagged bucket, where they are painted as
+   * suspect and hidden by a check nobody aimed at them.
+   *
+   * Verified against the live API, not the docs, with
+   * `issue=<code>&hasGeospatialIssue=false`: nothing comes back for any code in
+   * the set, and records come back for both of the notes.
+   */
+  it("holds no code GBIF reports without excluding the record over", () => {
+    for (const note of GBIF_COORDINATE_NOTES) {
+      expect(GBIF_GEOSPATIAL_ISSUES.has(note), `${note} is a note, not a flag`).toBe(false);
+    }
+  });
+
+  it("names the two that GBIF reports but does not act on", () => {
+    expect([...GBIF_COORDINATE_NOTES].sort()).toEqual([
+      "COORDINATE_REPROJECTION_SUSPICIOUS",
+      "GEODETIC_DATUM_INVALID",
+    ]);
+  });
+
+  it("keeps the ones GBIF does exclude records over", () => {
+    for (const code of [
+      "ZERO_COORDINATE",
+      "COORDINATE_INVALID",
+      "COUNTRY_COORDINATE_MISMATCH",
+      "CONTINENT_COORDINATE_MISMATCH",
+      "PRESUMED_SWAPPED_COORDINATE",
+    ]) {
+      expect(GBIF_GEOSPATIAL_ISSUES.has(code), `${code} should be a flag`).toBe(true);
     }
   });
 });

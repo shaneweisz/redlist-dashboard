@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { getQualityFlags } from "@/lib/mapping/coordinate-cleaning";
-import { GBIF_CHECKLIST_KEY, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
+import { GBIF_CHECKLIST_KEY, GBIF_COORDINATE_NOTES, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
 
 export const dynamic = "force-dynamic";
 
@@ -216,15 +216,96 @@ function classify(r: GbifRecord, geospatialIssues: string[]): CoordinateStatus {
   return geospatialIssues.length > 0 ? "issue" : "mapped";
 }
 
-/** Total matching records for a bucket, without transferring any of them. */
+/**
+ * One GBIF occurrence search, retried on the statuses worth retrying.
+ *
+ * Retried because this route fires several queries at once and pages some of
+ * them in a tight loop, and GBIF throttles the burst. Reproduced on every run
+ * of the browser check: the map for a species with 130,322 records 500s while
+ * the same requests issued sequentially by hand all return 200. Naming a
+ * non-default checklistKey appears to make each request more expensive for
+ * GBIF to answer, so this got easier to trigger after the Catalogue of Life
+ * migration.
+ *
+ * The status goes in the message because response.statusText is empty over
+ * HTTP/2, which is what Node's fetch negotiates — the original error read
+ * "GBIF API error: " with nothing after it, and hid the 429 for two rounds of
+ * debugging.
+ */
+async function gbifSearch(
+  params: URLSearchParams
+): Promise<{ count: number; results: GbifRecord[]; endOfRecords: boolean }> {
+  for (let attempt = 0; attempt <= GBIF_MAX_RETRIES; attempt++) {
+    const response = await fetch(`https://api.gbif.org/v1/occurrence/search?${params}`, {
+      cache: "no-store",
+    });
+    if (response.ok) return response.json();
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === GBIF_MAX_RETRIES) {
+      throw new Error(`GBIF API error: HTTP ${response.status} ${response.statusText}`.trim());
+    }
+    await new Promise((r) => setTimeout(r, 2 ** attempt * GBIF_BACKOFF_MS));
+  }
+  throw new Error("GBIF API error: exhausted retries");
+}
+
+/**
+ * Total matching records for a bucket, without transferring any of them.
+ *
+ * Retried like every other query here rather than swallowing a failure as
+ * zero: this count is what the viewer reads "Loaded X of Y" from, and a
+ * throttled request returning 0 said a species with 230 flagged records had
+ * none — a wrong answer that looks exactly like a right one.
+ */
 async function countBucket(base: URLSearchParams, bucket: CoordinateStatus): Promise<number> {
   const params = bucketParams(base, bucket);
   params.set("limit", "0");
-  const response = await fetch(`https://api.gbif.org/v1/occurrence/search?${params}`, {
-    cache: "no-store",
-  });
-  if (!response.ok) return 0;
-  return (await response.json()).count ?? 0;
+  return (await gbifSearch(params)).count ?? 0;
+}
+
+/**
+ * Every record GBIF has coordinates for, as one list under one limit: the ones
+ * it vouches for first, then the ones it flags a geospatial issue against.
+ *
+ * Two queries, because GBIF has no single filter for "either" — but paged as
+ * though it were one list, with `offset` walking the concatenation. That is
+ * what makes a sample of 300 come back as 300 records rather than 300 of each:
+ * the flagged set is only reached once the trusted one is spent, so a species
+ * with thousands of good records never spends the sample on a suspect one,
+ * and a species with a handful still gets the rest of its budget filled.
+ *
+ * `issueTotal` is counted whether or not any flagged record is fetched — the
+ * viewer counts the two sets together in "Loaded X of Y records with
+ * coordinates", so it needs the total even on the pages that never reach them.
+ */
+async function fetchGeoreferenced(
+  base: URLSearchParams,
+  limit: number,
+  offset: number,
+  includeIssues: boolean
+): Promise<{ results: GbifRecord[]; mappedTotal: number; issueTotal: number }> {
+  const [mapped, issueTotal] = await Promise.all([
+    fetchPaginated(bucketParams(base, "mapped"), limit, offset),
+    countBucket(base, "issue"),
+  ]);
+
+  const remaining = includeIssues ? limit - mapped.results.length : 0;
+  if (remaining <= 0 || issueTotal === 0) {
+    return { results: mapped.results, mappedTotal: mapped.totalCount, issueTotal };
+  }
+
+  // Where this page falls inside the flagged set: at its start when the mapped
+  // set ran out mid-page, and further in on every page after that.
+  const issues = await fetchPaginated(
+    bucketParams(base, "issue"),
+    remaining,
+    Math.max(0, offset - mapped.totalCount)
+  );
+  return {
+    results: [...mapped.results, ...issues.results],
+    mappedTotal: mapped.totalCount,
+    issueTotal,
+  };
 }
 
 /**
@@ -246,32 +327,7 @@ async function fetchPaginated(
     params.set("limit", pageSize.toString());
     params.set("offset", offset.toString());
 
-    // Retried, because this pages in a tight loop and GBIF throttles the burst.
-    // Reproduced on every run of the browser check: the map for a species with
-    // 130,322 records 500s while the same requests issued sequentially by hand
-    // all return 200. Naming a non-default checklistKey appears to make each
-    // request more expensive for GBIF to answer, so this got easier to trigger
-    // after the Catalogue of Life migration.
-    //
-    // The status goes in the message because response.statusText is empty over
-    // HTTP/2, which is what Node's fetch negotiates — the original error read
-    // "GBIF API error: " with nothing after it, and hid the 429 for two rounds
-    // of debugging.
-    let response: Response | undefined;
-    for (let attempt = 0; attempt <= GBIF_MAX_RETRIES; attempt++) {
-      response = await fetch(`https://api.gbif.org/v1/occurrence/search?${params}`, {
-        cache: "no-store",
-      });
-      if (response.ok) break;
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === GBIF_MAX_RETRIES) {
-        throw new Error(`GBIF API error: HTTP ${response.status} ${response.statusText}`.trim());
-      }
-      await new Promise((r) => setTimeout(r, 2 ** attempt * GBIF_BACKOFF_MS));
-    }
-    if (!response?.ok) throw new Error("GBIF API error: exhausted retries");
-
-    const data = await response.json();
+    const data = await gbifSearch(params);
     totalCount = data.count;
     results = results.concat(data.results);
     offset += pageSize;
@@ -304,8 +360,19 @@ function toFeatures(results: GbifRecord[]) {
     allResults.push(r);
   }
 
+  // Two readings of the same record. `geospatial` is what GBIF acts on, and so
+  // what decides which set the record belongs to; `shown` adds the notes it
+  // reports without acting on, which belong in the list's Flags column beside
+  // them. Keeping them apart is what stops a note demoting a record GBIF was
+  // happy with — see GBIF_COORDINATE_NOTES.
   const geospatialIssuesByKey = new Map<number, string[]>(
     allResults.map((r) => [r.key, (r.issues ?? []).filter((i) => GBIF_GEOSPATIAL_ISSUES.has(i))])
+  );
+  const shownIssuesByKey = new Map<number, string[]>(
+    allResults.map((r) => [
+      r.key,
+      (r.issues ?? []).filter((i) => GBIF_GEOSPATIAL_ISSUES.has(i) || GBIF_COORDINATE_NOTES.has(i)),
+    ])
   );
 
   // Coordinate-cleaning checks only mean anything for records that have a
@@ -358,7 +425,7 @@ function toFeatures(results: GbifRecord[]) {
       establishmentMeans: r.establishmentMeans,
       occurrenceID: r.occurrenceID,
       coordinateStatus: classify(r, geospatialIssuesByKey.get(r.key) ?? []),
-      gbifIssues: geospatialIssuesByKey.get(r.key) ?? [],
+      gbifIssues: shownIssuesByKey.get(r.key) ?? [],
       ...passThrough(r),
       images: imagesOf(r),
     },
@@ -454,34 +521,30 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Each requested set is fetched under its own bounded limit rather than by
-    // dropping the filters and taking whatever comes back, so a species with
-    // thousands of mapped records can't crowd out the handful of unmapped ones
-    // (or the reverse) inside a single sample.
-    const [mapped, issues, missing] = await Promise.all([
+    // Two lists, each under its own limit: the records GBIF has coordinates for
+    // (mapped then flagged, see fetchGeoreferenced) and the records it has none
+    // for. Separate because they are read in different places — the map draws
+    // the first, only the list can show the second — and a species with
+    // thousands of mapped records would otherwise crowd the handful of
+    // unlocalised ones out of the sample entirely, or the reverse.
+    const [georeferenced, missing] = await Promise.all([
       onlyMissing
-        ? Promise.resolve({ results: [] as GbifRecord[], totalCount: 0 })
-        : fetchPaginated(bucketParams(baseParams, "mapped"), limit, offset),
-      includeIssues && !onlyMissing
-        ? fetchPaginated(bucketParams(baseParams, "issue"), limit, offset)
-        : Promise.resolve(null),
+        // Paging the unmapped set alone. Its caller reads the features and none
+        // of the totals, so the counts aren't worth two more requests here.
+        ? Promise.resolve({ results: [] as GbifRecord[], mappedTotal: 0, issueTotal: 0 })
+        : fetchGeoreferenced(baseParams, limit, offset, includeIssues),
       includeMissing || onlyMissing
         ? fetchPaginated(bucketParams(baseParams, "missing"), limit, offset)
         : Promise.resolve(null),
     ]);
 
-    // Counts for the sets that weren't fetched, so the UI can offer them by name
+    // Count for the set that wasn't fetched, so the UI can offer it by name
     // ("Include 30 records without coordinates") before anyone opts in.
-    const [issueTotal, missingTotal] = await Promise.all([
-      issues ? Promise.resolve(issues.totalCount) : countBucket(baseParams, "issue"),
-      missing ? Promise.resolve(missing.totalCount) : countBucket(baseParams, "missing"),
-    ]);
+    const missingTotal = missing
+      ? missing.totalCount
+      : await countBucket(baseParams, "missing");
 
-    const features = toFeatures([
-      ...mapped.results,
-      ...(issues?.results ?? []),
-      ...(missing?.results ?? []),
-    ]);
+    const features = toFeatures([...georeferenced.results, ...(missing?.results ?? [])]);
 
     // Calculate bbox from the mapped features only. Flagged records are exactly
     // the ones whose coordinates can't be trusted — this species' single flagged
@@ -511,10 +574,10 @@ export async function GET(request: NextRequest) {
         count: features.length,
         // `total` stays the mapped set's total, which is what the "Loaded X of Y"
         // badge and every load-more control have always counted against.
-        total: onlyMissing ? (missing?.totalCount ?? 0) : mapped.totalCount,
+        total: onlyMissing ? (missing?.totalCount ?? 0) : georeferenced.mappedTotal,
         totals: {
-          mapped: mapped.totalCount,
-          issue: issueTotal,
+          mapped: georeferenced.mappedTotal,
+          issue: georeferenced.issueTotal,
           missing: missingTotal,
         },
         bbox: positionedCount > 0 ? [minLon, minLat, maxLon, maxLat] : null,
