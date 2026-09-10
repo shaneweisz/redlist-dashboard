@@ -898,11 +898,13 @@ export default function OccurrenceMapRow({
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
   }, [gbifOptionsOpen]);
-  // Hybrid by default: imagery with the place names still on it. A record's
-  // position is judged against what is actually on the ground — the plantation,
-  // the river, the edge of the forest — and the street map draws none of it,
-  // while bare satellite leaves nothing to say where you are looking.
-  const [basemap, setBasemap] = useState<BasemapKey>("hybrid");
+  // The street map by default. Imagery answers a question you ask about one
+  // record — what is on the ground where this point sits — and the map opens
+  // on a species' whole range, where the question is where the records are at
+  // all. Coastlines, borders and place names answer that at a glance and a
+  // satellite mosaic doesn't; hybrid is one click away for the moment the
+  // question changes.
+  const [basemap, setBasemap] = useState<BasemapKey>("streets");
   // Overlays — informational map layers, independent of the "Native range only"
   // occurrence filter above: shading which countries a source considers native,
   // regardless of whether occurrences are being filtered by it.
@@ -2090,6 +2092,34 @@ export default function OccurrenceMapRow({
   // is fetching the next unfiltered batch — separate from loadingMoreCategory since
   // this isn't scoped to one basis-of-record category.
   const [loadingMoreOverall, setLoadingMoreOverall] = useState(false);
+  const [loadingMoreMissing, setLoadingMoreMissing] = useState(false);
+
+  // Records with no coordinates arrive as their own bounded sample, so a
+  // species with hundreds of unlocalised sheets doesn't stall the first paint.
+  // This pages that set alone, from however many are already loaded — driven
+  // from the record list's footer, which is the only place they can be read.
+  const loadMoreMissing = useCallback(() => {
+    setLoadingMoreMissing(true);
+    const loaded = occurrences.filter((o) => o.properties.coordinateStatus === "missing").length;
+    const params = new URLSearchParams({
+      speciesKey,
+      limit: sampleSize.toString(),
+      offset: loaded.toString(),
+      onlyMissing: "true",
+    });
+    if (countryCode) params.set("country", countryCode);
+    fetch(`/api/occurrences?${params}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const next: OccurrenceFeature[] = data.features || [];
+        setOccurrences((prev) => {
+          const seen = new Set(prev.map((o) => o.properties.gbifID));
+          return [...prev, ...next.filter((f) => !seen.has(f.properties.gbifID))];
+        });
+      })
+      .catch(console.error)
+      .finally(() => setLoadingMoreMissing(false));
+  }, [occurrences, speciesKey, countryCode, sampleSize]);
 
   // Load another batch of just one basis-of-record category (e.g. "load 200 more
   // Preserved specimen records"), independent of the overall sample-size selector —
@@ -4885,8 +4915,8 @@ export default function OccurrenceMapRow({
                   <Layer id={`eoo-fill-${panelId}`} type="fill" paint={{ "fill-color": "#0ea5e9", "fill-opacity": 0.12 }} />
                   {/* A white casing under the hull, as the protected-area
                       highlights use: a dark blue line on dark imagery was a
-                      line you had to know was there to find, and the hybrid
-                      basemap is now the one people start on. */}
+                      line you had to know was there to find, and imagery is a
+                      click away whatever the map opens on. */}
                   <Layer
                     id={`eoo-casing-${panelId}`}
                     type="line"
@@ -5702,6 +5732,14 @@ export default function OccurrenceMapRow({
     () => occurrences.filter(hasPosition).length,
     [occurrences]
   );
+  const missingLoadedCount = useMemo(
+    () => occurrences.filter((o) => o.properties.coordinateStatus === "missing").length,
+    [occurrences]
+  );
+  /** Records with no coordinates still to fetch. Named in the list's footer
+   *  only when there are some — "all N loaded" is a fact with nothing to do
+   *  about it, and they are in the table either way. */
+  const missingToLoad = Math.max(0, (recordSetTotals?.missing ?? 0) - missingLoadedCount);
   const georeferencedTotal = recordSetTotals
     ? recordSetTotals.mapped + recordSetTotals.issue
     : totalOccurrences;
@@ -8975,6 +9013,23 @@ export default function OccurrenceMapRow({
                       )}
                       {EDIT_TOOLS}
                     </>
+                  }
+                  footerCountExtra={
+                    listTab === "gbif" && missingToLoad > 0 ? (
+                      <>
+                        {" "}·{" "}
+                        <button
+                          onClick={loadMoreMissing}
+                          disabled={loadingMoreMissing}
+                          title={`GBIF has no coordinates for ${(recordSetTotals?.missing ?? 0).toLocaleString()} records of this species — a locality description and nothing to map. ${missingLoadedCount.toLocaleString()} are in this table; the rest are a click away.`}
+                          className="underline decoration-dotted hover:decoration-solid disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loadingMoreMissing
+                            ? "Loading…"
+                            : `Load ${Math.min(sampleSize, missingToLoad).toLocaleString()} more without coordinates`}
+                        </button>
+                      </>
+                    ) : undefined
                   }
                   excludedIds={excludedIds}
                   exclusions={exclusions}
