@@ -18,6 +18,7 @@ import {
   type EditsBackup,
 } from "@/lib/mapping/edits-backup";
 import { duplicatesByPrimary as groupDuplicates, keepRecord as keepRecordIn } from "@/lib/mapping/duplicates";
+import { taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { FaInfoCircle } from "react-icons/fa";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
@@ -675,22 +676,30 @@ interface OccurrenceMapRowProps {
 /**
  * Which record types are selected when the viewer opens.
  *
- * Every kingdom now starts with every record type but two, rather than only
- * plants and fungi: a herbarium sheet, a museum skin or a literature citation
- * is evidence of where the species was, and a default that quietly drops
- * record types hides the very evidence an assessment gets written from.
+ * Every record type but three: a literature citation or a bare "occurrence"
+ * record is evidence of where the species was, and a default that quietly
+ * drops record types hides the very evidence an assessment gets written from.
  *
- * The two exceptions are the ones that say where an individual *ended up*
- * rather than where the species lives: a living specimen is a zoo or botanic
+ * Two of the three say where an individual *ended up* rather than where the
+ * species lives, whatever the kingdom: a living specimen is a zoo or botanic
  * garden animal or plant, and a fossil specimen is a range from a different
  * epoch. Both are off until asked for.
+ *
+ * The third, preserved specimens, follows the taxon — on for plants and fungi
+ * (and the brown algae filed with them), off for animals. It is the same rule
+ * `taxonGroupCountsPreservedSpecimens` applies to the dashboard's own GBIF
+ * counts, and the viewer opening on a different record set from the count that
+ * sent you to it is the confusion worth avoiding: a plant is known mostly from
+ * collected, preserved material, an animal mostly from observation, and a
+ * mammal's herbarium-equivalent museum skins are a small tail of records whose
+ * localities are the oldest and vaguest in the set.
  */
-export function defaultCheckedTypes() {
+export function defaultCheckedTypes(taxonGroup?: string) {
   return {
     humanObservation: true,
     machineObservation: true,
     observation: true,
-    preservedSpecimen: true,
+    preservedSpecimen: taxonGroupCountsPreservedSpecimens(taxonGroup),
     fossilSpecimen: false,
     livingSpecimen: false,
     materialSample: true,
@@ -833,7 +842,7 @@ export default function OccurrenceMapRow({
   const [loadingOccurrences, setLoadingOccurrences] = useState(true);
   const [loadingBreakdown, setLoadingBreakdown] = useState(true);
 
-  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes());
+  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes(taxonGroup));
 
   // Advanced filter state
   const [maxUncertainty, setMaxUncertainty] = useState<number | null>(null);
@@ -1937,22 +1946,19 @@ export default function OccurrenceMapRow({
   // unfiltered ordering actually considers "next" if reused here.
   const [generalOffset, setGeneralOffset] = useState(0);
 
-  // Opt-in record sets the viewer has always filtered out: records GBIF has no
-  // coordinates for, and records whose coordinates GBIF flags. Both are only
-  // useful in the list (one can't be drawn at all, the other shouldn't be
-  // trusted where it's drawn), and both are what an assessor georeferences by
-  // hand — so they're off until asked for, and their totals are always fetched
-  // so the toggles can name what's being hidden.
-  // Fetched automatically in fullscreen — the list is the only place they can
-  // be read, and it's the whole point of that page. Off elsewhere, where
-  // there's no list to put them in.
-  const includeMissing = !!fullscreenProp;
-  // Records GBIF flags are always fetched now: they have coordinates, so they
+  // Records GBIF flags are always fetched: they have coordinates, so they
   // belong with the rest and are hidden (or not) by a coordinate-cleaning check
   // like any other suspect point, rather than by a separate opt-in.
-  // Off by default — the same rule the other cleaning checks follow, since
-  // this is now one of them.
-  const [hideGbifFlagged, setHideGbifFlagged] = useState(false);
+  //
+  // On by default, unlike the other cleaning checks. Those are this project's
+  // own plausibility heuristics with real false-positive rates, so they stay
+  // opt-in; this one is GBIF's verdict on its own record — a zero coordinate, a
+  // country that doesn't match the point, a swapped latitude — and a map an
+  // assessor reads a range off shouldn't open on positions the aggregator that
+  // published them won't vouch for. Unchecking it puts them back on the map in
+  // amber, and they are in the list either way: greyed, and counted in the
+  // footer's "N removed by your filters".
+  const [hideGbifFlagged, setHideGbifFlagged] = useState(true);
   const [recordSetTotals, setRecordSetTotals] = useState<{ mapped: number; issue: number; missing: number } | null>(null);
 
   /**
@@ -1979,7 +1985,12 @@ export default function OccurrenceMapRow({
     if (countryCode) {
       params.set("country", countryCode);
     }
-    if (includeMissing) params.set("includeMissing", "true");
+    // Both of the sets that aren't plain mapped points: the ones GBIF flags,
+    // and the ones it has no coordinates for at all. Fetched in both modes —
+    // the record panel exists on the dashboard as well as fullscreen, and a
+    // herbarium sheet waiting to be georeferenced is exactly as readable in
+    // one as in the other.
+    params.set("includeMissing", "true");
     params.set("includeIssues", "true");
     fetch(`/api/occurrences?${params}`)
       .then((res) => res.json())
@@ -1998,7 +2009,7 @@ export default function OccurrenceMapRow({
       })
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
-  }, [speciesKey, countryCode, sampleSize, includeMissing]);
+  }, [speciesKey, countryCode, sampleSize]);
 
   /**
    * The records this assessor has edited, whether or not the sample holds them.
@@ -3994,7 +4005,7 @@ export default function OccurrenceMapRow({
             the ones only the list can show. */}
         {!loadingOccurrences &&
           ((!splitView && totalOccurrences != null) ||
-            (fullscreen && (recordSetTotals?.missing ?? 0) > 0)) &&
+            (recordSetTotals?.missing ?? 0) > 0) &&
           (countsOpen ? (
           <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-[11px]">
             {!splitView && totalOccurrences != null && (
@@ -4026,7 +4037,7 @@ export default function OccurrenceMapRow({
             {/* Records with no coordinates only get a line when there are
                 more to fetch. "All N loaded" was a fact with nothing to do
                 about it — they're in the table either way. */}
-            {fullscreen && missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
+            {missingLoadedCount < (recordSetTotals?.missing ?? 0) && (
               <div className="text-amber-700 dark:text-amber-400">
                 <>
                     Loaded <strong>{missingLoadedCount.toLocaleString()}</strong> of{" "}
