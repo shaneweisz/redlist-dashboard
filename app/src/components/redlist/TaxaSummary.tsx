@@ -1621,7 +1621,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   const sscMode = layoutMode === "ssc";
   const countryMode = layoutMode === "country";
 
-  // Single 4-way view selector — replaces the old Table 1a/SSC Groups button pair
+  // Single view selector — replaces the old Table 1a/SSC Groups button pair
   // (+ their "Exit ... View" states). "Country view" needs real per-country
   // location data, which Not Evaluated species don't have (no assessment means no
   // assessment_locations row), so it's disabled under New Assessments.
@@ -1644,6 +1644,13 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             router.push("/narrative-search");
             return;
           }
+          // Same again, from the other direction: a place rather than a taxon.
+          // It has no taxon selection to carry over and no counts to lay out,
+          // so it is a route rather than a layout of this table.
+          if (v === "near") {
+            router.push("/near-me");
+            return;
+          }
           onLayoutModeChange(v === "taxonomic" ? null : (v as "table1a" | "ssc" | "country"));
         }}
         className="text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1655,6 +1662,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <option value="ssc">By SSC Specialist Group (WIP)</option>
         <option value="compare">Comparison Mode</option>
         <option value="text">By Assessment Text (search)</option>
+        <option value="near">Near a Location (map)</option>
         <option value="table1a">Table 1a</option>
       </select>
     </span>
