@@ -1,8 +1,10 @@
 /**
  * GET /api/nearby-species?lat=&lng=&radiusKm=&exclude=
+ * GET /api/nearby-species?geometry=<WKT>&exclude=
  *
- * The assessed species GBIF has records for within `radiusKm` of a point, with
- * the threats their assessments cite. See lib/mapping/nearby-species.ts for why
+ * The assessed species GBIF has records for within `radiusKm` of a point — or
+ * inside a boundary given as WKT, which is how "what is threatened inside this
+ * protected area" is asked — with the threats their assessments cite. See lib/mapping/nearby-species.ts for why
  * the search is narrowed on GBIF's Red List categories but never labelled with
  * them.
  *
@@ -15,8 +17,11 @@ import { CACHE_1H } from "@/lib/cache-headers";
 import { normalizeCategory } from "@/config/taxa";
 import { threatTags } from "@/lib/mapping/nearby-threats";
 import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
+import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_CATEGORIES,
+  whereParams,
+  type NearbyWhere,
   NEARBY_FACET_LIMIT,
   snapRadiusKm,
   nearbyFacetUrl,
@@ -32,16 +37,37 @@ interface GbifFacetCount {
 
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
-  const lat = Number(sp.get("lat"));
-  const lng = Number(sp.get("lng"));
   const exclude = sp.get("exclude");
+  const geometry = sp.get("geometry");
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    return NextResponse.json({ error: "lat and lng are required, and must be a real position" }, { status: 400 });
-  }
+  let where: NearbyWhere;
+  let lat = Number(sp.get("lat"));
+  let lng = Number(sp.get("lng"));
   // Anything outside the offered set would be a radius the panel can't label
   // and the cache would never be asked for twice.
-  const radiusKm = snapRadiusKm(sp.get("radiusKm"));
+  let radiusKm: number | undefined = snapRadiusKm(sp.get("radiusKm"));
+
+  if (geometry) {
+    if (!isPolygonWkt(geometry)) {
+      return NextResponse.json({ error: "geometry must be a POLYGON or MULTIPOLYGON in WKT" }, { status: 400 });
+    }
+    // Refused here rather than passed on, because GBIF's own refusal is a
+    // Tomcat error page rather than an explanation — see gbif-geometry, which
+    // is what callers should be preparing a boundary with.
+    if (encodeURIComponent(geometry).length > GBIF_URL_BUDGET) {
+      return NextResponse.json({ error: "geometry is too long for GBIF to accept" }, { status: 400 });
+    }
+    where = { wkt: geometry };
+    radiusKm = undefined;
+    // A boundary has no centre of its own, and the panel wants somewhere to
+    // point at; the caller sends the point it was picked at when it has one.
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) [lat, lng] = [0, 0];
+  } else {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return NextResponse.json({ error: "lat and lng are required, and must be a real position" }, { status: 400 });
+    }
+    where = { lat, lng, radiusKm: radiusKm as number };
+  }
 
   try {
     // Two counts, one purpose: the threatened facet is the panel, and the
@@ -49,10 +75,10 @@ export async function GET(request: NextRequest) {
     // here at all. A radius with 40 threatened records out of 40 total is a
     // different claim from 40 out of 400,000.
     const [faceted, all] = await Promise.all([
-      fetchJson(nearbyFacetUrl({ lat, lng, radiusKm })),
+      fetchJson(nearbyFacetUrl(where)),
       fetchJson(
         `https://api.gbif.org/v1/occurrence/search?${new URLSearchParams({
-          geoDistance: `${lat},${lng},${radiusKm}km`,
+          ...whereParams(where),
           hasCoordinate: "true",
           hasGeospatialIssue: "false",
           limit: "0",
@@ -93,6 +119,7 @@ export async function GET(request: NextRequest) {
       lat,
       lng,
       radiusKm,
+      geometry: geometry ?? undefined,
       totalRecords: all?.count ?? 0,
       categoryRecords: faceted?.count ?? 0,
       species,

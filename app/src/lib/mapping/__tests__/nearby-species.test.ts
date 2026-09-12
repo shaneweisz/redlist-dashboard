@@ -179,7 +179,7 @@ describe("carrying the open searches in a URL", () => {
     ]);
   });
 
-  it("snaps a radius that isn't one of the four to the nearest that is", () => {
+  it("snaps a radius that isn't one on offer to the nearest that is", () => {
     expect(decodeNearbySearches("10,20,999")).toEqual([{ lat: 10, lng: 20, radiusKm: 100 }]);
     expect(decodeNearbySearches("10,20,0")).toEqual([{ lat: 10, lng: 20, radiusKm: 10 }]);
     expect(decodeNearbySearches("10,20,30")).toEqual([{ lat: 10, lng: 20, radiusKm: 25 }]);
@@ -199,7 +199,9 @@ describe("carrying the open searches in a URL", () => {
 
 describe("snapRadiusKm", () => {
   it("lands on the nearest radius the panel offers", () => {
-    expect(snapRadiusKm(1)).toBe(10);
+    expect(snapRadiusKm(1)).toBe(1);
+    expect(snapRadiusKm(3)).toBe(2);
+    expect(snapRadiusKm(4)).toBe(5);
     expect(snapRadiusKm(17)).toBe(10);
     expect(snapRadiusKm(18)).toBe(25);
     expect(snapRadiusKm(40)).toBe(50);
@@ -218,5 +220,10 @@ describe("snapRadiusKm", () => {
     expect(snapRadiusKm("abc")).toBe(NEARBY_RADIUS_DEFAULT);
     expect(snapRadiusKm(null)).toBe(NEARBY_RADIUS_DEFAULT);
     expect(snapRadiusKm(undefined)).toBe(NEARBY_RADIUS_DEFAULT);
+    // Number("") and Number(null) are both 0, which is finite — the guard has
+    // to reject a non-positive distance or a missing radius snaps to 1 km.
+    expect(snapRadiusKm("")).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(0)).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(-5)).toBe(NEARBY_RADIUS_DEFAULT);
   });
 });

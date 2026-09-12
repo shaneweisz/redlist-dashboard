@@ -32,24 +32,39 @@
 
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
-/** Radii offered in the panel. Beyond ~50 km "near here" stops meaning much. */
 /**
  * The radii on offer.
  *
- * Four, not a slider: the answer to "what is near here" is read against the
- * distance it was asked over, and a table of neighbours at 37 km is harder to
- * hold in mind than one at 25 or 50. Dragging the ring on the map snaps to
+ * A fixed set, not a slider: the answer to "what is near here" is read against
+ * the distance it was asked over, and a table of neighbours at 37 km is harder
+ * to hold in mind than one at 25 or 50. Dragging the ring on the map snaps to
  * these, so the circle can be pulled about freely and still land on a number
  * that means something. 100 km is the outer edge — past it the facet is
  * answering a question about a region rather than a locality.
+ *
+ * The bottom three are what a *place* needs rather than a record. 10 km around
+ * a collection locality is already a tight question; 10 km around where you are
+ * standing is a city, and the answer is a list of everything recorded across
+ * it. 1 and 2 km are "this park, this hillside, this stretch of coast", which
+ * is the scale at which a walk happens and at which the records returned are
+ * plausibly things you could go and look at.
  */
-export const NEARBY_RADII_KM = [10, 25, 50, 100] as const;
+export const NEARBY_RADII_KM = [1, 2, 5, 10, 25, 50, 100] as const;
 export type NearbyRadiusKm = (typeof NEARBY_RADII_KM)[number];
 
-/** The nearest radius on offer to a distance dragged out on the map. */
+/**
+ * The nearest radius on offer to a distance dragged out on the map.
+ *
+ * Anything that isn't a positive distance falls back to the default rather
+ * than being snapped. The guard has to say `n > 0` and not merely "is a
+ * number": `Number(null)` and `Number("")` are both `0`, which is finite, so
+ * for as long as the smallest radius was 10 km a missing value snapped to 10
+ * and looked like the fallback working. Adding a 1 km radius turned that
+ * accident into a bug — a link with no radius in it started opening at 1 km.
+ */
 export function snapRadiusKm(km: unknown): NearbyRadiusKm {
-  const n = Number(km);
-  if (!Number.isFinite(n)) return NEARBY_RADIUS_DEFAULT;
+  const n = typeof km === "number" || typeof km === "string" ? Number(km) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return NEARBY_RADIUS_DEFAULT;
   return NEARBY_RADII_KM.reduce((best, r) =>
     Math.abs(r - n) < Math.abs(best - n) ? r : best
   );
@@ -304,14 +319,9 @@ export function groupNearbyFeatures(
 }
 
 /** Where a picked neighbour's records are, inside the same radius. */
-export function nearbyPointsUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  speciesKey: string;
-}): string {
+export function nearbyPointsUrl(opts: NearbyWhere & { speciesKey: string }): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     // Same checklist as the facet that produced this key — see nearbyFacetUrl.
     checklistKey: COL_XR_CHECKLIST_KEY,
     taxonKey: opts.speciesKey,
@@ -358,7 +368,10 @@ export interface NearbySpecies {
 export interface NearbyResult {
   lat: number;
   lng: number;
-  radiusKm: number;
+  /** Set for a radius search; absent when a boundary was searched instead. */
+  radiusKm?: number;
+  /** Set for a boundary search: the WKT that was actually sent to GBIF. */
+  geometry?: string;
   /** Records in the radius across all taxa, assessed or not — the denominator. */
   totalRecords: number;
   /** Records in the radius belonging to the categories asked for. */
@@ -371,6 +384,26 @@ export interface NearbyResult {
 }
 
 /**
+ * The ground a search covers: a circle, or a boundary drawn on the map.
+ *
+ * GBIF takes these as two different parameters — `geoDistance` and `geometry` —
+ * and everything else about the query is identical, so the two are one type
+ * here and every URL builder branches in one place. A protected area's boundary
+ * has to be prepared by lib/mapping/gbif-geometry first; by the time it arrives
+ * as `wkt` it is already wound and short enough for GBIF to accept.
+ */
+export type NearbyWhere =
+  | { lat: number; lng: number; radiusKm: number }
+  | { wkt: string };
+
+/** The `geoDistance`/`geometry` pair for one patch of ground. */
+export function whereParams(where: NearbyWhere): Record<string, string> {
+  return "wkt" in where
+    ? { geometry: where.wkt }
+    : { geoDistance: `${where.lat},${where.lng},${where.radiusKm}km` };
+}
+
+/**
  * A GBIF occurrence-search URL for the radius.
  *
  * `checklistKey` is not optional. GBIF's v1 API still defaults to the frozen
@@ -380,15 +413,14 @@ export interface NearbyResult {
  * is not hypothetical: dropped from a first draft of this file, it matched 0 of
  * 205 species. See lib/gbif.ts.
  */
-export function nearbyFacetUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  categories?: readonly string[];
-  facetLimit?: number;
-}): string {
+export function nearbyFacetUrl(
+  opts: NearbyWhere & {
+    categories?: readonly string[];
+    facetLimit?: number;
+  }
+): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     checklistKey: COL_XR_CHECKLIST_KEY,
     hasCoordinate: "true",
     // Records GBIF itself flags as positionally suspect would put species in a
@@ -407,14 +439,9 @@ export function nearbyFacetUrl(opts: {
 }
 
 /** The same radius on gbif.org, so the assessor can go and look at the records. */
-export function nearbyGbifSiteUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  speciesKey?: string;
-}): string {
+export function nearbyGbifSiteUrl(opts: NearbyWhere & { speciesKey?: string }): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     checklistKey: COL_XR_CHECKLIST_KEY,
     hasCoordinate: "true",
     hasGeospatialIssue: "false",
@@ -459,9 +486,9 @@ export function decodeNearbySearches(
     const [lat, lng, km] = part.split(",").map(Number);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-    // A radius that is not one of the four is snapped to the nearest, so an
-    // old link or a hand-edited param still asks a question this can answer.
-    const radiusKm = Number.isFinite(km) ? snapRadiusKm(km) : NEARBY_RADIUS_DEFAULT;
+    // A radius that is not one on offer is snapped to the nearest, so an old
+    // link or a hand-edited param still asks a question this can answer.
+    const radiusKm = snapRadiusKm(km);
     out.push({ lat, lng, radiusKm });
   }
   return out.slice(0, NEARBY_MAX_SEARCHES);

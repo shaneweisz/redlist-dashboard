@@ -1,5 +1,6 @@
 /**
  * GET /api/nearby-species/points?lat=&lng=&radiusKm=&speciesKey=
+ * GET /api/nearby-species/points?geometry=<WKT>&speciesKey=
  *
  * Where one neighbour's records actually are, inside the radius the panel is
  * describing — so a name in the list can be turned into dots on the map.
@@ -11,8 +12,10 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_POINTS_LIMIT,
+  type NearbyWhere,
   snapRadiusKm,
   nearbyPointsUrl,
   type NearbyPoint,
@@ -43,17 +46,30 @@ export async function GET(request: NextRequest) {
   const lat = Number(sp.get("lat"));
   const lng = Number(sp.get("lng"));
   const speciesKey = sp.get("speciesKey");
+  const geometry = sp.get("geometry");
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    return NextResponse.json({ error: "lat and lng are required, and must be a real position" }, { status: 400 });
-  }
   if (!speciesKey) {
     return NextResponse.json({ error: "speciesKey is required" }, { status: 400 });
   }
   const radiusKm = snapRadiusKm(sp.get("radiusKm"));
 
+  // The same ground the facet was taken over, said the same way — see the
+  // sibling route for why a boundary is refused here rather than by GBIF.
+  let where: NearbyWhere;
+  if (geometry) {
+    if (!isPolygonWkt(geometry) || encodeURIComponent(geometry).length > GBIF_URL_BUDGET) {
+      return NextResponse.json({ error: "geometry must be a POLYGON or MULTIPOLYGON in WKT, and short enough for GBIF" }, { status: 400 });
+    }
+    where = { wkt: geometry };
+  } else {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return NextResponse.json({ error: "lat and lng are required, and must be a real position" }, { status: 400 });
+    }
+    where = { lat, lng, radiusKm };
+  }
+
   try {
-    const res = await fetch(nearbyPointsUrl({ lat, lng, radiusKm, speciesKey }), {
+    const res = await fetch(nearbyPointsUrl({ ...where, speciesKey }), {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw new Error(`GBIF returned ${res.status}`);
