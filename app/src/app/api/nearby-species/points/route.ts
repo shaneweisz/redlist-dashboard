@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { gbifJson } from "@/lib/gbif-fetch";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_POINTS_LIMIT,
@@ -69,11 +70,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(nearbyPointsUrl({ ...where, speciesKey }), {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`GBIF returned ${res.status}`);
-    const data = await res.json();
+    const data = (await gbifJson(nearbyPointsUrl({ ...where, speciesKey }))) as {
+      results?: GbifOccurrence[];
+      count?: number;
+    };
 
     const points: NearbyPoint[] = (data.results ?? [])
       .filter((r: GbifOccurrence) => Number.isFinite(r.decimalLatitude) && Number.isFinite(r.decimalLongitude))

@@ -14,6 +14,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { gbifJson } from "@/lib/gbif-fetch";
 import { normalizeCategory } from "@/config/taxa";
 import { threatTags } from "@/lib/mapping/nearby-threats";
 import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
@@ -33,6 +34,12 @@ import {
 interface GbifFacetCount {
   name: string;
   count: number;
+}
+
+/** The parts of GBIF's occurrence-search response these two queries read. */
+interface GbifSearchResponse {
+  count?: number;
+  facets?: { counts?: GbifFacetCount[] }[];
 }
 
 export async function GET(request: NextRequest) {
@@ -74,9 +81,9 @@ export async function GET(request: NextRequest) {
     // unfiltered total is the denominator that says how hard anyone has looked
     // here at all. A radius with 40 threatened records out of 40 total is a
     // different claim from 40 out of 400,000.
-    const [faceted, all] = await Promise.all([
-      fetchJson(nearbyFacetUrl(where)),
-      fetchJson(
+    const [faceted, all] = (await Promise.all([
+      gbifJson(nearbyFacetUrl(where)),
+      gbifJson(
         `https://api.gbif.org/v1/occurrence/search?${new URLSearchParams({
           ...whereParams(where),
           hasCoordinate: "true",
@@ -84,7 +91,7 @@ export async function GET(request: NextRequest) {
           limit: "0",
         })}`
       ),
-    ]);
+    ])) as [GbifSearchResponse, GbifSearchResponse];
 
     const counts: GbifFacetCount[] = faceted?.facets?.[0]?.counts ?? [];
     const byKey = new Map(counts.map((c) => [String(c.name), c.count]));
@@ -150,10 +157,4 @@ const CATEGORY_ORDER = ["CR", "EN", "VU", "NT", "LC", "DD", "EW", "EX"];
 function categoryRank(category: string): number {
   const i = CATEGORY_ORDER.indexOf(normalizeCategory(category));
   return i === -1 ? CATEGORY_ORDER.length : i;
-}
-
-async function fetchJson(url: string) {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`GBIF returned ${res.status}`);
-  return res.json();
 }

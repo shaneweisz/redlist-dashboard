@@ -123,6 +123,25 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
  */
 const SEARCH_BOUNDARY_OFFSET = 0.0002;
 
+/**
+ * The grid a search centre is snapped to, in degrees — about 110 m.
+ *
+ * Not cosmetic: it is what makes the hour-long edge cache in front of
+ * /api/nearby-species worth having. The centre of a "near me" search comes
+ * straight from the browser's geolocation, which reports something like
+ * -33.92490000000001, so every visitor asked a URL nobody had ever asked
+ * before and every single request went through to GBIF. Rounded, everyone
+ * standing within the same hundred metres — and the same person returning, or
+ * reloading — shares one cached answer.
+ *
+ * 110 m is comfortably inside the accuracy of the fix itself, and small against
+ * even the tightest radius on offer. The marker showing where you are is *not*
+ * snapped; only the circle that gets searched.
+ */
+const SEARCH_GRID_DECIMALS = 3;
+
+const snapToGrid = (degrees: number) => Number(degrees.toFixed(SEARCH_GRID_DECIMALS));
+
 /** West/south/east/north of a boundary, for framing it. */
 function boundsOf(geometry: GeoJSON.MultiPolygon): [[number, number], [number, number]] | null {
   let [w, s, e, n] = [180, 90, -180, -90];
@@ -263,7 +282,7 @@ export default function NearbyMapView({
    */
   const askAt = useCallback(
     (lat: number, lng: number, km: NearbyRadiusKm, { fly = true }: { fly?: boolean } = {}) => {
-      setSearch({ lat, lng, radiusKm: km });
+      setSearch({ lat: snapToGrid(lat), lng: snapToGrid(lng), radiusKm: km });
       setArea(null);
       setPicked([]);
       setShownGroup([]);
@@ -510,7 +529,7 @@ export default function NearbyMapView({
         polygons: ready.polygons,
         sourcePolygons: ready.sourcePolygons,
       });
-      setSearch({ lat: at.lat, lng: at.lng, radiusKm });
+      setSearch({ lat: snapToGrid(at.lat), lng: snapToGrid(at.lng), radiusKm });
       setPicked([]);
       setShownGroup([]);
       setSitesHere(null);

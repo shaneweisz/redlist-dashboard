@@ -41,7 +41,9 @@ export default async function NearMePage({
   // point, and falls back to asking.
   const initial =
     Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
-      ? { lat, lng, radiusKm: snapRadiusKm(one("r")) }
+      // Snapped to the same grid the view searches on, so a shared link is a
+      // cache hit rather than a near-miss of one.
+      ? { lat: Number(lat.toFixed(3)), lng: Number(lng.toFixed(3)), radiusKm: snapRadiusKm(one("r")) }
       : null;
 
   return (
