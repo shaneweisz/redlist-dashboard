@@ -83,7 +83,7 @@ export function snapRadiusKm(km: unknown): NearbyRadiusKm {
 export const NEARBY_RADIUS_DEFAULT: NearbyRadiusKm = 10;
 
 /**
- * The categories this panel is about: the threatened three.
+ * The categories this panel is about by default: the threatened three.
  *
  * Asked of GBIF, and — this is the part that matters — checked again against
  * this dashboard's own category before a species is listed. GBIF's Red List
@@ -92,6 +92,60 @@ export const NEARBY_RADIUS_DEFAULT: NearbyRadiusKm = 10;
  * "threatened species near here" and then listed an LC one.
  */
 export const NEARBY_CATEGORIES = ["CR", "EN", "VU"] as const;
+
+/**
+ * How much of what is recorded here to ask about.
+ *
+ * The default is the threatened three, because that is the question this panel
+ * was built for. But "what else is here" is a fair question too, and two other
+ * answers are worth having: everything that carries a Red List assessment at
+ * all — which is how you see that the neighbours are mostly Least Concern — and
+ * everything GBIF has records for, assessed or not.
+ *
+ * Widening costs accuracy, and unavoidably. A facet returns at most
+ * NEARBY_FACET_LIMIT species, so once the filter stops being "threatened" the
+ * budget is spent on whatever is commonest: 424,389 of the 440,000 records in
+ * one 10 km circle in the Cape are Least Concern, so "all species" there is a
+ * list of abundant birds and weeds with the rare things pushed off the end.
+ * That is a true answer to "what is recorded here" and a bad answer to "what
+ * matters here", which is why the narrow scope stays the default and the panel
+ * says when a list was truncated.
+ */
+export const NEARBY_SCOPES = ["threatened", "assessed", "all"] as const;
+export type NearbyScope = (typeof NEARBY_SCOPES)[number];
+
+export const NEARBY_SCOPE_LABELS: Record<NearbyScope, string> = {
+  threatened: "Threatened",
+  assessed: "Assessed",
+  all: "All species",
+};
+
+export const NEARBY_SCOPE_HINTS: Record<NearbyScope, string> = {
+  threatened: "Critically Endangered, Endangered and Vulnerable species only",
+  assessed: "Every species carrying a Red List assessment, whatever its category",
+  all: "Everything GBIF has records for here, assessed or not",
+};
+
+/**
+ * The categories asked of GBIF for each scope; null asks for no filter at all.
+ *
+ * "Assessed" is spelled out as every category rather than "not NE" because the
+ * parameter is a positive filter — and GBIF takes only the short codes, checked
+ * against the live API: NE and the long spellings (EXTINCT, LEAST_CONCERN)
+ * are accepted and match nothing.
+ */
+export const NEARBY_SCOPE_CATEGORIES: Record<NearbyScope, readonly string[] | null> = {
+  threatened: NEARBY_CATEGORIES,
+  assessed: ["CR", "EN", "VU", "NT", "LC", "DD", "EX", "EW"],
+  all: null,
+};
+
+/** The scope named in a URL or a query string, or the default. */
+export function parseScope(value: unknown): NearbyScope {
+  return (NEARBY_SCOPES as readonly string[]).includes(String(value))
+    ? (String(value) as NearbyScope)
+    : "threatened";
+}
 
 /**
  * How many species the facet may return. GBIF caps facetLimit well above this;
@@ -374,6 +428,8 @@ export interface NearbyResult {
   geometry?: string;
   /** Records in the radius across all taxa, assessed or not — the denominator. */
   totalRecords: number;
+  /** How much was asked about: the threatened three, all assessed, or all. */
+  scope: NearbyScope;
   /** Records in the radius belonging to the categories asked for. */
   categoryRecords: number;
   species: NearbySpecies[];
@@ -415,7 +471,8 @@ export function whereParams(where: NearbyWhere): Record<string, string> {
  */
 export function nearbyFacetUrl(
   opts: NearbyWhere & {
-    categories?: readonly string[];
+    /** Undefined means the threatened three; null means no filter at all. */
+    categories?: readonly string[] | null;
     facetLimit?: number;
   }
 ): string {
@@ -432,7 +489,10 @@ export function nearbyFacetUrl(
     // Only the facet is wanted; the records themselves are never read.
     limit: "0",
   });
-  for (const c of opts.categories ?? NEARBY_CATEGORIES) {
+  // `undefined` keeps the default; an explicit `null` asks for no category
+  // filter, which is what the "all species" scope needs.
+  const categories = opts.categories === undefined ? NEARBY_CATEGORIES : opts.categories;
+  for (const c of categories ?? []) {
     params.append("iucnRedListCategory", c);
   }
   return `https://api.gbif.org/v1/occurrence/search?${params}`;

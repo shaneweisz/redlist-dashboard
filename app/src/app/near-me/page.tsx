@@ -19,12 +19,12 @@
 import type { Metadata } from "next";
 import MapPageHeader from "@/components/mapping/MapPageHeader";
 import NearbyView from "./NearbyView";
-import { snapRadiusKm } from "@/lib/mapping/nearby-species";
+import { snapRadiusKm, parseScope } from "@/lib/mapping/nearby-species";
 
 export const metadata: Metadata = {
   title: "Threatened species near you",
   description:
-    "Critically Endangered, Endangered and Vulnerable species with GBIF records near a point, and the threats their Red List assessments cite.",
+    "Species with GBIF records near a point, or inside a protected area, and the threats their Red List assessments cite. Threatened species by default; assessed species and everything recorded there on request.",
 };
 
 export default async function NearMePage({
@@ -43,7 +43,12 @@ export default async function NearMePage({
     Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
       // Snapped to the same grid the view searches on, so a shared link is a
       // cache hit rather than a near-miss of one.
-      ? { lat: Number(lat.toFixed(3)), lng: Number(lng.toFixed(3)), radiusKm: snapRadiusKm(one("r")) }
+      ? {
+          lat: Number(lat.toFixed(3)),
+          lng: Number(lng.toFixed(3)),
+          radiusKm: snapRadiusKm(one("r")),
+          scope: parseScope(one("scope")),
+        }
       : null;
 
   return (

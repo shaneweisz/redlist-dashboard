@@ -17,10 +17,12 @@ import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifJson } from "@/lib/gbif-fetch";
 import { normalizeCategory } from "@/config/taxa";
 import { threatTags } from "@/lib/mapping/nearby-threats";
-import { getAssessedByGbifKeys } from "@/lib/data/species-duckdb";
+import { getAssessedByGbifKeys, getUnassessedByGbifKeys } from "@/lib/data/species-duckdb";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_CATEGORIES,
+  NEARBY_SCOPE_CATEGORIES,
+  parseScope,
   whereParams,
   type NearbyWhere,
   NEARBY_FACET_LIMIT,
@@ -46,6 +48,7 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const exclude = sp.get("exclude");
   const geometry = sp.get("geometry");
+  const scope = parseScope(sp.get("scope"));
 
   let where: NearbyWhere;
   let lat = Number(sp.get("lat"));
@@ -82,7 +85,7 @@ export async function GET(request: NextRequest) {
     // here at all. A radius with 40 threatened records out of 40 total is a
     // different claim from 40 out of 400,000.
     const [faceted, all] = (await Promise.all([
-      gbifJson(nearbyFacetUrl(where)),
+      gbifJson(nearbyFacetUrl({ ...where, categories: NEARBY_SCOPE_CATEGORIES[scope] })),
       gbifJson(
         `https://api.gbif.org/v1/occurrence/search?${new URLSearchParams({
           ...whereParams(where),
@@ -98,17 +101,47 @@ export async function GET(request: NextRequest) {
     if (exclude) byKey.delete(exclude);
 
     const assessed = await getAssessedByGbifKeys([...byKey.keys()]);
-    const species: NearbySpecies[] = assessed
+    const matched: NearbySpecies[] = assessed
       // Our own category decides, not GBIF's. Theirs is a lagging snapshot and
       // is only good enough to narrow the search; a species it still calls
       // threatened may have been down-listed since, and the panel would then
       // list an LC or NT species under a heading that says otherwise.
-      .filter((a) => (NEARBY_CATEGORIES as readonly string[]).includes(normalizeCategory(a.category)))
+      .filter(
+        (a) =>
+          scope !== "threatened" ||
+          (NEARBY_CATEGORIES as readonly string[]).includes(normalizeCategory(a.category))
+      )
       .map((a) => ({
         ...a,
         records: byKey.get(a.gbif_species_key) ?? 0,
         threat_tags: threatTags(a.threat_codes),
-      }))
+      }));
+
+    // The species nobody has assessed, which is most of what an unfiltered
+    // facet returns. Only fetched for the scope that asks for them — the other
+    // two are defined by having an assessment, so a second parquet scan would
+    // be a scan whose every row is then discarded.
+    const unassessed: NearbySpecies[] =
+      scope === "all"
+        ? (
+            await getUnassessedByGbifKeys(
+              [...byKey.keys()].filter((k) => !matched.some((m) => m.gbif_species_key === k))
+            )
+          ).map((u) => ({
+            ...u,
+            category: "NE",
+            criteria: null,
+            threat_codes: [],
+            threat_tags: [],
+            assessment_year: null,
+            assessment_id: null,
+            sis_taxon_id: null,
+            dashboard_row_key: null,
+            records: byKey.get(u.gbif_species_key) ?? 0,
+          }))
+        : [];
+
+    const species: NearbySpecies[] = [...matched, ...unassessed]
       .sort(
         (a, b) =>
           // How much of it was actually found here, first. Sorting by category
@@ -129,6 +162,7 @@ export async function GET(request: NextRequest) {
       geometry: geometry ?? undefined,
       totalRecords: all?.count ?? 0,
       categoryRecords: faceted?.count ?? 0,
+      scope,
       species,
       unmatched: byKey.size - species.length,
       truncated: counts.length >= NEARBY_FACET_LIMIT,

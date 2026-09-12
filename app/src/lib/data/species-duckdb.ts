@@ -965,6 +965,46 @@ export async function getSpeciesByGbifKey(gbifSpeciesKey: string): Promise<{
  * GBIF indexes occurrences well beyond what the Red List has assessed, so a
  * miss is the normal case, not a fault.
  */
+/**
+ * The species we hold *without* a Red List assessment, by GBIF key.
+ *
+ * The other half of the "all species" scope on the nearby panel: the assessed
+ * parquet can only ever name the species someone has assessed, and a facet with
+ * no category filter returns whatever GBIF has records for — mostly things
+ * nobody has assessed. Without this they came back as `unmatched`, so "all
+ * species recorded here" listed a handful of assessed ones and silently dropped
+ * the rest.
+ *
+ * Deliberately thin next to getAssessedByGbifKeys: there is no assessment, so
+ * there is no category, no criteria, no threats and no year to read.
+ */
+export async function getUnassessedByGbifKeys(keys: readonly string[]): Promise<
+  {
+    gbif_species_key: string;
+    scientific_name: string;
+    common_name: string | null;
+    taxon_group: string;
+    class_name: string | null;
+  }[]
+> {
+  if (!keys.length) return [];
+  const conn = await getConn();
+  const list = keys.map((k) => `'${String(k).replace(/'/g, "''")}'`).join(",");
+  const rows = (
+    await conn.runAndReadAll(`
+      SELECT gbif_species_key, scientific_name, common_name, taxon_group, class_name
+      FROM '${parquetUri("unassessed.parquet")}'
+      WHERE gbif_species_key IN (${list})`)
+  ).getRowObjects();
+  return rows.map((r) => ({
+    gbif_species_key: str(r.gbif_species_key) ?? "",
+    scientific_name: String(r.scientific_name ?? ""),
+    common_name: (r.common_name as string) ?? null,
+    taxon_group: String(r.taxon_group ?? ""),
+    class_name: str(r.class_name),
+  }));
+}
+
 export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
   {
     gbif_species_key: string;

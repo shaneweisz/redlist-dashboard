@@ -46,6 +46,7 @@ import {
 import {
   NEARBY_RADII_KM,
   NEARBY_RADIUS_DEFAULT,
+  type NearbyScope,
   NEARBY_SEARCH_COLOR,
   NEARBY_PICKED_COLORS,
   NEARBY_MAX_PICKED,
@@ -167,7 +168,7 @@ export default function NearbyMapView({
   /** A point in the URL, so a search can be linked to. */
   initial,
 }: {
-  initial: { lat: number; lng: number; radiusKm: NearbyRadiusKm } | null;
+  initial: { lat: number; lng: number; radiusKm: NearbyRadiusKm; scope: NearbyScope } | null;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const [basemap, setBasemap] = useState<BasemapKey>("streets");
@@ -178,18 +179,10 @@ export default function NearbyMapView({
   /** The radius the next search will use, which the panel also edits. */
   const [radiusKm, setRadiusKm] = useState<NearbyRadiusKm>(initial?.radiusKm ?? NEARBY_RADIUS_DEFAULT);
 
-  /**
-   * Starts at "asking" when the page is going to ask on arrival.
-   *
-   * Set from the initial state rather than by the mount effect, because the
-   * effect must not call setState synchronously — its only job is to talk to
-   * the browser's geolocation, and every state change belongs in the callbacks
-   * that come back from it. A link that already names a point never asks, and a
-   * browser with no geolocation at all can't.
-   */
-  const [locating, setLocating] = useState<"idle" | "asking" | "denied">(() =>
-    initial ? "idle" : typeof navigator !== "undefined" && navigator.geolocation ? "asking" : "denied"
-  );
+  /** How much of what is here to ask about — see NEARBY_SCOPES. */
+  const [scope, setScope] = useState<NearbyScope>(initial?.scope ?? "threatened");
+
+  const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   /** Where a place search landed, marked so it can be compared with the ring. */
   const [placePin, setPlacePin] = useState<Place | null>(null);
@@ -325,25 +318,25 @@ export default function NearbyMapView({
   }, [foundMe, lostMe]);
 
   /**
-   * Ask on arrival, unless the URL already said where.
+   * Nothing is asked until the button is pressed.
    *
-   * A page whose whole subject is "near me" opening on an empty world map, with
-   * the thing it is for behind a button, wastes the one interaction everybody
-   * arriving here was always going to make. A link carrying its own coordinates
-   * is the exception: it named a place, and prompting for a different one would
-   * be answering a question nobody asked.
+   * The page used to locate you and search on arrival, on the reasoning that a
+   * page called "near me" shouldn't make you press the thing it is for. Two
+   * arguments beat it. A visitor who only wanted to look at the map spent two
+   * GBIF queries, on a free API, without asking for anything — and it also
+   * meant the browser's location prompt appeared before the reader had any idea
+   * what the page wanted it for, which is the worst moment to ask.
+   *
+   * A link that carries its own coordinates is different: it already named a
+   * place, so it opens on it and searches straight away, having asked nobody
+   * for anything.
    */
   const asked = useRef(false);
   useEffect(() => {
-    if (asked.current) return;
+    if (asked.current || !initial) return;
     asked.current = true;
-    if (initial) {
-      flyTo(initial.lat, initial.lng, 0);
-      return;
-    }
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(foundMe, lostMe, GEOLOCATION_OPTIONS);
-  }, [foundMe, lostMe, initial, flyTo]);
+    flyTo(initial.lat, initial.lng, 0);
+  }, [initial, flyTo]);
 
   /** The search in the address bar, so what is on screen can be sent to someone. */
   useEffect(() => {
@@ -352,13 +345,16 @@ export default function NearbyMapView({
       url.searchParams.set("lat", search.lat.toFixed(5));
       url.searchParams.set("lng", search.lng.toFixed(5));
       url.searchParams.set("r", String(search.radiusKm));
+      if (scope === "threatened") url.searchParams.delete("scope");
+      else url.searchParams.set("scope", scope);
     } else {
       url.searchParams.delete("lat");
       url.searchParams.delete("lng");
       url.searchParams.delete("r");
+      url.searchParams.delete("scope");
     }
     window.history.replaceState(null, "", url);
-  }, [search]);
+  }, [search, scope]);
 
   /**
    * Changing the radius moves the circle the current question is about — and
@@ -383,9 +379,11 @@ export default function NearbyMapView({
    * What ground the current question covers, as one string.
    *
    * Everything cached per-search hangs off this, so switching between a radius
-   * and a boundary can't hand one's records to the other.
+   * and a boundary can't hand one's records to the other. Named `ground` and
+   * not `scope`, which is a different thing entirely here — how much of what is
+   * recorded on this ground to ask about.
    */
-  const scope = useMemo(
+  const ground = useMemo(
     () =>
       area
         ? `area:${area.wkt}`
@@ -400,7 +398,7 @@ export default function NearbyMapView({
     if (!search) return;
     const controller = new AbortController();
     for (const p of picked) {
-      const key = pointsKey(scope, p.key);
+      const key = pointsKey(ground, p.key);
       if (pointsRef.current[key]) continue;
       const params = new URLSearchParams({ speciesKey: p.key });
       if (area) {
@@ -421,7 +419,7 @@ export default function NearbyMapView({
         });
     }
     return () => controller.abort();
-  }, [picked, search, area, scope]);
+  }, [picked, search, area, ground]);
 
   const ringGeoJson = useMemo<GeoJSON.FeatureCollection>(
     () => ({
@@ -447,29 +445,29 @@ export default function NearbyMapView({
       // survives to find the point again on a click.
       features: search
         ? picked.flatMap((p) =>
-            (points[pointsKey(scope, p.key)]?.points ?? []).map((pt, i) => ({
+            (points[pointsKey(ground, p.key)]?.points ?? []).map((pt, i) => ({
               type: "Feature" as const,
-              properties: { nearbyKey: pointsKey(scope, p.key), nearbyIndex: i, color: colors[p.key] },
+              properties: { nearbyKey: pointsKey(ground, p.key), nearbyIndex: i, color: colors[p.key] },
               geometry: { type: "Point" as const, coordinates: [pt.lng, pt.lat] },
             }))
           )
         : [],
     }),
-    [search, picked, points, colors, scope]
+    [search, picked, points, colors, ground]
   );
 
   /** What the panel needs to know about each drawn species. */
   const pickedForPanel = useMemo(
     () =>
       picked.map((p) => {
-        const got = search ? points[pointsKey(scope, p.key)] : undefined;
+        const got = search ? points[pointsKey(ground, p.key)] : undefined;
         return {
           key: p.key,
           color: colors[p.key],
           drawn: got ? { shown: got.points.length, total: got.total } : null,
         };
       }),
-    [picked, points, colors, search, scope]
+    [picked, points, colors, search, ground]
   );
 
   /**
@@ -778,7 +776,7 @@ export default function NearbyMapView({
               images={shown.images}
               fields={nearbyPointFields(
                 shown,
-                picked.find((p) => search && points[pointsKey(scope, p.key)]?.points.includes(shown))?.name
+                picked.find((p) => search && points[pointsKey(ground, p.key)]?.points.includes(shown))?.name
               )}
               page={
                 shownGroup.length > 1
@@ -999,7 +997,15 @@ export default function NearbyMapView({
                 <path strokeLinecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3" />
                 <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
               </svg>
-              {locating === "asking" ? "Finding you…" : "Find threatened species near me"}
+              {locating === "asking"
+                ? "Finding you…"
+                : // Follows the scope, so the button never promises threatened
+                  // species and then hands back a list of starlings.
+                  scope === "threatened"
+                  ? "Find threatened species near me"
+                  : scope === "assessed"
+                    ? "Find assessed species near me"
+                    : "Find species near me"}
             </button>
             <span className="flex flex-wrap items-center justify-center gap-1 text-[11px]">
               <span className="text-zinc-500 dark:text-zinc-400">Within</span>
@@ -1052,6 +1058,8 @@ export default function NearbyMapView({
                 sourcePolygons: area.sourcePolygons,
               }
             }
+            scope={scope}
+            onScopeChange={setScope}
             onClearArea={() => {
               setArea(null);
               setPicked([]);

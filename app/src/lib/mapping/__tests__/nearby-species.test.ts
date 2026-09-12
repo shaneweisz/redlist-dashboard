@@ -10,6 +10,11 @@ import {
   nearbyFacetUrl,
   nearbyGbifSiteUrl,
   groupNearbyFeatures,
+  NEARBY_SCOPES,
+  NEARBY_SCOPE_CATEGORIES,
+  NEARBY_SCOPE_LABELS,
+  NEARBY_SCOPE_HINTS,
+  parseScope,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
 import { THREAT_TOP_LEVEL, THREAT_SUB_LEVEL, compareThreatCodes } from "../nearby-species";
@@ -194,6 +199,42 @@ describe("carrying the open searches in a URL", () => {
   it("never returns more searches than the tab strip holds", () => {
     const many = Array.from({ length: 9 }, (_, i) => `${i},${i},10`).join(";");
     expect(decodeNearbySearches(many)).toHaveLength(NEARBY_MAX_SEARCHES);
+  });
+});
+
+describe("scopes", () => {
+  it("asks GBIF for the right categories, and for none at all when scope is all", () => {
+    const at = { lat: 1, lng: 2, radiusKm: 10 };
+    const params = (categories: readonly string[] | null | undefined) =>
+      new URL(nearbyFacetUrl({ ...at, categories })).searchParams.getAll("iucnRedListCategory");
+
+    // Undefined keeps the default; null is the "all species" scope and must
+    // send no filter, not an empty one that matches nothing.
+    expect(params(undefined)).toEqual(["CR", "EN", "VU"]);
+    expect(params(NEARBY_SCOPE_CATEGORIES.threatened)).toEqual(["CR", "EN", "VU"]);
+    expect(params(NEARBY_SCOPE_CATEGORIES.all)).toEqual([]);
+    // Every category but NE, and short codes only — the long spellings and NE
+    // are accepted by GBIF and match nothing (checked against the live API).
+    expect(params(NEARBY_SCOPE_CATEGORIES.assessed)).toEqual(["CR", "EN", "VU", "NT", "LC", "DD", "EX", "EW"]);
+    expect(NEARBY_SCOPE_CATEGORIES.assessed).not.toContain("NE");
+  });
+
+  it("reads a scope from a URL, and falls back to the narrow one", () => {
+    expect(parseScope("assessed")).toBe("assessed");
+    expect(parseScope("all")).toBe("all");
+    expect(parseScope("threatened")).toBe("threatened");
+    // Anything else is the default, which is the one that spends the facet
+    // limit on the species worth seeing.
+    expect(parseScope("everything")).toBe("threatened");
+    expect(parseScope(null)).toBe("threatened");
+    expect(parseScope(undefined)).toBe("threatened");
+  });
+
+  it("labels and explains every scope it offers", () => {
+    for (const scope of NEARBY_SCOPES) {
+      expect(NEARBY_SCOPE_LABELS[scope]).toBeTruthy();
+      expect(NEARBY_SCOPE_HINTS[scope]).toBeTruthy();
+    }
   });
 });
 

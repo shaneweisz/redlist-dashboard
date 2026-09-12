@@ -9,14 +9,14 @@
  * map.
  */
 import dynamic from "next/dynamic";
-import type { NearbyRadiusKm } from "@/lib/mapping/nearby-species";
+import type { NearbyRadiusKm, NearbyScope } from "@/lib/mapping/nearby-species";
 
 const NearbyMapView = dynamic(() => import("@/components/mapping/NearbyMapView"), { ssr: false });
 
 export default function NearbyView({
   initial,
 }: {
-  initial: { lat: number; lng: number; radiusKm: NearbyRadiusKm } | null;
+  initial: { lat: number; lng: number; radiusKm: NearbyRadiusKm; scope: NearbyScope } | null;
 }) {
   return <NearbyMapView initial={initial} />;
 }
