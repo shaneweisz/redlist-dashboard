@@ -10,6 +10,11 @@ import {
   nearbyFacetUrl,
   nearbyGbifSiteUrl,
   groupNearbyFeatures,
+  NEARBY_SCOPES,
+  NEARBY_SCOPE_CATEGORIES,
+  NEARBY_SCOPE_LABELS,
+  NEARBY_SCOPE_HINTS,
+  parseScope,
 } from "../nearby-species";
 import { threatTags } from "../nearby-threats";
 import { THREAT_TOP_LEVEL, THREAT_SUB_LEVEL, compareThreatCodes } from "../nearby-species";
@@ -179,7 +184,7 @@ describe("carrying the open searches in a URL", () => {
     ]);
   });
 
-  it("snaps a radius that isn't one of the four to the nearest that is", () => {
+  it("snaps a radius that isn't one on offer to the nearest that is", () => {
     expect(decodeNearbySearches("10,20,999")).toEqual([{ lat: 10, lng: 20, radiusKm: 100 }]);
     expect(decodeNearbySearches("10,20,0")).toEqual([{ lat: 10, lng: 20, radiusKm: 10 }]);
     expect(decodeNearbySearches("10,20,30")).toEqual([{ lat: 10, lng: 20, radiusKm: 25 }]);
@@ -197,9 +202,47 @@ describe("carrying the open searches in a URL", () => {
   });
 });
 
+describe("scopes", () => {
+  it("asks GBIF for the right categories, and for none at all when scope is all", () => {
+    const at = { lat: 1, lng: 2, radiusKm: 10 };
+    const params = (categories: readonly string[] | null | undefined) =>
+      new URL(nearbyFacetUrl({ ...at, categories })).searchParams.getAll("iucnRedListCategory");
+
+    // Undefined keeps the default; null is the "all species" scope and must
+    // send no filter, not an empty one that matches nothing.
+    expect(params(undefined)).toEqual(["CR", "EN", "VU"]);
+    expect(params(NEARBY_SCOPE_CATEGORIES.threatened)).toEqual(["CR", "EN", "VU"]);
+    expect(params(NEARBY_SCOPE_CATEGORIES.all)).toEqual([]);
+    // Every category but NE, and short codes only — the long spellings and NE
+    // are accepted by GBIF and match nothing (checked against the live API).
+    expect(params(NEARBY_SCOPE_CATEGORIES.assessed)).toEqual(["CR", "EN", "VU", "NT", "LC", "DD", "EX", "EW"]);
+    expect(NEARBY_SCOPE_CATEGORIES.assessed).not.toContain("NE");
+  });
+
+  it("reads a scope from a URL, and falls back to the narrow one", () => {
+    expect(parseScope("assessed")).toBe("assessed");
+    expect(parseScope("all")).toBe("all");
+    expect(parseScope("threatened")).toBe("threatened");
+    // Anything else is the default, which is the one that spends the facet
+    // limit on the species worth seeing.
+    expect(parseScope("everything")).toBe("threatened");
+    expect(parseScope(null)).toBe("threatened");
+    expect(parseScope(undefined)).toBe("threatened");
+  });
+
+  it("labels and explains every scope it offers", () => {
+    for (const scope of NEARBY_SCOPES) {
+      expect(NEARBY_SCOPE_LABELS[scope]).toBeTruthy();
+      expect(NEARBY_SCOPE_HINTS[scope]).toBeTruthy();
+    }
+  });
+});
+
 describe("snapRadiusKm", () => {
   it("lands on the nearest radius the panel offers", () => {
-    expect(snapRadiusKm(1)).toBe(10);
+    expect(snapRadiusKm(1)).toBe(1);
+    expect(snapRadiusKm(3)).toBe(2);
+    expect(snapRadiusKm(4)).toBe(5);
     expect(snapRadiusKm(17)).toBe(10);
     expect(snapRadiusKm(18)).toBe(25);
     expect(snapRadiusKm(40)).toBe(50);
@@ -218,5 +261,10 @@ describe("snapRadiusKm", () => {
     expect(snapRadiusKm("abc")).toBe(NEARBY_RADIUS_DEFAULT);
     expect(snapRadiusKm(null)).toBe(NEARBY_RADIUS_DEFAULT);
     expect(snapRadiusKm(undefined)).toBe(NEARBY_RADIUS_DEFAULT);
+    // Number("") and Number(null) are both 0, which is finite — the guard has
+    // to reject a non-positive distance or a missing radius snaps to 1 km.
+    expect(snapRadiusKm("")).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(0)).toBe(NEARBY_RADIUS_DEFAULT);
+    expect(snapRadiusKm(-5)).toBe(NEARBY_RADIUS_DEFAULT);
   });
 });

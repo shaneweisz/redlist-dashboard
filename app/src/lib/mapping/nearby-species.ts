@@ -32,24 +32,39 @@
 
 import { COL_XR_CHECKLIST_KEY } from "@/lib/gbif";
 
-/** Radii offered in the panel. Beyond ~50 km "near here" stops meaning much. */
 /**
  * The radii on offer.
  *
- * Four, not a slider: the answer to "what is near here" is read against the
- * distance it was asked over, and a table of neighbours at 37 km is harder to
- * hold in mind than one at 25 or 50. Dragging the ring on the map snaps to
+ * A fixed set, not a slider: the answer to "what is near here" is read against
+ * the distance it was asked over, and a table of neighbours at 37 km is harder
+ * to hold in mind than one at 25 or 50. Dragging the ring on the map snaps to
  * these, so the circle can be pulled about freely and still land on a number
  * that means something. 100 km is the outer edge — past it the facet is
  * answering a question about a region rather than a locality.
+ *
+ * The bottom three are what a *place* needs rather than a record. 10 km around
+ * a collection locality is already a tight question; 10 km around where you are
+ * standing is a city, and the answer is a list of everything recorded across
+ * it. 1 and 2 km are "this park, this hillside, this stretch of coast", which
+ * is the scale at which a walk happens and at which the records returned are
+ * plausibly things you could go and look at.
  */
-export const NEARBY_RADII_KM = [10, 25, 50, 100] as const;
+export const NEARBY_RADII_KM = [1, 2, 5, 10, 25, 50, 100] as const;
 export type NearbyRadiusKm = (typeof NEARBY_RADII_KM)[number];
 
-/** The nearest radius on offer to a distance dragged out on the map. */
+/**
+ * The nearest radius on offer to a distance dragged out on the map.
+ *
+ * Anything that isn't a positive distance falls back to the default rather
+ * than being snapped. The guard has to say `n > 0` and not merely "is a
+ * number": `Number(null)` and `Number("")` are both `0`, which is finite, so
+ * for as long as the smallest radius was 10 km a missing value snapped to 10
+ * and looked like the fallback working. Adding a 1 km radius turned that
+ * accident into a bug — a link with no radius in it started opening at 1 km.
+ */
 export function snapRadiusKm(km: unknown): NearbyRadiusKm {
-  const n = Number(km);
-  if (!Number.isFinite(n)) return NEARBY_RADIUS_DEFAULT;
+  const n = typeof km === "number" || typeof km === "string" ? Number(km) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return NEARBY_RADIUS_DEFAULT;
   return NEARBY_RADII_KM.reduce((best, r) =>
     Math.abs(r - n) < Math.abs(best - n) ? r : best
   );
@@ -68,7 +83,7 @@ export function snapRadiusKm(km: unknown): NearbyRadiusKm {
 export const NEARBY_RADIUS_DEFAULT: NearbyRadiusKm = 10;
 
 /**
- * The categories this panel is about: the threatened three.
+ * The categories this panel is about by default: the threatened three.
  *
  * Asked of GBIF, and — this is the part that matters — checked again against
  * this dashboard's own category before a species is listed. GBIF's Red List
@@ -77,6 +92,60 @@ export const NEARBY_RADIUS_DEFAULT: NearbyRadiusKm = 10;
  * "threatened species near here" and then listed an LC one.
  */
 export const NEARBY_CATEGORIES = ["CR", "EN", "VU"] as const;
+
+/**
+ * How much of what is recorded here to ask about.
+ *
+ * The default is the threatened three, because that is the question this panel
+ * was built for. But "what else is here" is a fair question too, and two other
+ * answers are worth having: everything that carries a Red List assessment at
+ * all — which is how you see that the neighbours are mostly Least Concern — and
+ * everything GBIF has records for, assessed or not.
+ *
+ * Widening costs accuracy, and unavoidably. A facet returns at most
+ * NEARBY_FACET_LIMIT species, so once the filter stops being "threatened" the
+ * budget is spent on whatever is commonest: 424,389 of the 440,000 records in
+ * one 10 km circle in the Cape are Least Concern, so "all species" there is a
+ * list of abundant birds and weeds with the rare things pushed off the end.
+ * That is a true answer to "what is recorded here" and a bad answer to "what
+ * matters here", which is why the narrow scope stays the default and the panel
+ * says when a list was truncated.
+ */
+export const NEARBY_SCOPES = ["threatened", "assessed", "all"] as const;
+export type NearbyScope = (typeof NEARBY_SCOPES)[number];
+
+export const NEARBY_SCOPE_LABELS: Record<NearbyScope, string> = {
+  threatened: "Threatened",
+  assessed: "Assessed",
+  all: "All species",
+};
+
+export const NEARBY_SCOPE_HINTS: Record<NearbyScope, string> = {
+  threatened: "Critically Endangered, Endangered and Vulnerable species only",
+  assessed: "Every species carrying a Red List assessment, whatever its category",
+  all: "Everything GBIF has records for here, assessed or not",
+};
+
+/**
+ * The categories asked of GBIF for each scope; null asks for no filter at all.
+ *
+ * "Assessed" is spelled out as every category rather than "not NE" because the
+ * parameter is a positive filter — and GBIF takes only the short codes, checked
+ * against the live API: NE and the long spellings (EXTINCT, LEAST_CONCERN)
+ * are accepted and match nothing.
+ */
+export const NEARBY_SCOPE_CATEGORIES: Record<NearbyScope, readonly string[] | null> = {
+  threatened: NEARBY_CATEGORIES,
+  assessed: ["CR", "EN", "VU", "NT", "LC", "DD", "EX", "EW"],
+  all: null,
+};
+
+/** The scope named in a URL or a query string, or the default. */
+export function parseScope(value: unknown): NearbyScope {
+  return (NEARBY_SCOPES as readonly string[]).includes(String(value))
+    ? (String(value) as NearbyScope)
+    : "threatened";
+}
 
 /**
  * How many species the facet may return. GBIF caps facetLimit well above this;
@@ -304,14 +373,9 @@ export function groupNearbyFeatures(
 }
 
 /** Where a picked neighbour's records are, inside the same radius. */
-export function nearbyPointsUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  speciesKey: string;
-}): string {
+export function nearbyPointsUrl(opts: NearbyWhere & { speciesKey: string }): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     // Same checklist as the facet that produced this key — see nearbyFacetUrl.
     checklistKey: COL_XR_CHECKLIST_KEY,
     taxonKey: opts.speciesKey,
@@ -358,9 +422,14 @@ export interface NearbySpecies {
 export interface NearbyResult {
   lat: number;
   lng: number;
-  radiusKm: number;
+  /** Set for a radius search; absent when a boundary was searched instead. */
+  radiusKm?: number;
+  /** Set for a boundary search: the WKT that was actually sent to GBIF. */
+  geometry?: string;
   /** Records in the radius across all taxa, assessed or not — the denominator. */
   totalRecords: number;
+  /** How much was asked about: the threatened three, all assessed, or all. */
+  scope: NearbyScope;
   /** Records in the radius belonging to the categories asked for. */
   categoryRecords: number;
   species: NearbySpecies[];
@@ -368,6 +437,26 @@ export interface NearbyResult {
   unmatched: number;
   /** The facet hit its limit, so the list is the commonest, not all of them. */
   truncated: boolean;
+}
+
+/**
+ * The ground a search covers: a circle, or a boundary drawn on the map.
+ *
+ * GBIF takes these as two different parameters — `geoDistance` and `geometry` —
+ * and everything else about the query is identical, so the two are one type
+ * here and every URL builder branches in one place. A protected area's boundary
+ * has to be prepared by lib/mapping/gbif-geometry first; by the time it arrives
+ * as `wkt` it is already wound and short enough for GBIF to accept.
+ */
+export type NearbyWhere =
+  | { lat: number; lng: number; radiusKm: number }
+  | { wkt: string };
+
+/** The `geoDistance`/`geometry` pair for one patch of ground. */
+export function whereParams(where: NearbyWhere): Record<string, string> {
+  return "wkt" in where
+    ? { geometry: where.wkt }
+    : { geoDistance: `${where.lat},${where.lng},${where.radiusKm}km` };
 }
 
 /**
@@ -380,15 +469,15 @@ export interface NearbyResult {
  * is not hypothetical: dropped from a first draft of this file, it matched 0 of
  * 205 species. See lib/gbif.ts.
  */
-export function nearbyFacetUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  categories?: readonly string[];
-  facetLimit?: number;
-}): string {
+export function nearbyFacetUrl(
+  opts: NearbyWhere & {
+    /** Undefined means the threatened three; null means no filter at all. */
+    categories?: readonly string[] | null;
+    facetLimit?: number;
+  }
+): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     checklistKey: COL_XR_CHECKLIST_KEY,
     hasCoordinate: "true",
     // Records GBIF itself flags as positionally suspect would put species in a
@@ -400,21 +489,19 @@ export function nearbyFacetUrl(opts: {
     // Only the facet is wanted; the records themselves are never read.
     limit: "0",
   });
-  for (const c of opts.categories ?? NEARBY_CATEGORIES) {
+  // `undefined` keeps the default; an explicit `null` asks for no category
+  // filter, which is what the "all species" scope needs.
+  const categories = opts.categories === undefined ? NEARBY_CATEGORIES : opts.categories;
+  for (const c of categories ?? []) {
     params.append("iucnRedListCategory", c);
   }
   return `https://api.gbif.org/v1/occurrence/search?${params}`;
 }
 
 /** The same radius on gbif.org, so the assessor can go and look at the records. */
-export function nearbyGbifSiteUrl(opts: {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-  speciesKey?: string;
-}): string {
+export function nearbyGbifSiteUrl(opts: NearbyWhere & { speciesKey?: string }): string {
   const params = new URLSearchParams({
-    geoDistance: `${opts.lat},${opts.lng},${opts.radiusKm}km`,
+    ...whereParams(opts),
     checklistKey: COL_XR_CHECKLIST_KEY,
     hasCoordinate: "true",
     hasGeospatialIssue: "false",
@@ -459,9 +546,9 @@ export function decodeNearbySearches(
     const [lat, lng, km] = part.split(",").map(Number);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
-    // A radius that is not one of the four is snapped to the nearest, so an
-    // old link or a hand-edited param still asks a question this can answer.
-    const radiusKm = Number.isFinite(km) ? snapRadiusKm(km) : NEARBY_RADIUS_DEFAULT;
+    // A radius that is not one on offer is snapped to the nearest, so an old
+    // link or a hand-edited param still asks a question this can answer.
+    const radiusKm = snapRadiusKm(km);
     out.push({ lat, lng, radiusKm });
   }
   return out.slice(0, NEARBY_MAX_SEARCHES);

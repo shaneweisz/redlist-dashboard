@@ -153,6 +153,19 @@ interface IdentifyRequest {
   height: number;
   /** Click slop in screen pixels. Derived from the zoom when not given. */
   tolerance?: number;
+  /**
+   * How coarsely the server may generalise the boundary it returns, in degrees.
+   *
+   * Defaults to a screen pixel's worth, which is right when the boundary is
+   * only going to be drawn at the zoom it was asked from. It is wrong when the
+   * boundary is going to be *used* — a narrow phone makes a pixel worth several
+   * hundred metres, and at that offset Kruger came back not merely coarser but
+   * structurally different: one 980-point outline on a desktop, and on a phone
+   * a 518-point one accompanied by two zero-area slivers. Anything deciding
+   * what to do with the shape should ask for a fixed offset so it gets the same
+   * shape whoever is looking.
+   */
+  maxAllowableOffset?: number;
 }
 
 /**
@@ -183,7 +196,8 @@ export function identifyUrl(request: IdentifyRequest): string {
   // is not a nuance here: one Colombian national park is 3.7 MB of rings at
   // full detail and 15 KB at a pixel's worth of tolerance, and at the zoom you
   // asked from they draw identically.
-  const degreesPerPixel = Math.abs(bounds[2] - bounds[0]) / Math.max(1, width);
+  const degreesPerPixel =
+    request.maxAllowableOffset ?? Math.abs(bounds[2] - bounds[0]) / Math.max(1, width);
   const params = new URLSearchParams({
     geometry: JSON.stringify({ x: lng, y: lat }),
     geometryType: "esriGeometryPoint",

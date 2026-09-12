@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getSpeciesByGbifKey } from "@/lib/data/species-duckdb";
 import OccurrencePanel from "./OccurrencePanel";
-import MappingHeader from "./MappingHeader";
+import MapPageHeader from "@/components/mapping/MapPageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +37,10 @@ export default async function OccurrencesPage({ params }: { params: Promise<{ ke
 
   return (
     <div className="h-screen flex flex-col bg-white dark:bg-zinc-900">
-      <MappingHeader
-        scientificName={species.scientific_name}
-        commonName={species.common_name}
+      <MapPageHeader
+        title={species.scientific_name}
+        subtitle={species.common_name}
+        italicTitle
       />
       <div className="flex-1 min-h-0">
         <OccurrencePanel

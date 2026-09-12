@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
+import { GBIF_USER_AGENT } from "@/lib/gbif-fetch";
 import { getQualityFlags } from "@/lib/mapping/coordinate-cleaning";
 import { GBIF_CHECKLIST_KEY, GBIF_COORDINATE_NOTES, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
 
@@ -237,6 +238,11 @@ async function gbifSearch(
 ): Promise<{ count: number; results: GbifRecord[]; endOfRecords: boolean }> {
   for (let attempt = 0; attempt <= GBIF_MAX_RETRIES; attempt++) {
     const response = await fetch(`https://api.gbif.org/v1/occurrence/search?${params}`, {
+      // Identified, because this route is by far the app's heaviest GBIF
+      // consumer — several queries at once, paged 300 at a time — and an
+      // anonymous caller doing that from a shared egress address is exactly
+      // what GBIF has no way to contact.
+      headers: { "User-Agent": GBIF_USER_AGENT },
       cache: "no-store",
     });
     if (response.ok) return response.json();

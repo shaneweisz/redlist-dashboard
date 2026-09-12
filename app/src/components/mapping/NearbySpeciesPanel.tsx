@@ -34,6 +34,10 @@ import {
 } from "@/lib/redlist/assessment";
 import {
   NEARBY_RADII_KM,
+  NEARBY_SCOPES,
+  NEARBY_SCOPE_LABELS,
+  NEARBY_SCOPE_HINTS,
+  type NearbyScope,
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
   THREAT_TOP_LEVEL,
@@ -56,6 +60,36 @@ interface Props {
   /** Controlled by the map, which draws this radius on the ground. */
   radiusKm: NearbyRadiusKm;
   onRadiusChange: (km: NearbyRadiusKm) => void;
+  /**
+   * A boundary to search instead of the radius — a protected area, picked off
+   * the map.
+   *
+   * When it is set the radius is not asked at all, and the chips that change it
+   * give way to the site's name: a national park has an edge of its own, and
+   * offering to widen it by 25 km would be offering to stop searching the thing
+   * the reader asked about. `wkt` is already prepared for GBIF — wound and
+   * shortened by lib/mapping/gbif-geometry — and `simplified` says whether what
+   * will be searched is the site's real edge or an approximation of it.
+   */
+  area?: {
+    name: string;
+    wkt: string;
+    simplified: boolean;
+    polygons: number;
+    sourcePolygons: number;
+  } | null;
+  /** Offered beside an area, to go back to asking about a circle. */
+  onClearArea?: () => void;
+  /**
+   * How much of what is recorded here to ask about.
+   *
+   * Optional, and defaults to the threatened three: the occurrence map opens
+   * this panel to compare one species against its threatened neighbours, and
+   * has no use for a list of the local starlings. The standalone view, where
+   * the question starts from a place rather than a species, offers all three.
+   */
+  scope?: NearbyScope;
+  onScopeChange?: (scope: NearbyScope) => void;
   /** The neighbours the map is drawing, with the colour each was given. */
   picked: { key: string; color: string; drawn: { shown: number; total: number } | null }[];
   onTogglePick: (species: { key: string; name: string; commonName: string | null }) => void;
@@ -328,7 +362,7 @@ function SpeciesDetail({
  * whole row out of step with the rows under it.
  */
 const ROW =
-  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_7.5rem_2.25rem_6rem_minmax(8rem,2.4fr)] gap-2 items-center px-2";
+  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_7.5rem_2.25rem_6rem_minmax(8rem,2.4fr)] gap-2 items-center px-2 min-w-[41rem]";
 
 /**
  * One filter as a dropdown of checkboxes, in the header.
@@ -581,7 +615,7 @@ function redListUrl(s: NearbySpecies): string | null {
 
 export default function NearbySpeciesPanel({
   lat, lng, recordName, excludeGbifKey, radiusKm, onRadiusChange,
-  picked, onTogglePick, onClose,
+  area, onClearArea, scope = "threatened", onScopeChange, picked, onTogglePick, onClose,
 }: Props) {
   const pickedByKey = useMemo(() => new Map(picked.map((p) => [p.key, p])), [picked]);
 
@@ -627,7 +661,11 @@ export default function NearbySpeciesPanel({
    */
   const [answer, setAnswer] = useState<{ key: string; result?: NearbyResult; error?: string } | null>(null);
 
-  const key = `${lat},${lng},${radiusKm},${excludeGbifKey ?? ""}`;
+  /** What this list is of, in the words the header and the footer both use. */
+  const subject =
+    scope === "threatened" ? "Threatened species" : scope === "assessed" ? "Assessed species" : "Species";
+
+  const key = `${lat},${lng},${area ? area.wkt : radiusKm},${scope},${excludeGbifKey ?? ""}`;
   const loading = answer?.key !== key;
   const result = answer?.key === key ? answer.result : undefined;
   const error = answer?.key === key ? answer.error : undefined;
@@ -640,7 +678,12 @@ export default function NearbySpeciesPanel({
     // a time, and asking GBIF to facet a radius search for every frame of that
     // is dozens of queries to answer the one the reader stops on.
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radiusKm: String(radiusKm) });
+      const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+      // A boundary replaces the radius rather than narrowing it; sending both
+      // would ask GBIF for the part of the park within 10 km of the click.
+      if (area) params.set("geometry", area.wkt);
+      else params.set("radiusKm", String(radiusKm));
+      if (scope !== "threatened") params.set("scope", scope);
       if (excludeGbifKey) params.set("exclude", excludeGbifKey);
       fetch(`/api/nearby-species?${params}`, { signal: controller.signal })
         .then(async (r) => {
@@ -657,7 +700,7 @@ export default function NearbySpeciesPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [lat, lng, radiusKm, excludeGbifKey, key]);
+  }, [lat, lng, radiusKm, area, scope, excludeGbifKey, key]);
 
   // A radius that returns no birds should not keep offering a Birds chip, so
   // the row is rebuilt from each answer.
@@ -753,13 +796,65 @@ export default function NearbySpeciesPanel({
             about that species — which is the one species it never contains.
             The record it was opened from follows in brackets when there was
             one, because that is provenance rather than subject. */}
-        <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">Threatened species recorded near</span>
-        <span className="shrink-0 tabular-nums text-zinc-600 dark:text-zinc-300">
-          {lat.toFixed(4)}, {lng.toFixed(4)}
-        </span>
-        {recordName && (
-          <span className="max-w-[12rem] truncate italic text-zinc-400" title={recordName}>
-            ({recordName})
+        {area ? (
+          <>
+            <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">{subject} recorded in</span>
+            <span className="max-w-[22rem] truncate text-zinc-700 dark:text-zinc-200" title={area.name}>
+              {area.name}
+            </span>
+            {/* Said in the header, not in a footnote: the difference between
+                "inside this park" and "inside most of this park, roughly" is
+                the difference between a list you can cite and one you can't. */}
+            {area.simplified && (
+              <span
+                className="shrink-0 text-amber-600 dark:text-amber-400"
+                title={
+                  area.polygons < area.sourcePolygons
+                    ? `This site is ${area.sourcePolygons} separate parcels, which is more boundary than GBIF will take in one query. ${area.polygons === 1 ? "The parcel you clicked is" : `The ${area.polygons} shown are`} being searched.`
+                    : "The boundary was simplified to fit GBIF's query limit, so the edges searched are approximate. The outline drawn on the map is the one being searched."
+                }
+              >
+                {area.polygons < area.sourcePolygons
+                  ? `${area.polygons} of ${area.sourcePolygons} parcels`
+                  : "approximate edges"}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-zinc-700 dark:text-zinc-200 shrink-0">{subject} recorded near</span>
+            <span className="shrink-0 tabular-nums text-zinc-600 dark:text-zinc-300">
+              {lat.toFixed(4)}, {lng.toFixed(4)}
+            </span>
+            {recordName && (
+              <span className="max-w-[12rem] truncate italic text-zinc-400" title={recordName}>
+                ({recordName})
+              </span>
+            )}
+          </>
+        )}
+
+        {/* What is being asked about, ahead of the filters — it decides what
+            there is to filter. Three buttons rather than a dropdown: the
+            difference between them is the whole meaning of the list, and it
+            should be readable without opening anything. */}
+        {onScopeChange && (
+          <span className="flex shrink-0 items-center overflow-hidden rounded border border-zinc-300 dark:border-zinc-600">
+            {NEARBY_SCOPES.map((option) => (
+              <button
+                key={option}
+                onClick={() => onScopeChange(option)}
+                title={NEARBY_SCOPE_HINTS[option]}
+                aria-pressed={option === scope}
+                className={`px-1.5 py-0.5 ${
+                  option === scope
+                    ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                }`}
+              >
+                {NEARBY_SCOPE_LABELS[option]}
+              </button>
+            ))}
           </span>
         )}
 
@@ -795,9 +890,20 @@ export default function NearbySpeciesPanel({
           </>
         )}
 
-        <span className="ml-auto flex items-center gap-1 shrink-0">
-          <span className="text-zinc-500 dark:text-zinc-400">Within</span>
-          {NEARBY_RADII_KM.map((r) => (
+        {/* Wraps rather than holding one line: seven radius chips plus the
+            close button are wider than a phone, and `shrink-0` on a row that
+            can't wrap pushed the last chip and the × off the screen. */}
+        <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
+          {area ? (
+            <button
+              onClick={onClearArea}
+              className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            >
+              Search a radius instead
+            </button>
+          ) : null}
+          {!area && <span className="text-zinc-500 dark:text-zinc-400">Within</span>}
+          {!area && NEARBY_RADII_KM.map((r) => (
             <button
               key={r}
               onClick={() => onRadiusChange(r)}
@@ -859,7 +965,7 @@ export default function NearbySpeciesPanel({
                     {pick ? "Hide records from map" : "Show records on map"}
                   </button>
                   <a
-                    href={nearbyGbifSiteUrl({ lat, lng, radiusKm: radiusKm, speciesKey: s.gbif_species_key })}
+                    href={nearbyGbifSiteUrl(area ? { wkt: area.wkt, speciesKey: s.gbif_species_key } : { lat, lng, radiusKm, speciesKey: s.gbif_species_key })}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setRowMenu(null)}
@@ -891,7 +997,13 @@ export default function NearbySpeciesPanel({
         </>
       )}
 
-          <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
+          {/* Scrolls in both axes from the one container, deliberately. The
+              table's columns need about 41rem and a phone has 24, so it has to
+              be reachable sideways — but putting the horizontal scroll on an
+              inner wrapper would make *that* the nearest scrollport, and the
+              header's `sticky top-0` would then stick to the wrapper instead of
+              to this, i.e. scroll away with the rows. */}
+          <div className="flex-1 min-h-0 overflow-auto py-1.5">
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
             {/* The body says it is working, not just the corner of the header.
@@ -900,14 +1012,14 @@ export default function NearbySpeciesPanel({
             {loading && !error && (
               <p className="flex items-center gap-1.5 px-2 py-3 text-zinc-500 dark:text-zinc-400">
                 <Spinner />
-                Finding threatened species within {radiusKm} km…
+                Finding {subject.toLowerCase()} {area ? `in ${area.name}` : `within ${radiusKm} km`}…
               </p>
             )}
 
             {result && !error && (
               <>
                 {shownSpecies.length > 0 && (
-                  <div>
+                  <div className="min-w-[41rem]">
                     <div
                       className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
                     >
@@ -1057,17 +1169,25 @@ export default function NearbySpeciesPanel({
 
                 <p className="px-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400">
                   {result.species.length === 0 ? (
-                    <>No threatened species recorded within {result.radiusKm} km.</>
+                    <>No {subject.toLowerCase()} recorded {area ? `in ${area.name}` : `within ${result.radiusKm} km`}.</>
                   ) : (
                     <>
                       <span className="font-medium text-zinc-700 dark:text-zinc-200">{result.species.length}</span>{" "}
-                      threatened species (CR, EN, VU), from{" "}
+                      {scope === "threatened" ? "threatened species (CR, EN, VU)" : scope === "assessed" ? "assessed species" : "species"}, from{" "}
                       <span className="tabular-nums">{result.categoryRecords.toLocaleString()}</span> of the{" "}
                       <span className="tabular-nums">{result.totalRecords.toLocaleString()}</span> records here.
                       {result.truncated && (
                         <span className="text-amber-600 dark:text-amber-400">
                           {" "}
                           Only the most-recorded are shown — there are more here.
+                          {scope !== "threatened" && (
+                            <>
+                              {" "}
+                              A wider scope spends that limit on whatever is commonest, so rare
+                              species can be pushed off this list entirely; Threatened is the scope
+                              that spends it on them.
+                            </>
+                          )}
                         </span>
                       )}
                     </>
