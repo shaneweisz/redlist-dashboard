@@ -33,7 +33,7 @@ import { uncertaintyCircle } from "@/lib/mapping/georeferences";
 import { haversineMetres } from "@/lib/mapping/geo-distance";
 import { nearbyPointFields } from "@/lib/mapping/nearby-point-fields";
 import { GEOCODER_ATTRIBUTION, type Place } from "@/lib/mapping/geocode";
-import { geometryForGbif } from "@/lib/mapping/gbif-geometry";
+import { geometryForGbif, type GbifGeometry } from "@/lib/mapping/gbif-geometry";
 import {
   PROTECTED_AREAS_TILE_URL,
   PROTECTED_AREAS_ATTRIBUTION,
@@ -111,6 +111,18 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
   maximumAge: 60000,
 };
 
+/**
+ * How finely WDPA is asked to draw a boundary here, in degrees (about 22 m).
+ *
+ * Fixed rather than derived from the map's pixel size, because this boundary is
+ * going to be *searched* and not merely drawn. Left to the default, a phone
+ * makes a pixel worth several hundred metres, and at that offset the service
+ * returns a structurally different shape: Kruger came back as one 980-point
+ * outline on a desktop and, on a phone, a coarser outline plus two zero-area
+ * slivers. Whoever is looking should get the same answer.
+ */
+const SEARCH_BOUNDARY_OFFSET = 0.0002;
+
 /** West/south/east/north of a boundary, for framing it. */
 function boundsOf(geometry: GeoJSON.MultiPolygon): [[number, number], [number, number]] | null {
   let [w, s, e, n] = [180, 90, -180, -90];
@@ -173,7 +185,9 @@ export default function NearbyMapView({
 
   /** Whether the WDPA overlay is drawn, and what a click on it found. */
   const [showProtected, setShowProtected] = useState(false);
-  const [sitesHere, setSitesHere] = useState<{ lat: number; lng: number; sites: ProtectedArea[] } | "loading" | null>(null);
+  const [sitesHere, setSitesHere] = useState<
+    { lat: number; lng: number; sites: { site: ProtectedArea; ready: GbifGeometry | null }[] } | "loading" | null
+  >(null);
   const [area, setArea] = useState<Area | null>(null);
 
   const [hoveringRing, setHoveringRing] = useState(false);
@@ -458,8 +472,24 @@ export default function NearbyMapView({
       bounds: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
       width: canvas.clientWidth,
       height: canvas.clientHeight,
+      maxAllowableOffset: SEARCH_BOUNDARY_OFFSET,
     })
-      .then((sites) => setSitesHere({ lat, lng, sites }))
+      // Each boundary is prepared now rather than when its button is pressed:
+      // not every site has one GBIF will take, and a button that silently does
+      // nothing is worse than one that isn't offered. Preparing here means the
+      // offer and the ability to honour it are decided by the same code.
+      .then((found) =>
+        setSitesHere({
+          lat,
+          lng,
+          sites: found.map((site) => ({
+            site,
+            ready: site.geometry
+              ? geometryForGbif(site.geometry, { baseUrlBytes: 400, focus: [lng, lat] })
+              : null,
+          })),
+        })
+      )
       .catch(() => setSitesHere({ lat, lng, sites: [] }));
   }, []);
 
@@ -471,29 +501,22 @@ export default function NearbyMapView({
    * be forwarded whole.
    */
   const searchSite = useCallback(
-    (site: ProtectedArea, at: { lat: number; lng: number }) => {
-      if (!site.geometry) return;
-      const prepared = geometryForGbif(site.geometry, {
-        // Room for everything else the two routes put in GBIF's query string.
-        baseUrlBytes: 400,
-        focus: [at.lng, at.lat],
-      });
-      if (!prepared) return;
+    (site: ProtectedArea, ready: GbifGeometry, at: { lat: number; lng: number }) => {
       setArea({
         site,
-        wkt: prepared.wkt,
-        geometry: prepared.geometry,
-        simplified: prepared.simplified,
-        polygons: prepared.polygons,
-        sourcePolygons: prepared.sourcePolygons,
+        wkt: ready.wkt,
+        geometry: ready.geometry,
+        simplified: ready.simplified,
+        polygons: ready.polygons,
+        sourcePolygons: ready.sourcePolygons,
       });
       setSearch({ lat: at.lat, lng: at.lng, radiusKm });
       setPicked([]);
       setShownGroup([]);
       setSitesHere(null);
       const map = mapRef.current?.getMap();
-      const bounds = boundsOf(prepared.geometry);
-      if (map && bounds) map.fitBounds(bounds, { padding: 60, duration: 900 });
+      const bounds = boundsOf(ready.geometry);
+      if (map && bounds) map.fitBounds(bounds, { padding: 40, duration: 900 });
     },
     [radiusKm]
   );
@@ -851,7 +874,7 @@ export default function NearbyMapView({
             overlapping designations, and a popup that size over the click hides
             the ground being asked about. */}
         {showProtected && sitesHere && (
-          <div className="absolute bottom-6 left-2 z-20 max-h-[60%] w-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white/95 p-2 text-[11px] shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-800/95">
+          <div className="absolute inset-x-2 bottom-2 z-30 max-h-[75%] overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white/95 p-2 text-[11px] shadow-lg backdrop-blur sm:inset-x-auto sm:bottom-6 sm:left-2 sm:w-72 dark:border-zinc-700 dark:bg-zinc-800/95">
             {sitesHere === "loading" ? (
               <p className="text-zinc-500 dark:text-zinc-400">Looking up protected areas…</p>
             ) : sitesHere.sites.length === 0 ? (
@@ -877,7 +900,7 @@ export default function NearbyMapView({
                     </svg>
                   </button>
                 </div>
-                {sitesHere.sites.map((site) => (
+                {sitesHere.sites.map(({ site, ready }) => (
                   <div key={site.sitePid} className="border-t border-zinc-100 py-1.5 dark:border-zinc-700">
                     <p className="font-medium text-zinc-800 dark:text-zinc-100">{site.name}</p>
                     <p className="text-zinc-500 dark:text-zinc-400">
@@ -886,17 +909,24 @@ export default function NearbyMapView({
                         .join(" · ")}
                     </p>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
-                      {site.geometry ? (
+                      {ready ? (
                         <button
-                          onClick={() => searchSite(site, { lat: sitesHere.lat, lng: sitesHere.lng })}
-                          className="rounded bg-emerald-600 px-2 py-0.5 font-medium text-white hover:bg-emerald-700"
+                          onClick={() => searchSite(site, ready, { lat: sitesHere.lat, lng: sitesHere.lng })}
+                          className="rounded bg-emerald-600 px-2 py-1 font-medium text-white hover:bg-emerald-700"
                         >
                           Find threatened species in here
                         </button>
                       ) : (
-                        // WDPA holds the smallest sites as a point and no
-                        // outline, and there is nothing to search inside a point.
-                        <span className="text-zinc-400">No boundary published — search a radius instead</span>
+                        // Either WDPA holds this one as a point with no outline
+                        // at all — it does that for the smallest sites — or the
+                        // boundary is past anything GBIF will take in a query.
+                        // Both are honest answers; an unexplained dead button
+                        // is not.
+                        <span className="text-zinc-400">
+                          {site.geometry
+                            ? "Boundary too complex for GBIF to search — use a radius"
+                            : "No boundary published — use a radius"}
+                        </span>
                       )}
                       <a
                         href={protectedPlanetUrl(site)}
@@ -918,7 +948,14 @@ export default function NearbyMapView({
             and the radius it will be asked at. Bottom-centre rather than in a
             bar above the map, because both of them are about the circle on the
             ground and belong next to it. */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-6 z-10 flex flex-col items-center gap-2 px-2">
+        <div
+          className={`pointer-events-none absolute inset-x-0 bottom-6 z-10 flex-col items-center gap-2 px-2 ${
+            // On a phone the callout is a sheet across the bottom of the map,
+            // and these would be behind it. Choosing a protected area is the
+            // thing being done; the radius is still there when it closes.
+            showProtected && sitesHere ? "hidden sm:flex" : "flex"
+          }`}
+        >
           {movedAway && search && !area && (
             <button
               onClick={() => {
@@ -932,7 +969,7 @@ export default function NearbyMapView({
               Search here instead
             </button>
           )}
-          <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-zinc-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-800/95">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur sm:rounded-full dark:border-zinc-700 dark:bg-zinc-800/95">
             <button
               onClick={findMe}
               disabled={locating === "asking"}
@@ -945,7 +982,7 @@ export default function NearbyMapView({
               </svg>
               {locating === "asking" ? "Finding you…" : "Find threatened species near me"}
             </button>
-            <span className="flex items-center gap-1 text-[11px]">
+            <span className="flex flex-wrap items-center justify-center gap-1 text-[11px]">
               <span className="text-zinc-500 dark:text-zinc-400">Within</span>
               {NEARBY_RADII_KM.map((r) => (
                 <button

@@ -348,7 +348,7 @@ function SpeciesDetail({
  * whole row out of step with the rows under it.
  */
 const ROW =
-  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_7.5rem_2.25rem_6rem_minmax(8rem,2.4fr)] gap-2 items-center px-2";
+  "grid grid-cols-[20px_minmax(7rem,1fr)_5rem_7.5rem_2.25rem_6rem_minmax(8rem,2.4fr)] gap-2 items-center px-2 min-w-[41rem]";
 
 /**
  * One filter as a dropdown of checkboxes, in the header.
@@ -847,7 +847,10 @@ export default function NearbySpeciesPanel({
           </>
         )}
 
-        <span className="ml-auto flex items-center gap-1 shrink-0">
+        {/* Wraps rather than holding one line: seven radius chips plus the
+            close button are wider than a phone, and `shrink-0` on a row that
+            can't wrap pushed the last chip and the × off the screen. */}
+        <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
           {area ? (
             <button
               onClick={onClearArea}
@@ -951,7 +954,13 @@ export default function NearbySpeciesPanel({
         </>
       )}
 
-          <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
+          {/* Scrolls in both axes from the one container, deliberately. The
+              table's columns need about 41rem and a phone has 24, so it has to
+              be reachable sideways — but putting the horizontal scroll on an
+              inner wrapper would make *that* the nearest scrollport, and the
+              header's `sticky top-0` would then stick to the wrapper instead of
+              to this, i.e. scroll away with the rows. */}
+          <div className="flex-1 min-h-0 overflow-auto py-1.5">
             {error && <p className="px-2 text-amber-600 dark:text-amber-400">{error}</p>}
 
             {/* The body says it is working, not just the corner of the header.
@@ -967,7 +976,7 @@ export default function NearbySpeciesPanel({
             {result && !error && (
               <>
                 {shownSpecies.length > 0 && (
-                  <div>
+                  <div className="min-w-[41rem]">
                     <div
                       className={`${ROW} sticky top-0 bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 pb-0.5 border-b border-zinc-100 dark:border-zinc-800`}
                     >

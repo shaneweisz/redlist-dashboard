@@ -39,23 +39,30 @@
  */
 export const GBIF_URL_BUDGET = 3400;
 
-/** Coordinate precision in the WKT. Five decimals is a bit over a metre. */
-const PRECISION = 5;
+/**
+ * Coordinate precision in the WKT.
+ *
+ * Five decimals is a bit over a metre, and four is about eleven. Once a
+ * boundary is being moved by 50 m or more to fit, writing it to the metre is
+ * spending roughly a tenth of the byte budget on precision that the
+ * simplification has already thrown away.
+ */
+const decimalsFor = (epsilon: number) => (epsilon >= 0.0005 ? 4 : 5);
 
 /**
  * Tolerances tried in turn, in degrees. The first that fits the budget wins, so
  * a boundary is never simplified more than it has to be — 0 means "as supplied"
  * and is always tried first.
  *
- * The ladder stops at 0.005°, a little over 500 m, and the ceiling is a
- * correctness limit rather than a taste one. Past it, neighbouring parcels of
- * the same site are pushed far enough out of shape to overlap each other, and
- * GBIF rejects a MULTIPOLYGON whose parts intersect exactly as it rejects a
- * ring that crosses itself. A site too big to fit at 500 m loses its smallest
- * parcels instead, which is a loss the caller can describe honestly; a boundary
- * bulldozed by 5 km is one nobody can.
+ * The ladder runs to 0.02°, a bit over 2 km, which is as far out of shape as a
+ * boundary can go and still be worth calling that site's edge. It needs that
+ * reach: Kruger is one 807-point outline over 350 km, and nothing gentler than
+ * about 1 km brings it inside a 4 KB URL. Parcels pushed into each other on the
+ * way are dropped by `disjoint` rather than prevented by a lower ceiling —
+ * losing the smaller of two colliding parcels is a loss that can be described,
+ * where refusing the whole site is not.
  */
-const TOLERANCES = [0, 0.00002, 0.00005, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005];
+const TOLERANCES = [0, 0.00002, 0.00005, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02];
 
 export interface GbifGeometry {
   /** WKT, wound the way GBIF reads it, and inside the URL budget. */
@@ -114,10 +121,10 @@ function rdp(points: GeoJSON.Position[], epsilon: number): GeoJSON.Position[] {
 }
 
 /** The ring at the precision the WKT will carry, with repeats collapsed. */
-function roundRing(ring: GeoJSON.Position[]): GeoJSON.Position[] {
+function roundRing(ring: GeoJSON.Position[], decimals: number): GeoJSON.Position[] {
   const out: GeoJSON.Position[] = [];
   for (const [x, y] of ring) {
-    const point: GeoJSON.Position = [+x.toFixed(PRECISION), +y.toFixed(PRECISION)];
+    const point: GeoJSON.Position = [+x.toFixed(decimals), +y.toFixed(decimals)];
     const last = out[out.length - 1];
     // Rounding is not a formatting step that happens later: two vertices a
     // centimetre apart become the same point in the WKT, and a zero-length
@@ -141,13 +148,20 @@ const inBox = (a: GeoJSON.Position, b: GeoJSON.Position, c: GeoJSON.Position) =>
   Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1]);
 
 /**
- * Whether two segments cross, counting a touch as a crossing.
+ * Whether two segments cross or touch.
  *
- * The collinear case has to be handled separately, and it is not a theoretical
- * nicety: simplification routinely leaves two stretches of a boundary lying
- * along the same line, and every orientation test then answers zero, so the
- * sign comparison alone sees nothing. GBIF sees it — "Self-intersection at or
- * near point (18.41034, -33.92014)" on a ring this function had already passed.
+ * A touch counts, and that is not over-strict: JTS — and so GBIF — applies the
+ * OGC validity rule, under which a ring that meets itself at a single point is
+ * invalid even though nothing crosses. It says so in its own words, and with a
+ * different message from a true crossing: "Invalid geometry: Ring
+ * Self-intersection at or near point (24.6151, -33.7333)". Loosening this to
+ * proper crossings only let exactly those polygons through.
+ *
+ * The collinear case has to be handled separately, and is not a theoretical
+ * nicety: simplification routinely leaves two stretches lying along the same
+ * line, and every orientation test then answers zero, so the sign comparison
+ * alone sees nothing. GBIF sees it — "Self-intersection at or near point
+ * (18.41034, -33.92014)" on a ring this function had already passed.
  */
 function segmentsCross(
   a: GeoJSON.Position, b: GeoJSON.Position,
@@ -161,6 +175,27 @@ function segmentsCross(
     return inBox(a, b, c) || inBox(a, b, d) || inBox(c, d, a) || inBox(c, d, b);
   }
   return false;
+}
+
+/**
+ * Whether a ring encloses no area at all.
+ *
+ * Rounding and simplification both produce these: three points that end up
+ * collinear still read as a ring with enough distinct vertices, and every
+ * validity test above passes it, because a line does not cross itself. JTS —
+ * and so GBIF — cannot give a flat ring an orientation, and reports it as the
+ * wrong one: "Polygon with anticlockwise interior ring" for a clockwise
+ * MULTIPOLYGON whose twelve holes were all, measurably, clockwise. The offender
+ * was a four-point hole with zero area, and the message named the winding
+ * rather than the flatness, which is what made it hard to see.
+ *
+ * The threshold is the rounding grid rather than zero: on a grid of 10^-d
+ * degrees, twice the area of any ring that genuinely encloses something is at
+ * least one grid square, so anything under half of that is noise.
+ */
+function isFlat(ring: GeoJSON.Position[], decimals: number): boolean {
+  const grid = 10 ** -decimals;
+  return Math.abs(signedArea(ring)) < (grid * grid) / 2;
 }
 
 /**
@@ -178,8 +213,8 @@ function isSimpleRing(ring: GeoJSON.Position[]): boolean {
   const open = ring.slice(0, -1);
   const n = open.length;
   if (n < 3) return false;
-  // A vertex repeated away from its neighbours pinches the ring shut, which
-  // GBIF reads as a self-intersection too.
+  // A vertex used twice pinches the ring shut, which is a self-touch and so,
+  // under the OGC rule above, invalid.
   const seen = new Set<string>();
   for (const [x, y] of open) {
     const key = `${x},${y}`;
@@ -255,29 +290,43 @@ const usable = (ring: GeoJSON.Position[]) =>
  * always terminates somewhere GBIF will accept, at worst costing bytes.
  */
 function simplifyRing(ring: GeoJSON.Position[], epsilon: number): GeoJSON.Position[] | null {
-  const source = roundRing(ring);
-  if (source.length < 4) return null;
+  const decimals = decimalsFor(epsilon);
+  const source = roundRing(ring, decimals);
+  if (source.length < 4 || isFlat(source, decimals)) return null;
   if (epsilon === 0) return usable(source) ? source : null;
 
   const open = source.slice(0, -1);
-  let anchor = 0;
+  let farthest = 0;
   let worst = -1;
   for (let i = 1; i < open.length; i++) {
     const d = (open[i][0] - open[0][0]) ** 2 + (open[i][1] - open[0][1]) ** 2;
     if (d > worst) {
       worst = d;
-      anchor = i;
+      farthest = i;
     }
   }
+  /**
+   * Where to cut the ring, in the order worth trying.
+   *
+   * Whether RDP leaves a ring crossing itself depends heavily on where the two
+   * chains are cut, and the cut is arbitrary — so a tolerance that fails from
+   * one anchor often succeeds from another. Trying three before conceding is a
+   * few hundred microseconds, and it is the difference between simplifying a
+   * long wiggly boundary and falling all the way back to sending it whole.
+   */
+  const anchors = [farthest, Math.floor(open.length / 3), Math.floor((2 * open.length) / 3)];
 
   for (let e = epsilon; e > 1e-7; e /= 2) {
-    const head = rdp(open.slice(0, anchor + 1), e);
-    const tail = rdp([...open.slice(anchor), open[0]], e);
-    const candidate = roundRing([...head.slice(0, -1), ...tail]);
-    // Three distinct corners plus the repeat that closes it. Anything less is
-    // a line or a point, and a sliver parcel simplified into one is better
-    // dropped than sent to GBIF as a degenerate ring.
-    if (candidate.length >= 4 && usable(candidate)) return candidate;
+    for (const anchor of anchors) {
+      if (anchor < 1 || anchor >= open.length) continue;
+      const head = rdp(open.slice(0, anchor + 1), e);
+      const tail = rdp([...open.slice(anchor), open[0]], e);
+      const candidate = roundRing([...head.slice(0, -1), ...tail], decimals);
+      // Three distinct corners plus the repeat that closes it. Anything less is
+      // a line or a point, and a sliver parcel simplified into one is better
+      // dropped than sent to GBIF as a degenerate ring.
+      if (candidate.length >= 4 && !isFlat(candidate, decimals) && usable(candidate)) return candidate;
+    }
   }
   return usable(source) ? source : null;
 }
@@ -379,6 +428,27 @@ export function geometryForGbif(
   const fits = (polygons: GeoJSON.Position[][][]) =>
     encodeURIComponent(toWkt(polygons)).length <= allowance;
 
+  /**
+   * Whether a candidate set still contains the ground that was clicked.
+   *
+   * Parcels get dropped in two places — a ring that won't simplify validly is
+   * discarded by `at`, and one too detailed to fit is skipped by the greedy
+   * fill — and either can quietly leave a set that is technically the site and
+   * practically nothing. Kruger did exactly that: its 1.7-square-degree outline
+   * was dropped and the budget filled with two zero-area slivers, and the panel
+   * reported "no threatened species in Kruger National Park" with complete
+   * confidence.
+   *
+   * The rule is the click rather than a share of the area, because a share
+   * can't tell those apart from the case that is fine: on a serial site of 128
+   * scattered parcels, searching the one you pointed at is a small fraction of
+   * the total and exactly the right answer. What is never right is searching
+   * somewhere you didn't point at instead.
+   */
+  const clickedParcel = focus ? source.findIndex((p) => contains(p[0], focus)) : -1;
+  const honoursClick = (polygons: GeoJSON.Position[][][]) =>
+    clickedParcel < 0 || polygons.some((p) => contains(p[0], focus!));
+
   const answer = (polygons: GeoJSON.Position[][][], epsilon: number): GbifGeometry => ({
     wkt: toWkt(polygons),
     geometry: { type: "MultiPolygon", coordinates: polygons },
@@ -393,7 +463,7 @@ export function geometryForGbif(
 
   for (const epsilon of TOLERANCES) {
     const polygons = disjoint(at(epsilon));
-    if (polygons.length && fits(polygons)) return answer(polygons, epsilon);
+    if (polygons.length && fits(polygons) && honoursClick(polygons)) return answer(polygons, epsilon);
   }
 
   // Simplifying as hard as we are willing to still doesn't fit — a serial site
@@ -415,7 +485,7 @@ export function geometryForGbif(
     if (!fits([...kept, polygon])) continue;
     kept.push(polygon);
   }
-  if (kept.length === 0) return null;
+  if (kept.length === 0 || !honoursClick(kept)) return null;
   return answer(kept, TOLERANCES[TOLERANCES.length - 1]);
 }
 

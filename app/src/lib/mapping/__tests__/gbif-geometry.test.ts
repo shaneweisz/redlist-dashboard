@@ -142,6 +142,33 @@ describe("geometryForGbif", () => {
     expect(geometryForGbif(mp([[shell, inside]]))!.geometry.coordinates[0].length).toBe(2);
   });
 
+  it("rejects a ring that touches itself, as GBIF does", () => {
+    // Not over-strict: JTS applies the OGC rule, under which a ring meeting
+    // itself at a point is invalid even though nothing crosses — "Invalid
+    // geometry: Ring Self-intersection". Loosening this to proper crossings
+    // only let exactly those polygons through to a 400.
+    const pinched: GeoJSON.Position[] = [
+      [0, 0], [4, 0], [4, 4], [2, 2], [0, 4], [2, 2], [0, 0],
+    ];
+    expect(geometryForGbif(mp([[pinched]]))).toBeNull();
+  });
+
+  it("drops a ring that encloses no area", () => {
+    // Rounding and simplification both leave these behind, and every other
+    // test passes them: a flat ring has enough distinct points and cannot
+    // cross itself. JTS can't orient one, so GBIF rejects the whole polygon
+    // with "Polygon with anticlockwise interior ring" — naming the winding
+    // rather than the flatness, which is what made it hard to find. It was a
+    // four-point zero-area hole in Kruger, among eleven good ones.
+    const shell = box(0, 0, 10, 10);
+    const flat: GeoJSON.Position[] = [[2, 2], [4, 4], [6, 6], [2, 2]];
+    const out = geometryForGbif(mp([[shell, flat]]))!;
+    expect(out.geometry.coordinates[0].length).toBe(1);
+
+    // A polygon that is nothing but a flat ring is not a polygon at all.
+    expect(geometryForGbif(mp([[flat]]))).toBeNull();
+  });
+
   it("returns null for a geometry with nothing usable in it", () => {
     expect(geometryForGbif(mp([]))).toBeNull();
     expect(geometryForGbif(mp([[[[0, 0], [1, 1]]]]))).toBeNull();
@@ -192,7 +219,9 @@ describe("live GBIF", () => {
       imageDisplay: "1400,520,96",
       layers: "all",
       returnGeometry: "true",
-      maxAllowableOffset: "0.0002857",
+      // The same fixed offset NearbyMapView asks for, so this exercises the
+      // boundaries the app actually prepares rather than pixel-derived ones.
+      maxAllowableOffset: "0.0002",
       f: "json",
     });
     const response = await fetch(`${MAP_SERVER}/identify?${params}`);
@@ -203,6 +232,10 @@ describe("live GBIF", () => {
     ["Table Mountain, South Africa", 18.4, -33.98],
     ["Serengeti, Tanzania", 34.83, -2.33],
     ["Yellowstone, USA", -110.58, 44.6],
+    // One 807-point outline over 350 km: the case that needs the coarse end of
+    // the tolerance ladder, and the one that exposed both the touching-vertex
+    // and zero-area-ring bugs.
+    ["Kruger, South Africa", 31.5, -24.0],
   ];
 
   for (const [label, lng, lat] of sites) {
@@ -217,11 +250,16 @@ describe("live GBIF", () => {
           return;
         }
         expect(results.length).toBeGreaterThan(0);
+        let searchable = 0;
         for (const result of results) {
           const multiPolygon = esriRingsToMultiPolygon(result.geometry?.rings);
           if (!multiPolygon) continue;
           const geometry = geometryForGbif(multiPolygon, { baseUrlBytes: 300, focus: [lng, lat] });
-          expect(geometry).not.toBeNull();
+          // Null is a legitimate answer — a boundary past what GBIF will take —
+          // and the UI says so rather than offering a button that does nothing.
+          // What must hold is that anything we *do* produce, GBIF accepts.
+          if (!geometry) continue;
+          searchable += 1;
 
           const params = new URLSearchParams({
             geometry: geometry!.wkt,
@@ -237,6 +275,9 @@ describe("live GBIF", () => {
           // Counter-clockwise or the count is the whole world minus the park.
           expect(JSON.parse(body).count).toBeLessThan(5_000_000);
         }
+        // And somewhere this well protected, at least one designation has to be
+        // searchable, or the feature does nothing where it matters most.
+        expect(searchable).toBeGreaterThan(0);
       },
       120_000
     );
