@@ -182,7 +182,8 @@ export default function NearbyMapView({
   /** How much of what is here to ask about — see NEARBY_SCOPES. */
   const [scope, setScope] = useState<NearbyScope>(initial?.scope ?? "threatened");
 
-  const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
+  /** Which button is waiting on the browser for a fix, if either. */
+  const [locating, setLocating] = useState<"idle" | "search" | "go" | "denied">("idle");
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   /** Where a place search landed, marked so it can be compared with the ring. */
   const [placePin, setPlacePin] = useState<Place | null>(null);
@@ -313,9 +314,37 @@ export default function NearbyMapView({
       setLocating("denied");
       return;
     }
-    setLocating("asking");
+    setLocating("search");
     navigator.geolocation.getCurrentPosition(foundMe, lostMe, GEOLOCATION_OPTIONS);
   }, [foundMe, lostMe]);
+
+  /**
+   * Takes the map to where you are, and asks nothing.
+   *
+   * The pill is for the reader who wants the answer; this is for the one who
+   * wants to look around first — at the protected areas near them, say, or at
+   * which side of town to put the circle on. It marks you and stops, as the
+   * occurrence map's own locate button does. If a search is already on screen
+   * somewhere else, flying away from it is what brings up "Search here
+   * instead", so the question is one click away without being asked for you.
+   */
+  const goToMe = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocating("denied");
+      return;
+    }
+    setLocating("go");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating("idle");
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setMyLocation({ lat, lng });
+        flyTo(lat, lng);
+      },
+      lostMe,
+      GEOLOCATION_OPTIONS
+    );
+  }, [flyTo, lostMe]);
 
   /**
    * Nothing is asked until the button is pressed.
@@ -859,8 +888,10 @@ export default function NearbyMapView({
           )}
         </div>
 
-        {/* Under the basemap button: a layer you turn on, then click. */}
-        <div className="absolute right-2 top-14 z-10">
+        {/* Under the basemap button: a layer you turn on, then click; and
+            under that, the crosshair-in-a-ring every map uses for "go to where
+            I am", matching the occurrence map's. */}
+        <div className="absolute right-2 top-14 z-10 flex flex-col gap-2">
           <button
             onClick={() => {
               setShowProtected((on) => !on);
@@ -881,6 +912,27 @@ export default function NearbyMapView({
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6l7-3z" />
+            </svg>
+          </button>
+          <button
+            onClick={goToMe}
+            disabled={locating === "search" || locating === "go"}
+            title={locating === "denied" ? "Your browser wouldn't share a location" : "Go to your location"}
+            aria-label="Go to your location"
+            className={`rounded-md border border-zinc-300 bg-white p-1.5 shadow hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:bg-zinc-700 ${
+              locating === "denied" ? "text-amber-600 dark:text-amber-400" : "text-zinc-600 dark:text-zinc-300"
+            }`}
+          >
+            <svg
+              className={`h-4 w-4 ${locating === "go" ? "animate-pulse" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.8}
+            >
+              <circle cx="12" cy="12" r="3.5" />
+              <circle cx="12" cy="12" r="8" />
+              <path strokeLinecap="round" d="M12 1.5v2.5M12 20v2.5M1.5 12h2.5M20 12h2.5" />
             </svg>
           </button>
         </div>
@@ -989,7 +1041,7 @@ export default function NearbyMapView({
           <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur sm:rounded-full dark:border-zinc-700 dark:bg-zinc-800/95">
             <button
               onClick={findMe}
-              disabled={locating === "asking"}
+              disabled={locating === "search" || locating === "go"}
               className="flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -997,7 +1049,7 @@ export default function NearbyMapView({
                 <path strokeLinecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3" />
                 <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
               </svg>
-              {locating === "asking"
+              {locating === "search"
                 ? "Finding you…"
                 : // Follows the scope, so the button never promises threatened
                   // species and then hands back a list of starlings.
