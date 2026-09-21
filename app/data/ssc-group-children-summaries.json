@@ -2903,7 +2903,7 @@
       "name": "Lagomorph Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 96,
-      "outdated": 33,
+      "outdated": 34,
       "gbifNeSpeciesCount": 5,
       "byCategory": {
         "LC": 63,
@@ -2972,7 +2972,7 @@
       "name": "New World Marsupial Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 107,
-      "outdated": 95,
+      "outdated": 96,
       "gbifNeSpeciesCount": 28,
       "byCategory": {
         "LC": 72,
@@ -3769,7 +3769,7 @@
       "name": "Small Mammal Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 2933,
-      "outdated": 2017,
+      "outdated": 2052,
       "gbifNeSpeciesCount": 135,
       "byCategory": {
         "CR": 74,
@@ -7275,7 +7275,7 @@
       "name": "Gekkota Lizard Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 1775,
-      "outdated": 585,
+      "outdated": 586,
       "gbifNeSpeciesCount": 312,
       "byCategory": {
         "LC": 1042,
@@ -11733,7 +11733,7 @@
       "name": "No / Other SSC Group",
       "estimatedDescribed": 0,
       "totalAssessed": 25717,
-      "outdated": 9853,
+      "outdated": 9857,
       "gbifNeSpeciesCount": 3798,
       "byCategory": {
         "CR": 748,
@@ -16484,8 +16484,8 @@
       "name": "Mollusc Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 9957,
-      "outdated": 5237,
-      "gbifNeSpeciesCount": 26761,
+      "outdated": 5240,
+      "gbifNeSpeciesCount": 26762,
       "byCategory": {
         "CR": 782,
         "EN": 771,
@@ -21284,7 +21284,7 @@
       "name": "Dragonfly Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 6229,
-      "outdated": 3091,
+      "outdated": 3105,
       "gbifNeSpeciesCount": 185,
       "byCategory": {
         "EN": 313,
@@ -26805,7 +26805,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 303,
       "outdated": 0,
-      "gbifNeSpeciesCount": 2110,
+      "gbifNeSpeciesCount": 2111,
       "byCategory": {
         "LC": 79,
         "NT": 28,
@@ -30742,7 +30742,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 3946,
       "outdated": 1318,
-      "gbifNeSpeciesCount": 255921,
+      "gbifNeSpeciesCount": 255944,
       "byCategory": {
         "VU": 449,
         "EN": 447,
@@ -36032,8 +36032,8 @@
       "name": "Orchid Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 2443,
-      "outdated": 1169,
-      "gbifNeSpeciesCount": 18928,
+      "outdated": 1172,
+      "gbifNeSpeciesCount": 18927,
       "byCategory": {
         "VU": 315,
         "NT": 134,
@@ -37459,8 +37459,8 @@
       "name": "Bryophyte Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 327,
-      "outdated": 111,
-      "gbifNeSpeciesCount": 14500,
+      "outdated": 112,
+      "gbifNeSpeciesCount": 14504,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -39763,7 +39763,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1330,
       "outdated": 450,
-      "gbifNeSpeciesCount": 1090,
+      "gbifNeSpeciesCount": 1091,
       "byCategory": {
         "VU": 138,
         "CR": 192,
@@ -40740,7 +40740,7 @@
       "name": "Conifer Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 616,
-      "outdated": 535,
+      "outdated": 536,
       "gbifNeSpeciesCount": 46,
       "byCategory": {
         "LC": 302,
@@ -41331,8 +41331,8 @@
       "name": "No / Other SSC Group",
       "estimatedDescribed": 0,
       "totalAssessed": 71284,
-      "outdated": 16097,
-      "gbifNeSpeciesCount": 228057,
+      "outdated": 16200,
+      "gbifNeSpeciesCount": 228074,
       "byCategory": {
         "LR/cd": 95,
         "VU": 9845,
@@ -83774,7 +83774,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 17,
       "outdated": 1,
-      "gbifNeSpeciesCount": 1933,
+      "gbifNeSpeciesCount": 1934,
       "byCategory": {
         "NT": 4,
         "VU": 4,
@@ -83863,7 +83863,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 125,
       "outdated": 7,
-      "gbifNeSpeciesCount": 13821,
+      "gbifNeSpeciesCount": 13819,
       "byCategory": {
         "EN": 31,
         "CR": 17,
@@ -84229,7 +84229,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1149,
       "outdated": 47,
-      "gbifNeSpeciesCount": 26565,
+      "gbifNeSpeciesCount": 26563,
       "byCategory": {
         "LC": 478,
         "NT": 101,
@@ -86092,7 +86092,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 55,
       "outdated": 1,
-      "gbifNeSpeciesCount": 44545,
+      "gbifNeSpeciesCount": 44553,
       "byCategory": {
         "VU": 8,
         "LC": 7,
