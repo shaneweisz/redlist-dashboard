@@ -6,9 +6,10 @@ import { useMap } from "react-map-gl/maplibre";
 /**
  * The map's tools, behind one button under the basemap and locate controls.
  *
- * EOO/AOO and measuring are both things an assessor reaches for occasionally
- * and neither is worth a permanent panel — between them they had two corners
- * of the map, the metrics standing open whether or not they were switched on.
+ * EOO/AOO, measuring and the GPS uncertainty rings are all things an assessor
+ * reaches for occasionally and none is worth a permanent panel — between them
+ * they had two corners of the map, the metrics standing open whether or not they
+ * were switched on.
  *
  * Top right, below the other two: everything that acts on the map is in one
  * column now, and the bottom right is left to the scale bar and the
@@ -23,12 +24,24 @@ export default function MapToolsMenu({
   onToggle,
   measuring,
   onMeasureToggle,
+  uncertainty,
+  onUncertaintyToggle,
+  uncertaintyNote,
   children,
 }: {
   open: boolean;
   onToggle: () => void;
   measuring: boolean;
   onMeasureToggle: () => void;
+  /** Whether each record's stated GPS uncertainty is drawn around it. */
+  uncertainty: boolean;
+  onUncertaintyToggle: () => void;
+  /**
+   * What the rings do and don't cover — how many records state a radius at all.
+   * Shown only while they're on, where it's a caveat about what you're looking
+   * at rather than a paragraph in front of a switch.
+   */
+  uncertaintyNote?: string;
   children?: React.ReactNode;
 }) {
   const { current: map } = useMap();
@@ -62,10 +75,13 @@ export default function MapToolsMenu({
     <div className="absolute right-2 z-[999] flex flex-col items-end gap-1.5" style={{ top: offset }}>
       <button
         onClick={onToggle}
-        title={open ? "Hide the map tools" : "Map tools: EOO/AOO and measuring"}
+        title={open ? "Hide the map tools" : "Map tools: EOO/AOO, measuring and GPS uncertainty"}
         aria-label="Map tools"
         className={`p-1.5 rounded-lg shadow-md border transition-colors ${
-          open || measuring
+          // Lit while a tool is on, not only while the panel is open: both of
+          // them change what the map is showing, and the panel folds away over
+          // whichever one you left running.
+          open || measuring || uncertainty
             ? "bg-blue-600 border-blue-700 text-white"
             : "bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
         }`}
@@ -99,6 +115,33 @@ export default function MapToolsMenu({
             </svg>
             {measuring ? "Measuring — click two points" : "Measure a distance"}
           </button>
+          {/* Under measuring, and next to it rather than among the filters,
+              because it's the same kind of thing: a way of interrogating the
+              points already on the map, switched on while you're asking and off
+              again afterwards. */}
+          <button
+            onClick={onUncertaintyToggle}
+            title="Draw each record's stated GPS uncertainty as a circle on the ground, to scale"
+            aria-pressed={uncertainty}
+            className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded text-[11px] transition-colors ${
+              uncertainty
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            }`}
+          >
+            {/* A dot inside a dashed ring: the point, and the ground it might
+                actually be anywhere in. */}
+            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <circle cx="12" cy="12" r="8.5" strokeDasharray="3 2.5" />
+              <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+            </svg>
+            GPS uncertainty
+          </button>
+          {uncertainty && uncertaintyNote && (
+            <p className="px-1.5 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+              {uncertaintyNote}
+            </p>
+          )}
         </div>
       )}
     </div>

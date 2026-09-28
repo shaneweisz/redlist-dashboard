@@ -251,6 +251,13 @@ const MAP_LAYER_SLOTS = [
   "ranges",
   /** The nearby search's radius: the question's boundary, under its answers. */
   "nearby-radius",
+  /**
+   * The GPS uncertainty rings, under the dots whose ground they are. Its own
+   * band rather than the records' because the toggle mounts them after the
+   * points are already on the map, and within a band mount order decides — so
+   * sharing "records" would have put the rings over the dots they belong to.
+   */
+  "uncertainty",
   /** The species' own GBIF records. */
   "records",
   /** A picked neighbour's records, above this species' own. */
@@ -373,6 +380,72 @@ function formatUncertainty(meters: number): string {
     return `${Number.isInteger(km) ? km : km.toFixed(1)}km`;
   }
   return `${meters}m`;
+}
+
+/**
+ * The colour of the GPS uncertainty rings.
+ *
+ * Slate rather than a hue of its own: the ring isn't another layer to read
+ * against the records, it is the same record drawn at the precision it actually
+ * has, so it should recede behind the dot at its centre. It is drawn over a
+ * white casing because a dark ring alone disappears into the satellite basemap,
+ * which is the basemap you reach for precisely when you are asking whether a
+ * point can be believed.
+ */
+const UNCERTAINTY_RING_COLOR = "#334155";
+
+/**
+ * The widest radius drawn as a ring, in metres.
+ *
+ * GBIF carries figures in the thousands of kilometres — a country or a province
+ * recorded as a point, with its own extent as the uncertainty. There is nothing
+ * to draw for those: `uncertaintyCircle` offsets degrees about a centre, which
+ * stops meaning anything long before a continent, and a ring that wraps the
+ * globe is a shape over the whole map rather than a fact about one record. So
+ * they are left off and counted in the note under the toggle instead — which is
+ * the more useful form anyway, since "this record's radius is 2,000km" is a
+ * verdict on the record, not something you need to see to scale.
+ *
+ * 500km is well past any GPS reading and past the widest preset in the
+ * uncertainty filter (50km), so nothing an assessor is weighing point by point
+ * falls foul of it.
+ */
+export const UNCERTAINTY_RING_MAX_M = 500_000;
+
+/** Whether a stated figure is one there's a ring to draw for. */
+function isDrawableUncertainty(metres: number | null | undefined): metres is number {
+  return metres != null && metres > 0 && metres <= UNCERTAINTY_RING_MAX_M;
+}
+
+/**
+ * Each record's stated GPS uncertainty as a ring on the ground.
+ *
+ * Only the records that state one: a record with no figure gets no ring, which
+ * is why the toggle says how many of them there are. An absent radius means
+ * nobody wrote the precision down, not that the point is exact, and a map that
+ * drew nothing for both cases would say the opposite.
+ *
+ * 36 segments, not the 64 `uncertaintyCircle` defaults to. A georeference is one
+ * circle an assessor is placing by hand and wants smooth; these are up to a few
+ * thousand at once, most of them a few pixels across, where the extra vertices
+ * cost more than they show.
+ */
+export function buildUncertaintyRings(
+  panelOccurrences: OccurrenceFeature[]
+): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const o of panelOccurrences) {
+    if (!hasPosition(o)) continue;
+    const metres = o.properties.coordinateUncertaintyInMeters;
+    if (!isDrawableUncertainty(metres)) continue;
+    const [lon, lat] = o.geometry.coordinates;
+    features.push({
+      type: "Feature",
+      properties: { gbifID: o.properties.gbifID },
+      geometry: uncertaintyCircle(lat, lon, metres, 36),
+    });
+  }
+  return { type: "FeatureCollection", features };
 }
 
 /**
@@ -1012,6 +1085,17 @@ export default function OccurrenceMapRow({
    * click normally does, and that needs to have been asked for.
    */
   const [measure, setMeasure] = useState<[number, number][] | null>(null);
+  /**
+   * Whether each record's stated GPS uncertainty is drawn as a ring around it.
+   *
+   * Off by default, and a toggle rather than always-on, because the two
+   * questions a dot has to answer are different ones. Most of the time you are
+   * reading the distribution, where a few thousand overlapping rings is noise;
+   * occasionally you are asking whether a single point can be believed — the
+   * forest elephants apparently swimming off Gabon (#557) — and then the ring is
+   * the whole answer, since a 35 km radius reaches the coast from well inland.
+   */
+  const [showUncertainty, setShowUncertainty] = useState(false);
   /** True while the map is being panned, so the cursor can say so. */
   const [panning, setPanning] = useState(false);
   /**
@@ -2860,6 +2944,87 @@ export default function OccurrenceMapRow({
     return { type: "FeatureCollection", features };
   }, [hoveredFeature, colorByDate, assessmentDate, assessmentYear, exclusions]);
 
+  /**
+   * The uncertainty rings for a panel's records, built once per set of records.
+   *
+   * Keyed on the array itself rather than recomputed per render: the panel's
+   * JSX is a plain function, so it re-runs on every hover — and unlike the
+   * styled dots, whose radius changes when a record is hovered, the rings don't
+   * depend on any of that. Every array that reaches it is a memo's result
+   * upstream, so identity is stable until the filters actually change, and a
+   * WeakMap lets the old collection go with the old array.
+   */
+  const uncertaintyRingsCache = useRef(
+    new WeakMap<OccurrenceFeature[], GeoJSON.FeatureCollection>()
+  );
+  const uncertaintyRingsFor = useCallback((panelOccurrences: OccurrenceFeature[]) => {
+    const cached = uncertaintyRingsCache.current.get(panelOccurrences);
+    if (cached) return cached;
+    const built = buildUncertaintyRings(panelOccurrences);
+    uncertaintyRingsCache.current.set(panelOccurrences, built);
+    return built;
+  }, []);
+
+  /**
+   * How many of the drawn records got a ring, how many state no radius at all,
+   * how many state one too wide to draw, and the widest ring on the map.
+   *
+   * All of it goes under the toggle, because the rings on their own are
+   * misleading in the directions that matter: a point with no ring hasn't been
+   * shown to be precise, a record whose radius is a whole country is the least
+   * trustworthy one there and the only one with nothing drawn for it, and the
+   * widest ring is usually what you opened this to find.
+   */
+  const uncertaintyCoverage = useMemo(() => {
+    let drawn = 0;
+    let ringed = 0;
+    let tooWide = 0;
+    let largestRing = 0;
+    for (const o of mappedOccurrences) {
+      if (!hasPosition(o)) continue;
+      drawn++;
+      const u = o.properties.coordinateUncertaintyInMeters;
+      if (u == null || !(u > 0)) continue;
+      // Stated, but not drawable — the same test the ring builder applies, so
+      // the count under the toggle can't drift from what's on the map.
+      if (!isDrawableUncertainty(u)) {
+        tooWide++;
+        continue;
+      }
+      ringed++;
+      if (u > largestRing) largestRing = u;
+    }
+    return { drawn, ringed, tooWide, largestRing };
+  }, [mappedOccurrences]);
+
+  /** The coverage above, in words, for under the toggle that draws the rings. */
+  const uncertaintyNote = useMemo(() => {
+    if (!showGbif) return "GBIF's records are hidden — tick them back on to see the rings.";
+    const { drawn, ringed, tooWide, largestRing } = uncertaintyCoverage;
+    if (drawn === 0) return "No records on the map to draw a radius for.";
+    const parts: string[] = [];
+    if (ringed === 0) {
+      parts.push(
+        tooWide > 0
+          ? "None of these records state a radius narrow enough to draw."
+          : "None of these records state a radius."
+      );
+    } else {
+      parts.push(
+        `${ringed.toLocaleString()} of ${drawn.toLocaleString()} drawn records state a radius — the widest is ${formatUncertainty(largestRing)}.`
+      );
+    }
+    if (tooWide > 0) {
+      parts.push(
+        `${tooWide.toLocaleString()} state one over ${formatUncertainty(UNCERTAINTY_RING_MAX_M)} — a locality that size is a point in name only.`
+      );
+    }
+    if (ringed < drawn) {
+      parts.push("A record with no ring isn't a precise one; it's one whose precision nobody recorded.");
+    }
+    return parts.join(" ");
+  }, [showGbif, uncertaintyCoverage]);
+
   // FitBounds helper using map ref
   const fitMapToBbox = useCallback((bbox: [number, number, number, number]) => {
     const map = mapRef.current;
@@ -4096,15 +4261,19 @@ export default function OccurrenceMapRow({
                   the map has projected. */}
               {renderClickInfo(panelId)}
               {/* The map's tools, behind one cog above its bottom-right
-                  controls: the EOO/AOO switch and its figures, and measuring.
-                  Both were panels of their own in opposite corners, which is a
-                  lot of standing furniture for two things used occasionally. */}
+                  controls: the EOO/AOO switch and its figures, measuring, and
+                  the GPS uncertainty rings. The first two were panels of their
+                  own in opposite corners, which is a lot of standing furniture
+                  for things used occasionally. */}
               {panelId === "main" || !splitView ? (
                 <MapToolsMenu
                   open={toolsOpen}
                   onToggle={() => setToolsOpen((v) => !v)}
                   measuring={!!measure}
                   onMeasureToggle={() => setMeasure(measure ? null : [])}
+                  uncertainty={showUncertainty}
+                  onUncertaintyToggle={() => setShowUncertainty((v) => !v)}
+                  uncertaintyNote={uncertaintyNote}
                 >
                   {renderRangeMetrics()}
                 </MapToolsMenu>
@@ -4366,6 +4535,42 @@ export default function OccurrenceMapRow({
                     beforeId={slotId("ranges", panelId)}
                     type="line"
                     paint={{ "line-color": "#d97706", "line-width": 1 }}
+                  />
+                </Source>
+              )}
+              {/* Each record's GPS uncertainty, to scale, under the dot it
+                  belongs to — the ground the record actually claims rather than
+                  the pixel it is drawn at. Outline only, no fill: the basemap
+                  inside the ring is the whole question being asked of it (is
+                  that 35km of ocean or of forest?), and a wash over it — times
+                  however many rings overlap there — is exactly the thing you
+                  need to keep reading. Two layers, because a single dark ring
+                  disappears into the satellite basemap: a white casing, and the
+                  dashed ring itself. Dashed, like every other radius on this map
+                  (the nearby search, the assessor's own georeferences), so it
+                  reads as a stated tolerance and not as a mapped boundary. */}
+              {showGbif && showUncertainty && (
+                <Source
+                  id={`uncertainty-rings-${panelId}`}
+                  type="geojson"
+                  data={uncertaintyRingsFor(panelOccurrences)}
+                >
+                  <Layer
+                    id={`uncertainty-casing-${panelId}`}
+                    beforeId={slotId("uncertainty", panelId)}
+                    type="line"
+                    paint={{ "line-color": "#ffffff", "line-width": 3, "line-opacity": 0.5 }}
+                  />
+                  <Layer
+                    id={`uncertainty-line-${panelId}`}
+                    beforeId={slotId("uncertainty", panelId)}
+                    type="line"
+                    paint={{
+                      "line-color": UNCERTAINTY_RING_COLOR,
+                      "line-width": 1.25,
+                      "line-opacity": 0.8,
+                      "line-dasharray": [3, 2],
+                    }}
                   />
                 </Source>
               )}
