@@ -5,8 +5,8 @@
       "name": "Insects",
       "estimatedDescribed": 1008355,
       "totalAssessed": 14531,
-      "outdated": 6111,
-      "gbifNeSpeciesCount": 252088,
+      "outdated": 6115,
+      "gbifNeSpeciesCount": 252090,
       "byCategory": {
         "VU": 1086,
         "EN": 1185,
@@ -47,7 +47,7 @@
       "name": "Molluscs",
       "estimatedDescribed": 89129,
       "totalAssessed": 9957,
-      "outdated": 5240,
+      "outdated": 5248,
       "gbifNeSpeciesCount": 26762,
       "byCategory": {
         "CR": 782,
@@ -70,7 +70,7 @@
       "estimatedDescribed": 83805,
       "totalAssessed": 3410,
       "outdated": 3097,
-      "gbifNeSpeciesCount": 25544,
+      "gbifNeSpeciesCount": 25545,
       "byCategory": {
         "VU": 429,
         "CR": 182,
@@ -164,8 +164,8 @@
       "name": "Flowering Plants",
       "estimatedDescribed": 369000,
       "totalAssessed": 76102,
-      "outdated": 19010,
-      "gbifNeSpeciesCount": 230374,
+      "outdated": 19052,
+      "gbifNeSpeciesCount": 230416,
       "byCategory": {
         "LR/cd": 102,
         "VU": 10376,
@@ -207,7 +207,7 @@
       "estimatedDescribed": 11800,
       "totalAssessed": 839,
       "outdated": 536,
-      "gbifNeSpeciesCount": 11948,
+      "gbifNeSpeciesCount": 11949,
       "byCategory": {
         "DD": 110,
         "NT": 55,
@@ -226,8 +226,8 @@
       "name": "Mosses, Liverworts & Hornworts",
       "estimatedDescribed": 19539,
       "totalAssessed": 327,
-      "outdated": 112,
-      "gbifNeSpeciesCount": 14504,
+      "outdated": 114,
+      "gbifNeSpeciesCount": 14506,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -247,7 +247,7 @@
       "estimatedDescribed": 14739,
       "totalAssessed": 18,
       "outdated": 13,
-      "gbifNeSpeciesCount": 3475,
+      "gbifNeSpeciesCount": 3477,
       "byCategory": {
         "DD": 6,
         "LC": 11,
@@ -281,7 +281,7 @@
       "estimatedDescribed": 157648,
       "totalAssessed": 1351,
       "outdated": 56,
-      "gbifNeSpeciesCount": 92834,
+      "gbifNeSpeciesCount": 93121,
       "byCategory": {
         "EN": 130,
         "CR": 48,
