@@ -54,7 +54,7 @@ describe("buildUncertaintyRings", () => {
     }
   });
 
-  it("closes the ring, so it fills as a polygon rather than drawing as a gap", () => {
+  it("closes the ring, so the outline comes back round rather than leaving a gap", () => {
     const [ring] = buildUncertaintyRings([record(1, 9.5, 0.5, 2_000)]).features;
     const coords = (ring.geometry as GeoJSON.Polygon).coordinates[0];
     expect(coords[0]).toEqual(coords[coords.length - 1]);

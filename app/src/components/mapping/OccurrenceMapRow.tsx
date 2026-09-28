@@ -4540,8 +4540,12 @@ export default function OccurrenceMapRow({
               )}
               {/* Each record's GPS uncertainty, to scale, under the dot it
                   belongs to — the ground the record actually claims rather than
-                  the pixel it is drawn at. Three layers because one isn't
-                  legible on every basemap: a faint fill, a white casing, and the
+                  the pixel it is drawn at. Outline only, no fill: the basemap
+                  inside the ring is the whole question being asked of it (is
+                  that 35km of ocean or of forest?), and a wash over it — times
+                  however many rings overlap there — is exactly the thing you
+                  need to keep reading. Two layers, because a single dark ring
+                  disappears into the satellite basemap: a white casing, and the
                   dashed ring itself. Dashed, like every other radius on this map
                   (the nearby search, the assessor's own georeferences), so it
                   reads as a stated tolerance and not as a mapped boundary. */}
@@ -4551,12 +4555,6 @@ export default function OccurrenceMapRow({
                   type="geojson"
                   data={uncertaintyRingsFor(panelOccurrences)}
                 >
-                  <Layer
-                    id={`uncertainty-fill-${panelId}`}
-                    beforeId={slotId("uncertainty", panelId)}
-                    type="fill"
-                    paint={{ "fill-color": UNCERTAINTY_RING_COLOR, "fill-opacity": 0.07 }}
-                  />
                   <Layer
                     id={`uncertainty-casing-${panelId}`}
                     beforeId={slotId("uncertainty", panelId)}
