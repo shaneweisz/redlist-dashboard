@@ -1156,8 +1156,8 @@
       "name": "Bat Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 1336,
-      "outdated": 683,
-      "gbifNeSpeciesCount": 90,
+      "outdated": 684,
+      "gbifNeSpeciesCount": 91,
       "byCategory": {
         "VU": 109,
         "EN": 89,
@@ -6477,7 +6477,7 @@
       "name": "Anoline Lizard Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 379,
-      "outdated": 341,
+      "outdated": 342,
       "gbifNeSpeciesCount": 54,
       "byCategory": {
         "CR": 22,
@@ -7276,7 +7276,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1775,
       "outdated": 586,
-      "gbifNeSpeciesCount": 312,
+      "gbifNeSpeciesCount": 315,
       "byCategory": {
         "LC": 1042,
         "NT": 108,
@@ -8206,8 +8206,8 @@
       "name": "Snake and Lizard Red List Authority",
       "estimatedDescribed": 0,
       "totalAssessed": 5393,
-      "outdated": 3684,
-      "gbifNeSpeciesCount": 766,
+      "outdated": 3689,
+      "gbifNeSpeciesCount": 768,
       "byCategory": {
         "EN": 323,
         "NT": 227,
@@ -11106,7 +11106,7 @@
       "name": "Seahorse, Pipefish and Seadragon Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 308,
-      "outdated": 216,
+      "outdated": 223,
       "gbifNeSpeciesCount": 16,
       "byCategory": {
         "DD": 78,
@@ -11733,8 +11733,8 @@
       "name": "No / Other SSC Group",
       "estimatedDescribed": 0,
       "totalAssessed": 25717,
-      "outdated": 9857,
-      "gbifNeSpeciesCount": 3799,
+      "outdated": 9859,
+      "gbifNeSpeciesCount": 3807,
       "byCategory": {
         "CR": 748,
         "EX": 75,
@@ -16484,8 +16484,8 @@
       "name": "Mollusc Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 9957,
-      "outdated": 5248,
-      "gbifNeSpeciesCount": 26762,
+      "outdated": 5263,
+      "gbifNeSpeciesCount": 26856,
       "byCategory": {
         "CR": 782,
         "EN": 771,
@@ -16507,7 +16507,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 933,
       "outdated": 200,
-      "gbifNeSpeciesCount": 16049,
+      "gbifNeSpeciesCount": 16063,
       "byCategory": {
         "EN": 146,
         "DD": 83,
@@ -19521,7 +19521,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1643,
       "outdated": 1027,
-      "gbifNeSpeciesCount": 10231,
+      "gbifNeSpeciesCount": 10258,
       "byCategory": {
         "VU": 220,
         "EN": 197,
@@ -20114,7 +20114,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 682,
       "outdated": 81,
-      "gbifNeSpeciesCount": 7161,
+      "gbifNeSpeciesCount": 7171,
       "byCategory": {
         "VU": 50,
         "CR": 14,
@@ -21142,7 +21142,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 99,
       "outdated": 9,
-      "gbifNeSpeciesCount": 6080,
+      "gbifNeSpeciesCount": 6081,
       "byCategory": {
         "EX": 7,
         "VU": 12,
@@ -21284,7 +21284,7 @@
       "name": "Dragonfly Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 6229,
-      "outdated": 3109,
+      "outdated": 3111,
       "gbifNeSpeciesCount": 185,
       "byCategory": {
         "EN": 313,
@@ -21304,7 +21304,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 213,
       "outdated": 148,
-      "gbifNeSpeciesCount": 6398,
+      "gbifNeSpeciesCount": 6405,
       "byCategory": {
         "VU": 142,
         "CR": 3,
@@ -21676,7 +21676,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 2650,
       "outdated": 2558,
-      "gbifNeSpeciesCount": 340,
+      "gbifNeSpeciesCount": 342,
       "byCategory": {
         "CR": 117,
         "DD": 1042,
@@ -26805,7 +26805,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 303,
       "outdated": 0,
-      "gbifNeSpeciesCount": 2111,
+      "gbifNeSpeciesCount": 2116,
       "byCategory": {
         "LC": 79,
         "NT": 28,
@@ -27280,7 +27280,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1039,
       "outdated": 617,
-      "gbifNeSpeciesCount": 1693,
+      "gbifNeSpeciesCount": 1696,
       "byCategory": {
         "EN": 42,
         "DD": 322,
@@ -29731,7 +29731,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 377,
       "outdated": 356,
-      "gbifNeSpeciesCount": 614,
+      "gbifNeSpeciesCount": 621,
       "byCategory": {
         "DD": 241,
         "VU": 10,
@@ -30668,7 +30668,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 45,
       "outdated": 0,
-      "gbifNeSpeciesCount": 4002,
+      "gbifNeSpeciesCount": 4010,
       "byCategory": {
         "LC": 6,
         "DD": 35,
@@ -30742,7 +30742,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 3946,
       "outdated": 1318,
-      "gbifNeSpeciesCount": 255947,
+      "gbifNeSpeciesCount": 256637,
       "byCategory": {
         "VU": 449,
         "EN": 447,
@@ -36032,8 +36032,8 @@
       "name": "Orchid Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 2443,
-      "outdated": 1182,
-      "gbifNeSpeciesCount": 18929,
+      "outdated": 1199,
+      "gbifNeSpeciesCount": 18937,
       "byCategory": {
         "VU": 315,
         "NT": 134,
@@ -37459,8 +37459,8 @@
       "name": "Bryophyte Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 327,
-      "outdated": 114,
-      "gbifNeSpeciesCount": 14506,
+      "outdated": 115,
+      "gbifNeSpeciesCount": 14508,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -39762,7 +39762,7 @@
       "name": "Palm Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 1330,
-      "outdated": 451,
+      "outdated": 491,
       "gbifNeSpeciesCount": 1091,
       "byCategory": {
         "VU": 138,
@@ -40324,7 +40324,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 505,
       "outdated": 365,
-      "gbifNeSpeciesCount": 403,
+      "gbifNeSpeciesCount": 404,
       "byCategory": {
         "VU": 48,
         "LC": 389,
@@ -41331,8 +41331,8 @@
       "name": "No / Other SSC Group",
       "estimatedDescribed": 0,
       "totalAssessed": 71284,
-      "outdated": 16231,
-      "gbifNeSpeciesCount": 228116,
+      "outdated": 16252,
+      "gbifNeSpeciesCount": 228059,
       "byCategory": {
         "LR/cd": 95,
         "VU": 9845,
@@ -83774,7 +83774,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 17,
       "outdated": 1,
-      "gbifNeSpeciesCount": 1937,
+      "gbifNeSpeciesCount": 1938,
       "byCategory": {
         "NT": 4,
         "VU": 4,
@@ -84229,7 +84229,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1149,
       "outdated": 47,
-      "gbifNeSpeciesCount": 26602,
+      "gbifNeSpeciesCount": 26599,
       "byCategory": {
         "LC": 478,
         "NT": 101,
@@ -85975,7 +85975,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 5,
       "outdated": 0,
-      "gbifNeSpeciesCount": 5968,
+      "gbifNeSpeciesCount": 5969,
       "byCategory": {
         "VU": 2,
         "CR": 2,
@@ -86092,7 +86092,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 55,
       "outdated": 1,
-      "gbifNeSpeciesCount": 44759,
+      "gbifNeSpeciesCount": 44695,
       "byCategory": {
         "VU": 8,
         "LC": 7,
