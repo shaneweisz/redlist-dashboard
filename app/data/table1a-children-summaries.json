@@ -5,8 +5,8 @@
       "name": "Insects",
       "estimatedDescribed": 1008355,
       "totalAssessed": 14531,
-      "outdated": 6115,
-      "gbifNeSpeciesCount": 252090,
+      "outdated": 6117,
+      "gbifNeSpeciesCount": 252492,
       "byCategory": {
         "VU": 1086,
         "EN": 1185,
@@ -29,7 +29,7 @@
       "estimatedDescribed": 98006,
       "totalAssessed": 1057,
       "outdated": 247,
-      "gbifNeSpeciesCount": 22802,
+      "gbifNeSpeciesCount": 22838,
       "byCategory": {
         "EN": 165,
         "VU": 104,
@@ -47,8 +47,8 @@
       "name": "Molluscs",
       "estimatedDescribed": 89129,
       "totalAssessed": 9957,
-      "outdated": 5248,
-      "gbifNeSpeciesCount": 26762,
+      "outdated": 5263,
+      "gbifNeSpeciesCount": 26856,
       "byCategory": {
         "CR": 782,
         "EN": 771,
@@ -70,7 +70,7 @@
       "estimatedDescribed": 83805,
       "totalAssessed": 3410,
       "outdated": 3097,
-      "gbifNeSpeciesCount": 25545,
+      "gbifNeSpeciesCount": 25753,
       "byCategory": {
         "VU": 429,
         "CR": 182,
@@ -93,7 +93,7 @@
       "estimatedDescribed": 5695,
       "totalAssessed": 916,
       "outdated": 18,
-      "gbifNeSpeciesCount": 2673,
+      "gbifNeSpeciesCount": 2676,
       "byCategory": {
         "VU": 57,
         "DD": 131,
@@ -143,7 +143,7 @@
       "estimatedDescribed": 171981,
       "totalAssessed": 1153,
       "outdated": 578,
-      "gbifNeSpeciesCount": 21390,
+      "gbifNeSpeciesCount": 21515,
       "byCategory": {
         "CR": 67,
         "VU": 50,
@@ -164,8 +164,8 @@
       "name": "Flowering Plants",
       "estimatedDescribed": 369000,
       "totalAssessed": 76102,
-      "outdated": 19052,
-      "gbifNeSpeciesCount": 230416,
+      "outdated": 19130,
+      "gbifNeSpeciesCount": 230370,
       "byCategory": {
         "LR/cd": 102,
         "VU": 10376,
@@ -207,7 +207,7 @@
       "estimatedDescribed": 11800,
       "totalAssessed": 839,
       "outdated": 536,
-      "gbifNeSpeciesCount": 11949,
+      "gbifNeSpeciesCount": 11945,
       "byCategory": {
         "DD": 110,
         "NT": 55,
@@ -226,8 +226,8 @@
       "name": "Mosses, Liverworts & Hornworts",
       "estimatedDescribed": 19539,
       "totalAssessed": 327,
-      "outdated": 114,
-      "gbifNeSpeciesCount": 14506,
+      "outdated": 115,
+      "gbifNeSpeciesCount": 14508,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -247,7 +247,7 @@
       "estimatedDescribed": 14739,
       "totalAssessed": 18,
       "outdated": 13,
-      "gbifNeSpeciesCount": 3477,
+      "gbifNeSpeciesCount": 3479,
       "byCategory": {
         "DD": 6,
         "LC": 11,
@@ -281,7 +281,7 @@
       "estimatedDescribed": 157648,
       "totalAssessed": 1351,
       "outdated": 56,
-      "gbifNeSpeciesCount": 93121,
+      "gbifNeSpeciesCount": 93056,
       "byCategory": {
         "EN": 130,
         "CR": 48,
