@@ -76,7 +76,7 @@ Records **with no coordinates** and records **GBIF flags** are fetched too, rath
 ### Nearby threatened species
 From a record, a right-click anywhere on the occurrence map, or the locate control: the CR/EN/VU species GBIF holds records for inside a radius, with what their assessments blame beside them. Several searches can be open at once, each a tab named for where it was asked and each pinned on the map.
 
-**`/near-me`** asks the same question of a place rather than a species, reached from the View selector. The point comes from a place search, a map click, a pasted coordinate pair or the browser's location; the radius runs 1–100 km or is dragged on the ground; and three scopes (Threatened, Assessed, All species) ride in the URL alongside `?lat=&lng=&r=`. Clicking the WDPA overlay offers to search **inside a protected area** instead of a circle, sending GBIF the real boundary.
+**`/mapping`** (formerly `/near-me`, which redirects; `/mapping/<species key>` is the species map) asks the same question of a place rather than a species, reached from the View selector. It carries the occurrence map's overlays, toolbar and callouts — the two share `useMapOverlays` and `components/mapping/overlays/` — and a click anywhere opens a callout with what the overlays say about the spot and **Show nearby threatened species**; a protected area named there offers to search **inside its boundary** instead, sending GBIF the real outline. The point can also come from a place search or the browser's location; the radius runs 1–100 km or is dragged on the ground; and three scopes (Threatened, Assessed, All species) ride in the URL alongside `?lat=&lng=&r=`.
 
 ### Narrative search
 A view of its own that searches what the assessors actually wrote — all 175,910 current global assessments, ~470 MB of prose — over a purpose-built term index. Published once per Red List release under `narratives/<release>/` in the `dashboard-data` bucket rather than once per weekly sync, since the prose only changes when the Red List publishes.
@@ -133,7 +133,7 @@ Live external APIs:
   BHL / CORE /      → historical scans, repository theses and reports,
   Google Books        printed floras (each optional — enabled by its own key)
   EOL TraitBank     → trait data for the EOL tab (hidden behind a flag)
-  Photon / OSM      → place search on the occurrence and /near-me maps
+  Photon / OSM      → place search on the occurrence map and /mapping
 ```
 
 ## How the Data Works

@@ -43,6 +43,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // /near-me became /mapping when it took on the species map's overlays — the
+  // same map as /mapping/<species key>, with no species in the address. Permanent,
+  // so a link someone saved or sent keeps working and search engines move with
+  // it; the query string (a shared search's ?lat=&lng=&r=) is carried across.
+  async redirects() {
+    return [{ source: "/near-me", destination: "/mapping", permanent: true }];
+  },
   // PostHog's API relies on trailing slashes; without this Next.js redirects them
   // and breaks event capture through the proxy.
   skipTrailingSlashRedirect: true,

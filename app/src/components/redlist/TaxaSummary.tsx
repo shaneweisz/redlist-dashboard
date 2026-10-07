@@ -1707,7 +1707,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           // It has no taxon selection to carry over and no counts to lay out,
           // so it is a route rather than a layout of this table.
           if (v === "near") {
-            router.push("/near-me");
+            router.push("/mapping");
             return;
           }
           onLayoutModeChange(v === "taxonomic" ? null : (v as LayoutMode));
