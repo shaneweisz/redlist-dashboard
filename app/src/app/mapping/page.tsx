@@ -1,5 +1,8 @@
 /**
- * The map on its own, about a place rather than a species: /map.
+ * The map on its own, about a place rather than a species: /mapping.
+ *
+ * The same map as /mapping/<species key> with no species in the address — so
+ * the same overlays, toolbar and callouts, and none of the records.
  *
  * The species map's overlays and its nearby-species search, reachable without
  * first knowing a species. On the occurrence map the search hangs off a record,

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The client half of /map.
+ * The client half of /mapping.
  *
  * Its only job is to keep MapLibre off the server: the view underneath reaches
  * for `window` and a WebGL context on mount, so it is imported with

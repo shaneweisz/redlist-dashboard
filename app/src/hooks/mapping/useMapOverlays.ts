@@ -169,6 +169,8 @@ export function useMapOverlays({
   }, [showEcoregions, ecoregions, ecoregionsLoading, loadEcoregions]);
 
   const [clickedAreas, setClickedAreas] = useState<ClickedAreas | null>(null);
+  /** True while WDPA is still being asked about the last click. */
+  const [areasPending, setAreasPending] = useState(false);
   /**
    * The habitat class under the last left click, while that overlay is on.
    *
@@ -239,6 +241,7 @@ export function useMapOverlays({
       // an answer to it.
       ++areasQueryId.current;
       setClickedAreas(null);
+      setAreasPending(showProtectedAreas);
       // Answered from the polygons already loaded, so there's nothing to wait
       // for. Clicking off every ecoregion clears the selection rather than
       // leaving it stranded.
@@ -311,13 +314,16 @@ export function useMapOverlays({
         .then((areas) => {
           // Nothing opens for a spot that isn't protected: the overlay already
           // shows that, and a section saying so on every click is noise.
-          if (query !== areasQueryId.current || areas.length === 0) return;
-          setClickedAreas({ panelId, lng, lat, areas, highlight: 0 });
+          if (query !== areasQueryId.current) return;
+          setAreasPending(false);
+          if (areas.length > 0) setClickedAreas({ panelId, lng, lat, areas, highlight: 0 });
         })
         .catch(() => {
           // Only the current query speaks for the service: an aborted one says
           // nothing about whether it is up.
-          if (query === areasQueryId.current) setProtectedAreasDown(true);
+          if (query !== areasQueryId.current) return;
+          setAreasPending(false);
+          setProtectedAreasDown(true);
         });
     },
     [
@@ -339,6 +345,7 @@ export function useMapOverlays({
     ++habitatQueryId.current;
     ++forestQueryId.current;
     setClickedAreas(null);
+    setAreasPending(false);
     setClickedHabitat(null);
     setClickedForest(null);
     setSelectedEcoregion(null);
@@ -349,6 +356,7 @@ export function useMapOverlays({
     setShowProtectedAreas((v) => !v);
     ++areasQueryId.current;
     setClickedAreas(null);
+    setAreasPending(false);
     // A fresh attempt: the service may have come back since.
     setProtectedAreasDown(false);
   }, []);
@@ -433,6 +441,7 @@ export function useMapOverlays({
     effortLoading,
     clickedAreas,
     setClickedAreas,
+    areasPending,
     clickedHabitat,
     setClickedHabitat,
     clickedForest,

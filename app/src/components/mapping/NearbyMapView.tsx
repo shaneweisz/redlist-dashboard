@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The map at /map: the species map's overlays, asked of a place rather than of
+ * The map at /mapping: the species map's overlays, asked of a place rather than of
  * a species, and the nearby-species search from wherever you click.
  *
  * The nearby-species panel already existed, but only as something you could
@@ -593,8 +593,18 @@ export default function NearbyMapView({
     [flyTo, openAt]
   );
 
+  /**
+   * Whether the click landed in a protected area — or might have, while WDPA is
+   * still being asked. A click on a protected area is a question about the
+   * area, so its callout names the area and offers the search inside it; the
+   * point's own coordinates and radius search would be a second answer to a
+   * question nobody asked. Held back while the answer is pending, so it doesn't
+   * flash up and vanish.
+   */
+  const aboutArea = overlays.areasPending || overlays.clickedAreas != null;
+
   /** The callout's own part: the point, and the offer to search around it. */
-  const calloutHeader = clicked && {
+  const calloutHeader = clicked && !aboutArea ? {
     lng: clicked.lng,
     lat: clicked.lat,
     content: (
@@ -642,7 +652,7 @@ export default function NearbyMapView({
         </button>
       </div>
     ),
-  };
+  } : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2">
@@ -851,7 +861,7 @@ export default function NearbyMapView({
           {/* The point the callout is about. The callout sits beside whatever
               boundaries it names, which can be some way from the click, so the
               spot itself is marked. */}
-          {clicked && (
+          {clicked && !aboutArea && (
             <MapLibreMarker longitude={clicked.lng} latitude={clicked.lat} anchor="center">
               <span className="block h-3 w-3 rounded-full border-2 border-white bg-zinc-800 shadow dark:bg-zinc-200" />
             </MapLibreMarker>
