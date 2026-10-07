@@ -1,21 +1,25 @@
 "use client";
 
 /**
- * What is threatened around here, asked of a place rather than of a species.
+ * The map at /map: the species map's overlays, asked of a place rather than of
+ * a species, and the nearby-species search from wherever you click.
  *
  * The nearby-species panel already existed, but only as something you could
  * reach from *inside* one species' occurrence map: you had to know a species,
- * open its map, find a record, right-click it. That is the wrong way round for
- * the question most people actually arrive with — "what threatened species are
- * near me" — which names a place and no species at all. This is the same search
- * and the same panel with the species-shaped doorway taken off the front.
+ * open its map, find a record, click it. That is the wrong way round for the
+ * question most people actually arrive with — "what threatened species are
+ * near here" — which names a place and no species at all. This is the same
+ * search and the same panel with the species-shaped doorway taken off the
+ * front, and the same overlays, toolbar and callouts as the species map, so
+ * the two read as one tool.
  *
- * It opens on wherever the browser says you are, because that is the answer to
- * "near me" and asking for it is one permission prompt. Everything else is a
- * way of choosing a different point: search a place by name, click the map,
- * paste a coordinate pair. The radius is four fixed distances rather than a
- * slider, for the reason NEARBY_RADII_KM gives — and the ring on the ground can
- * be dragged to pick between them.
+ * A click is the question, as a click on a record is on the species map. It
+ * opens a callout at the point with what the overlays say about it and the
+ * offer to search around it; a protected area named there offers to search
+ * inside its boundary instead. Nothing is searched until one of those is
+ * pressed. The radius is four fixed distances rather than a slider, for the
+ * reason NEARBY_RADII_KM gives — and the ring on the ground can be dragged to
+ * pick between them.
  *
  * It deliberately does not draw every GBIF record in the circle. A radius in a
  * well-collected part of the world holds hundreds of thousands of them, and an
@@ -28,23 +32,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { MapRef, MapLayerMouseEvent } from "react-map-gl/maplibre";
 import NearbySpeciesPanel from "@/components/mapping/NearbySpeciesPanel";
+import MapOverlayMenu from "@/components/mapping/overlays/MapOverlayMenu";
+import MapOverlayLegend from "@/components/mapping/overlays/MapOverlayLegend";
+import { MAP_LAYER_SLOTS, slotId } from "@/components/mapping/overlays/layer-slots";
+import { useMapOverlays } from "@/hooks/mapping/useMapOverlays";
 import { BASEMAP_STYLES, type BasemapKey } from "@/lib/mapping/basemaps";
 import { uncertaintyCircle } from "@/lib/mapping/georeferences";
-import { haversineMetres } from "@/lib/mapping/geo-distance";
 import { nearbyPointFields } from "@/lib/mapping/nearby-point-fields";
+import { ELEVATION_ATTRIBUTION, elevationAt, formatElevation } from "@/lib/mapping/elevation";
 import { GEOCODER_ATTRIBUTION, type Place } from "@/lib/mapping/geocode";
 import { geometryForGbif, type GbifGeometry } from "@/lib/mapping/gbif-geometry";
+import { haversineMetres } from "@/lib/mapping/geo-distance";
+import type { ProtectedArea } from "@/lib/mapping/protected-areas";
 import {
-  PROTECTED_AREAS_TILE_URL,
-  PROTECTED_AREAS_ATTRIBUTION,
-  PROTECTED_AREAS_HUE_ROTATION,
-  PROTECTED_AREAS_MAX_ZOOM,
-  identifyProtectedAreas,
-  protectedPlanetUrl,
-  type ProtectedArea,
-} from "@/lib/mapping/protected-areas";
-import {
-  NEARBY_RADII_KM,
   NEARBY_RADIUS_DEFAULT,
   type NearbyScope,
   NEARBY_SEARCH_COLOR,
@@ -63,6 +63,11 @@ const MapLibreMarker = dynamic(() => import("react-map-gl/maplibre").then((mod) 
 const ScaleControl = dynamic(() => import("react-map-gl/maplibre").then((mod) => mod.ScaleControl), { ssr: false });
 const MapPlaceSearch = dynamic(() => import("./MapPlaceSearch"), { ssr: false });
 const MapOccurrenceTooltip = dynamic(() => import("./MapOccurrenceTooltip"), { ssr: false });
+const MapOverlayLayers = dynamic(() => import("./overlays/MapOverlayLayers"), { ssr: false });
+const MapOverlayCallout = dynamic(() => import("./overlays/MapOverlayCallout"), { ssr: false });
+
+/** One map, so one set of layer ids. */
+const PANEL = "main";
 
 /** A species the reader has asked to see the records of, and where they are. */
 type Picked = { key: string; name: string; commonName: string | null };
@@ -88,8 +93,18 @@ type Area = {
   sourcePolygons: number;
 };
 
-const RING_LAYER = "near-radius-grab";
-const POINTS_LAYER = "near-points-circle";
+/** The point last clicked, and what is known about it so far. */
+type Clicked = {
+  lng: number;
+  lat: number;
+  /** A place search's name for it, when that is how it was chosen. */
+  name: string | null;
+  elevation: number | null;
+  elevationLoading: boolean;
+};
+
+const RING_LAYER = `nearby-radius-grab-${PANEL}`;
+const POINTS_LAYER = `nearby-points-circle-${PANEL}`;
 
 /** Where the map looks before it knows anything: the whole world, once. */
 const WORLD_VIEW = { longitude: 10, latitude: 25, zoom: 1.4 };
@@ -128,20 +143,26 @@ const SEARCH_BOUNDARY_OFFSET = 0.0002;
  * The grid a search centre is snapped to, in degrees — about 110 m.
  *
  * Not cosmetic: it is what makes the hour-long edge cache in front of
- * /api/nearby-species worth having. The centre of a "near me" search comes
- * straight from the browser's geolocation, which reports something like
- * -33.92490000000001, so every visitor asked a URL nobody had ever asked
- * before and every single request went through to GBIF. Rounded, everyone
- * standing within the same hundred metres — and the same person returning, or
- * reloading — shares one cached answer.
+ * /api/nearby-species worth having. A centre from a click or the browser's
+ * geolocation is something like -33.92490000000001, so every visitor asked a
+ * URL nobody had ever asked before and every single request went through to
+ * GBIF. Rounded, everyone asking within the same hundred metres — and the same
+ * person returning, or reloading — shares one cached answer.
  *
- * 110 m is comfortably inside the accuracy of the fix itself, and small against
- * even the tightest radius on offer. The marker showing where you are is *not*
- * snapped; only the circle that gets searched.
+ * 110 m is small against even the tightest radius on offer. The marker showing
+ * where you are is *not* snapped; only the circle that gets searched.
  */
 const SEARCH_GRID_DECIMALS = 3;
 
 const snapToGrid = (degrees: number) => Number(degrees.toFixed(SEARCH_GRID_DECIMALS));
+
+/** What the search button offers, following the scope so it never promises
+ *  threatened species and then hands back a list of starlings. */
+const SCOPE_NOUN: Record<NearbyScope, string> = {
+  threatened: "threatened species",
+  assessed: "assessed species",
+  all: "species",
+};
 
 /** West/south/east/north of a boundary, for framing it. */
 function boundsOf(geometry: GeoJSON.MultiPolygon): [[number, number], [number, number]] | null {
@@ -164,6 +185,18 @@ function boundsOf(geometry: GeoJSON.MultiPolygon): [[number, number], [number, n
  */
 const pointsKey = (scope: string, speciesKey: string) => `${scope}|${speciesKey}`;
 
+/** The search mark: a dashed ring around a dot, as the species map uses. */
+const SearchIcon = () => (
+  <svg className="w-3 h-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <circle cx="12" cy="12" r="3" />
+    <circle cx="12" cy="12" r="9" strokeDasharray="3 3" />
+  </svg>
+);
+
+/** A control on the map, styled as the species map styles its own. */
+const mapButtonClass =
+  "p-1.5 rounded-lg bg-white dark:bg-zinc-800 shadow-md border border-zinc-200 dark:border-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-60";
+
 export default function NearbyMapView({
   /** A point in the URL, so a search can be linked to. */
   initial,
@@ -174,6 +207,23 @@ export default function NearbyMapView({
   const [basemap, setBasemap] = useState<BasemapKey>("streets");
   const [basemapOpen, setBasemapOpen] = useState(false);
 
+  /**
+   * The same overlays the species map has. Sampling effort opens on all taxa:
+   * with no species here there is no group to match, and the reader can pick
+   * one from the list under the row.
+   */
+  const overlays = useMapOverlays({ defaultEffortGroup: "all", areaBoundaryOffset: SEARCH_BOUNDARY_OFFSET });
+  const [overlaysOpen, setOverlaysOpen] = useState(false);
+  const overlaysRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!overlaysOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (overlaysRef.current && !overlaysRef.current.contains(e.target as Node)) setOverlaysOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [overlaysOpen]);
+
   /** The question on screen: null until one has been asked. */
   const [search, setSearch] = useState<Search | null>(initial);
   /** The radius the next search will use, which the panel also edits. */
@@ -182,12 +232,14 @@ export default function NearbyMapView({
   /** How much of what is here to ask about — see NEARBY_SCOPES. */
   const [scope, setScope] = useState<NearbyScope>(initial?.scope ?? "threatened");
 
-  /** Which button is waiting on the browser for a fix, if either. */
-  const [locating, setLocating] = useState<"idle" | "search" | "go" | "denied">("idle");
+  const [locating, setLocating] = useState<"idle" | "asking" | "denied">("idle");
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   /** Where a place search landed, marked so it can be compared with the ring. */
   const [placePin, setPlacePin] = useState<Place | null>(null);
   const [previewPlace, setPreviewPlace] = useState<Place | null>(null);
+  /** The point the callout is about, until it is searched or put away. */
+  const [clicked, setClicked] = useState<Clicked | null>(null);
+  const elevationQueryId = useRef(0);
 
   const [picked, setPicked] = useState<Picked[]>([]);
   const [points, setPoints] = useState<Record<string, { points: NearbyPoint[]; total: number }>>({});
@@ -196,32 +248,12 @@ export default function NearbyMapView({
   const [shownIndex, setShownIndex] = useState(0);
   const shown = shownGroup[Math.min(shownIndex, shownGroup.length - 1)] ?? null;
 
-  /** Whether the WDPA overlay is drawn, and what a click on it found. */
-  const [showProtected, setShowProtected] = useState(false);
-  const [sitesHere, setSitesHere] = useState<
-    { lat: number; lng: number; sites: { site: ProtectedArea; ready: GbifGeometry | null }[] } | "loading" | null
-  >(null);
   const [area, setArea] = useState<Area | null>(null);
 
   const [hoveringRing, setHoveringRing] = useState(false);
   const [hoveringPoint, setHoveringPoint] = useState(false);
   const [dragging, setDragging] = useState(false);
-  /**
-   * Whether the map has been moved away from the point being described.
-   *
-   * Read from the map on every move rather than held as a view state: this view
-   * never controls the camera as React state (it flies it), and a `viewState`
-   * round-trip would fight `flyTo` for it.
-   */
-  const [movedAway, setMovedAway] = useState(false);
-
-  /** The radius as of now, for the callbacks that must not depend on it —
-   *  findMe is passed to a mount effect, and a new identity there would
-   *  re-prompt for a location every time the radius changed. */
-  const radiusKmRef = useRef(radiusKm);
-  useEffect(() => {
-    radiusKmRef.current = radiusKm;
-  }, [radiusKm]);
+  const [panning, setPanning] = useState(false);
 
   const pointsRef = useRef(points);
   useEffect(() => {
@@ -246,10 +278,8 @@ export default function NearbyMapView({
    * MapLibre is loaded with `ssr: false` and mounts a beat after the page does,
    * while the browser can answer a geolocation prompt it has already been
    * granted more or less instantly. Flying straight off `mapRef` therefore lost
-   * the very first camera move about as often as it landed it: the panel filled
-   * in with species from a point the map was still showing the whole world
-   * around. Whatever the camera was last told is kept until the map says it is
-   * ready for it.
+   * the very first camera move about as often as it landed it. Whatever the
+   * camera was last told is kept until the map says it is ready for it.
    */
   const mapReady = useRef(false);
   const pendingCentre = useRef<{ lat: number; lng: number; duration: number } | null>(null);
@@ -262,6 +292,32 @@ export default function NearbyMapView({
   }, []);
 
   /**
+   * Opens the callout at a point: its coordinates and elevation, what the
+   * overlays say about it, and the offer to search around it.
+   */
+  const openAt = useCallback(
+    (lng: number, lat: number, name: string | null = null) => {
+      const map = mapRef.current?.getMap();
+      const query = ++elevationQueryId.current;
+      setClicked({ lng, lat, name, elevation: null, elevationLoading: true });
+      if (map) overlays.queryAt(map, lng, lat, PANEL);
+      elevationAt(lng, lat)
+        .catch(() => null)
+        .then((elevation) => {
+          if (query !== elevationQueryId.current) return;
+          setClicked((prev) => (prev ? { ...prev, elevation, elevationLoading: false } : prev));
+        });
+    },
+    [overlays]
+  );
+
+  const closeCallout = useCallback(() => {
+    ++elevationQueryId.current;
+    setClicked(null);
+    overlays.clearAnswers();
+  }, [overlays]);
+
+  /**
    * Asks about a point.
    *
    * Moving the centre drops whatever species were drawn, which changing the
@@ -270,95 +326,47 @@ export default function NearbyMapView({
    * another continent left the legend naming a plant with no records anywhere
    * near the new circle. Widening the same circle is the same question asked
    * again, so the picks survive it.
-   *
-   * `fly` is off for a point the reader chose on the map, where the camera is
-   * already where they want it and moving it under the click is disorienting.
    */
   const askAt = useCallback(
-    (lat: number, lng: number, km: NearbyRadiusKm, { fly = true }: { fly?: boolean } = {}) => {
+    (lat: number, lng: number, km: NearbyRadiusKm) => {
       setSearch({ lat: snapToGrid(lat), lng: snapToGrid(lng), radiusKm: km });
       setArea(null);
       setPicked([]);
       setShownGroup([]);
-      if (fly) flyTo(lat, lng);
     },
-    [flyTo]
+    []
   );
 
   /**
-   * A fix came back: mark it, and ask what is threatened around it.
+   * Takes the map to where you are, and offers the search there.
    *
-   * The occurrence map's own locate button deliberately stops at flying there,
-   * because on that map the search is a separate question asked of a record.
-   * Here it is the entire question the page exists for, so the two are one
-   * thing: a page called "near me" that puts you on the map and then waits to
-   * be asked a second time is asking you to press the same button twice.
-   */
-  const foundMe = useCallback(
-    (pos: GeolocationPosition) => {
-      setLocating("idle");
-      const { latitude: lat, longitude: lng } = pos.coords;
-      setMyLocation({ lat, lng });
-      setPlacePin(null);
-      askAt(lat, lng, radiusKmRef.current);
-    },
-    [askAt]
-  );
-
-  /** Denied, or no fix. Either way the map cannot help, and says so rather than
-   *  leaving the button spinning. */
-  const lostMe = useCallback(() => setLocating("denied"), []);
-
-  const findMe = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocating("denied");
-      return;
-    }
-    setLocating("search");
-    navigator.geolocation.getCurrentPosition(foundMe, lostMe, GEOLOCATION_OPTIONS);
-  }, [foundMe, lostMe]);
-
-  /**
-   * Takes the map to where you are, and asks nothing.
-   *
-   * The pill is for the reader who wants the answer; this is for the one who
-   * wants to look around first — at the protected areas near them, say, or at
-   * which side of town to put the circle on. It marks you and stops, as the
-   * occurrence map's own locate button does. If a search is already on screen
-   * somewhere else, flying away from it is what brings up "Search here
-   * instead", so the question is one click away without being asked for you.
+   * It stops at the offer rather than searching: the button is also how you
+   * look around your own area first — at the protected areas near you, say —
+   * and the search is one click away in the callout it opens.
    */
   const goToMe = useCallback(() => {
     if (!navigator.geolocation) {
       setLocating("denied");
       return;
     }
-    setLocating("go");
+    setLocating("asking");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocating("idle");
         const { latitude: lat, longitude: lng } = pos.coords;
         setMyLocation({ lat, lng });
+        setPlacePin(null);
         flyTo(lat, lng);
+        openAt(lng, lat, "Your location");
       },
-      lostMe,
+      () => setLocating("denied"),
       GEOLOCATION_OPTIONS
     );
-  }, [flyTo, lostMe]);
+  }, [flyTo, openAt]);
 
   /**
-   * Nothing is asked until the button is pressed.
-   *
-   * The page used to locate you and search on arrival, on the reasoning that a
-   * page called "near me" shouldn't make you press the thing it is for. Two
-   * arguments beat it. A visitor who only wanted to look at the map spent two
-   * GBIF queries, on a free API, without asking for anything — and it also
-   * meant the browser's location prompt appeared before the reader had any idea
-   * what the page wanted it for, which is the worst moment to ask.
-   *
-   * A link that carries its own coordinates is different: it already named a
-   * place, so it opens on it and searches straight away, having asked nobody
-   * for anything.
+   * A link that carries its own coordinates already named a place, so it opens
+   * on it with the search shown, having asked nobody for anything.
    */
   const asked = useRef(false);
   useEffect(() => {
@@ -500,51 +508,34 @@ export default function NearbyMapView({
   );
 
   /**
-   * What is protected under a click, asked of WDPA's own MapServer.
+   * Each clicked protected area's boundary, prepared for GBIF.
    *
-   * The overlay is a raster, so nothing about it can be hit-tested in the
-   * browser — the same service that drew the tiles answers an `identify` for
-   * the point, which is what makes what you click guaranteed to be what you saw.
+   * Prepared when the callout opens rather than when its button is pressed:
+   * not every site has one GBIF will take, and a button that silently does
+   * nothing is worse than one that isn't offered. Preparing here means the
+   * offer and the ability to honour it are decided by the same code.
    */
-  const identifyAt = useCallback((lng: number, lat: number) => {
-    const map = mapRef.current?.getMap();
-    if (!map) return;
-    const b = map.getBounds();
-    const canvas = map.getCanvas();
-    setSitesHere("loading");
-    identifyProtectedAreas({
-      lng,
-      lat,
-      bounds: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
-      width: canvas.clientWidth,
-      height: canvas.clientHeight,
-      maxAllowableOffset: SEARCH_BOUNDARY_OFFSET,
-    })
-      // Each boundary is prepared now rather than when its button is pressed:
-      // not every site has one GBIF will take, and a button that silently does
-      // nothing is worse than one that isn't offered. Preparing here means the
-      // offer and the ability to honour it are decided by the same code.
-      .then((found) =>
-        setSitesHere({
-          lat,
-          lng,
-          sites: found.map((site) => ({
-            site,
-            ready: site.geometry
-              ? geometryForGbif(site.geometry, { baseUrlBytes: 400, focus: [lng, lat] })
-              : null,
-          })),
-        })
-      )
-      .catch(() => setSitesHere({ lat, lng, sites: [] }));
-  }, []);
+  const readyAreas = useMemo(() => {
+    const out = new Map<string, GbifGeometry | null>();
+    const clickedAreas = overlays.clickedAreas;
+    if (!clickedAreas) return out;
+    for (const site of clickedAreas.areas) {
+      out.set(
+        site.sitePid,
+        site.geometry
+          ? geometryForGbif(site.geometry, { baseUrlBytes: 400, focus: [clickedAreas.lng, clickedAreas.lat] })
+          : null
+      );
+    }
+    return out;
+  }, [overlays.clickedAreas]);
 
   /**
    * Search one protected area rather than a circle.
    *
-   * The boundary is prepared here, in the browser, and the *same* prepared
-   * boundary is both drawn and sent — see gbif-geometry for why it can't simply
-   * be forwarded whole.
+   * The boundary is prepared in the browser, and the *same* prepared boundary
+   * is both drawn and sent — see gbif-geometry for why it can't simply be
+   * forwarded whole.
    */
   const searchSite = useCallback(
     (site: ProtectedArea, ready: GbifGeometry, at: { lat: number; lng: number }) => {
@@ -559,16 +550,19 @@ export default function NearbyMapView({
       setSearch({ lat: snapToGrid(at.lat), lng: snapToGrid(at.lng), radiusKm });
       setPicked([]);
       setShownGroup([]);
-      setSitesHere(null);
+      closeCallout();
       const map = mapRef.current?.getMap();
       const bounds = boundsOf(ready.geometry);
       if (map && bounds) map.fitBounds(bounds, { padding: 40, duration: 900 });
     },
-    [radiusKm]
+    [radiusKm, closeCallout]
   );
 
   const onMapClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      // A marker's own click is not the map's: MapLibre listens on the whole
+      // container, so a click on the place pin reaches here too.
+      if ((e.originalEvent?.target as HTMLElement | null)?.closest(".maplibregl-marker")) return;
       const hits = (e.features ?? []).filter((f) => String(f.layer?.id ?? "") === POINTS_LAYER);
       if (hits.length) {
         const group = groupNearbyFeatures(hits, pointsRef.current);
@@ -578,48 +572,120 @@ export default function NearbyMapView({
           return;
         }
       }
-      // With the overlay up, a click is a question about what is protected
-      // there rather than a new centre: the overlay is the reason you turned it
-      // on, and moving the circle instead would make it unusable.
-      if (showProtected) {
-        identifyAt(e.lngLat.lng, e.lngLat.lat);
-        return;
-      }
-      // Bare ground moves the question. The map is the control here: there is
-      // no record to right-click and no species whose map this is, so a plain
-      // click is the least that could possibly work.
+      // Anywhere else — including inside the ring — is a question about that
+      // spot. The map is the control here, as a record is on the species map:
+      // a click opens what is known about the point, and the search is one
+      // more click from there.
+      setShownGroup([]);
       setPlacePin(null);
-      askAt(e.lngLat.lat, e.lngLat.lng, radiusKm, { fly: false });
+      openAt(e.lngLat.lng, e.lngLat.lat);
     },
-    [askAt, radiusKm, showProtected, identifyAt]
+    [openAt]
   );
-
-  const onMapMove = useCallback(() => {
-    const centre = mapRef.current?.getCenter();
-    // A boundary search has no centre to have moved away from, and fitting the
-    // map to a site's bounds moves the camera a long way by design.
-    if (!centre || !search || area) {
-      setMovedAway(false);
-      return;
-    }
-    // Half the radius: far enough that the ring is no longer what you're
-    // looking at, close enough that nudging the map doesn't offer to re-ask.
-    const away = haversineMetres([search.lng, search.lat], [centre.lng, centre.lat]);
-    setMovedAway(away > search.radiusKm * 500);
-  }, [search, area]);
 
   const goToPlace = useCallback(
     (place: Place) => {
       setPlacePin(place);
       setPreviewPlace(null);
-      askAt(place.lat, place.lng, radiusKm);
+      flyTo(place.lat, place.lng);
+      openAt(place.lng, place.lat, place.name);
     },
-    [askAt, radiusKm]
+    [flyTo, openAt]
   );
 
+  /** The callout's own part: the point, and the offer to search around it. */
+  const calloutHeader = clicked && {
+    lng: clicked.lng,
+    lat: clicked.lat,
+    content: (
+      <div>
+        <div className="flex items-baseline gap-1 pb-0.5">
+          <span className="min-w-0 truncate font-medium text-zinc-700 dark:text-zinc-200">
+            {clicked.name ?? "This point"}
+          </span>
+          <button
+            onClick={closeCallout}
+            title="Close"
+            className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="text-zinc-500 dark:text-zinc-400 tabular-nums">
+          {clicked.lat.toFixed(5)}, {clicked.lng.toFixed(5)}
+          {" · "}
+          {clicked.elevationLoading ? (
+            <span className="text-zinc-400">reading elevation…</span>
+          ) : clicked.elevation == null ? (
+            <span className="text-zinc-400">elevation unavailable</span>
+          ) : (
+            <span className="text-zinc-700 dark:text-zinc-200" title={ELEVATION_ATTRIBUTION}>
+              {formatElevation(clicked.elevation)}
+            </span>
+          )}
+        </div>
+        {/* The record panel's own action, from bare ground — same mark, same
+            row, so it reads as the thing it is on the species map. */}
+        <button
+          onClick={() => {
+            askAt(clicked.lat, clicked.lng, radiusKm);
+            closeCallout();
+          }}
+          title={`${SCOPE_NOUN[scope][0].toUpperCase()}${SCOPE_NOUN[scope].slice(1)} with GBIF records within ${radiusKm} km of this point, and the threats their assessments cite`}
+          className="mt-1 -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 rounded px-1 py-1 text-left hover:bg-zinc-100 dark:hover:bg-zinc-700"
+        >
+          <SearchIcon />
+          <span className="flex-1">Show nearby {SCOPE_NOUN[scope]}</span>
+          <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">{radiusKm} km</span>
+        </button>
+      </div>
+    ),
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="relative min-h-0 flex-1">
+    <div className="flex h-full min-h-0 flex-col gap-2 p-2">
+      {/* The toolbar above the map, as on the species map: the overlays live
+          here rather than as buttons on the map they describe. */}
+      <div className="relative flex flex-wrap items-center gap-2">
+        <div className="lg:relative" ref={overlaysRef}>
+          <button
+            onClick={() => setOverlaysOpen(!overlaysOpen)}
+            aria-label="Overlays"
+            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
+              overlaysOpen
+                ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
+                : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            } text-zinc-700 dark:text-zinc-300`}
+            title="Context layers: protected areas, tree cover loss, IUCN habitat types, terrestrial ecoregions, GBIF sampling effort"
+          >
+            <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l9 5-9 5-9-5 9-5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l9 5 9-5" />
+            </svg>
+            <span>Overlays</span>
+            <span className="text-[10px] text-zinc-400 tabular-nums">
+              {overlays.toggleValues.filter(Boolean).length} of {overlays.toggleValues.length}
+            </span>
+            <svg className={`w-3 h-3 text-zinc-400 transition-transform ${overlaysOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {overlaysOpen && (
+            <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
+              <div className="flex flex-col py-1 w-[20rem] max-w-full">
+                <MapOverlayMenu overlays={overlays} />
+              </div>
+            </div>
+          )}
+        </div>
+        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          Click anywhere on the map to see what&apos;s there and show nearby {SCOPE_NOUN[scope]}.
+        </span>
+      </div>
+
+      <div className="relative isolate z-0 min-h-0 flex-1 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
         <MapGL
           ref={mapRef}
           initialViewState={WORLD_VIEW}
@@ -627,7 +693,12 @@ export default function NearbyMapView({
           style={{ width: "100%", height: "100%" }}
           interactiveLayerIds={[POINTS_LAYER, RING_LAYER]}
           onClick={onMapClick}
-          onMove={onMapMove}
+          // A tile that won't load is the earliest signal WDPA is down, and the
+          // only one before anybody clicks.
+          onError={(e) => {
+            const sourceId = (e as unknown as { sourceId?: string }).sourceId;
+            if (sourceId?.startsWith("wdpa-")) overlays.setProtectedAreasDown(true);
+          }}
           onLoad={() => {
             mapReady.current = true;
             const pending = pendingCentre.current;
@@ -639,7 +710,11 @@ export default function NearbyMapView({
               duration: pending.duration,
             });
           }}
-          cursor={dragging || hoveringRing ? "ew-resize" : hoveringPoint ? "pointer" : "default"}
+          onDragStart={() => setPanning(true)}
+          onDragEnd={() => setPanning(false)}
+          // The species map's cursors: the arrow at rest, four-way arrows while
+          // panning, a pointer over a record and a resize over the ring.
+          cursor={dragging || hoveringRing ? "ew-resize" : panning ? "move" : hoveringPoint ? "pointer" : "default"}
           onMouseMove={(e: MapLayerMouseEvent) => {
             const ids = (e.features ?? []).map((f) => String(f.layer?.id ?? ""));
             setHoveringPoint(ids.includes(POINTS_LAYER));
@@ -680,30 +755,12 @@ export default function NearbyMapView({
           }}
         >
           <ScaleControl position="bottom-right" />
-
-          {/* The WDPA overlay, under everything: it covers whole regions, so
-              anything drawn over it has to stay readable. Recoloured in the
-              browser rather than by the server — see PROTECTED_AREAS_HUE_ROTATION. */}
-          {showProtected && (
-            <Source
-              id="wdpa"
-              type="raster"
-              tiles={[PROTECTED_AREAS_TILE_URL]}
-              tileSize={256}
-              maxzoom={PROTECTED_AREAS_MAX_ZOOM}
-              attribution={PROTECTED_AREAS_ATTRIBUTION}
-            >
-              <Layer
-                id="wdpa-layer"
-                type="raster"
-                paint={{
-                  "raster-opacity": 0.55,
-                  "raster-hue-rotate": PROTECTED_AREAS_HUE_ROTATION,
-                  "raster-saturation": 0.2,
-                }}
-              />
-            </Source>
-          )}
+          {/* The species map's layer bands, so every overlay sits at the same
+              height here as there. See MAP_LAYER_SLOTS. */}
+          {MAP_LAYER_SLOTS.map((slot) => (
+            <Layer key={slot} id={slotId(slot, PANEL)} type="background" layout={{ visibility: "none" }} />
+          ))}
+          <MapOverlayLayers overlays={overlays} panelId={PANEL} />
 
           {/* The boundary being searched, outlined. This is the geometry that
               went to GBIF and not the site's own — where it had to be cut down
@@ -714,18 +771,24 @@ export default function NearbyMapView({
               searched was indistinguishable from the hundred that aren't. */}
           {area && (
             <Source id="near-area" type="geojson" data={area.geometry}>
-              <Layer id="near-area-fill" type="fill" paint={{ "fill-color": NEARBY_SEARCH_COLOR, "fill-opacity": 0.18 }} />
-              <Layer id="near-area-casing" type="line" paint={{ "line-color": "#ffffff", "line-width": 5, "line-opacity": 0.9 }} />
-              <Layer id="near-area-line" type="line" paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 2.5 }} />
+              <Layer id="near-area-fill" beforeId={slotId("nearby-radius", PANEL)} type="fill" paint={{ "fill-color": NEARBY_SEARCH_COLOR, "fill-opacity": 0.18 }} />
+              <Layer id="near-area-casing" beforeId={slotId("nearby-radius", PANEL)} type="line" paint={{ "line-color": "#ffffff", "line-width": 5, "line-opacity": 0.9 }} />
+              <Layer id="near-area-line" beforeId={slotId("nearby-radius", PANEL)} type="line" paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 2.5 }} />
             </Source>
           )}
 
           {/* The circle the panel is describing, drawn to scale. */}
           {search && !area && (
             <Source id="near-radius" type="geojson" data={ringGeoJson}>
-              <Layer id="near-radius-fill" type="fill" paint={{ "fill-color": NEARBY_SEARCH_COLOR, "fill-opacity": 0.08 }} />
+              <Layer
+                id="near-radius-fill"
+                beforeId={slotId("nearby-radius", PANEL)}
+                type="fill"
+                paint={{ "fill-color": NEARBY_SEARCH_COLOR, "fill-opacity": 0.08 }}
+              />
               <Layer
                 id="near-radius-line"
+                beforeId={slotId("nearby-radius", PANEL)}
                 type="line"
                 paint={{
                   "line-color": NEARBY_SEARCH_COLOR,
@@ -738,6 +801,7 @@ export default function NearbyMapView({
                   anyone can catch. */}
               <Layer
                 id={RING_LAYER}
+                beforeId={slotId("nearby-radius", PANEL)}
                 type="line"
                 paint={{ "line-color": NEARBY_SEARCH_COLOR, "line-width": 14, "line-opacity": 0.01 }}
               />
@@ -749,6 +813,7 @@ export default function NearbyMapView({
             <Source id="near-points" type="geojson" data={pointsGeoJson}>
               <Layer
                 id={POINTS_LAYER}
+                beforeId={slotId("nearby-points", PANEL)}
                 type="circle"
                 paint={{
                   "circle-radius": 4.5,
@@ -783,6 +848,15 @@ export default function NearbyMapView({
             </MapLibreMarker>
           )}
 
+          {/* The point the callout is about. The callout sits beside whatever
+              boundaries it names, which can be some way from the click, so the
+              spot itself is marked. */}
+          {clicked && (
+            <MapLibreMarker longitude={clicked.lng} latitude={clicked.lat} anchor="center">
+              <span className="block h-3 w-3 rounded-full border-2 border-white bg-zinc-800 shadow dark:bg-zinc-200" />
+            </MapLibreMarker>
+          )}
+
           {/* A place that was searched for, and one that is only being pointed
               at in the results list — marked but not flown to. */}
           {[placePin, previewPlace].filter(Boolean).map((place, i) => (
@@ -795,6 +869,43 @@ export default function NearbyMapView({
               />
             </MapLibreMarker>
           ))}
+
+          {/* What is at the clicked point: the overlays' answers in the species
+              map's own callout, with this map's search on top of them and under
+              each protected area. */}
+          <MapOverlayCallout
+            overlays={overlays}
+            panelId={PANEL}
+            header={calloutHeader}
+            // Wide enough for "Show nearby threatened species" and its radius
+            // on one line.
+            width={260}
+            areaAction={(site) => {
+              const at = overlays.clickedAreas;
+              const ready = readyAreas.get(site.sitePid);
+              if (!at) return null;
+              return ready ? (
+                <button
+                  onClick={() => searchSite(site, ready, { lat: at.lat, lng: at.lng })}
+                  title={`${SCOPE_NOUN[scope][0].toUpperCase()}${SCOPE_NOUN[scope].slice(1)} with GBIF records inside this site's boundary`}
+                  className="mt-0.5 -mx-1 flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                >
+                  <SearchIcon />
+                  Show {SCOPE_NOUN[scope]} in here
+                </button>
+              ) : (
+                // Either WDPA holds this one as a point with no outline at all —
+                // it does that for the smallest sites — or the boundary is past
+                // anything GBIF will take in a query. Both are honest answers;
+                // an unexplained dead button is not.
+                <span className="block text-[10px] text-zinc-400">
+                  {site.geometry
+                    ? "Boundary too complex for GBIF to search — use a radius"
+                    : "No boundary published — use a radius"}
+                </span>
+              );
+            }}
+          />
 
           {/* A neighbour's record answers in the same panel the occurrence map's
               own records do — same fields, same order. */}
@@ -837,9 +948,9 @@ export default function NearbyMapView({
           )}
         </MapGL>
 
-        {/* Finding a different place, top-left, where the occurrence map keeps
-            the same control. */}
-        <div className="absolute left-2 top-2 z-10">
+        {/* Finding a different place, top-left, where the species map keeps the
+            same control. */}
+        <div className="absolute left-2 top-2 z-[1000] flex flex-col items-start gap-1.5">
           <MapPlaceSearch
             getCentre={() => {
               const map = mapRef.current;
@@ -852,11 +963,11 @@ export default function NearbyMapView({
           />
         </div>
 
-        {/* The basemap, on the map it paints. Folded to one button until asked
-            for, as on the occurrence map. */}
-        <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
+        {/* Top-right stack, as on the species map: the basemap, then the
+            control that goes to where the reader is. */}
+        <div data-map-corner="top-right" className="absolute right-2 top-2 z-[1000] flex flex-col items-end gap-1.5 max-w-[85%]">
           {basemapOpen ? (
-            <div className="flex flex-col overflow-hidden rounded-md border border-zinc-300 bg-white text-[11px] shadow dark:border-zinc-600 dark:bg-zinc-800">
+            <div className="flex flex-col gap-0.5 bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 p-1">
               {(Object.entries(BASEMAP_STYLES) as [BasemapKey, (typeof BASEMAP_STYLES)[BasemapKey]][]).map(([key, opt]) => (
                 <button
                   key={key}
@@ -864,10 +975,10 @@ export default function NearbyMapView({
                     setBasemap(key);
                     setBasemapOpen(false);
                   }}
-                  className={`px-2 py-1 text-left ${
+                  className={`px-2 py-0.5 rounded text-left text-[10px] transition-colors ${
                     basemap === key
-                      ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                      : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                      ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium"
+                      : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700"
                   }`}
                 >
                   {opt.label}
@@ -879,56 +990,29 @@ export default function NearbyMapView({
               onClick={() => setBasemapOpen(true)}
               title={`Basemap: ${BASEMAP_STYLES[basemap].label}. Click to change.`}
               aria-label="Choose a basemap"
-              className="rounded-md border border-zinc-300 bg-white p-1.5 text-zinc-600 shadow hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              className={`${mapButtonClass} text-zinc-500 dark:text-zinc-400`}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7" />
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l9 5-9 5-9-5 9-5z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l9 5 9-5" />
               </svg>
             </button>
           )}
-        </div>
-
-        {/* Under the basemap button: a layer you turn on, then click; and
-            under that, the crosshair-in-a-ring every map uses for "go to where
-            I am", matching the occurrence map's. */}
-        <div className="absolute right-2 top-14 z-10 flex flex-col gap-2">
-          <button
-            onClick={() => {
-              setShowProtected((on) => !on);
-              setSitesHere(null);
-            }}
-            title={
-              showProtected
-                ? "Protected areas (WDPA) are shown — click one to search inside it"
-                : "Show protected areas (WDPA)"
-            }
-            aria-pressed={showProtected}
-            aria-label="Show protected areas"
-            className={`rounded-md border p-1.5 shadow ${
-              showProtected
-                ? "border-pink-400 bg-pink-50 text-pink-700 dark:border-pink-500 dark:bg-pink-900/40 dark:text-pink-300"
-                : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-            }`}
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6l7-3z" />
-            </svg>
-          </button>
           <button
             onClick={goToMe}
-            disabled={locating === "search" || locating === "go"}
+            disabled={locating === "asking"}
             title={locating === "denied" ? "Your browser wouldn't share a location" : "Go to your location"}
             aria-label="Go to your location"
-            className={`rounded-md border border-zinc-300 bg-white p-1.5 shadow hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-800 dark:hover:bg-zinc-700 ${
-              locating === "denied" ? "text-amber-600 dark:text-amber-400" : "text-zinc-600 dark:text-zinc-300"
+            className={`${mapButtonClass} ${
+              locating === "denied" ? "text-amber-600 dark:text-amber-400" : "text-zinc-500 dark:text-zinc-400"
             }`}
           >
             <svg
-              className={`h-4 w-4 ${locating === "go" ? "animate-pulse" : ""}`}
+              className={`w-3.5 h-3.5 ${locating === "asking" ? "animate-pulse" : ""}`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
-              strokeWidth={1.8}
+              strokeWidth={2}
             >
               <circle cx="12" cy="12" r="3.5" />
               <circle cx="12" cy="12" r="8" />
@@ -937,156 +1021,17 @@ export default function NearbyMapView({
           </button>
         </div>
 
-        {/* What the overlay says is protected under the last click, and the
-            offer this page exists to make of it. Anchored over the map's
-            bottom-left rather than at the pointer: the list can name four
-            overlapping designations, and a popup that size over the click hides
-            the ground being asked about. */}
-        {showProtected && sitesHere && (
-          <div className="absolute inset-x-2 bottom-2 z-30 max-h-[75%] overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white/95 p-2 text-[11px] shadow-lg backdrop-blur sm:inset-x-auto sm:bottom-6 sm:left-2 sm:w-72 dark:border-zinc-700 dark:bg-zinc-800/95">
-            {sitesHere === "loading" ? (
-              <p className="text-zinc-500 dark:text-zinc-400">Looking up protected areas…</p>
-            ) : sitesHere.sites.length === 0 ? (
-              <p className="text-zinc-500 dark:text-zinc-400">
-                Nothing protected recorded there.
-                <button onClick={() => setSitesHere(null)} className="ml-1 underline">
-                  Close
-                </button>
-              </p>
-            ) : (
-              <>
-                <div className="mb-1 flex items-center gap-1">
-                  <span className="font-medium text-zinc-700 dark:text-zinc-200">
-                    {sitesHere.sites.length === 1 ? "Protected area here" : `${sitesHere.sites.length} designations here`}
-                  </span>
-                  <button
-                    onClick={() => setSitesHere(null)}
-                    title="Close"
-                    className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                  >
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                {sitesHere.sites.map(({ site, ready }) => (
-                  <div key={site.sitePid} className="border-t border-zinc-100 py-1.5 dark:border-zinc-700">
-                    <p className="font-medium text-zinc-800 dark:text-zinc-100">{site.name}</p>
-                    <p className="text-zinc-500 dark:text-zinc-400">
-                      {[site.designation, site.iucnCategory && `IUCN ${site.iucnCategory}`, site.statusYear ? `since ${site.statusYear}` : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      {ready ? (
-                        <button
-                          onClick={() => searchSite(site, ready, { lat: sitesHere.lat, lng: sitesHere.lng })}
-                          className="rounded bg-emerald-600 px-2 py-1 font-medium text-white hover:bg-emerald-700"
-                        >
-                          Find threatened species in here
-                        </button>
-                      ) : (
-                        // Either WDPA holds this one as a point with no outline
-                        // at all — it does that for the smallest sites — or the
-                        // boundary is past anything GBIF will take in a query.
-                        // Both are honest answers; an unexplained dead button
-                        // is not.
-                        <span className="text-zinc-400">
-                          {site.geometry
-                            ? "Boundary too complex for GBIF to search — use a radius"
-                            : "No boundary published — use a radius"}
-                        </span>
-                      )}
-                      <a
-                        href={protectedPlanetUrl(site)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 underline dark:text-blue-400"
-                      >
-                        Protected Planet
-                      </a>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* The page's own controls, over the bottom of the map: the question,
-            and the radius it will be asked at. Bottom-centre rather than in a
-            bar above the map, because both of them are about the circle on the
-            ground and belong next to it. */}
-        <div
-          className={`pointer-events-none absolute inset-x-0 bottom-6 z-10 flex-col items-center gap-2 px-2 ${
-            // On a phone the callout is a sheet across the bottom of the map,
-            // and these would be behind it. Choosing a protected area is the
-            // thing being done; the radius is still there when it closes.
-            showProtected && sitesHere ? "hidden sm:flex" : "flex"
-          }`}
-        >
-          {movedAway && search && !area && (
-            <button
-              onClick={() => {
-                const c = mapRef.current?.getCenter();
-                if (!c) return;
-                setPlacePin(null);
-                askAt(c.lat, c.lng, radiusKm, { fly: false });
-              }}
-              className="pointer-events-auto rounded-full border border-zinc-300 bg-white/95 px-3 py-1 text-xs font-medium text-zinc-700 shadow backdrop-blur hover:bg-white dark:border-zinc-600 dark:bg-zinc-800/95 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            >
-              Search here instead
-            </button>
-          )}
-          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur sm:rounded-full dark:border-zinc-700 dark:bg-zinc-800/95">
-            <button
-              onClick={findMe}
-              disabled={locating === "search" || locating === "go"}
-              className="flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="12" r="7" />
-                <path strokeLinecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3" />
-                <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
-              </svg>
-              {locating === "search"
-                ? "Finding you…"
-                : // Follows the scope, so the button never promises threatened
-                  // species and then hands back a list of starlings.
-                  scope === "threatened"
-                  ? "Find threatened species near me"
-                  : scope === "assessed"
-                    ? "Find assessed species near me"
-                    : "Find species near me"}
-            </button>
-            <span className="flex flex-wrap items-center justify-center gap-1 text-[11px]">
-              <span className="text-zinc-500 dark:text-zinc-400">Within</span>
-              {NEARBY_RADII_KM.map((r) => (
-                <button
-                  key={r}
-                  onClick={() => changeRadius(r)}
-                  className={`rounded border px-1.5 py-0.5 tabular-nums ${
-                    r === radiusKm && !area
-                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                      : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {r} km
-                </button>
-              ))}
-            </span>
-          </div>
+        {/* Bottom-left, as on the species map: what each overlay's colours
+            mean. Bounded to the map and scrolled, so a tall legend on a short
+            map can't climb out of it. */}
+        <div className="absolute bottom-2 left-2 z-[1000] flex flex-col items-start gap-1.5 max-w-[90%] max-h-[calc(100%-1rem)] overflow-y-auto overscroll-contain [&>*]:shrink-0">
           {locating === "denied" && (
-            <p className="pointer-events-auto max-w-md rounded-md bg-amber-50 px-2 py-1 text-center text-[11px] text-amber-800 shadow dark:bg-amber-900/40 dark:text-amber-200">
-              Your browser wouldn&apos;t share a location. Search for a place above, or click anywhere on the map.
+            <p className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800 shadow dark:bg-amber-900/40 dark:text-amber-200">
+              Your browser wouldn&apos;t share a location. Search for a place, or click anywhere on the map.
             </p>
           )}
-          {!search && locating !== "denied" && (
-            <p className="pointer-events-auto max-w-md rounded-md bg-white/90 px-2 py-1 text-center text-[11px] text-zinc-600 shadow backdrop-blur dark:bg-zinc-800/90 dark:text-zinc-300">
-              Or search for a place, or click anywhere on the map.
-            </p>
-          )}
-          <p className="pointer-events-none text-[10px] text-zinc-500 dark:text-zinc-400">{GEOCODER_ATTRIBUTION}</p>
+          <MapOverlayLegend overlays={overlays} />
+          <p className="text-[10px] text-zinc-500 dark:text-zinc-400">{GEOCODER_ATTRIBUTION}</p>
         </div>
       </div>
 
@@ -1094,7 +1039,7 @@ export default function NearbyMapView({
           "twelve species within 10 km" and look at where they are when the list
           is on top of them. */}
       {search && (
-        <div className="h-[45%] min-h-0 shrink-0 p-2 pt-0">
+        <div className="h-[45%] min-h-0 shrink-0">
           <NearbySpeciesPanel
             lat={search.lat}
             lng={search.lng}

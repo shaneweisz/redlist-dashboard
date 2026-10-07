@@ -22,7 +22,6 @@ import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { FaInfoCircle } from "react-icons/fa";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
-import YearRangeSlider from "@/components/mapping/YearRangeSlider";
 import ListZoomControl, { LIST_ZOOM_DEFAULT } from "@/components/mapping/ListZoomControl";
 import CompilerDialog from "@/components/mapping/CompilerDialog";
 import NearbySpeciesPanel from "@/components/mapping/NearbySpeciesPanel";
@@ -48,37 +47,8 @@ import type { OccurrenceFeature as OccurrenceFeatureType } from "./OccurrenceLis
 // appears. A value import from a module the map otherwise loads lazily, which
 // is fine: it's a plain object with no component behind it.
 import { BASIS_LABELS, isGeoreferenceable } from "./OccurrenceListTable";
-import {
-  PROTECTED_AREAS_TILE_URL,
-  PROTECTED_AREAS_ATTRIBUTION,
-  highlightColour,
-  PROTECTED_AREAS_HUE_ROTATION,
-  PROTECTED_AREAS_MAX_ZOOM,
-  identifyProtectedAreas,
-  protectedPlanetUrl,
-  type ProtectedArea,
-} from "@/lib/mapping/protected-areas";
 import { ELEVATION_ATTRIBUTION, elevationAt, formatElevation } from "@/lib/mapping/elevation";
-import {
-  EFFORT_GROUP_LABELS,
-  EFFORT_GROUPS,
-  EFFORT_LEGEND,
-  EFFORT_PAPER_URL,
-  effortGroupFor,
-  formatEffort,
-  gbifSearchUrl,
-  type EffortGroup,
-} from "@/lib/mapping/sampling-effort";
-import { useSamplingEffort, effortAt, effortCell, useGbifCellCount } from "@/hooks/mapping/useSamplingEffort";
-import {
-  BIOMES,
-  ECOREGIONS_ASSET,
-  ECOREGIONS_ATTRIBUTION,
-  ECOREGIONS_PAPER_URL,
-  oneEarthEcoregionUrl,
-  overlayUrl,
-  type EcoregionProperties,
-} from "@/lib/mapping/map-overlays";
+import { effortGroupFor } from "@/lib/mapping/sampling-effort";
 import { formatDistance, pathLengthMetres } from "@/lib/mapping/geo-distance";
 import {
   clearPointFile,
@@ -97,6 +67,11 @@ import {
   type PointFileImport,
 } from "@/lib/mapping/iucn-point-file";
 import { useAssessorEdits } from "@/hooks/mapping/useAssessorEdits";
+import { useMapOverlays } from "@/hooks/mapping/useMapOverlays";
+import MapOverlayMenu from "./overlays/MapOverlayMenu";
+import MapOverlayLegend from "./overlays/MapOverlayLegend";
+import SourceCitation from "./overlays/SourceCitation";
+import { MAP_LAYER_SLOTS, slotId } from "./overlays/layer-slots";
 import {
   b1Threshold,
   b2Threshold,
@@ -105,41 +80,6 @@ import {
   formatAreaKm2,
 } from "@/lib/mapping/range-metrics";
 import { type Place, type PinnedPlace } from "@/lib/mapping/geocode";
-import {
-  FOREST_LOSS_ATTRIBUTION,
-  FOREST_LOSS_CANOPY_THRESHOLD,
-  FOREST_LOSS_CAVEAT,
-  FOREST_LOSS_COLOR,
-  FOREST_LOSS_DATASET_URL,
-  FOREST_LOSS_FIRST_YEAR,
-  FOREST_LOSS_LAST_YEAR,
-  FOREST_LOSS_MAX_ZOOM,
-  FOREST_LOSS_SOURCE_NOTE,
-  FOREST_LOSS_THRESHOLD_NOTE,
-  forestLossTileUrl,
-} from "@/lib/mapping/forest-loss";
-import {
-  DRIVERS_CANOPY_THRESHOLD,
-  FOREST_LOSS_DRIVERS,
-  FOREST_LOSS_DRIVERS_ATTRIBUTION,
-  FOREST_LOSS_DRIVERS_CAVEAT,
-  FOREST_LOSS_DRIVERS_FIRST_YEAR,
-  FOREST_LOSS_DRIVERS_LAST_YEAR,
-  FOREST_LOSS_DRIVERS_MAX_ZOOM,
-  FOREST_LOSS_DRIVERS_PAPER_URL,
-  FOREST_LOSS_DRIVERS_TILE_URL,
-  type LossDriverClass,
-} from "@/lib/mapping/forest-loss-drivers";
-import { hasForestAnswer, queryForestPoint, type ForestPoint } from "@/lib/mapping/forest-point-query";
-
-import {
-  HABITAT_ATTRIBUTION,
-  HABITAT_LEGEND,
-  HABITAT_SCHEME_URL,
-  HABITAT_TILE_URL,
-  identifyHabitat,
-  type HabitatClass,
-} from "@/lib/mapping/habitat-map";
 import {
   uncertaintyCircle,
   DEFAULT_GEOREFERENCE_RADIUS_M,
@@ -205,10 +145,10 @@ const MapToolsMenu = dynamic(
   () => import("./MapToolsMenu"),
   { ssr: false }
 );
-const MapShapeCallout = dynamic(
-  () => import("./MapShapeCallout"),
-  { ssr: false }
-);
+// The context overlays, shared with /map. The two that draw on the map reach
+// for MapLibre, so they load with it.
+const MapOverlayLayers = dynamic(() => import("./overlays/MapOverlayLayers"), { ssr: false });
+const MapOverlayCallout = dynamic(() => import("./overlays/MapOverlayCallout"), { ssr: false });
 const MapPlaceSearch = dynamic(
   () => import("./MapPlaceSearch"),
   { ssr: false }
@@ -218,63 +158,6 @@ const PointFileDialog = dynamic(
   { ssr: false }
 );
 
-/**
- * The overlay stack, bottom to top — and the reason it has to be written down.
- *
- * MapLibre draws layers in the order they were *added*, and react-map-gl adds
- * a `<Layer>` when it mounts. Every overlay here mounts on a checkbox, so the
- * order on screen was the order the boxes happened to be ticked, not the order
- * the JSX is written in. That made the layers below silently wrong rather than
- * broken: ticking tree cover loss after the drivers layer put a near-opaque
- * sheet of pink over it, so "tree cover loss by dominant driver" appeared to do
- * nothing at all — the one combination an assessor is most likely to try,
- * since the drivers layer exists to answer the question the loss layer raises.
- * The same applied to the habitat and protected-area rasters, and to the
- * occurrence circles, which the rasters covered instead of the reverse.
- *
- * So the stack is declared once, here, and each layer names the band it
- * belongs in. Each band is anchored by a hidden, always-mounted layer, and a
- * layer joins its band with `beforeId`, which inserts it in the right place
- * whatever order it mounted in. Within a band the mount order still decides,
- * which is what the JSX order is for.
- */
-const MAP_LAYER_SLOTS = [
-  /** Sampling effort: whether anyone has looked here. Under everything. */
-  "effort",
-  "ecoregions",
-  "habitat",
-  "forest-loss",
-  /** Above the loss it classifies — this is the layer that says why. */
-  "loss-drivers",
-  "protected-areas",
-  /** POWO/IUCN native range polygons. */
-  "ranges",
-  /** The nearby search's radius: the question's boundary, under its answers. */
-  "nearby-radius",
-  /**
-   * The GPS uncertainty rings, under the dots whose ground they are. Its own
-   * band rather than the records' because the toggle mounts them after the
-   * points are already on the map, and within a band mount order decides — so
-   * sharing "records" would have put the rings over the dots they belong to.
-   */
-  "uncertainty",
-  /** The species' own GBIF records. */
-  "records",
-  /** A picked neighbour's records, above this species' own. */
-  "nearby-points",
-  /** The assessor's own georeferences, above every published record. */
-  "georeferences",
-  /** EOO/AOO and measuring — always readable over the data they describe. */
-  "tools",
-] as const;
-
-type MapLayerSlot = (typeof MAP_LAYER_SLOTS)[number];
-
-/**
- * The anchor that marks the top of a band. A layer passing this as `beforeId`
- * lands immediately below it, and so above every band declared earlier.
- */
-const slotId = (slot: MapLayerSlot, panelId: string) => `slot-${slot}-${panelId}`;
 
 // Shape of coordinate-cleaning-refdata/countries.json (Natural Earth admin-0
 // country polygons, keyed by ISO 3166-1 alpha-2), dynamically imported for the
@@ -475,7 +358,6 @@ function nearbyLayerKey(search: { id: string; radiusKm: number }, speciesKey: st
 }
 
 
-
 /**
  * Determine whether an occurrence record is "new" (recorded after the assessment date).
  * Uses full date comparison when eventDate is available, falls back to year comparison.
@@ -484,25 +366,6 @@ function nearbyLayerKey(search: { id: string; radiusKm: number }, speciesKey: st
 const formatBasisOfRecord = (basis?: string) =>
   basis ? BASIS_LABELS[basis] ?? basis.replace(/_/g, " ").toLowerCase() : "";
 
-/** Every position in a geometry, flattened — enough to take a bounding box. */
-function positionsOf(geometry: GeoJSON.Geometry): GeoJSON.Position[] {
-  const out: GeoJSON.Position[] = [];
-  const walk = (node: unknown) => {
-    if (!Array.isArray(node)) return;
-    if (typeof node[0] === "number") out.push(node as GeoJSON.Position);
-    else for (const child of node) walk(child);
-  };
-  if ("coordinates" in geometry) walk(geometry.coordinates);
-  return out;
-}
-
-/** The latitude Web Mercator stops at, and so the top edge of a world PNG. */
-const MERCATOR_LIMIT = 85.051129;
-
-type EcoregionCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, EcoregionProperties>;
-
-/** Shared by every panel and every species — the layer is global. */
-let ecoregionCache: EcoregionCollection | null = null;
 
 export function isAfterAssessment(
   eventDate: string | undefined | null,
@@ -753,67 +616,6 @@ export function isOutsideNativeRange(
   return !nativeCountries.some((c) => c.toUpperCase() === upper);
 }
 
-/**
- * One driver's colour in the legend, with its name on hover.
- *
- * The same bubble FlagMark uses, for the same reason: these sit over the map,
- * where a native `title` never appears at all. A 10px square makes it worse —
- * the tooltip needs the pointer held still on a target smaller than the
- * pointer, so drifting along the row of seven cancels it every time. The
- * cursor promised something to read and nothing was ever shown.
- */
-function DriverSwatch({ driver }: { driver: LossDriverClass }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      className="relative block h-2.5 w-2.5 rounded-sm cursor-help"
-      style={{ background: driver.color }}
-    >
-      {/* Opens rightward: the legend sits against the map's left edge, so a
-          bubble anchored the other way runs off the side of the screen. */}
-      {open && (
-        <span className="absolute bottom-4 left-0 z-[1000] block w-max max-w-[240px] rounded-md bg-zinc-900/95 dark:bg-zinc-700 px-1.5 py-1 text-[10px] leading-snug text-white shadow-lg">
-          <span className="font-medium">{driver.label}</span>
-          <span className="block text-zinc-300">{driver.description}</span>
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
- * Where an overlay's data comes from, as a citation you can click.
- *
- * These rows each carried an ⓘ linking to the source, which said that a source
- * existed and nothing about what it was. A layer drawn over a species' range
- * is evidence, and evidence in an assessment gets attributed — so the row
- * names the paper or the database instead, in the bracketed form a reader
- * already knows how to skim past or follow.
- *
- * It links where the ⓘ linked, and opens the same way: these sit inside a
- * <label>, so a plain anchor click would be forwarded to the checkbox and
- * toggle the layer on the way out.
- */
-function SourceCitation({ href, cite, title }: { href: string; cite: string; title: string }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={title}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        window.open(href, "_blank", "noopener,noreferrer");
-      }}
-      className="shrink-0 italic tabular-nums text-[10px] text-zinc-400 hover:text-zinc-600 hover:underline dark:text-zinc-500 dark:hover:text-zinc-300"
-    >
-      [{cite}]
-    </a>
-  );
-}
 
 export default function OccurrenceMapRow({
   speciesKey,
@@ -902,94 +704,16 @@ export default function OccurrenceMapRow({
   // satellite mosaic doesn't; hybrid is one click away for the moment the
   // question changes.
   const [basemap, setBasemap] = useState<BasemapKey>("streets");
-  // Overlays — informational map layers, independent of the "Native range only"
-  // occurrence filter above: shading which countries a source considers native,
-  // regardless of whether occurrences are being filtered by it.
-  const [showProtectedAreas, setShowProtectedAreas] = useState(false);
   /**
-   * Whether UNEP-WCMC's service is answering.
+   * The context overlays — protected areas, tree cover loss and its drivers,
+   * habitat, ecoregions, sampling effort — shared with /map, which draws the
+   * same layers and answers the same clicks.
    *
-   * It goes down, and when it does the layer fails silently in the worst
-   * possible way: the tiles 500, nothing is drawn, and a click returns no
-   * areas — which is indistinguishable from "nothing here is protected". On an
-   * assessment that is a wrong answer, not a missing one, so the row says the
-   * source is unreachable instead of letting the blank map speak for it.
-   *
-   * Observed 2026-09-02: the whole ArcGIS host answered every request, its own
-   * service directory included, with "The ArcGIS Web Adaptor has been
-   * configured with SSL/HTTPS. Please enable SSL/HTTPS for your ArcGIS Server
-   * site." — their misconfiguration, nothing to do with the caller.
+   * Sampling effort is offered only against the surface this species can
+   * honestly be shown against: null withholds it rather than falling back to
+   * all taxa. See effortGroupFor.
    */
-  const [protectedAreasDown, setProtectedAreasDown] = useState(false);
-  const [showForestLoss, setShowForestLoss] = useState(false);
-  /**
-   * The years of loss to draw, which the tiles are cut to server-side.
-   *
-   * This replaced a colour ramp. The rendered tiles are one pink whatever year
-   * the loss happened in, so the year can't be read off the map any more — but
-   * it can be asked for, and the question an assessor actually has is a range:
-   * what has gone since the assessment, or since the last one. Narrowing to
-   * that is a better answer than estimating where a colour sat on a gradient.
-   */
-  const [lossYears, setLossYears] = useState<[number, number]>([
-    FOREST_LOSS_FIRST_YEAR,
-    FOREST_LOSS_LAST_YEAR,
-  ]);
-  /** What the loss was for — the 1 km dominant-driver classification. */
-  const [showLossDrivers, setShowLossDrivers] = useState(false);
-  const [showHabitat, setShowHabitat] = useState(false);
-  const [showEcoregions, setShowEcoregions] = useState(false);
-  const [showSamplingEffort, setShowSamplingEffort] = useState(false);
-
-  /**
-   * The effort surface this species can honestly be shown against.
-   *
-   * Null withholds the layer entirely rather than falling back to all-taxa:
-   * the dataset has no fish group, and nothing covering crustaceans, corals,
-   * mosses or the algae, so for those an all-groups surface would answer a
-   * question nobody asked — "is this sea well surveyed?" when what was
-   * surveyed was seabirds.
-   */
-  const nativeEffortGroup = effortGroupFor(taxonGroup);
-  const [effortGroup, setEffortGroup] = useState<EffortGroup | null>(nativeEffortGroup);
-  const [effortGroupFor_, setEffortGroupFor] = useState(speciesKey);
-  if (effortGroupFor_ !== speciesKey) {
-    setEffortGroupFor(speciesKey);
-    setEffortGroup(nativeEffortGroup);
-  }
-  const { layer: effortLayer, loading: effortLoading } = useSamplingEffort(
-    showSamplingEffort && nativeEffortGroup ? effortGroup : null
-  );
-
-  /**
-   * Ecoregion polygons, fetched the first time the overlay is switched on.
-   *
-   * ~2 MB gzipped for the whole world, which is too much to spend on every
-   * reader of the page and cheap enough to spend once on the reader who asks
-   * for it. Held for the life of the module rather than the component so
-   * switching species doesn't re-fetch it — the layer is global and has nothing
-   * to do with which species is open.
-   */
-  const [ecoregions, setEcoregions] = useState<EcoregionCollection | null>(ecoregionCache);
-  const [ecoregionsLoading, setEcoregionsLoading] = useState(false);
-  const [ecoregionsFailed, setEcoregionsFailed] = useState(false);
-
-  useEffect(() => {
-    if (!showEcoregions || ecoregions || ecoregionsLoading) return;
-    setEcoregionsLoading(true);
-    setEcoregionsFailed(false);
-    fetch(overlayUrl(ECOREGIONS_ASSET))
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((collection: EcoregionCollection) => {
-        ecoregionCache = collection;
-        setEcoregions(collection);
-      })
-      .catch(() => setEcoregionsFailed(true))
-      .finally(() => setEcoregionsLoading(false));
-  }, [showEcoregions, ecoregions, ecoregionsLoading]);
+  const overlays = useMapOverlays({ defaultEffortGroup: effortGroupFor(taxonGroup), resetKey: speciesKey });
 
   /** Whether the Overlays panel is rolled up to its header. */
   const [overlaysOpen, setOverlaysOpen] = useState(false);
@@ -1038,43 +762,23 @@ export default function OccurrenceMapRow({
    */
   const [aooCellKm, setAooCellKm] = useState(2);
   const [aooCellOpen, setAooCellOpen] = useState(false);
-  const [habitatLegendOpen, setHabitatLegendOpen] = useState(false);
-  /** Whether the tree cover loss legend's two caveats are showing. */
-  const [forestLossNotesOpen, setForestLossNotesOpen] = useState(false);
-  const [lossDriverNotesOpen, setLossDriverNotesOpen] = useState(false);
-  const [biomeLegendOpen, setBiomeLegendOpen] = useState(false);
   /**
-   * What's at the point last clicked: its elevation, and — when the overlay is
-   * on — what protects it.
+   * What's at the point last right-clicked: its coordinates and elevation.
    *
    * Elevation is here because it's the constraint a specimen label gives you
    * that a locality description doesn't: "1900 m" is checkable against the
    * ground before you place a point, and having to leave the map to check it is
-   * how it stops being checked.
-   *
-   * A click routinely sits inside several designations at once — a national
-   * park that is also a World Heritage site and a biosphere reserve — and
-   * they're all true, so the popup lists them and outlines whichever one you're
-   * pointing at rather than picking one on your behalf.
+   * how it stops being checked. What an overlay says of the spot answers a left
+   * click instead — see useMapOverlays.
    */
   const [pointQuery, setPointQuery] = useState<{
-    /** Which button opened it — the two answer different questions. */
-    kind: "areas" | "point";
     panelId: string;
     lng: number;
     lat: number;
     elevation: number | null;
     elevationLoading: boolean;
-    areas: ProtectedArea[];
-    areasLoading: boolean;
-    areasFailed?: boolean;
-    /** Which of the listed areas is outlined on the map. */
-    highlight: number;
   } | null>(null);
   const pointQueryId = useRef(0);
-  /** Discards a habitat lookup that a later click has already superseded. */
-  const habitatQueryId = useRef(0);
-  const forestQueryId = useRef(0);
   /** Copied-to-clipboard acknowledgement, cleared on a timer. */
   const [copiedPoint, setCopiedPoint] = useState(false);
   /**
@@ -3267,119 +2971,13 @@ export default function OccurrenceMapRow({
       }
     }
     setPointQuery(null);
-    // Same bargain as the protected areas: with the overlay on, the shapes are
-    // right there, so clicking one should tell you which it is. Answered from
-    // the polygons already loaded, so there's nothing to wait for. Clicking off
-    // every ecoregion clears the selection rather than leaving it stranded.
-    if (showEcoregions && ecoregions) {
-      const point: GeoJSON.Feature<GeoJSON.Point> = {
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Point", coordinates: [e.lngLat.lng, e.lngLat.lat] },
-      };
-      const hit = ecoregions.features.find((f) => booleanPointInPolygon(point, f));
-      setSelectedEcoregion(
-        hit
-          ? {
-              properties: hit.properties,
-              geometry: hit.geometry,
-              lng: e.lngLat.lng,
-              lat: e.lngLat.lat,
-              panelId,
-            }
-          : null
-      );
-    }
-    // The effort counts came down with the layer, so this is a lookup rather
-    // than a request: the callout opens on the click with the snapshot figure,
-    // and only GBIF's live count is left to arrive.
-    if (showSamplingEffort && effortLayer) {
-      const { lng, lat } = e.lngLat;
-      setClickedEffort({ panelId, lng, lat });
-    }
-    // The habitat map is a raster, so there's no feature to hit-test: the
-    // service that drew the tiles answers an identify at a point, which means
-    // the answer can't disagree with what's on screen.
-    if (showHabitat) {
-      const { lng, lat } = e.lngLat;
-      const query = ++habitatQueryId.current;
-      setClickedHabitat({ habitat: null, loading: true, panelId, lng, lat });
-      identifyHabitat(lng, lat)
-        .then((habitat) => {
-          if (query !== habitatQueryId.current) return;
-          setClickedHabitat({ habitat, loading: false, panelId, lng, lat });
-        })
-        .catch(() => {
-          if (query !== habitatQueryId.current) return;
-          setClickedHabitat({ habitat: null, loading: false, panelId, lng, lat });
-        });
-    }
-    // Same bargain again for the forest layers, and the one that most needed
-    // it: a 1 km driver cell is a colour with no name on it until you click.
-    // Asked of the rasters rather than the picture of them, and answered as
-    // three parts — what the loss was for, when, and how wooded the ground was
-    // before it — because the last is what keeps the first two honest.
-    if (showLossDrivers || showForestLoss) {
-      const { lng, lat } = e.lngLat;
-      const query = ++forestQueryId.current;
-      setClickedForest({ point: null, loading: true, panelId, lng, lat });
-      queryForestPoint(lng, lat)
-        .then((point) => {
-          if (query !== forestQueryId.current) return;
-          setClickedForest({ point, loading: false, panelId, lng, lat });
-        })
-        .catch(() => {
-          if (query !== forestQueryId.current) return;
-          setClickedForest({ point: null, loading: false, panelId, lng, lat });
-        });
-    }
-    // With the overlay on, a plain click asks what protects this spot — the
-    // shapes are right there, so clicking one should answer for it. Everything
-    // else about a location is on the right button.
-    if (!showProtectedAreas) return;
-    const map = e.target;
-    const bounds = map.getBounds();
-    const canvas = map.getCanvas();
-    const { lng, lat } = e.lngLat;
-    const query = ++pointQueryId.current;
-    identifyProtectedAreas({
-      lng,
-      lat,
-      bounds: [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
-      width: canvas.clientWidth,
-      height: canvas.clientHeight,
-    })
-      .then((areas) => {
-        // Nothing opens for a spot that isn't protected: the overlay already
-        // shows that, and a popup saying so on every click is noise.
-        if (query !== pointQueryId.current || areas.length === 0) return;
-        setPointQuery({
-          kind: "areas",
-          panelId,
-          lng,
-          lat,
-          elevation: null,
-          elevationLoading: false,
-          areas,
-          areasLoading: false,
-          highlight: 0,
-        });
-      })
-      .catch(() => {
-        // Only the current query speaks for the service: an aborted one says
-        // nothing about whether it is up.
-        if (query === pointQueryId.current) setProtectedAreasDown(true);
-      });
+    // Everything else a left click on bare ground asks is what the overlays
+    // say about the spot — the protected areas covering it, its habitat class,
+    // its ecoregion, its sampling effort — answered in one callout beside it.
+    overlays.queryAt(e.target, e.lngLat.lng, e.lngLat.lat, panelId);
   }, [
-    showForestLoss,
-    showLossDrivers,
     measure,
-    showProtectedAreas,
-    showEcoregions,
-    ecoregions,
-    showHabitat,
-    showSamplingEffort,
-    effortLayer,
+    overlays,
     // Left out until now, which is why clicking a record never pinned its
     // panel: the handler was memoised on the first render, and the callbacks
     // it had closed over were the first render's. The records themselves come
@@ -3415,17 +3013,7 @@ export default function OccurrenceMapRow({
     // a slow answer would overwrite the panel you're already reading.
     const isCurrent = () => query === pointQueryId.current;
     setCopiedPoint(false);
-    setPointQuery({
-      kind: "point",
-      panelId,
-      lng,
-      lat,
-      elevation: null,
-      elevationLoading: true,
-      areas: [],
-      areasLoading: false,
-      highlight: 0,
-    });
+    setPointQuery({ panelId, lng, lat, elevation: null, elevationLoading: true });
 
     elevationAt(lng, lat)
       .then((metres) => {
@@ -3594,40 +3182,6 @@ export default function OccurrenceMapRow({
     [pointFileComparison]
   );
 
-  /**
-   * The ecoregion containing the right-clicked point.
-   *
-   * A linear scan of 847 polygons with a bounding-box reject first, which is
-   * fast enough to run during render and avoids carrying a spatial index for a
-   * lookup that happens once per click.
-   */
-  /**
-   * The sampling-effort cell under the last left click, while that layer is on.
-   *
-   * A left click, like the other layers you click to interrogate, and answered
-   * in the same callout — not folded into the right-click panel, which is
-   * about the spot itself rather than what an overlay says of it.
-   */
-  const [clickedEffort, setClickedEffort] = useState<{
-    panelId: string;
-    lng: number;
-    lat: number;
-  } | null>(null);
-  const effortCellAtPoint = useMemo(
-    () =>
-      clickedEffort && effortLayer && showSamplingEffort
-        ? effortCell(effortLayer, clickedEffort.lng, clickedEffort.lat)
-        : null,
-    [clickedEffort, effortLayer, showSamplingEffort]
-  );
-  const {
-    count: gbifCellCount,
-    byBasis: gbifCellByBasis,
-    loading: gbifCellCountLoading,
-  } = useGbifCellCount(
-    effortCellAtPoint?.bounds ?? null,
-    effortLayer?.group ?? null
-  );
 
   const hoveredPointFileRow = useMemo(
     () =>
@@ -3914,91 +3468,6 @@ export default function OccurrenceMapRow({
     };
   }, [showRangeMetrics, rangeMetricPoints, aooCellKm]);
 
-  /**
-   * The habitat class under the last left click, while that overlay is on.
-   *
-   * Its own state rather than a field on the right-click query: habitat is a
-   * layer you click to interrogate, like the protected areas and the
-   * ecoregions, and it answers into the same docked panel they do.
-   */
-  const [clickedHabitat, setClickedHabitat] = useState<{
-    habitat: HabitatClass | null;
-    loading: boolean;
-    panelId: string;
-    /** Where it was clicked: a raster read has no shape to anchor the callout. */
-    lng: number;
-    lat: number;
-  } | null>(null);
-
-  /**
-   * What the forest rasters say under the last left click.
-   *
-   * The drivers layer is the reason this exists: it is a raster, so there is
-   * no feature to hit-test and no way to click a cell and be told what it is.
-   * Reading the colour under the cursor would be the easy version and a
-   * dishonest one — the renderer blends at cell edges, so a click near a
-   * boundary would name a class that isn't stored there. The platform serves
-   * the rasters themselves at a point, so the answer comes from the data.
-   */
-  const [clickedForest, setClickedForest] = useState<{
-    point: ForestPoint | null;
-    loading: boolean;
-    panelId: string;
-    lng: number;
-    lat: number;
-  } | null>(null);
-
-  /** The ecoregion clicked on the map, outlined and named until dismissed. */
-  const [selectedEcoregion, setSelectedEcoregion] = useState<{
-    properties: EcoregionProperties;
-    geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
-    /** Where it was clicked — the popup opens there, not in a corner. */
-    lng: number;
-    lat: number;
-    panelId: string;
-  } | null>(null);
-
-  const selectedEcoregionGeoJson = useMemo<GeoJSON.Feature | null>(
-    () =>
-      selectedEcoregion
-        ? { type: "Feature", properties: {}, geometry: selectedEcoregion.geometry }
-        : null,
-    [selectedEcoregion]
-  );
-
-  // A different species is a different map; an ecoregion picked out on the last
-  // one has nothing to say about this one.
-  useEffect(() => setSelectedEcoregion(null), [speciesKey]);
-
-  /**
-   * Every protected area under the clicked point, each carrying its own colour.
-   *
-   * All of them at once rather than one at a time: the whole question a click
-   * on overlapping designations asks is how many there are and where each one
-   * ends, and that can't be answered by a shape that changes under the pointer.
-   * The one being pointed at is drawn heavier, so hover still says which row is
-   * which — it just isn't the only thing that does.
-   */
-  const highlightedAreaGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
-    if (!pointQuery) return null;
-    // Indexed before filtering, so a point-only site (which has no geometry to
-    // draw) doesn't shift the colours of the ones after it away from their
-    // swatches in the list.
-    const features = pointQuery.areas
-      .map((area, index) => ({ area, index }))
-      .filter(({ area }) => area.geometry)
-      .map(({ area, index }) => ({
-        type: "Feature" as const,
-        properties: {
-          sitePid: area.sitePid,
-          colour: highlightColour(index),
-          active: index === pointQuery.highlight,
-        },
-        geometry: area.geometry as GeoJSON.MultiPolygon,
-      }));
-    if (features.length === 0) return null;
-    return { type: "FeatureCollection", features };
-  }, [pointQuery]);
 
   // Where a hovered record sits on the map: the assessor's own coordinates
   // when they've supplied any, otherwise GBIF's. Null for a record with
@@ -4210,7 +3679,7 @@ export default function OccurrenceMapRow({
               // whose absence would otherwise be read as an answer.
               onError={(e) => {
                 const sourceId = (e as unknown as { sourceId?: string }).sourceId;
-                if (sourceId?.startsWith("wdpa-")) setProtectedAreasDown(true);
+                if (sourceId?.startsWith("wdpa-")) overlays.setProtectedAreasDown(true);
               }}
               style={{ width: "100%", height: "100%" }}
               mapStyle={BASEMAP_STYLES[basemap].style}
@@ -4321,217 +3790,7 @@ export default function OccurrenceMapRow({
                   layout={{ visibility: "none" }}
                 />
               ))}
-              {/* Sampling effort — the very bottom of the stack. It answers
-                  whether a blank area is empty because the species isn't there
-                  or because nobody has looked, which is context for everything
-                  drawn above it.
-
-                  An image source rather than a raster one: the PNG is a single
-                  world-wide Web Mercator image, and MapLibre maps an image
-                  source linearly in Mercator space between its corners, which
-                  is exactly the projection it's already in. At 10 km per source
-                  cell it is deliberately coarse — the pattern is the point, not
-                  any one pixel. */}
-              {showSamplingEffort && effortLayer && (
-                <Source
-                  id={`sampling-effort-${panelId}`}
-                  type="image"
-                  url={effortLayer.url}
-                  coordinates={[
-                    [-180, MERCATOR_LIMIT],
-                    [180, MERCATOR_LIMIT],
-                    [180, -MERCATOR_LIMIT],
-                    [-180, -MERCATOR_LIMIT],
-                  ]}
-                >
-                  <Layer
-                    id={`sampling-effort-layer-${panelId}`}
-                    beforeId={slotId("effort", panelId)}
-                    type="raster"
-                    paint={{ "raster-opacity": 0.6, "raster-fade-duration": 0 }}
-                  />
-                </Source>
-              )}
-              {/* Ecoregions (Dinerstein et al. 2017), drawn in the dataset's
-                  own biome colours. Fill kept faint and the boundary strong:
-                  the useful thing is where one ecoregion ends and the next
-                  begins, and a heavy fill hides the ground being compared. */}
-              {showEcoregions && ecoregions && (
-                <Source
-                  id={`ecoregions-${panelId}`}
-                  type="geojson"
-                  data={ecoregions}
-                  attribution={ECOREGIONS_ATTRIBUTION}
-                >
-                  <Layer
-                    id={`ecoregions-fill-${panelId}`}
-                    beforeId={slotId("ecoregions", panelId)}
-                    type="fill"
-                    paint={{ "fill-color": ["get", "biomeColor"], "fill-opacity": 0.22 }}
-                  />
-                  <Layer
-                    id={`ecoregions-line-${panelId}`}
-                    beforeId={slotId("ecoregions", panelId)}
-                    type="line"
-                    paint={{ "line-color": ["get", "biomeColor"], "line-width": 1, "line-opacity": 0.9 }}
-                  />
-                </Source>
-              )}
-              {/* The clicked ecoregion, outlined. Same treatment as a clicked
-                  protected area — white casing under a strong line, so the
-                  boundary reads over whatever basemap is underneath. */}
-              {showEcoregions && selectedEcoregionGeoJson && (
-                <Source id={`ecoregion-highlight-${panelId}`} type="geojson" data={selectedEcoregionGeoJson}>
-                  <Layer
-                    id={`ecoregion-highlight-fill-${panelId}`}
-                    beforeId={slotId("ecoregions", panelId)}
-                    type="fill"
-                    paint={{ "fill-color": "#059669", "fill-opacity": 0.18 }}
-                  />
-                  <Layer
-                    id={`ecoregion-highlight-casing-${panelId}`}
-                    beforeId={slotId("ecoregions", panelId)}
-                    type="line"
-                    paint={{ "line-color": "#ffffff", "line-width": 4.5, "line-opacity": 0.9 }}
-                  />
-                  <Layer
-                    id={`ecoregion-highlight-line-${panelId}`}
-                    beforeId={slotId("ecoregions", panelId)}
-                    type="line"
-                    paint={{ "line-color": "#059669", "line-width": 2 }}
-                  />
-                </Source>
-              )}
-              {/* Habitat types (Jung et al.) — bottom of the overlay stack: it
-                  covers whole continents, so anything drawn over it stays
-                  readable and it never hides a boundary or a point. */}
-              {showHabitat && (
-                <Source
-                  id={`habitat-${panelId}`}
-                  type="raster"
-                  tiles={[HABITAT_TILE_URL]}
-                  tileSize={256}
-                  attribution={HABITAT_ATTRIBUTION}
-                >
-                  <Layer
-                    id={`habitat-layer-${panelId}`}
-                    beforeId={slotId("habitat", panelId)}
-                    type="raster"
-                    paint={{ "raster-opacity": 0.55 }}
-                  />
-                </Source>
-              )}
-              {/* Global Forest Watch tree cover loss, year-coded. Above the
-                  habitat map, below everything else: the question is what
-                  happened inside a range, so it sits under the range and the
-                  records rather than over them. */}
-              {showForestLoss && (
-                <Source
-                  // The year range is baked into the tile URL, so a change of
-                  // range is a different source rather than a repaint of this
-                  // one — keyed so it is torn down and rebuilt instead of
-                  // holding the tiles it already fetched.
-                  key={`forest-loss-${lossYears[0]}-${lossYears[1]}`}
-                  id={`forest-loss-${panelId}`}
-                  type="raster"
-                  tiles={[forestLossTileUrl(lossYears[0], lossYears[1])]}
-                  tileSize={256}
-                  maxzoom={FOREST_LOSS_MAX_ZOOM}
-                  attribution={FOREST_LOSS_ATTRIBUTION}
-                >
-                  {/* No hue rotation any more: these tiles are already the
-                      pink the old ramp was rotated into. */}
-                  <Layer
-                    id={`forest-loss-layer-${panelId}`}
-                    beforeId={slotId("forest-loss", panelId)}
-                    type="raster"
-                    paint={{ "raster-opacity": 0.85 }}
-                  />
-                </Source>
-              )}
-              {/* What the loss was for, at 1 km. Drawn as the platform draws
-                  it — their tiles, their colours — because the legend has to
-                  be true of the pixels, and above the loss layer, since where
-                  both are on this is the one that answers "why". */}
-              {showLossDrivers && (
-                <Source
-                  id={`loss-drivers-${panelId}`}
-                  type="raster"
-                  tiles={[FOREST_LOSS_DRIVERS_TILE_URL]}
-                  tileSize={256}
-                  maxzoom={FOREST_LOSS_DRIVERS_MAX_ZOOM}
-                  attribution={FOREST_LOSS_DRIVERS_ATTRIBUTION}
-                >
-                  <Layer
-                    id={`loss-drivers-layer-${panelId}`}
-                    beforeId={slotId("loss-drivers", panelId)}
-                    type="raster"
-                    paint={{ "raster-opacity": 0.85 }}
-                  />
-                </Source>
-              )}
-              {/* Protected areas overlay (WDPA) — rendered before the occurrence
-                  circles so the points draw on top of the shaded PA polygons */}
-              {showProtectedAreas && (
-                <Source
-                  id={`wdpa-${panelId}`}
-                  type="raster"
-                  tiles={[PROTECTED_AREAS_TILE_URL]}
-                  tileSize={256}
-                  maxzoom={PROTECTED_AREAS_MAX_ZOOM}
-                  attribution={PROTECTED_AREAS_ATTRIBUTION}
-                >
-                  {/* Recoloured here rather than by the server: the tiles are
-                      WDPA's own green, which disappears against the terrain
-                      basemap. See PROTECTED_AREAS_HUE_ROTATION. */}
-                  <Layer
-                    id={`wdpa-layer-${panelId}`}
-                    beforeId={slotId("protected-areas", panelId)}
-                    type="raster"
-                    paint={{
-                      "raster-opacity": 0.55,
-                      "raster-hue-rotate": PROTECTED_AREAS_HUE_ROTATION,
-                      "raster-saturation": 0.2,
-                    }}
-                  />
-                </Source>
-              )}
-              {/* The clicked area, outlined. A boundary you can see the whole
-                  of answers "does my point sit inside this?" in a way a name in
-                  a popup can't — and with several designations stacked at one
-                  spot, it's the only way to tell which one you're reading. The
-                  white casing keeps it legible over satellite imagery. */}
-              {highlightedAreaGeoJson && pointQuery?.panelId === panelId && (
-                <Source id={`wdpa-highlight-${panelId}`} type="geojson" data={highlightedAreaGeoJson}>
-                  <Layer
-                    id={`wdpa-highlight-fill-${panelId}`}
-                    beforeId={slotId("protected-areas", panelId)}
-                    type="fill"
-                    paint={{
-                      "fill-color": ["get", "colour"],
-                      // Light, because these stack: three overlapping fills at
-                      // the old opacity turned the shared ground opaque and
-                      // hid the records the question was about.
-                      "fill-opacity": ["case", ["get", "active"], 0.2, 0.08],
-                    }}
-                  />
-                  <Layer
-                    id={`wdpa-highlight-casing-${panelId}`}
-                    beforeId={slotId("protected-areas", panelId)}
-                    type="line"
-                    paint={{ "line-color": "#ffffff", "line-width": 4.5, "line-opacity": 0.9 }}
-                  />
-                  <Layer
-                    id={`wdpa-highlight-line-${panelId}`}
-                    beforeId={slotId("protected-areas", panelId)}
-                    type="line"
-                    paint={{
-                      "line-color": ["get", "colour"],
-                      "line-width": ["case", ["get", "active"], 3, 1.75],
-                    }}
-                  />
-                </Source>
-              )}
+              <MapOverlayLayers overlays={overlays} panelId={panelId} />
               {/* POWO / IUCN native-range overlays — shade the countries each
                   source considers native, purely informational (independent of
                   the "Native range only" occurrence filter). Distinct colors
@@ -5292,7 +4551,7 @@ export default function OccurrenceMapRow({
                 </MapPopup>
               )}
               {/* What's here: the ground's height, and what protects it. */}
-              {pointQuery?.panelId === panelId && pointQuery.kind === "point" && (
+              {pointQuery?.panelId === panelId && (
                 <MapPopup
                   longitude={pointQuery.lng}
                   latitude={pointQuery.lat}
@@ -5470,233 +4729,7 @@ export default function OccurrenceMapRow({
               </button>
             </div>
           )}
-          {/* One key for the layers that are on, laid out as a table: name on
-              the left, its colours on the right, its source at the end. Four
-              separate cards each with its own arrangement read as four notices
-              rather than one legend, and nothing lined up with anything.
-
-              Each name is its own disclosure where there's more to say — the
-              biomes, the habitat classes, what tree cover loss does and doesn't
-              mean. */}
-          {!loadingOccurrences &&
-            (showSamplingEffort || showEcoregions || showForestLoss || showLossDrivers || showHabitat) && (
-            <div className="bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 py-1 text-[11px] text-zinc-600 dark:text-zinc-300 max-w-full">
-              <div className="px-2 pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Overlays
-              </div>
-              {showEcoregions && ecoregions && (
-                <div>
-                  <div className="flex items-center gap-2 px-2 py-0.5">
-                    <button
-                      onClick={() => setBiomeLegendOpen((v) => !v)}
-                      title={biomeLegendOpen ? "Hide the biomes" : "Show what the ecoregion colours mean"}
-                      className="flex-1 min-w-0 flex items-center gap-1 text-left hover:text-zinc-800 dark:hover:text-zinc-100"
-                    >
-                      <span className="truncate">Terrestrial ecoregions</span>
-                      <span className="text-[9px] text-zinc-400">{biomeLegendOpen ? "▾" : "▸"}</span>
-                    </button>
-                    <span className="flex rounded-sm overflow-hidden shrink-0">
-                      {BIOMES.slice(0, 8).map((biome) => (
-                        <span key={biome.name} className="w-2 h-2.5" style={{ background: biome.color }} />
-                      ))}
-                    </span>
-                    <a
-                      href={ECOREGIONS_PAPER_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Dinerstein et al. 2017, RESOLVE Ecoregions 2017 (CC BY 4.0)"
-                      className="shrink-0 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                    >
-                      <FaInfoCircle className="w-3 h-3" />
-                    </a>
-                  </div>
-                  {biomeLegendOpen && (
-                    <div className="px-2 pb-1 pl-3 space-y-0.5">
-                      {BIOMES.map((biome) => (
-                        <div key={biome.name} className="flex items-center gap-1.5">
-                          <span
-                            className="w-2.5 h-2.5 rounded-sm shrink-0 border border-black/10"
-                            style={{ background: biome.color }}
-                          />
-                          <span className="truncate text-[10px]">{biome.name}</span>
-                        </div>
-                      ))}
-                      <div className="text-[10px] text-zinc-400 pt-0.5">
-                        {ecoregions.features.length} ecoregions in 14 biomes
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              {showHabitat && (
-                <div>
-                  <div className="flex items-center gap-2 px-2 py-0.5">
-                    <button
-                      onClick={() => setHabitatLegendOpen((v) => !v)}
-                      title={habitatLegendOpen ? "Hide the habitat classes" : "Show what the habitat colours mean"}
-                      className="flex-1 min-w-0 flex items-center gap-1 text-left hover:text-zinc-800 dark:hover:text-zinc-100"
-                    >
-                      <span className="truncate">IUCN habitat types</span>
-                      <span className="text-[9px] text-zinc-400">{habitatLegendOpen ? "▾" : "▸"}</span>
-                    </button>
-                    <span className="flex rounded-sm overflow-hidden shrink-0">
-                      {HABITAT_LEGEND.slice(0, 8).map((entry) => (
-                        <span key={entry.code} className="w-2 h-2.5" style={{ background: entry.color }} />
-                      ))}
-                    </span>
-                    <a
-                      href={HABITAT_SCHEME_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="IUCN Habitats Classification Scheme — Jung et al. 2020 (CC BY 4.0). Click the map for the class at a point."
-                      className="shrink-0 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                    >
-                      <FaInfoCircle className="w-3 h-3" />
-                    </a>
-                  </div>
-                  {habitatLegendOpen && (
-                    <div className="px-2 pb-1 pl-3 space-y-0.5 max-w-xs">
-                      {HABITAT_LEGEND.map((entry) => (
-                        <div key={entry.code} className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: entry.color }} />
-                          <span className="truncate text-[10px]">{entry.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {showForestLoss && (
-                <div>
-                  <div className="flex items-center gap-2 px-2 py-0.5">
-                    <button
-                      onClick={() => setForestLossNotesOpen((v) => !v)}
-                      title={forestLossNotesOpen ? "Hide what this layer does and doesn't mean" : "What this layer does and doesn't mean"}
-                      className="flex-1 min-w-0 flex items-center gap-1 text-left hover:text-zinc-800 dark:hover:text-zinc-100"
-                    >
-                      <span className="truncate">Tree cover loss</span>
-                      <span className="text-[9px] text-zinc-400">{forestLossNotesOpen ? "▾" : "▸"}</span>
-                    </button>
-                    {/* One swatch, not a ramp: the tiles are a single colour
-                        whatever year the loss is from. The years are set on
-                        the track below, where a range can be dragged. */}
-                    <span className="flex items-center gap-1 shrink-0 text-[9px] tabular-nums text-zinc-400">
-                      <span
-                        className="h-2.5 w-4 rounded-sm"
-                        style={{ background: FOREST_LOSS_COLOR }}
-                        title={`Loss between ${lossYears[0]} and ${lossYears[1]}`}
-                      />
-                    </span>
-                    <a
-                      href={FOREST_LOSS_DATASET_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={FOREST_LOSS_SOURCE_NOTE}
-                      className="shrink-0 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                    >
-                      <FaInfoCircle className="w-3 h-3" />
-                    </a>
-                  </div>
-                  {/* Always out, not behind the disclosure: narrowing the
-                      years is the thing you do with this layer, not a note
-                      about it. */}
-                  <YearRangeSlider
-                    min={FOREST_LOSS_FIRST_YEAR}
-                    max={FOREST_LOSS_LAST_YEAR}
-                    value={lossYears}
-                    onChange={setLossYears}
-                    color={FOREST_LOSS_COLOR}
-                    label="Years of tree cover loss to show"
-                  />
-                  {forestLossNotesOpen && (
-                    <div className="px-2 pb-1 pl-3 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400 max-w-md">
-                      <div>
-                        <span className="font-medium">Loss is disturbance, not deforestation.</span>{" "}
-                        {FOREST_LOSS_CAVEAT}
-                      </div>
-                      <div className="pt-0.5">{FOREST_LOSS_THRESHOLD_NOTE}</div>
-                    </div>
-                  )}
-                </div>
-              )}
-              {showLossDrivers && (
-                <div>
-                  <div className="flex items-center gap-2 px-2 py-0.5">
-                    <button
-                      onClick={() => setLossDriverNotesOpen((v) => !v)}
-                      title={lossDriverNotesOpen ? "Hide what this layer does and doesn't mean" : "What this layer does and doesn't mean"}
-                      className="flex-1 min-w-0 flex items-center gap-1 text-left hover:text-zinc-800 dark:hover:text-zinc-100"
-                    >
-                      <span className="truncate">Tree cover loss by dominant driver</span>
-                      <span className="text-[9px] text-zinc-400">{lossDriverNotesOpen ? "▾" : "▸"}</span>
-                    </button>
-                    {/* Seven classes, so the swatches carry their names on
-                        hover rather than in a column that would be taller than
-                        the map. Opened, each one says what it covers. */}
-                    <span className="flex items-center gap-0.5 shrink-0">
-                      {FOREST_LOSS_DRIVERS.map((driver) => (
-                        <DriverSwatch key={driver.label} driver={driver} />
-                      ))}
-                    </span>
-                    <a
-                      href={FOREST_LOSS_DRIVERS_PAPER_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Sims et al. (2025), Global drivers of forest loss at 1 km resolution — the paper this classification comes from."
-                      className="shrink-0 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                    >
-                      <FaInfoCircle className="w-3 h-3" />
-                    </a>
-                  </div>
-                  {lossDriverNotesOpen && (
-                    <div className="px-2 pb-1 pl-3 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400 max-w-md">
-                      <div className="grid grid-cols-1 gap-y-0.5 pb-1">
-                        {FOREST_LOSS_DRIVERS.map((driver) => (
-                          <div key={driver.label} className="flex gap-1.5">
-                            <span
-                              className="mt-[3px] h-2 w-2 shrink-0 rounded-sm"
-                              style={{ background: driver.color }}
-                            />
-                            <span>
-                              <span className="font-medium text-zinc-600 dark:text-zinc-300">{driver.label}</span>{" "}
-                              {driver.description}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div>{FOREST_LOSS_DRIVERS_CAVEAT}</div>
-                    </div>
-                  )}
-                </div>
-              )}
-              {showSamplingEffort && effortLayer && (
-                <div className="flex items-center gap-2 px-2 py-0.5">
-                  <span className="flex-1 min-w-0 truncate" title="GBIF records per 10 km cell. A gap here means nobody has looked, which is not the same as the species being absent.">
-                    GBIF sampling effort
-                    <span className="text-zinc-400"> · {EFFORT_GROUP_LABELS[effortLayer.group]}</span>
-                  </span>
-                  <span className="flex items-center gap-1 shrink-0 text-[9px] text-zinc-400">
-                    less
-                    <span className="flex rounded-sm overflow-hidden">
-                      {EFFORT_LEGEND.map((step) => (
-                        <span key={step} className="w-2 h-2.5" style={{ background: step }} />
-                      ))}
-                    </span>
-                    more
-                  </span>
-                  <a
-                    href={EFFORT_PAPER_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Global sampling effort of GBIF biodiversity data — El-Gabbas 2026, Diversity and Distributions"
-                    className="shrink-0 text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
-                  >
-                    <FaInfoCircle className="w-3 h-3" />
-                  </a>
-                </div>
-              )}
-            </div>
-          )}
+          {!loadingOccurrences && <MapOverlayLegend overlays={overlays} />}
           </div>
           {/* This session's edits, newest first. Clicking one steps back to it,
               which is undo applied until it's reached. */}
@@ -5900,14 +4933,9 @@ export default function OccurrenceMapRow({
   const overlayToggleValues = [
     ...(assessmentId && canViewRangeMap ? [showRange] : []),
     ...(isAohAvailable ? [showAoh] : []),
-    showProtectedAreas,
-    showForestLoss,
-    showLossDrivers,
-    showHabitat,
-    showEcoregions,
+    ...overlays.toggleValues,
     showPowoRangeOverlay,
     ...(hasIucnNativeRange ? [showIucnRangeOverlay] : []),
-    ...(nativeEffortGroup ? [showSamplingEffort] : []),
   ];
 
   /**
@@ -6902,357 +5930,7 @@ export default function OccurrenceMapRow({
     );
   };
 
-  const renderClickInfo = (panelId: string) => {
-    const areasHere =
-      pointQuery?.panelId === panelId && pointQuery.kind === "areas" ? pointQuery : null;
-    const eco =
-      showEcoregions && selectedEcoregion?.panelId === panelId ? selectedEcoregion : null;
-    const hab = showHabitat && clickedHabitat?.panelId === panelId ? clickedHabitat : null;
-    const forest =
-      (showLossDrivers || showForestLoss) && clickedForest?.panelId === panelId
-        ? clickedForest
-        : null;
-    const effort =
-      showSamplingEffort && effortLayer && effortCellAtPoint && clickedEffort?.panelId === panelId
-        ? { ...clickedEffort, layer: effortLayer, cell: effortCellAtPoint }
-        : null;
-    if (!areasHere && !eco && !hab && !forest && !effort) return null;
-
-    // The extent of everything being highlighted, so the callout can sit
-    // outside it. Habitat and sampling effort have no shape here — each is read
-    // at a point — so on their own they anchor to their click. Habitat used to
-    // borrow the right-click query's point, which a left click clears, so on
-    // its own it opened at 0°, 0°, off screen.
-    const shapes: GeoJSON.Geometry[] = [];
-    for (const area of areasHere?.areas ?? []) if (area.geometry) shapes.push(area.geometry);
-    if (eco) shapes.push(eco.geometry);
-    let bounds: [number, number, number, number] | null = null;
-    for (const shape of shapes) {
-      for (const position of positionsOf(shape)) {
-        bounds = bounds
-          ? [
-              Math.min(bounds[0], position[0]),
-              Math.min(bounds[1], position[1]),
-              Math.max(bounds[2], position[0]),
-              Math.max(bounds[3], position[1]),
-            ]
-          : [position[0], position[1], position[0], position[1]];
-      }
-    }
-    const at =
-      areasHere ?? eco ?? forest ?? hab ?? effort!;
-
-    return (
-      <MapShapeCallout bounds={bounds} lng={at.lng} lat={at.lat}>
-      <div className="bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-700 dark:text-zinc-200 space-y-1.5">
-        {areasHere && (
-          <div>
-            <div className="flex items-baseline gap-1 pb-0.5">
-              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Protected areas
-              </span>
-              <button
-                onClick={() => setPointQuery(null)}
-                title="Close"
-                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-      <div className="space-y-1">
-        {/* Says up front that there is more than one, before
-            you have to infer it from the length of the list. */}
-        {areasHere.areas.length > 1 && (
-          <div className="text-[10px] text-zinc-400 dark:text-zinc-500">
-            {areasHere.areas.length} overlapping designations here
-          </div>
-        )}
-        {areasHere.areas.map((area, index) => (
-          <div
-            key={area.sitePid}
-            onMouseEnter={() => setPointQuery((prev) => (prev ? { ...prev, highlight: index } : prev))}
-            className={`-mx-1 px-1 py-0.5 rounded flex gap-1.5 ${
-              index === areasHere.highlight ? "bg-zinc-100 dark:bg-zinc-800" : ""
-            }`}
-          >
-            {/* The swatch is what ties this row to its outline
-                on the map. Only drawn when there's more than
-                one site — a single colour keyed to nothing is
-                just decoration. */}
-            {areasHere.areas.length > 1 && (
-              <span
-                className="mt-1 w-2 h-2 rounded-sm shrink-0"
-                style={{ background: highlightColour(index) }}
-                title="This site's outline on the map"
-              />
-            )}
-            <div className="min-w-0">
-              <a
-                href={protectedPlanetUrl(area)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open this site on Protected Planet"
-                className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                {area.name}
-              </a>
-              <div className="text-zinc-500 dark:text-zinc-400">
-                {[
-                  area.designation,
-                  area.iucnCategory ? `IUCN ${area.iucnCategory}` : null,
-                  area.statusYear ? String(area.statusYear) : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-          </div>
-        )}
-        {hab && (
-          <div className={areasHere ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : ""}>
-            <div className="flex items-baseline gap-1 pb-0.5">
-              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Habitat
-              </span>
-              <button
-                onClick={() => setClickedHabitat(null)}
-                title="Close"
-                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            {hab.loading ? (
-              <span className="text-zinc-400">Reading habitat…</span>
-            ) : hab.habitat == null ? (
-              <span className="text-zinc-400">No habitat class mapped here.</span>
-            ) : (
-              <div className="flex items-start gap-1.5">
-                <span
-                  className="w-2.5 h-2.5 rounded-sm shrink-0 translate-y-1"
-                  style={{ background: hab.habitat.color }}
-                />
-                <div className="min-w-0">
-                  {hab.habitat.name}{" "}
-                  <a
-                    href={HABITAT_SCHEME_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="IUCN Habitats Classification Scheme"
-                    className="tabular-nums text-zinc-400 hover:underline"
-                  >
-                    {hab.habitat.code}
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {forest && (
-          <div className={areasHere || hab ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : ""}>
-            <div className="flex items-baseline gap-1 pb-0.5">
-              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Forest
-              </span>
-              <button
-                onClick={() => setClickedForest(null)}
-                title="Close"
-                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            {forest.loading ? (
-              <span className="text-zinc-400">Reading the rasters…</span>
-            ) : forest.point == null || !hasForestAnswer(forest.point) ? (
-              <span className="text-zinc-400">No tree cover loss recorded here.</span>
-            ) : (
-              <div className="space-y-0.5">
-                {/* The class, and nothing else about it. What each driver
-                    covers is a sentence long and lives in the legend, a
-                    hover away on the same swatch — repeating it here made a
-                    two-line answer into a paragraph. */}
-                {forest.point.driver && (
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="w-2.5 h-2.5 rounded-sm shrink-0"
-                      style={{ background: forest.point.driver.color }}
-                    />
-                    <span className="font-medium text-zinc-600 dark:text-zinc-300">
-                      {forest.point.driver.label}
-                    </span>
-                  </div>
-                )}
-                <div className="text-zinc-500 dark:text-zinc-400 tabular-nums">
-                  {[
-                    forest.point.lossYear ? `Loss ${forest.point.lossYear}` : null,
-                    forest.point.canopyPercent != null
-                      ? `${forest.point.canopyPercent}% canopy 2000`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-                {/* The three qualifiers as one line.
-                    All of them still need saying — a driver is the dominant
-                    one for a 1 km cell, the point query answers for ground
-                    the layers leave blank, and the loss it was measured from
-                    is 30 m so a spot can sit in a cell without having lost
-                    anything. As three sentences they were most of the card,
-                    and a caveat that long stops being read. */}
-                {forest.point.driver && (
-                  <div className="text-zinc-400">
-                    {[
-                      "Dominant driver, 1 km cell",
-                      forest.point.lossYear ? null : "no loss at this 30 m pixel",
-                      forest.point.belowThreshold
-                        ? `below the ${FOREST_LOSS_CANOPY_THRESHOLD}% canopy cut, so not shaded`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        {eco && (
-          <div className={areasHere || hab || forest ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : ""}>
-            <div className="flex items-baseline gap-1 pb-0.5">
-              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Ecoregion
-              </span>
-              <button
-                onClick={() => setSelectedEcoregion(null)}
-                title="Close"
-                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex items-start gap-1.5">
-              <span
-                className="w-2.5 h-2.5 rounded-sm shrink-0 translate-y-1 border border-black/10"
-                style={{ background: eco.properties.biomeColor }}
-              />
-              <div className="min-w-0">
-                <div className="font-medium">{eco.properties.name}</div>
-                <div className="text-zinc-400">{eco.properties.biome}</div>
-                <div className="text-zinc-400">
-                  {eco.properties.realm} · {eco.properties.nnh}
-                </div>
-                {eco.properties.oneEarth && (
-                  <a
-                    href={oneEarthEcoregionUrl(eco.properties.oneEarth)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    Read about it on One Earth
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        {effort && (
-          <div className={areasHere || hab || forest || eco ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : ""}>
-            <div className="flex items-baseline gap-1 pb-0.5">
-              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Sampling effort
-              </span>
-              <button
-                onClick={() => setClickedEffort(null)}
-                title="Close"
-                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="max-w-[16rem]">
-            {(() => {
-              const records = effortAt(effort.layer, effort.lng, effort.lat);
-              return (
-                <>
-                  <span className="font-medium text-zinc-700 dark:text-zinc-200">
-                    {records == null
-                      ? `No ${EFFORT_GROUP_LABELS[effort.layer.group].toLowerCase()} records when this was published`
-                      : formatEffort(records, effort.cell.widthKm)}
-                  </span>
-                  <span className="block text-zinc-400">
-                    {EFFORT_GROUP_LABELS[effort.layer.group]}, all years
-                  </span>
-                  {/* The layer is a snapshot published with the
-                      paper; this is what GBIF holds today. They
-                      differ by a lot and neither is wrong, so both
-                      are shown and both are labelled. */}
-                  <span className="block text-zinc-500 dark:text-zinc-400">
-                    {gbifCellCountLoading
-                      ? "Counting on GBIF…"
-                      : gbifCellCount == null
-                        ? ""
-                        : `${gbifCellCount.toLocaleString()} on GBIF today`}
-                  </span>
-                  {/* Broken down, because the total alone doesn't
-                      say what kind of looking happened here. A
-                      cell of photographs and a cell of herbarium
-                      sheets are different evidence about whether
-                      a plant would have been collected if it were
-                      present. */}
-                  {gbifCellByBasis.length > 0 && (
-                    <span className="block pl-2 border-l border-zinc-200 dark:border-zinc-700">
-                      {/* Each kind is its own search. Whether the
-                          looking here was photographs or herbarium
-                          sheets is usually the question, so the
-                          answer should be one click rather than a
-                          filter to set again on GBIF. */}
-                      {gbifCellByBasis.slice(0, 4).map((b) => (
-                        <a
-                          key={b.basis}
-                          href={gbifSearchUrl(effort.cell.bounds, effort.layer.group, [b.basis])}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
-                        >
-                          <span className="tabular-nums">{b.count.toLocaleString()}</span>{" "}
-                          {(BASIS_LABELS[b.basis] ?? b.basis.replace(/_/g, " ").toLowerCase())}
-                        </a>
-                      ))}
-                    </span>
-                  )}
-                  <a
-                    href={gbifSearchUrl(effort.cell.bounds, effort.layer.group)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Open this cell on GBIF, filtered to the same taxon. The total there is today's; the figure above is the snapshot this layer was published with."
-                    className="block text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    Inspect these records on GBIF
-                  </a>
-                </>
-              );
-            })()}
-            </div>
-          </div>
-        )}
-      </div>
-      </MapShapeCallout>
-    );
-  };
+  const renderClickInfo = (panelId: string) => <MapOverlayCallout overlays={overlays} panelId={panelId} />;
 
   const renderOverlayLayers = () => (
     <div className="flex flex-col py-1 w-[20rem]">
@@ -7356,218 +6034,59 @@ export default function OccurrenceMapRow({
           </span>
         </label>
       )}
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px]"
-        title="Overlay the World Database on Protected Areas (WDPA) — UNEP-WCMC & IUCN. With it on, clicking the map names the areas covering that point and links each to Protected Planet."
-      >
-        <input
-          type="checkbox"
-          checked={showProtectedAreas}
-          onChange={() => {
-            setShowProtectedAreas((v) => !v);
-            setPointQuery(null);
-            // A fresh attempt: the service may have come back since.
-            setProtectedAreasDown(false);
-          }}
-          className="w-3 h-3 rounded accent-emerald-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">Protected areas</span>
-        {/* Said where the layer is switched on, because the blank map it
-            leaves behind reads as "nothing here is protected". */}
-        {protectedAreasDown && (
-          <span
-            title="UNEP-WCMC's map service isn't answering, so this layer can't be drawn and clicking the map won't name any sites. A blank map here doesn't mean the area is unprotected. Their outage, not yours — try again later."
-            className="shrink-0 cursor-help text-[10px] text-amber-600 dark:text-amber-500"
-          >
-            source unavailable
-          </span>
-        )}
-        <SourceCitation
-          href="https://www.protectedplanet.net"
-          cite="WDPA"
-          title="World Database on Protected Areas — UNEP-WCMC & IUCN, via Protected Planet"
-        />
-      </label>
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
-        title={`${FOREST_LOSS_SOURCE_NOTE} Showing ${lossYears[0]}\u2013${lossYears[1]}; narrow the years in the legend. ${FOREST_LOSS_CAVEAT} ${FOREST_LOSS_THRESHOLD_NOTE} Click the map with this on to read the loss year and canopy cover at a point.`}
-      >
-        <input
-          type="checkbox"
-          checked={showForestLoss}
-          onChange={() => setShowForestLoss((v) => !v)}
-          className="w-3 h-3 rounded accent-emerald-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">Tree cover loss</span>
-        <SourceCitation
-          href={FOREST_LOSS_DATASET_URL}
-          cite="Hansen et al. 2013"
-          title="High-Resolution Global Maps of 21st-Century Forest Cover Change — Hansen et al. 2013, Science. The Global Forest Change dataset these tiles are drawn from."
-        />
-      </label>
-      {/* Next to the loss layer, because it answers the question that one
-          raises: a cleared block inside a range means something different if
-          it is a soy field, a logging rotation or a fire. */}
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
-        title={`Why the trees went, at 1 km: Sims et al. (2025), via Global Nature Watch. Loss ${FOREST_LOSS_DRIVERS_FIRST_YEAR}\u2013${FOREST_LOSS_DRIVERS_LAST_YEAR}, cut at ${DRIVERS_CANOPY_THRESHOLD}% canopy cover. ${FOREST_LOSS_DRIVERS_CAVEAT}`}
-      >
-        <input
-          type="checkbox"
-          checked={showLossDrivers}
-          onChange={() => setShowLossDrivers((v) => !v)}
-          className="w-3 h-3 rounded accent-emerald-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">Tree cover loss by dominant driver</span>
-        <SourceCitation
-          href={FOREST_LOSS_DRIVERS_PAPER_URL}
-          cite="Sims et al. 2025"
-          title="Global drivers of forest loss at 1 km resolution — Sims et al. 2025, Environmental Research Letters."
-        />
-      </label>
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
-        title="IUCN habitat classes from Jung et al. (2020), the 100m map behind Area of Habitat. Coloured by level 1; click the map for the exact class."
-      >
-        <input
-          type="checkbox"
-          checked={showHabitat}
-          onChange={() => {
-            setShowHabitat((v) => !v);
-            setPointQuery(null);
-          }}
-          className="w-3 h-3 rounded accent-emerald-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">IUCN habitat types</span>
-        <SourceCitation
-          href="https://zenodo.org/records/4058819"
-          cite="Jung et al. 2020"
-          title="A global map of terrestrial habitat types — Jung et al. 2020. The 100 m map behind Area of Habitat."
-        />
-      </label>
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px]"
-        title="Terrestrial ecoregions and biomes (Dinerstein et al. 2017) — the ecosystem a record sits in. Right-click anywhere to name it."
-      >
-        <input
-          type="checkbox"
-          checked={showEcoregions}
-          onChange={() => setShowEcoregions((v) => !v)}
-          className="w-3 h-3 rounded accent-emerald-600 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200 flex items-center gap-1">
-          Terrestrial ecoregions
-          {ecoregionsLoading && (
-            <svg className="w-3 h-3 animate-spin text-zinc-400" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          )}
-        </span>
-        {ecoregionsFailed && (
-          <span className="text-[10px] text-red-500 shrink-0">unavailable</span>
-        )}
-        <SourceCitation
-          href={ECOREGIONS_PAPER_URL}
-          cite="Dinerstein et al. 2017"
-          title="An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm — Dinerstein et al. 2017, BioScience. The RESOLVE Ecoregions 2017 layer, CC BY 4.0."
-        />
-      </label>
-      <label
-        className={`flex items-center gap-2 px-2 py-0.5 text-[11px] ${
-          nativeCountriesWcvp && nativeCountriesWcvp.length > 0
-            ? "hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
-            : "opacity-50 cursor-not-allowed"
-        }`}
-        title="Shade the countries Kew's POWO/World Checklist of Vascular Plants considers this species native to"
-      >
-        <input
-          type="checkbox"
-          checked={showPowoRangeOverlay}
-          disabled={!(nativeCountriesWcvp && nativeCountriesWcvp.length > 0)}
-          onChange={() => setShowPowoRangeOverlay((v) => !v)}
-          className="w-3 h-3 rounded accent-blue-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">POWO native range</span>
-        {wcvpPowoId && (
-          <SourceCitation
-            href={`https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:${wcvpPowoId}`}
-            cite="POWO"
-            title="This species on Plants of the World Online — Kew's World Checklist of Vascular Plants, which is where these countries come from."
-          />
-        )}
-      </label>
-{hasIucnNativeRange && (
-      <label
-        className="flex items-center gap-2 px-2 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
-        title="Shade the countries this species' IUCN Red List assessment lists as native range"
-      >
-        <input
-          type="checkbox"
-          checked={showIucnRangeOverlay}
-          onChange={() => setShowIucnRangeOverlay((v) => !v)}
-          className="w-3 h-3 rounded accent-amber-500 shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">IUCN native countries</span>
-        {sisTaxonId && assessmentId && (
-          <SourceCitation
-            href={`https://www.iucnredlist.org/species/${sisTaxonId}/${assessmentId}`}
-            cite="IUCN Red List"
-            title="This species' Red List assessment, which is where these countries are listed."
-          />
-        )}
-      </label>
-      )}
-      {/* Withheld entirely where the dataset has no matching
-          taxon — see lib/mapping/sampling-effort.ts. A fish
-          judged against seabird effort is worse than no layer. */}
-      {nativeEffortGroup && (
-        <div>
-          <label
-            className="flex items-center gap-2 px-2 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px]"
-            title="GBIF records per 10 km cell (El-Gabbas 2026). Shows whether a gap in the records is genuinely empty or merely unvisited — the caveat behind a record-based AOO."
-          >
-            <input
-              type="checkbox"
-              checked={showSamplingEffort}
-              onChange={() => setShowSamplingEffort((v) => !v)}
-              className="w-3 h-3 rounded accent-yellow-500 shrink-0"
-            />
-            <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200 flex items-center gap-1">
-              GBIF sampling effort
-              {effortLoading && (
-                <svg className="w-3 h-3 animate-spin text-zinc-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              )}
-            </span>
-            <SourceCitation
-              href={EFFORT_PAPER_URL}
-              cite="El-Gabbas 2026"
-              title="Global sampling effort of GBIF biodiversity data — El-Gabbas 2026, Diversity and Distributions."
-            />
-          </label>
-          {/* One taxon at a time, not several: two effort
-              surfaces drawn over each other give a colour that
-              can't be read back to either. */}
-          {showSamplingEffort && (
-            <select
-              value={effortGroup ?? nativeEffortGroup}
-              onChange={(e) => setEffortGroup(e.target.value as EffortGroup)}
-              className="mx-2 mb-1 w-[calc(100%-1rem)] rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-1.5 py-1 text-[11px] text-zinc-700 dark:text-zinc-200"
-              title="Which taxon's collecting effort to show. All taxa is dominated by birds and casual observation, so the matching group is usually the honest comparison."
+      <MapOverlayMenu
+        overlays={overlays}
+        effortDefaultNote="this species"
+        beforeEffort={
+          <>
+            <label
+              className={`flex items-center gap-2 px-2 py-0.5 text-[11px] ${
+                nativeCountriesWcvp && nativeCountriesWcvp.length > 0
+                  ? "hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
+                  : "opacity-50 cursor-not-allowed"
+              }`}
+              title="Shade the countries Kew's POWO/World Checklist of Vascular Plants considers this species native to"
             >
-              {EFFORT_GROUPS.map((g) => (
-                <option key={g} value={g}>
-                  {EFFORT_GROUP_LABELS[g]}
-                  {g === nativeEffortGroup ? " (this species)" : ""}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
+              <input
+                type="checkbox"
+                checked={showPowoRangeOverlay}
+                disabled={!(nativeCountriesWcvp && nativeCountriesWcvp.length > 0)}
+                onChange={() => setShowPowoRangeOverlay((v) => !v)}
+                className="w-3 h-3 rounded accent-blue-500 shrink-0"
+              />
+              <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">POWO native range</span>
+              {wcvpPowoId && (
+                <SourceCitation
+                  href={`https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:${wcvpPowoId}`}
+                  cite="POWO"
+                  title="This species on Plants of the World Online — Kew's World Checklist of Vascular Plants, which is where these countries come from."
+                />
+              )}
+            </label>
+            {hasIucnNativeRange && (
+            <label
+              className="flex items-center gap-2 px-2 py-0.5 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer"
+              title="Shade the countries this species' IUCN Red List assessment lists as native range"
+            >
+              <input
+                type="checkbox"
+                checked={showIucnRangeOverlay}
+                onChange={() => setShowIucnRangeOverlay((v) => !v)}
+                className="w-3 h-3 rounded accent-amber-500 shrink-0"
+              />
+              <span className="flex-1 min-w-0 text-zinc-700 dark:text-zinc-200">IUCN native countries</span>
+              {sisTaxonId && assessmentId && (
+                <SourceCitation
+                  href={`https://www.iucnredlist.org/species/${sisTaxonId}/${assessmentId}`}
+                  cite="IUCN Red List"
+                  title="This species' Red List assessment, which is where these countries are listed."
+                />
+              )}
+            </label>
+            )}
+          </>
+        }
+      />
       </>
     </div>
   );
