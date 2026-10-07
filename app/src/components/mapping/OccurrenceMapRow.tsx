@@ -3284,21 +3284,28 @@ export default function OccurrenceMapRow({
           : null
       );
     }
+    // The effort counts came down with the layer, so this is a lookup rather
+    // than a request: the callout opens on the click with the snapshot figure,
+    // and only GBIF's live count is left to arrive.
+    if (showSamplingEffort && effortLayer) {
+      const { lng, lat } = e.lngLat;
+      setClickedEffort({ panelId, lng, lat });
+    }
     // The habitat map is a raster, so there's no feature to hit-test: the
     // service that drew the tiles answers an identify at a point, which means
     // the answer can't disagree with what's on screen.
     if (showHabitat) {
       const { lng, lat } = e.lngLat;
       const query = ++habitatQueryId.current;
-      setClickedHabitat({ habitat: null, loading: true, panelId });
+      setClickedHabitat({ habitat: null, loading: true, panelId, lng, lat });
       identifyHabitat(lng, lat)
         .then((habitat) => {
           if (query !== habitatQueryId.current) return;
-          setClickedHabitat({ habitat, loading: false, panelId });
+          setClickedHabitat({ habitat, loading: false, panelId, lng, lat });
         })
         .catch(() => {
           if (query !== habitatQueryId.current) return;
-          setClickedHabitat({ habitat: null, loading: false, panelId });
+          setClickedHabitat({ habitat: null, loading: false, panelId, lng, lat });
         });
     }
     // Same bargain again for the forest layers, and the one that most needed
@@ -3365,6 +3372,8 @@ export default function OccurrenceMapRow({
     showEcoregions,
     ecoregions,
     showHabitat,
+    showSamplingEffort,
+    effortLayer,
     // Left out until now, which is why clicking a record never pinned its
     // panel: the handler was memoised on the first render, and the callbacks
     // it had closed over were the first render's. The records themselves come
@@ -3379,7 +3388,8 @@ export default function OccurrenceMapRow({
 
   /**
    * Right-click asks what this spot is: its coordinates, the ground elevation,
-   * the habitat class where that overlay is on, and the way into measuring.
+   * and the way into measuring. What an overlay says of the spot — habitat,
+   * sampling effort, protected areas — answers a left click instead.
    *
    * On the right button because that's where a map's "what is this" lives —
    * Google Maps put it there and everyone learned it — and because the left
@@ -3585,13 +3595,24 @@ export default function OccurrenceMapRow({
    * fast enough to run during render and avoids carrying a spatial index for a
    * lookup that happens once per click.
    */
-  /** The effort cell under the right-clicked point, if the layer is on. */
+  /**
+   * The sampling-effort cell under the last left click, while that layer is on.
+   *
+   * A left click, like the other layers you click to interrogate, and answered
+   * in the same callout — not folded into the right-click panel, which is
+   * about the spot itself rather than what an overlay says of it.
+   */
+  const [clickedEffort, setClickedEffort] = useState<{
+    panelId: string;
+    lng: number;
+    lat: number;
+  } | null>(null);
   const effortCellAtPoint = useMemo(
     () =>
-      pointQuery && effortLayer && showSamplingEffort
-        ? effortCell(effortLayer, pointQuery.lng, pointQuery.lat)
+      clickedEffort && effortLayer && showSamplingEffort
+        ? effortCell(effortLayer, clickedEffort.lng, clickedEffort.lat)
         : null,
-    [pointQuery, effortLayer, showSamplingEffort]
+    [clickedEffort, effortLayer, showSamplingEffort]
   );
   const {
     count: gbifCellCount,
@@ -3898,6 +3919,9 @@ export default function OccurrenceMapRow({
     habitat: HabitatClass | null;
     loading: boolean;
     panelId: string;
+    /** Where it was clicked: a raster read has no shape to anchor the callout. */
+    lng: number;
+    lat: number;
   } | null>(null);
 
   /**
@@ -5299,76 +5323,6 @@ export default function OccurrenceMapRow({
                         </span>
                       )}
                     </div>
-                    {/* How much collecting has happened here at all. The
-                        counts came down with the layer, so this is a lookup in
-                        an array rather than a request — the reason for shipping
-                        values instead of a picture. */}
-                    {showSamplingEffort && effortLayer && effortCellAtPoint && (
-                      <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
-                        {(() => {
-                          const records = effortAt(effortLayer, pointQuery.lng, pointQuery.lat);
-                          return (
-                            <>
-                              <span className="font-medium text-zinc-700 dark:text-zinc-200">
-                                {records == null
-                                  ? `No ${EFFORT_GROUP_LABELS[effortLayer.group].toLowerCase()} records when this was published`
-                                  : formatEffort(records, effortCellAtPoint.widthKm)}
-                              </span>
-                              <span className="block text-zinc-400">
-                                {EFFORT_GROUP_LABELS[effortLayer.group]}, all years
-                              </span>
-                              {/* The layer is a snapshot published with the
-                                  paper; this is what GBIF holds today. They
-                                  differ by a lot and neither is wrong, so both
-                                  are shown and both are labelled. */}
-                              <span className="block text-zinc-500 dark:text-zinc-400">
-                                {gbifCellCountLoading
-                                  ? "Counting on GBIF…"
-                                  : gbifCellCount == null
-                                    ? ""
-                                    : `${gbifCellCount.toLocaleString()} on GBIF today`}
-                              </span>
-                              {/* Broken down, because the total alone doesn't
-                                  say what kind of looking happened here. A
-                                  cell of photographs and a cell of herbarium
-                                  sheets are different evidence about whether
-                                  a plant would have been collected if it were
-                                  present. */}
-                              {gbifCellByBasis.length > 0 && (
-                                <span className="block pl-2 border-l border-zinc-200 dark:border-zinc-700">
-                                  {/* Each kind is its own search. Whether the
-                                      looking here was photographs or herbarium
-                                      sheets is usually the question, so the
-                                      answer should be one click rather than a
-                                      filter to set again on GBIF. */}
-                                  {gbifCellByBasis.slice(0, 4).map((b) => (
-                                    <a
-                                      key={b.basis}
-                                      href={gbifSearchUrl(effortCellAtPoint.bounds, effortLayer.group, [b.basis])}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="block text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
-                                    >
-                                      <span className="tabular-nums">{b.count.toLocaleString()}</span>{" "}
-                                      {(BASIS_LABELS[b.basis] ?? b.basis.replace(/_/g, " ").toLowerCase())}
-                                    </a>
-                                  ))}
-                                </span>
-                              )}
-                              <a
-                                href={gbifSearchUrl(effortCellAtPoint.bounds, effortLayer.group)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Open this cell on GBIF, filtered to the same taxon. The total there is today's; the figure above is the snapshot this layer was published with."
-                                className="block text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                Inspect these records on GBIF
-                              </a>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    )}
                     {/* Silent when the point isn't protected: the overlay is
                         already showing you that, and a line saying so on every
                         click is noise on the answer you did ask for. */}
@@ -6952,11 +6906,17 @@ export default function OccurrenceMapRow({
       (showLossDrivers || showForestLoss) && clickedForest?.panelId === panelId
         ? clickedForest
         : null;
-    if (!areasHere && !eco && !hab && !forest) return null;
+    const effort =
+      showSamplingEffort && effortLayer && effortCellAtPoint && clickedEffort?.panelId === panelId
+        ? { ...clickedEffort, layer: effortLayer, cell: effortCellAtPoint }
+        : null;
+    if (!areasHere && !eco && !hab && !forest && !effort) return null;
 
     // The extent of everything being highlighted, so the callout can sit
-    // outside it. Habitat has no shape — it's a raster read at a point — so on
-    // its own it anchors to the click.
+    // outside it. Habitat and sampling effort have no shape here — each is read
+    // at a point — so on their own they anchor to their click. Habitat used to
+    // borrow the right-click query's point, which a left click clears, so on
+    // its own it opened at 0°, 0°, off screen.
     const shapes: GeoJSON.Geometry[] = [];
     for (const area of areasHere?.areas ?? []) if (area.geometry) shapes.push(area.geometry);
     if (eco) shapes.push(eco.geometry);
@@ -6974,7 +6934,7 @@ export default function OccurrenceMapRow({
       }
     }
     const at =
-      areasHere ?? eco ?? forest ?? { lng: pointQuery?.lng ?? 0, lat: pointQuery?.lat ?? 0 };
+      areasHere ?? eco ?? forest ?? hab ?? effort!;
 
     return (
       <MapShapeCallout bounds={bounds} lng={at.lng} lat={at.lat}>
@@ -7198,6 +7158,88 @@ export default function OccurrenceMapRow({
                   </a>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+        {effort && (
+          <div className={areasHere || hab || forest || eco ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : ""}>
+            <div className="flex items-baseline gap-1 pb-0.5">
+              <span className="text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                Sampling effort
+              </span>
+              <button
+                onClick={() => setClickedEffort(null)}
+                title="Close"
+                className="ml-auto text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="max-w-[16rem]">
+            {(() => {
+              const records = effortAt(effort.layer, effort.lng, effort.lat);
+              return (
+                <>
+                  <span className="font-medium text-zinc-700 dark:text-zinc-200">
+                    {records == null
+                      ? `No ${EFFORT_GROUP_LABELS[effort.layer.group].toLowerCase()} records when this was published`
+                      : formatEffort(records, effort.cell.widthKm)}
+                  </span>
+                  <span className="block text-zinc-400">
+                    {EFFORT_GROUP_LABELS[effort.layer.group]}, all years
+                  </span>
+                  {/* The layer is a snapshot published with the
+                      paper; this is what GBIF holds today. They
+                      differ by a lot and neither is wrong, so both
+                      are shown and both are labelled. */}
+                  <span className="block text-zinc-500 dark:text-zinc-400">
+                    {gbifCellCountLoading
+                      ? "Counting on GBIF…"
+                      : gbifCellCount == null
+                        ? ""
+                        : `${gbifCellCount.toLocaleString()} on GBIF today`}
+                  </span>
+                  {/* Broken down, because the total alone doesn't
+                      say what kind of looking happened here. A
+                      cell of photographs and a cell of herbarium
+                      sheets are different evidence about whether
+                      a plant would have been collected if it were
+                      present. */}
+                  {gbifCellByBasis.length > 0 && (
+                    <span className="block pl-2 border-l border-zinc-200 dark:border-zinc-700">
+                      {/* Each kind is its own search. Whether the
+                          looking here was photographs or herbarium
+                          sheets is usually the question, so the
+                          answer should be one click rather than a
+                          filter to set again on GBIF. */}
+                      {gbifCellByBasis.slice(0, 4).map((b) => (
+                        <a
+                          key={b.basis}
+                          href={gbifSearchUrl(effort.cell.bounds, effort.layer.group, [b.basis])}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                        >
+                          <span className="tabular-nums">{b.count.toLocaleString()}</span>{" "}
+                          {(BASIS_LABELS[b.basis] ?? b.basis.replace(/_/g, " ").toLowerCase())}
+                        </a>
+                      ))}
+                    </span>
+                  )}
+                  <a
+                    href={gbifSearchUrl(effort.cell.bounds, effort.layer.group)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open this cell on GBIF, filtered to the same taxon. The total there is today's; the figure above is the snapshot this layer was published with."
+                    className="block text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Inspect these records on GBIF
+                  </a>
+                </>
+              );
+            })()}
             </div>
           </div>
         )}
