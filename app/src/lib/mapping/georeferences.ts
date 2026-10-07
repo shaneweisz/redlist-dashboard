@@ -241,30 +241,72 @@ export interface Exclusion {
   gbifID: number;
   /** Why. Required — an exclusion nobody can audit is just missing data. */
   justification: string;
+  /**
+   * The record this one was set aside in favour of, when it is a duplicate.
+   *
+   * The link itself, kept apart from the reason that describes it. It used to
+   * live only in the reason's wording, read back with a regex — so typing that
+   * sentence by hand made a duplicate, and rewording it would have unmade
+   * every one already saved.
+   */
+  duplicateOf?: number;
   /** ISO 8601, stamped on save. */
   excludedAt: string;
   excludedBy?: string;
 }
 
+/** What reading or following a duplicate link needs of an exclusion. */
+export type DuplicateLink = Pick<Exclusion, "justification" | "duplicateOf">;
+
 /**
  * One record set aside as a duplicate of another.
  *
- * A duplicate is an exclusion whose reason names the record kept, rather than
- * a store of its own: it is excluded, it needs a reason, and the reason is
+ * A duplicate is an exclusion carrying a `duplicateOf` link, rather than a
+ * store of its own: it is excluded, it needs a reason, and the reason is
  * exactly "this one instead". Anything that reads exclusions — the map, the
  * counts, the point file — treats it correctly without knowing about
  * duplicates at all.
+ *
+ * This is the reason written alongside the link, for people to read. It is
+ * still the sentence older builds read the link from, so a file saved here
+ * restores as duplicates there too.
  */
 export function duplicateOfReason(primaryGbifID: number): string {
   return `Duplicate of GBIF ${primaryGbifID}`;
 }
 
 /** The record this one was set aside in favour of, if that's why it was. */
-export function duplicateOf(justification: string | undefined | null): number | null {
-  // "record" was in the wording the first drag gesture wrote, and those
-  // exclusions are in people's browsers.
+export function duplicateOf(exclusion: DuplicateLink | undefined | null): number | null {
+  return exclusion?.duplicateOf ?? null;
+}
+
+/**
+ * The link as older builds wrote it: only in the reason's wording.
+ *
+ * Read once, when exclusions are loaded, and never again after — see
+ * `withDuplicateLinks`. "record" was in the wording the first drag gesture
+ * wrote, and those exclusions are in people's browsers.
+ */
+function legacyDuplicateOf(justification: string | undefined | null): number | null {
   const match = /^Duplicate of GBIF (?:record )?(\d+)\b/.exec((justification ?? "").trim());
   return match ? Number(match[1]) : null;
+}
+
+/**
+ * Exclusions with their duplicate links made explicit.
+ *
+ * Applied wherever exclusions come in from outside — this browser's storage
+ * and a saved-work file — so an older build's duplicates arrive linked, and
+ * nothing past this point reads a link out of a sentence. A link that is
+ * already there wins over the wording.
+ */
+export function withDuplicateLinks(exclusions: Record<number, Exclusion>): Record<number, Exclusion> {
+  const out: Record<number, Exclusion> = {};
+  for (const [id, e] of Object.entries(exclusions)) {
+    const legacy = e.duplicateOf == null ? legacyDuplicateOf(e.justification) : null;
+    out[Number(id)] = legacy == null ? e : { ...e, duplicateOf: legacy };
+  }
+  return out;
 }
 
 /**
@@ -282,12 +324,12 @@ export function duplicateOf(justification: string | undefined | null): number | 
  */
 export function resolvePrimary(
   gbifID: number,
-  exclusions: Record<number, { justification: string }>
+  exclusions: Record<number, DuplicateLink>
 ): number {
   const seen = new Set<number>([gbifID]);
   let current = gbifID;
   for (;;) {
-    const next = duplicateOf(exclusions[current]?.justification);
+    const next = duplicateOf(exclusions[current]);
     if (next == null || seen.has(next)) return current;
     seen.add(next);
     current = next;
@@ -449,7 +491,7 @@ export function loadExclusions(speciesKey: string): Record<number, Exclusion> {
     if (parsed?.version !== GEOREFERENCE_SCHEMA_VERSION) return {};
     const out: Record<number, Exclusion> = {};
     for (const [id, e] of Object.entries(parsed.records ?? {})) out[Number(id)] = e as Exclusion;
-    return out;
+    return withDuplicateLinks(out);
   } catch {
     return {};
   }

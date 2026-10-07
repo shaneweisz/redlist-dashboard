@@ -8,12 +8,13 @@ const ALL = [1, 2, 3, 4, 5];
 /** The exclusions as a readable map of id → what it says. */
 const shape = (exclusions: Record<number, Exclusion>) =>
   Object.fromEntries(
-    Object.entries(exclusions).map(([id, e]) => [id, duplicateOf(e.justification) ?? e.justification])
+    Object.entries(exclusions).map(([id, e]) => [id, duplicateOf(e) ?? e.justification])
   );
 
 const duplicateOfRecord = (of: number): Exclusion => ({
   gbifID: 0,
   justification: duplicateOfReason(of),
+  duplicateOf: of,
   excludedAt: STAMP.excludedAt,
 });
 
@@ -56,6 +57,14 @@ describe("keepRecord", () => {
     expect(shape(keep(before, 1, [2]))).toEqual({ 2: 1, 4: "Cultivated" });
   });
 
+  it("writes the link as a field, with the reason alongside it", () => {
+    expect(keep({}, 1, [2])[2]).toMatchObject({
+      gbifID: 2,
+      duplicateOf: 1,
+      justification: duplicateOfReason(1),
+    });
+  });
+
   it("is idempotent — saying it twice says it once", () => {
     const once = keep({}, 1, [2, 3]);
     expect(shape(keep(once, 1, [2, 3]))).toEqual(shape(once));
@@ -82,8 +91,8 @@ describe("excluding the record a group was kept for", () => {
   it("doesn't promote a duplicate to take its place", () => {
     // Nothing in the group is counted while the record kept is excluded —
     // which is the honest state: you excluded the one you had chosen.
-    expect(duplicateOf(primaryExcluded[2].justification)).toBe(1);
-    expect(duplicateOf(primaryExcluded[3].justification)).toBe(1);
+    expect(duplicateOf(primaryExcluded[2])).toBe(1);
+    expect(duplicateOf(primaryExcluded[3])).toBe(1);
   });
 
   it("restores the group when the record is put back", () => {

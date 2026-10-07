@@ -39,6 +39,18 @@ describe("the saved-work file", () => {
     expect(read.backup.version).toBe(EDITS_BACKUP_VERSION);
   });
 
+  it("links duplicates an older build saved only as wording", () => {
+    const old = {
+      ...backup(),
+      exclusions: {
+        4: { gbifID: 4, justification: "Duplicate of GBIF 5", excludedAt: "2026-08-27T09:00:00.000Z" },
+      },
+    };
+    const read = readEditsBackup(JSON.stringify(old), "6CX6F");
+    if (!("backup" in read)) throw new Error(read.error);
+    expect(read.backup.exclusions[4].duplicateOf).toBe(5);
+  });
+
   it("refuses another species' work, which would be a quiet disaster", () => {
     const read = readEditsBackup(JSON.stringify(backup()), "ANOTHER");
     expect(read).toEqual({ error: expect.stringContaining("Dioscorea biplicata") });

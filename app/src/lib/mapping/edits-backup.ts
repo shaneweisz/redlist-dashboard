@@ -1,5 +1,5 @@
 import type { PinnedPlace } from "./geocode";
-import type { AssessorDate, Exclusion, Georeference, LocalityNote } from "./georeferences";
+import { withDuplicateLinks, type AssessorDate, type Exclusion, type Georeference, type LocalityNote } from "./georeferences";
 import type { PointFileImport } from "./iucn-point-file";
 
 /**
@@ -98,7 +98,8 @@ export function readEditsBackup(
     backup: {
       ...backup,
       georeferences: backup.georeferences ?? {},
-      exclusions: backup.exclusions ?? {},
+      // A file from an older build carries its duplicates only in the wording.
+      exclusions: withDuplicateLinks(backup.exclusions ?? {}),
       dates: backup.dates ?? {},
       notes: backup.notes ?? {},
       // Written by a build that had no pins in it, or by one that had none
