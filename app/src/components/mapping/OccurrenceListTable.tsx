@@ -8,6 +8,7 @@ import LinkifiedText from "./LinkifiedText";
 import { formatGbifIssue } from "@/lib/gbif";
 import {
   duplicateOf,
+  type DuplicateLink,
   parseAssessorDate,
   parseCoordinateEntry,
   resolvePrimary,
@@ -707,7 +708,7 @@ interface OccurrenceListTableProps {
   /** Scales the table, so more of it fits without shrinking the controls. */
   zoom?: number;
   /** Records struck out by hand, with the reason given for each. */
-  exclusions?: Record<number, { justification: string }>;
+  exclusions?: Record<number, DuplicateLink>;
   /** Asks for a justification and excludes the given records. */
   onExclude?: (gbifIDs: number[]) => void;
   /** Puts hand-excluded records back, as one edit. */
@@ -1083,7 +1084,7 @@ export default function OccurrenceListTable({
         align: "right" as const,
         value: () => null,
         render: (p: OccurrenceFeature["properties"], f: OccurrenceFeature, index: number) =>
-          duplicateOf(exclusions?.[p.gbifID]?.justification) != null ? (
+          duplicateOf(exclusions?.[p.gbifID]) != null ? (
             <span />
           ) : (
             <span className="text-zinc-400 dark:text-zinc-500">{index + 1}</span>
@@ -1108,7 +1109,7 @@ export default function OccurrenceListTable({
                   // An empty string rather than nothing: this column is a
                   // relationship, and the dash that stands for a missing field
                   // down every other column would read as one here.
-                  return duplicateOf(exclusions?.[p.gbifID]?.justification) != null ? (
+                  return duplicateOf(exclusions?.[p.gbifID]) != null ? (
                     <span className="pl-2 text-zinc-400 dark:text-zinc-500" title="A duplicate of the record above">
                       ↳
                     </span>
@@ -1988,7 +1989,7 @@ export default function OccurrenceListTable({
             {displayRows.map((f, rowIndex) => {
               const id = f.properties.gbifID;
               const excluded = isExcluded(f);
-              const isDuplicate = duplicateOf(exclusions?.[id]?.justification) != null;
+              const isDuplicate = duplicateOf(exclusions?.[id]) != null;
               return (
               <tr
                 key={id}

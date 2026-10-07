@@ -2570,9 +2570,15 @@ export default function OccurrenceMapRow({
       if (!pendingExclusion) return;
       const next = { ...exclusions };
       for (const gbifID of pendingExclusion) {
+        // Rewording a duplicate's reason keeps it a duplicate: the link is
+        // what the gesture made, and the reason is free text about it. Which
+        // record is kept changes by keeping another; the link goes when the
+        // record is put back.
+        const linked = exclusions[gbifID]?.duplicateOf;
         next[gbifID] = {
           gbifID,
           justification,
+          ...(linked != null ? { duplicateOf: linked } : {}),
           excludedAt: new Date().toISOString(),
           excludedBy: accountEmail || undefined,
         };
@@ -6393,7 +6399,7 @@ export default function OccurrenceMapRow({
         stamp: { excludedAt: new Date().toISOString(), excludedBy: accountEmail || undefined },
       });
       const setAside = Object.values(next).filter(
-        (e) => duplicateOf(e.justification) === primaryGbifID
+        (e) => duplicateOf(e) === primaryGbifID
       ).length;
       commitEdits(
         { exclusions: next },
@@ -6739,8 +6745,8 @@ export default function OccurrenceMapRow({
           const id = o.properties.gbifID;
           if (id === gbifID) return false;
           if (normaliseCatalogNumber(o.properties.recordNumber) !== recordNo) return false;
-          const reason = exclusions[id]?.justification;
-          return !reason || duplicateOf(reason) != null;
+          const exclusion = exclusions[id];
+          return !exclusion || duplicateOf(exclusion) != null;
         })
       : [];
     const close = () => closeTooltip();
@@ -6771,7 +6777,7 @@ export default function OccurrenceMapRow({
                 {/* Only on a record that is already a duplicate of another:
                     this is how the group changes its mind about which sheet is
                     the one to keep. */}
-                {duplicateOf(exclusions[gbifID]?.justification) != null && (
+                {duplicateOf(exclusions[gbifID]) != null && (
                   <button
                     onClick={() => {
                       setRowMenu(null);
@@ -6860,7 +6866,7 @@ export default function OccurrenceMapRow({
                     menu has "Make this the record kept", which says the same
                     thing about the group it belongs to, and two ways to say it
                     on one menu only invited the question of how they differed. */}
-                {others.length > 0 && duplicateOf(exclusions[gbifID]?.justification) == null && (
+                {others.length > 0 && duplicateOf(exclusions[gbifID]) == null && (
                   <button
                     onClick={() => {
                       keepRecord(gbifID, others.map((o) => o.properties.gbifID));
@@ -6876,7 +6882,7 @@ export default function OccurrenceMapRow({
                     Keep this one of {stacked.length} at this point, mark the rest as duplicates
                   </button>
                 )}
-                {sameNumber.length > 0 && duplicateOf(exclusions[gbifID]?.justification) == null && (
+                {sameNumber.length > 0 && duplicateOf(exclusions[gbifID]) == null && (
                   <button
                     onClick={() => {
                       keepRecord(gbifID, sameNumber.map((o) => o.properties.gbifID));

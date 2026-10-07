@@ -1,9 +1,9 @@
-import { duplicateOf, duplicateOfReason, resolvePrimary, type Exclusion } from "./georeferences";
+import { duplicateOf, duplicateOfReason, resolvePrimary, type DuplicateLink, type Exclusion } from "./georeferences";
 
 /**
  * Duplicate groups, as operations on the exclusions.
  *
- * A duplicate is an excluded record whose reason names the record kept, so
+ * A duplicate is an excluded record linked to the record kept, so
  * there is no second store — but the arithmetic of keeping one record of a
  * group, re-pointing its siblings and flattening what was a chain is worth
  * having on its own, where it can be read and tested without a map around it.
@@ -13,12 +13,12 @@ import { duplicateOf, duplicateOfReason, resolvePrimary, type Exclusion } from "
 export function duplicatesByPrimary<T>(
   records: T[],
   gbifIdOf: (record: T) => number,
-  exclusions: Record<number, { justification: string }>
+  exclusions: Record<number, DuplicateLink>
 ): Map<number, T[]> {
   const groups = new Map<number, T[]>();
   for (const record of records) {
     const id = gbifIdOf(record);
-    if (duplicateOf(exclusions[id]?.justification) == null) continue;
+    if (duplicateOf(exclusions[id]) == null) continue;
     const primary = resolvePrimary(id, exclusions);
     if (primary === id) continue;
     const kept = groups.get(primary);
@@ -80,7 +80,7 @@ export function keepRecord({
     grew = false;
     for (const id of gbifIDs) {
       if (id === primaryGbifID || setAside.has(id)) continue;
-      const parent = duplicateOf(exclusions[id]?.justification);
+      const parent = duplicateOf(exclusions[id]);
       if (parent != null && setAside.has(parent)) {
         setAside.add(id);
         grew = true;
@@ -92,6 +92,6 @@ export function keepRecord({
   const next = { ...exclusions };
   delete next[primaryGbifID];
   const justification = duplicateOfReason(primaryGbifID);
-  for (const id of setAside) next[id] = { gbifID: id, justification, ...stamp };
+  for (const id of setAside) next[id] = { gbifID: id, justification, duplicateOf: primaryGbifID, ...stamp };
   return next;
 }

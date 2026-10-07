@@ -5,6 +5,7 @@ import {
   uncertaintyCircle,
   duplicateOf,
   duplicateOfReason,
+  withDuplicateLinks,
   resolvePrimary,
   parseAssessorDate,
   parseCoordinateEntry,
@@ -95,25 +96,50 @@ describe("uncertaintyCircle", () => {
 });
 
 describe("duplicate exclusions", () => {
-  it("names the record kept, and reads it back", () => {
+  const excluded = (justification: string, duplicateOf?: number) => ({
+    gbifID: 1,
+    justification,
+    excludedAt: "2026-08-27T00:00:00.000Z",
+    ...(duplicateOf != null ? { duplicateOf } : {}),
+  });
+  /** The link as read after loading, the only way exclusions arrive. */
+  const linkOf = (justification: string, link?: number) =>
+    duplicateOf(withDuplicateLinks({ 1: excluded(justification, link) })[1]);
+
+  it("names the record kept in the reason", () => {
     expect(duplicateOfReason(2013787280)).toBe("Duplicate of GBIF 2013787280");
-    expect(duplicateOf(duplicateOfReason(2013787280))).toBe(2013787280);
   });
 
-  it("still reads the wording the first drag gesture wrote", () => {
-    expect(duplicateOf("Duplicate of GBIF record 12345")).toBe(12345);
+  it("reads the link from the field, not the wording", () => {
+    expect(duplicateOf(excluded("Same sheet as the one at K", 42))).toBe(42);
+    // Typing the sentence by hand no longer makes a duplicate.
+    expect(duplicateOf(excluded(duplicateOfReason(42)))).toBeNull();
+    expect(duplicateOf(undefined)).toBeNull();
+  });
+
+  it("links what older builds saved only as wording", () => {
+    expect(linkOf(duplicateOfReason(2013787280))).toBe(2013787280);
+    expect(linkOf("Duplicate of GBIF record 12345")).toBe(12345);
+  });
+
+  it("lets a link already there win over the wording", () => {
+    expect(linkOf(duplicateOfReason(1), 2)).toBe(2);
   });
 
   it("is not fooled by a reason that merely mentions duplication", () => {
-    expect(duplicateOf("Looks like a duplicate of something")).toBeNull();
-    expect(duplicateOf("Cultivated")).toBeNull();
-    expect(duplicateOf(undefined)).toBeNull();
-    expect(duplicateOf("")).toBeNull();
+    expect(linkOf("Looks like a duplicate of something")).toBeNull();
+    expect(linkOf("Cultivated")).toBeNull();
+    expect(linkOf("")).toBeNull();
+  });
+
+  it("leaves an exclusion with nothing to link untouched", () => {
+    const plain = excluded("Cultivated");
+    expect(withDuplicateLinks({ 1: plain })[1]).toBe(plain);
   });
 });
 
 describe("resolvePrimary", () => {
-  const asDuplicate = (of: number) => ({ justification: duplicateOfReason(of) });
+  const asDuplicate = (of: number) => ({ justification: duplicateOfReason(of), duplicateOf: of });
 
   it("gives back a record that isn't a duplicate of anything", () => {
     expect(resolvePrimary(1, {})).toBe(1);
