@@ -9,7 +9,7 @@ import { HiOutlineAdjustmentsHorizontal } from "react-icons/hi2";
 import TaxaIcon from "@/components/TaxaIcon";
 import { CATEGORY_COLORS, CATEGORY_NAMES, CATEGORY_ORDER } from "@/config/taxa";
 import {
-  hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
+  hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, collapseTaxaToTokens, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
   describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref,
   matchesBreakdownName, speciesMatchesNode,
   type FilterRank, type DescribeFilterSegment,
@@ -1698,9 +1698,13 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           // Not a layout of this table but a view of the same data from the
           // other end — the assessors' own words rather than the counts. Its
           // own route for the same reason Comparison Mode is: it needs the
-          // whole page, and it has nothing to say about a taxon selection.
+          // whole page. It does now take a taxon, though (#565), so one
+          // selected here goes with it — but only one: the text search filters
+          // by a single group, and quietly dropping all but the first of
+          // several would be a narrower search than the table it came from.
           if (v === "text") {
-            router.push("/narrative-search");
+            const tokens = collapseTaxaToTokens(selectedTaxa, selectedSubgroups).filter((t) => t !== "all");
+            router.push(tokens.length === 1 ? `/narrative-search?taxa=${encodeURIComponent(tokens[0])}` : "/narrative-search");
             return;
           }
           // Same again, from the other direction: a place rather than a taxon.

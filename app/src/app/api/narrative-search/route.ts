@@ -1,11 +1,14 @@
 /**
- * GET /api/narrative-search?q=&limit=&offset=&fuzzy=
+ * GET /api/narrative-search?q=&limit=&offset=&fuzzy=&taxa=
  *
  * The assessments answering `q`, best first, with the field and the sentence
  * that answers it. The query is a small language rather than a checkbox — see
  * lib/redlist/narrative-query.ts — so quoting, excluding, alternatives and
  * prefixes all arrive in `q` itself. `fuzzy=true` also matches words a letter
- * away from the ones typed.
+ * away from the ones typed. `taxa` is the dashboard's own taxon token (the same
+ * one the home page's `taxa=` carries, including a live-drilldown one like
+ * `flowering_plants~dioscoreales~dioscoreaceae`), narrowing the search to that
+ * group.
  *
  * See lib/data/narratives-duckdb.ts for why this reads a term index rather than
  * the prose, and scripts/build-narratives.ts for how the three files are built.
@@ -31,6 +34,7 @@ export async function GET(request: NextRequest) {
       limit: sp.get("limit") ? Number(sp.get("limit")) : undefined,
       offset: sp.get("offset") ? Number(sp.get("offset")) : undefined,
       fuzzy: sp.get("fuzzy") === "true",
+      taxa: sp.get("taxa"),
     });
     return NextResponse.json({ ...result, ms: Date.now() - started }, { headers: CACHE_1H });
   } catch (error) {
