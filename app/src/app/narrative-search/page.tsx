@@ -20,6 +20,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { CitationProse } from "@/components/redlist/CitationProse";
 import { NARRATIVE_LABELS, type NarrativeField } from "@/lib/redlist/narrative-fields";
 import { loadAssessment } from "@/lib/redlist/assessment";
+import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
+import { findNode, expandTaxaToken } from "@/lib/taxonomy-utils";
+import { taxaTokenLabel } from "@/lib/taxa-token-label";
 import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
 
 interface Hit {
@@ -55,11 +58,51 @@ interface Narrative {
 
 const PAGE = 10;
 
+/**
+ * The groups the filter offers, from the Table 1a view's own section list.
+ *
+ * Config rather than a list typed out here, so a group added to the tree turns
+ * up in this dropdown too — and the coarse root of each section (Invertebrates,
+ * Plants, Fungi & Protists) is prepended where the section doesn't already name
+ * it, since "every invertebrate" is a thing to search and Table 1a only lists
+ * its parts. Deeper than this the tree is thousands of live nodes, which is a
+ * dropdown nobody can use — but a token for one arrives from the dashboard
+ * intact (see `incoming` below), so the depth is reachable, just not browsable.
+ */
+const TAXA_SECTIONS: { title: string; options: { token: string; label: string }[] }[] = (
+  TAXONOMY_VIEWS.table1a.sections ?? []
+).map((section) => {
+  const name = (token: string) => findNode(token)?.name ?? taxaTokenLabel(token);
+  const root = expandTaxaToken(section.nodeIds[0]).taxa;
+  const options = section.nodeIds.map((token) => ({ token, label: name(token) }));
+  // "All plants" rather than "Plants", so the row that means the whole section
+  // doesn't read as a sibling of the groups listed under it.
+  if (!section.nodeIds.includes(root)) {
+    options.unshift({ token: root, label: `All ${name(root).toLowerCase()}` });
+  }
+  return { title: section.title, options };
+});
+
+const KNOWN_TOKENS = new Set(TAXA_SECTIONS.flatMap((s) => s.options.map((o) => o.token)));
+
 export default function NarrativeSearchPage() {
   const [query, setQuery] = useState("");
   const [fuzzy, setFuzzy] = useState(false);
+  /**
+   * The taxonomic group to search within, as the dashboard's own `taxa=` token
+   * ("" is every group). Kept in the URL so a filtered search is shareable, and
+   * read back out of it on arrival — which is how a selection made on the
+   * dashboard survives the trip to this page (#565).
+   */
+  const [taxa, setTaxa] = useState("");
+  /**
+   * A group that arrived in the URL but is deeper than the dropdown goes (a
+   * family, a genus). Held for the session so switching away from it and back
+   * is possible, rather than the option vanishing the moment it is left.
+   */
+  const [incoming, setIncoming] = useState("");
   /** The query that produced what is on screen, so "loading" is a comparison. */
-  const [asked, setAsked] = useState<{ q: string; fuzzy: boolean; page: number } | null>(null);
+  const [asked, setAsked] = useState<{ q: string; fuzzy: boolean; taxa: string; page: number } | null>(null);
   const [answer, setAnswer] = useState<{ key: string; data?: Answer; error?: string } | null>(null);
   /** Which results are open, and the full text once it has been fetched. */
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -75,12 +118,23 @@ export default function NarrativeSearchPage() {
    */
   const [refs, setRefs] = useState<Map<number, AssessmentReference[]>>(new Map());
 
-  const key = asked ? `${asked.q}|${asked.fuzzy}|${asked.page}` : "";
+  const key = asked ? `${asked.q}|${asked.fuzzy}|${asked.taxa}|${asked.page}` : "";
   const loading = asked != null && answer?.key !== key;
   const data = answer?.key === key ? answer.data : undefined;
   const error = answer?.key === key ? answer.error : undefined;
   const page = asked?.page ?? 0;
   const top = useRef<HTMLDivElement>(null);
+
+  // The group the page was opened on, if the link that reached it named one —
+  // the dashboard's View selector passes its current taxon selection through.
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("taxa")?.trim() ?? "";
+    if (!token) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- hydrate from the URL on mount */
+    setTaxa(token);
+    if (!KNOWN_TOKENS.has(token)) setIncoming(token);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   useEffect(() => {
     if (!asked) return;
@@ -91,6 +145,7 @@ export default function NarrativeSearchPage() {
       offset: String(asked.page * PAGE),
     });
     if (asked.fuzzy) params.set("fuzzy", "true");
+    if (asked.taxa) params.set("taxa", asked.taxa);
     fetch(`/api/narrative-search?${params}`, { signal: controller.signal })
       .then(async (r) => {
         const body = await r.json();
@@ -105,14 +160,37 @@ export default function NarrativeSearchPage() {
   }, [asked, key]);
 
   const search = useCallback(
-    (q: string, nextPage: number, useFuzzy = fuzzy) => {
+    (q: string, nextPage: number, override?: { fuzzy?: boolean; taxa?: string }) => {
       const trimmed = q.trim();
       if (trimmed.length < 2) return;
       setOpen(new Set());
-      setAsked({ q: trimmed, fuzzy: useFuzzy, page: nextPage });
+      // The override is for the controls that re-run a search as they change:
+      // their own state has not been applied yet when they call this.
+      setAsked({
+        q: trimmed,
+        fuzzy: override?.fuzzy ?? fuzzy,
+        taxa: override?.taxa ?? taxa,
+        page: nextPage,
+      });
       if (nextPage !== page) top.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     },
-    [fuzzy, page]
+    [fuzzy, taxa, page]
+  );
+
+  /** Narrow (or widen) the search, in the URL as well as on screen. */
+  const chooseTaxa = useCallback(
+    (next: string) => {
+      setTaxa(next);
+      const params = new URLSearchParams(window.location.search);
+      if (next) params.set("taxa", next);
+      else params.delete("taxa");
+      const qs = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      // A group is a filter on the results, so re-ask from the first page —
+      // page four of the old answer is not page four of the new one.
+      if (asked) search(asked.q, 0, { taxa: next });
+    },
+    [asked, search]
   );
 
   /**
@@ -182,6 +260,28 @@ export default function NarrativeSearchPage() {
             autoFocus
             className="min-w-[18rem] flex-1 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
           />
+          <select
+            value={taxa}
+            onChange={(e) => chooseTaxa(e.target.value)}
+            aria-label="Filter by taxonomic group"
+            title="Search only the assessments of one taxonomic group"
+            className="px-2 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
+          >
+            <option value="">All taxonomic groups</option>
+            {/* A group the dropdown has no row for, because it is deeper than
+                the tree this list stops at — kept selectable for the session so
+                leaving it is not a one-way door. */}
+            {incoming && <option value={incoming}>{taxaTokenLabel(incoming)}</option>}
+            {TAXA_SECTIONS.map((section) => (
+              <optgroup key={section.title} label={section.title}>
+                {section.options.map(({ token, label }) => (
+                  <option key={token} value={token}>
+                    {label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
           <label
             className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300 cursor-pointer select-none"
             title="Also match words a letter away from the ones typed — including the assessors' own typos"
@@ -191,7 +291,7 @@ export default function NarrativeSearchPage() {
               checked={fuzzy}
               onChange={(e) => {
                 setFuzzy(e.target.checked);
-                if (asked) search(asked.q, 0, e.target.checked);
+                if (asked) search(asked.q, 0, { fuzzy: e.target.checked });
               }}
               className="h-3.5 w-3.5 rounded accent-red-600"
             />
@@ -205,7 +305,10 @@ export default function NarrativeSearchPage() {
           </button>
         </form>
 
-        <SyntaxHelp onExample={(q) => { setQuery(q); search(q, 0); }} />
+        <SyntaxHelp
+          onExample={(q) => { setQuery(q); search(q, 0); }}
+          scope={taxa ? taxaTokenLabel(taxa) : null}
+        />
 
         {error && <p className="mt-6 text-sm text-amber-600 dark:text-amber-400">{error}</p>}
 
@@ -222,7 +325,8 @@ export default function NarrativeSearchPage() {
               <span className="font-medium text-zinc-900 dark:text-zinc-100">
                 {data.total.toLocaleString()}
               </span>{" "}
-              {data.total === 1 ? "assessment" : "assessments"}, most relevant first
+              {data.total === 1 ? "assessment" : "assessments"}
+              {asked?.taxa && <> in {taxaTokenLabel(asked.taxa)}</>}, most relevant first
               <span className="pl-2 text-xs text-zinc-400 dark:text-zinc-500">{data.ms} ms</span>
             </p>
 
@@ -270,7 +374,22 @@ export default function NarrativeSearchPage() {
 
             {data.total === 0 ? (
               <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
-                Nothing matched. Try fewer words, drop the quotes, or tick “Include close/similar spellings”.
+                Nothing matched. Try fewer words, drop the quotes, or tick “Include close/similar
+                spellings”.
+                {asked?.taxa && (
+                  <>
+                    {" "}
+                    Or look beyond {taxaTokenLabel(asked.taxa)} —{" "}
+                    <button
+                      type="button"
+                      onClick={() => chooseTaxa("")}
+                      className="underline hover:text-zinc-700 dark:hover:text-zinc-200"
+                    >
+                      search every group
+                    </button>
+                    .
+                  </>
+                )}
               </p>
             ) : (
               <ul className="mt-3 space-y-2">
@@ -467,7 +586,7 @@ function Marked({
 }
 
 /** What can be typed into the box, with each convention one click away. */
-function SyntaxHelp({ onExample }: { onExample: (q: string) => void }) {
+function SyntaxHelp({ onExample, scope }: { onExample: (q: string) => void; scope: string | null }) {
   const examples: [string, string][] = [
     ["limestone quarrying", "both words, anywhere in the assessment"],
     ['"cave roost"', "those words together, in that order"],
@@ -492,8 +611,9 @@ function SyntaxHelp({ onExample }: { onExample: (q: string) => void }) {
       </div>
       <p className="mt-2 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
         Searches the rationale, range, population, habitat, threats, actions, use &amp; trade,
-        trend and taxonomic notes of every current global assessment. Superseded assessments are
-        not indexed. Click a result to read the whole section.
+        trend and taxonomic notes of every current global assessment
+        {scope ? ` of ${scope}` : ""}. Superseded assessments are not indexed. Click a result to
+        read the whole section.
       </p>
     </div>
   );

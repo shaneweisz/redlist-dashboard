@@ -39,6 +39,7 @@ import {
   type Atom,
   type ParsedQuery,
 } from "@/lib/redlist/narrative-query";
+import { taxaScopeSql } from "@/lib/taxa-scope-sql";
 
 export interface NarrativeHit {
   assessment_id: number;
@@ -224,23 +225,30 @@ function ensureLengths(): Promise<number> {
 }
 
 /**
- * The common name of every assessed species, by assessment.
+ * The common name and the taxonomy of every assessed species, by assessment.
  *
  * From the sync's `assessed.parquet` rather than the narratives, because that
- * is where it lives — and as a temp table for the same reason as the word
+ * is where they live — and as a temp table for the same reason as the word
  * list, since a result page needs ten rows of it and a scan per search would
  * be the most expensive part of a search. The two files come from different
  * places (a release, a sync) so the join is a LEFT one: a species the sync has
  * dropped still has narratives worth finding, just without a common name.
+ *
+ * The lineage columns are what a taxonomic-group filter runs against (#565), and
+ * they are named exactly as filterToSql expects them — this table IS the shape
+ * that predicate is written for. Unlike the common name they are not a LEFT
+ * join: an assessment the sync has no row for cannot be shown to be a mammal, so
+ * a search narrowed to mammals leaves it out rather than guessing.
  */
 let namesPromise: Promise<void> | null = null;
-function ensureCommonNames(): Promise<void> {
+function ensureSpeciesFacts(): Promise<void> {
   if (!namesPromise) {
     namesPromise = (async () => {
       const conn = await getConn();
       await conn.run(
         `CREATE TEMP TABLE IF NOT EXISTS narrative_species AS
-         SELECT assessment_id, common_name
+         SELECT assessment_id, common_name, scientific_name,
+                taxon_group, class_name, order_name, family
          FROM read_parquet(${lit(parquetUri("assessed.parquet"))})
          WHERE assessment_id IS NOT NULL`
       );
@@ -440,6 +448,13 @@ export async function searchNarratives(opts: {
   offset?: number;
   /** Also match words a letter away from the ones typed. */
   fuzzy?: boolean;
+  /**
+   * A `taxa=` URL token (`mammals`, `corals`,
+   * `flowering_plants~dioscoreales~dioscoreaceae`) to narrow the search to.
+   * Applied inside the ranking query rather than to its results, so the page
+   * and the count are both the group's own — see taxa-scope-sql.ts.
+   */
+  taxa?: string | null;
 }): Promise<NarrativeSearchResult> {
   const parsed = parseQuery(opts.query);
   const { terms, prefixes } = highlightsOf(parsed);
@@ -463,7 +478,7 @@ export async function searchNarratives(opts: {
     statsFor(parsed),
     assessmentCount(),
     ensureLengths(),
-    ensureCommonNames(),
+    ensureSpeciesFacts(),
   ]);
   const fuzzy = opts.fuzzy === true;
 
@@ -499,6 +514,16 @@ export async function searchNarratives(opts: {
   const excludeSql = parsed.excluded
     .map((a) => atomDocs(index, a, stats))
     .join("\n      UNION\n      ");
+  // Everything that rules an assessment out before it is scored: the words the
+  // reader excluded, and the taxonomic group they narrowed to. Both are semi-
+  // joins over assessment ids, so DuckDB prunes them before the BM25 sum rather
+  // than after it, and `total` counts what is left.
+  const conds: string[] = [];
+  if (excludeSql) conds.push(`m.assessment_id NOT IN (${excludeSql})`);
+  const scopeSql = taxaScopeSql(opts.taxa);
+  if (scopeSql) {
+    conds.push(`m.assessment_id IN (SELECT assessment_id FROM narrative_species WHERE ${scopeSql})`);
+  }
   // BM25: each match is worth how rare its word is, damped by how often this
   // assessment repeats it and by how long the assessment is. The length join is
   // a LEFT one — an assessment with no indexed words cannot be in the postings
@@ -508,7 +533,7 @@ export async function searchNarratives(opts: {
     SELECT m.assessment_id, sum(m.w * (m.tf * ${(K1 + 1).toFixed(1)}) / (m.tf + ${norm})) AS score
     FROM (${rows.join("\n      UNION ALL\n      ")}) m
     LEFT JOIN narrative_lengths l ON l.assessment_id = m.assessment_id
-    ${excludeSql ? `WHERE m.assessment_id NOT IN (${excludeSql})` : ""}
+    ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""}
     GROUP BY m.assessment_id
     HAVING count(DISTINCT m.c) = ${parsed.required.length}
   `;
