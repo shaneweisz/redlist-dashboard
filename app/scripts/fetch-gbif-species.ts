@@ -2,6 +2,9 @@
  * fetch-gbif-species: GBIF API → CSV
  *
  * Fetches per-species observation counts from GBIF and writes per-taxon to data/gbif/{taxonId}.csv.
+ * Each species gets two counts: georeferenced records, and every record. Species
+ * with records but none georeferenced go to data/gbif-all-only/ instead — see
+ * GBIF_ALL_ONLY_DIR for why they are kept apart.
  *
  * Usage:
  *   npx tsx scripts/fetch-gbif-species.ts [taxon]   # Fetch one taxon (e.g. mammalia)
@@ -73,6 +76,9 @@ export interface GbifSpecies {
   taxon_group_table1a: string;
   total_count: number;
   count_after_assessment_year: number | null;
+  /** Every record, georeferenced or not. null in a CSV written before it existed. */
+  total_count_all: number | null;
+  count_after_assessment_year_all: number | null;
   class_name: string;
   order_name: string;
   family: string;
@@ -89,11 +95,14 @@ export async function fetchFacets(
     yearRange,
     modifiedRange,
     includePreservedSpecimens = false,
+    georeferencedOnly = true,
   }: {
     yearRange?: string;
     modifiedRange?: string;
     /** See kingdomCountsPreservedSpecimens — on for plants, fungi and algae. */
     includePreservedSpecimens?: boolean;
+    /** Off for the all-records count, which also takes records with no usable coordinates. */
+    georeferencedOnly?: boolean;
   } = {},
 ): Promise<Array<{ speciesKey: string; count: number }>> {
   const allResults: Array<{ speciesKey: string; count: number }> = [];
@@ -103,14 +112,16 @@ export async function fetchFacets(
   while (hasMore) {
     const params = new URLSearchParams({
       checklistKey: GBIF_CHECKLIST_KEY,
-      hasCoordinate: "true",
-      hasGeospatialIssue: "false",
       facet: "speciesKey",
       facetLimit: FACET_LIMIT.toString(),
       facetOffset: offset.toString(),
       limit: "0",
       taxonKey,
     });
+    if (georeferencedOnly) {
+      params.set("hasCoordinate", "true");
+      params.set("hasGeospatialIssue", "false");
+    }
 
     if (yearRange) params.set("year", yearRange);
     if (modifiedRange) params.set("modified", modifiedRange);
@@ -163,14 +174,17 @@ export async function fetchFacets(
   return allResults;
 }
 
-export async function fetchGbifCounts(taxon: Taxon): Promise<SpeciesCount[]> {
+export async function fetchGbifCounts(
+  taxon: Taxon,
+  { georeferencedOnly = true }: { georeferencedOnly?: boolean } = {},
+): Promise<SpeciesCount[]> {
   const allResults: SpeciesCount[] = [];
   const includePreservedSpecimens = kingdomCountsPreservedSpecimens(taxon.kingdomKey);
 
   for (let i = 0; i < taxon.gbif.length; i++) {
     const q = taxon.gbif[i];
     process.stdout.write(`\r  Query ${i + 1}/${taxon.gbif.length}`);
-    const results = await fetchFacets(q.taxonKey, { includePreservedSpecimens });
+    const results = await fetchFacets(q.taxonKey, { includePreservedSpecimens, georeferencedOnly });
     // Reported, not thrown. An empty facet does NOT mean the key is dead: it
     // also happens when a real taxon has no records identified to species rank.
     // Turbellaria (BDSSX) is exactly that — 13,998 occurrence records under this
@@ -178,7 +192,7 @@ export async function fetchGbifCounts(taxon: Taxon): Promise<SpeciesCount[]> {
     // essentially none of them at species level. Throwing here aborted every
     // sync at phase 5. Whether the key is still VALID is a different question,
     // and assertRootKeysResolve answers it directly against the pinned release.
-    if (results.length === 0) {
+    if (results.length === 0 && georeferencedOnly) {
       console.warn(`  note: root key ${q.taxonKey} matched no species-rank taxa (it may legitimately have none)`);
     }
     for (const r of results) {
@@ -379,8 +393,21 @@ export function assertResolutionRate(taxonId: string, requested: number, resolve
 const GBIF_CSV_COLUMNS = [
   "gbif_species_key", "scientific_name", "common_name",
   "class_name", "order_name", "family", "taxon_group_table1a",
-  "total_count", "count_after_assessment_year", "countries",
+  "total_count", "count_after_assessment_year",
+  "total_count_all", "count_after_assessment_year_all", "countries",
 ];
+
+/**
+ * Species GBIF holds records for, none of them georeferenced.
+ *
+ * Kept out of data/gbif/ because everything that reads those files treats a row
+ * as "this species has georeferenced GBIF data": the per-group species and record
+ * totals in taxa-summary, the country phase, the NE counts. A moss known only from
+ * herbarium sheets labelled "Tasmania" belongs in none of those, so it lives here
+ * and only the places that want every record — matching, the all-records counts,
+ * build-parquet — read this directory too.
+ */
+export const GBIF_ALL_ONLY_DIR = path.join(DATA_DIR, "gbif-all-only");
 
 export function writeGbifCsv(speciesMap: Map<string, GbifSpecies>, outputPath: string): void {
   const rows = Array.from(speciesMap.values())
@@ -391,6 +418,8 @@ export function writeGbifCsv(speciesMap: Map<string, GbifSpecies>, outputPath: s
       taxon_group_table1a: s.taxon_group_table1a,
       total_count: s.total_count,
       count_after_assessment_year: s.count_after_assessment_year,
+      total_count_all: s.total_count_all,
+      count_after_assessment_year_all: s.count_after_assessment_year_all,
       class_name: s.class_name || null,
       order_name: s.order_name || null,
       family: s.family || null,
@@ -400,8 +429,10 @@ export function writeGbifCsv(speciesMap: Map<string, GbifSpecies>, outputPath: s
   writeCsv(rows, GBIF_CSV_COLUMNS, outputPath);
 }
 
-export function readGbifCsv(taxonId: string): Map<string, GbifSpecies> {
-  const csvPath = path.join(GBIF_DIR, `${taxonId}.csv`);
+export function readGbifCsv(taxonId: string, dir = GBIF_DIR): Map<string, GbifSpecies> {
+  const csvPath = path.join(dir, `${taxonId}.csv`);
+  // A group with no all-only species, or a data/ from before they existed.
+  if (dir !== GBIF_DIR && !fs.existsSync(csvPath)) return new Map();
   const rows = readCsv<GbifSpecies>(csvPath, (r) => ({
     gbif_species_key: r.gbif_species_key,
     scientific_name: r.scientific_name,
@@ -409,6 +440,8 @@ export function readGbifCsv(taxonId: string): Map<string, GbifSpecies> {
     taxon_group_table1a: r.taxon_group_table1a,
     total_count: parseInt(r.total_count, 10) || 0,
     count_after_assessment_year: r.count_after_assessment_year ? parseInt(r.count_after_assessment_year, 10) : null,
+    total_count_all: r.total_count_all ? parseInt(r.total_count_all, 10) : null,
+    count_after_assessment_year_all: r.count_after_assessment_year_all ? parseInt(r.count_after_assessment_year_all, 10) : null,
     class_name: r.class_name || "",
     order_name: r.order_name || "",
     family: r.family || "",
@@ -497,6 +530,13 @@ export async function run(opts: {
     console.log("  Fetching species observation counts from GBIF...");
     const rawResults = await fetchGbifCounts(taxon);
     console.log(`  Raw species: ${rawResults.length}`);
+    console.log("  Fetching all-records counts (georeferenced or not)...");
+    const allCounts = new Map(
+      (await fetchGbifCounts(taxon, { georeferencedOnly: false })).map((r) => [r.speciesKey, r.count]),
+    );
+    const georeferenced = new Set(rawResults.map((r) => r.speciesKey));
+    const allOnlyKeys = [...allCounts.keys()].filter((k) => !georeferenced.has(k));
+    console.log(`  Raw species with no georeferenced records: ${allOnlyKeys.length}`);
 
     console.log("  Resolving species keys...");
     const speciesKeys = rawResults.map((r) => r.speciesKey);
@@ -504,36 +544,52 @@ export async function run(opts: {
     // one these keys came from. GBIF moving to a newer release is silent
     // otherwise: keys simply stop being found, which looks like absent species.
     await assertPinnedRelease(speciesKeys);
-    const validSpecies = await validateSpeciesKeys(speciesKeys, {
+    const validSpecies = await validateSpeciesKeys([...speciesKeys, ...allOnlyKeys], {
       onProgress: (doneCount, total, cached) =>
         process.stdout.write(`\r  Resolved ${doneCount}/${total} (${cached} from cache)`),
     });
     if (speciesKeys.length > 0) console.log("");
     console.log(`  Valid species: ${validSpecies.size}`);
 
-    assertResolutionRate(taxon.id, speciesKeys.length, validSpecies.size);
+    assertResolutionRate(taxon.id, speciesKeys.length, speciesKeys.filter((k) => validSpecies.has(k)).length);
+
+    const toRow = (key: string, count: number, countAll: number, info: ValidatedSpecies): GbifSpecies => ({
+      gbif_species_key: key,
+      scientific_name: info.canonicalName,
+      common_name: info.vernacularName ? toTitleCase(info.vernacularName) : "",
+      taxon_group_table1a: taxon.id,
+      total_count: count,
+      count_after_assessment_year: null,
+      // Never below the georeferenced count, which it contains. Large facets are
+      // approximate, and the two queries are separate requests, so without the
+      // floor a species can read as having fewer records than its georeferenced ones.
+      total_count_all: Math.max(countAll, count),
+      count_after_assessment_year_all: null,
+      class_name: info.className.toLowerCase(),
+      order_name: info.orderName.toLowerCase(),
+      family: info.familyName.toLowerCase(),
+      countries: "",
+    });
 
     const taxonMap = new Map<string, GbifSpecies>();
     for (const r of rawResults) {
       const info = validSpecies.get(r.speciesKey);
       if (!info) continue;
-      taxonMap.set(r.speciesKey, {
-        gbif_species_key: r.speciesKey,
-        scientific_name: info.canonicalName,
-        common_name: info.vernacularName ? toTitleCase(info.vernacularName) : "",
-        taxon_group_table1a: r.taxonGroup,
-        total_count: r.count,
-        count_after_assessment_year: null,
-        class_name: info.className.toLowerCase(),
-        order_name: info.orderName.toLowerCase(),
-        family: info.familyName.toLowerCase(),
-        countries: "",
-      });
+      taxonMap.set(r.speciesKey, toRow(r.speciesKey, r.count, allCounts.get(r.speciesKey) ?? 0, info));
+    }
+    const allOnlyMap = new Map<string, GbifSpecies>();
+    for (const key of allOnlyKeys) {
+      const info = validSpecies.get(key);
+      if (!info) continue;
+      allOnlyMap.set(key, toRow(key, 0, allCounts.get(key)!, info));
     }
 
     const outputPath = path.join(GBIF_DIR, `${taxon.id}.csv`);
     writeGbifCsv(taxonMap, outputPath);
     console.log(`  Wrote ${taxonMap.size} species → ${outputPath}`);
+    const allOnlyPath = path.join(GBIF_ALL_ONLY_DIR, `${taxon.id}.csv`);
+    writeGbifCsv(allOnlyMap, allOnlyPath);
+    console.log(`  Wrote ${allOnlyMap.size} species with no georeferenced records → ${allOnlyPath}`);
 
     totalSpecies += taxonMap.size;
     const taxonDuration = ((Date.now() - taxonStart) / 1000).toFixed(1);

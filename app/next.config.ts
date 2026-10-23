@@ -166,7 +166,7 @@ const nextConfig: NextConfig = {
     // keep that one file. CRITICAL: keep ALL parquets out — USE_R2 is gated on
     // assessed.parquet NOT existing locally, so bundling any parquet flips the route to
     // local mode and the R2-only files (species_link) then 404.
-    "/api/redlist/species": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/species": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
     "/api/redlist/species/history": ["**/data/**"],
     // Queries backbone.parquet + species_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
@@ -188,7 +188,7 @@ const nextConfig: NextConfig = {
     "/api/redlist/credit-candidates": [
       "**/data/search-index.json",
       "**/data/*.parquet",
-      "**/data/gbif/**",
+      "**/data/gbif/**", "**/data/gbif-all-only/**",
       "**/data/overlays/**",
       "**/data/mapping.csv",
       ...COL_ARTIFACTS,
@@ -197,18 +197,18 @@ const nextConfig: NextConfig = {
     // assessed.parquet in R2 (httpfs) when ?country= is set — same CRITICAL
     // note as /api/redlist/species: keep ALL parquets out, since USE_R2 is
     // gated on assessed.parquet NOT existing locally.
-    "/api/redlist/taxa-summary": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
-    "/api/redlist/taxa-subgroups": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/taxa-summary": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/taxa-subgroups": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
     // Reads the small precomputed realm-stats.json, falling back to a live DuckDB
     // query over assessed.parquet in R2 when a sync predates that file — so it
     // keeps the DuckDB trace above, and the same CRITICAL parquet exclusion as
     // /api/redlist/species (USE_R2 is gated on assessed.parquet NOT existing
     // locally). The two children-summaries files it never opens are pruned, same
     // as /api/redlist/country-stats.
-    "/api/redlist/realm-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/realm-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
     // Reads only the small precomputed country-stats.json (no DuckDB — this is
     // a static aggregate, not a live query, see species-store.ts's getCountryStats).
-    "/api/redlist/country-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/country-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
     // Backbone tree navigation queries backbone.parquet in R2 (httpfs) — no local data.
     "/api/taxa/species": ["**/data/**"],
     // Reads assessed/species_link/species/backbone entirely from R2 (httpfs) — no
@@ -235,8 +235,8 @@ const nextConfig: NextConfig = {
     // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
     // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
     // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.
-    "/browse": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
-    "/api/mcp": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/browse": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/mcp": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/gbif-all-only/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
     "/llms.txt": ["**/data/**"],
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.

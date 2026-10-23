@@ -33,6 +33,11 @@ export interface RedListSpecies {
   gbif_species_key: string | null;
   gbif_occurrence_count: number | null;
   gbif_observations_after_assessment_year: number | null;
+  // The same two counts over every record, georeferenced or not — null on a sync
+  // from before the GBIF snapshot, and on Not Evaluated rows for the since-assessment
+  // one. The table swaps these in when its records toggle is on "All records".
+  gbif_occurrence_count_all?: number | null;
+  gbif_observations_after_assessment_year_all?: number | null;
   // Latest assessment's credits, inline in the species list (drives the credit
   // filters). The full history array is fetched lazily into previous_assessments
   // when a detail panel opens — empty in the list response.

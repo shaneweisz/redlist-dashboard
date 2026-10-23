@@ -2,7 +2,8 @@
  * fetch-gbif-new-counts: GBIF occurrence counts since last Red List assessment
  *
  * For each linked species, fetches GBIF occurrence counts from the year
- * after their last assessment to the current year, then updates per-taxon data/gbif/{taxonId}.csv.
+ * after their last assessment to the current year, then updates per-taxon data/gbif/{taxonId}.csv
+ * and data/gbif-all-only/{taxonId}.csv. Both counts, georeferenced and every record.
  *
  * Prerequisites:
  *   1. Per-taxon redlist CSVs exist in data/redlist/ (from fetch-redlist, with GBIF keys from match)
@@ -23,6 +24,7 @@ import {
 import { getTaxa, type Taxon } from "./taxa";
 import {
   GbifSpecies,
+  GBIF_ALL_ONLY_DIR,
   fetchFacets,
   writeGbifCsv,
   readGbifCsv,
@@ -102,8 +104,10 @@ export async function fetchCountsSinceAssessment(
   });
 
   const sinceAssessmentCounts = new Map<string, number>();
+  const sinceAssessmentCountsAll = new Map<string, number>();
   speciesAssessmentYear.forEach((_year, speciesKey) => {
     sinceAssessmentCounts.set(speciesKey, 0);
+    sinceAssessmentCountsAll.set(speciesKey, 0);
   });
 
   console.log(`  ${yearBuckets.length} year buckets x ${taxon.gbif.length} queries`);
@@ -119,13 +123,17 @@ export async function fetchCountsSinceAssessment(
 
     await mapConcurrent(yearBuckets, YEAR_BUCKET_CONCURRENCY, async (assessmentYear) => {
       const yearRange = `${assessmentYear + 1},${CURRENT_YEAR}`;
-      const results = await fetchFacets(q.taxonKey, { yearRange, includePreservedSpecimens });
       const bucketSpecies = speciesByYear.get(assessmentYear);
 
-      if (bucketSpecies) {
+      for (const [georeferencedOnly, counts] of [
+        [true, sinceAssessmentCounts],
+        [false, sinceAssessmentCountsAll],
+      ] as const) {
+        const results = await fetchFacets(q.taxonKey, { yearRange, includePreservedSpecimens, georeferencedOnly });
+        if (!bucketSpecies) continue;
         for (const r of results) {
           if (bucketSpecies.has(r.speciesKey)) {
-            sinceAssessmentCounts.set(r.speciesKey, sinceAssessmentCounts.get(r.speciesKey)! + r.count);
+            counts.set(r.speciesKey, counts.get(r.speciesKey)! + r.count);
           }
         }
       }
@@ -138,7 +146,10 @@ export async function fetchCountsSinceAssessment(
 
   sinceAssessmentCounts.forEach((count, key) => {
     const row = gbifSpeciesMap.get(key);
-    if (row) row.count_after_assessment_year = count;
+    if (!row) return;
+    row.count_after_assessment_year = count;
+    // Floored at the georeferenced count for the same reason as total_count_all.
+    row.count_after_assessment_year_all = Math.max(sinceAssessmentCountsAll.get(key)!, count);
   });
 
   return sinceAssessmentCounts.size;
@@ -161,12 +172,16 @@ export async function run(opts: {
 
   for (const taxon of taxaToSync) {
     console.log(`\n${taxon.name} (${taxon.id}):`);
-    const gbifSpeciesMap = readGbifCsv(taxon.id);
-    const count = await fetchCountsSinceAssessment(taxon, gbifSpeciesMap);
+    // Counted together, so one set of queries covers both files. A species in
+    // the all-only file has no georeferenced records, so its georeferenced count
+    // here comes back 0 and build-parquet reads it as NULL.
+    const georeferenced = readGbifCsv(taxon.id);
+    const allOnly = readGbifCsv(taxon.id, GBIF_ALL_ONLY_DIR);
+    const count = await fetchCountsSinceAssessment(taxon, new Map([...georeferenced, ...allOnly]));
     totalComputed += count;
 
-    const outputPath = path.join(GBIF_DIR, `${taxon.id}.csv`);
-    writeGbifCsv(gbifSpeciesMap, outputPath);
+    writeGbifCsv(georeferenced, path.join(GBIF_DIR, `${taxon.id}.csv`));
+    if (allOnly.size > 0) writeGbifCsv(allOnly, path.join(GBIF_ALL_ONLY_DIR, `${taxon.id}.csv`));
 
     logger.log("fetch_new_gbif_counts_taxon", { taxon_id: taxon.id, computed: count });
   }

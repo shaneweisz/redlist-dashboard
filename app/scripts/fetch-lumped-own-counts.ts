@@ -84,6 +84,7 @@ const LUMPED_CSV_COLUMNS = [
   // Which group's file these rows belong with, for the per-group enrichment join.
   "taxon_group_table1a",
   "total_count", "count_after_assessment_year",
+  "total_count_all", "count_after_assessment_year_all",
 ];
 // Name and lineage are deliberately absent. They were written for years and read
 // by nothing: the only consumer that wants them is the browsable-species export,
@@ -121,15 +122,18 @@ async function countBatch(
   keys: string[],
   yearRange?: string,
   includePreservedSpecimens = false,
+  georeferencedOnly = true,
 ): Promise<Map<string, number>> {
   const params = new URLSearchParams({
     checklistKey: GBIF_CHECKLIST_KEY,
     facet: "taxonKey",
     facetLimit: String(FACET_LIMIT),
-    hasCoordinate: "true",
-    hasGeospatialIssue: "false",
     limit: "0",
   });
+  if (georeferencedOnly) {
+    params.set("hasCoordinate", "true");
+    params.set("hasGeospatialIssue", "false");
+  }
   for (const k of keys) params.append("taxonKey", k);
   if (yearRange) params.set("year", yearRange);
   includedBasisOfRecord(includePreservedSpecimens).forEach((b) =>
@@ -161,7 +165,7 @@ async function countBatch(
         const halves = chunk(keys, Math.ceil(keys.length / 2));
         const merged = new Map<string, number>();
         for (const half of halves) {
-          for (const [k, v] of await countBatch(half, yearRange, includePreservedSpecimens)) {
+          for (const [k, v] of await countBatch(half, yearRange, includePreservedSpecimens, georeferencedOnly)) {
             merged.set(k, v);
           }
         }
@@ -275,14 +279,16 @@ export async function run(opts: { taxa?: string[]; logger?: SyncLogger } = {}): 
   // records, which for a plant is most of what GBIF holds about it.
   const preservedKeys = new Set(lumped.filter((s) => s.preservedSpecimens).map((s) => s.gbifKey));
 
-  // Totals: batched across all of them.
+  // Totals: batched across all of them, georeferenced and every record.
   const totals = new Map<string, number>();
+  const totalsAll = new Map<string, number>();
   const allKeys = [...new Set(lumped.map((s) => s.gbifKey))];
   let totalsDone = 0;
   for (const preserved of [false, true]) {
     const keys = allKeys.filter((k) => preservedKeys.has(k) === preserved);
     for (const batch of chunk(keys, BATCH_SIZE)) {
       for (const [k, v] of await countBatch(batch, undefined, preserved)) totals.set(k, v);
+      for (const [k, v] of await countBatch(batch, undefined, preserved, false)) totalsAll.set(k, v);
       totalsDone += batch.length;
       process.stdout.write(`\r  Totals ${totalsDone}/${allKeys.length}`);
     }
@@ -301,11 +307,13 @@ export async function run(opts: { taxa?: string[]; logger?: SyncLogger } = {}): 
     byYear.set(bucketKey, bucket);
   }
   const since = new Map<string, number>();
+  const sinceAll = new Map<string, number>();
   let bucketsDone = 0;
   for (const { year, preserved, keys } of byYear.values()) {
     for (const batch of chunk([...new Set(keys)], BATCH_SIZE)) {
-      const counts = await countBatch(batch, `${year + 1},${CURRENT_YEAR}`, preserved);
-      for (const [k, v] of counts) since.set(k, v);
+      const yearRange = `${year + 1},${CURRENT_YEAR}`;
+      for (const [k, v] of await countBatch(batch, yearRange, preserved)) since.set(k, v);
+      for (const [k, v] of await countBatch(batch, yearRange, preserved, false)) sinceAll.set(k, v);
     }
     bucketsDone++;
     process.stdout.write(`\r  Since-assessment windows ${bucketsDone}/${byYear.size}`);
@@ -323,23 +331,38 @@ export async function run(opts: { taxa?: string[]; logger?: SyncLogger } = {}): 
   // a value, so those rows would count as "has GBIF data" and the headline would
   // read 175,363 of 175,909 species — 99.7% coverage, produced entirely by
   // recording 60,601 absences as if they were measurements.
+  //
+  // "Has records" means any record. A species whose records are all
+  // ungeoreferenced still gets a row, with its georeferenced counts empty rather
+  // than 0, for the same reason: build-parquet reads empty as NULL, "no
+  // georeferenced data", where 0 would count it as having some.
   const rows = lumped
-    .filter((sp) => (totals.get(sp.gbifKey) ?? 0) > 0)
-    .map((sp) => ({
-    sis_taxon_id: sp.sisTaxonId,
-    gbif_species_key: sp.gbifKey,
-    taxon_group_table1a: sp.taxonId,
-    total_count: totals.get(sp.gbifKey) ?? 0,
-    count_after_assessment_year: since.has(sp.gbifKey) ? since.get(sp.gbifKey)! : null,
-  }));
+    .filter((sp) => (totalsAll.get(sp.gbifKey) ?? 0) > 0)
+    .map((sp) => {
+      const total = totals.get(sp.gbifKey) ?? 0;
+      const georeferenced = total > 0;
+      const s = since.get(sp.gbifKey);
+      const sAll = sinceAll.get(sp.gbifKey);
+      return {
+        sis_taxon_id: sp.sisTaxonId,
+        gbif_species_key: sp.gbifKey,
+        taxon_group_table1a: sp.taxonId,
+        total_count: georeferenced ? total : null,
+        count_after_assessment_year: georeferenced && s !== undefined ? s : null,
+        // Floored at the georeferenced counts they contain; see fetch-gbif-species.
+        total_count_all: Math.max(totalsAll.get(sp.gbifKey)!, total),
+        count_after_assessment_year_all: sAll !== undefined ? Math.max(sAll, s ?? 0) : null,
+      };
+    });
 
   writeCsv(rows, LUMPED_CSV_COLUMNS, LUMPED_CSV_PATH);
 
-  const withRecords = rows.filter((r) => r.total_count > 0).length;
-  const totalRecords = rows.reduce((n, r) => n + r.total_count, 0);
+  const withRecords = rows.filter((r) => r.total_count !== null).length;
+  const totalRecords = rows.reduce((n, r) => n + (r.total_count ?? 0), 0);
   console.log(`  Wrote ${LUMPED_CSV_PATH}: ${rows.length} rows`);
   console.log(
-    `  ${withRecords} of ${lumped.length} have records of their own (${totalRecords.toLocaleString()} in total)`
+    `  ${withRecords} of ${lumped.length} have georeferenced records of their own ` +
+    `(${totalRecords.toLocaleString()} in total); ${rows.length} have any record`
   );
   logger.log("fetch_lumped_own_counts", {
     species: lumped.length,

@@ -334,6 +334,20 @@ const CREDIT_CHART_MODES = ["assessors", "reviewers", "facilitators", "contribut
 const MAP_VIEW_MODES = ["map", "list"] as const;
 type CreditChartMode = (typeof CREDIT_CHART_MODES)[number];
 
+/**
+ * A species row with its all-records GBIF counts in the fields the table reads.
+ * A row without them — a sync from before the all-records counts, or a search preview —
+ * reads as unknown (null) rather than falling back to the georeferenced count,
+ * which would be a smaller number shown under a label promising every record.
+ */
+function withAllGbifRecords<T extends RedListSpecies>(s: T): T {
+  return {
+    ...s,
+    gbif_occurrence_count: s.gbif_occurrence_count_all ?? null,
+    gbif_observations_after_assessment_year: s.gbif_observations_after_assessment_year_all ?? null,
+  };
+}
+
 const CATEGORY_ORDER: Record<string, number> = {
   EX: 0, EW: 1, CR: 2, EN: 3, VU: 4, NT: 5, LC: 6, DD: 7, NE: 8,
 };
@@ -402,8 +416,6 @@ interface SpeciesDetails {
   criteria: string | null;
   commonName: string | null;
   gbifUrl: string | null;
-  gbifOccurrences: number | null;
-  gbifOccurrencesSinceAssessment: number | null;
   gbifMatchStatus: GbifMatchStatus | null;
   // undefined = still loading (show spinner), null = fetched, no image
   inatDefaultImage: InatDefaultImage | null | undefined;
@@ -990,7 +1002,7 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
 }
 
 
-function GbifInfoTooltip() {
+function GbifInfoTooltip({ allRecords = false }: { allRecords?: boolean }) {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -1024,8 +1036,17 @@ function GbifInfoTooltip() {
             transform: 'translateX(-50%) translateY(-100%)',
           }}
         >
-          <div className="font-medium text-[10px] mb-0.5">Georeferenced GBIF records only:</div>
-          <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
+          {allRecords ? (
+            <>
+              <div className="font-medium text-[10px] mb-0.5">All GBIF records:</div>
+              <div className="text-zinc-400">With or without usable coordinates</div>
+            </>
+          ) : (
+            <>
+              <div className="font-medium text-[10px] mb-0.5">Georeferenced GBIF records only:</div>
+              <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
+            </>
+          )}
           <div className="font-medium text-zinc-100 mt-1">Included:</div>
           <ul className="text-zinc-300 list-disc list-inside">
             <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
@@ -1145,6 +1166,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     exactFilters, setExactFilters,
     sortField, sortDirection, setSort,
     mapViewMode, mapSortKey, mapSortDirection, setMapViewMode, setMapSort,
+    gbifRecords, setGbifRecords,
     clearAllFilters,
     clearAllFiltersAndTaxa,
     setViewMode: setUrlViewMode,
@@ -1703,7 +1725,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
-  const species = assessedSpecies;
+  //
+  // Under "All records" the all-records counts are swapped into the fields every
+  // GBIF column, sort, filter and chart below already reads, so the whole view
+  // follows the toggle from this one place instead of each reader choosing.
+  const species = useMemo(
+    () => (gbifRecords === "all" ? assessedSpecies.map(withAllGbifRecords) : assessedSpecies),
+    [assessedSpecies, gbifRecords],
+  );
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
@@ -2127,7 +2156,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // Single-species fast path: use cached search result to render the detail panel
   // immediately without waiting for the bulk table to load.
-  const [singleSpeciesPreview, setSingleSpeciesPreview] = useState<RedListSpecies | null>(null);
+  const [singleSpeciesPreviewRaw, setSingleSpeciesPreview] = useState<RedListSpecies | null>(null);
+  // Swapped like the list (see `species`), and memoised so it stays one object: the
+  // table recognises the preview row by identity.
+  const singleSpeciesPreview = useMemo(
+    () => (gbifRecords === "all" && singleSpeciesPreviewRaw ? withAllGbifRecords(singleSpeciesPreviewRaw) : singleSpeciesPreviewRaw),
+    [singleSpeciesPreviewRaw, gbifRecords],
+  );
   useEffect(() => {
     if (urlSpecies == null) {
       setSingleSpeciesPreview(null);
@@ -3129,7 +3164,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
   }, [sortedSpecies, selectedSpeciesKey, isNewAssessments, PAGE_SIZE]);
 
-  // Populate basic speciesDetails from DB data (GBIF counts instant, no API calls)
+  // Populate basic speciesDetails from DB data (GBIF link + match status instant, no API calls)
   // inatDefaultImage / openAlexPaperCount / papersAtAssessment are left as undefined → spinner
   useEffect(() => {
     const newDetails: Record<string, SpeciesDetails> = {};
@@ -3141,8 +3176,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           criteria: null,
           commonName: s.common_name || null,
           gbifUrl: `https://www.gbif.org/species/${s.gbif_species_key}`,
-          gbifOccurrences: s.gbif_occurrence_count ?? null,
-          gbifOccurrencesSinceAssessment: s.gbif_observations_after_assessment_year ?? null,
           gbifMatchStatus: { matchType: 'EXACT' },
           inatDefaultImage: undefined, // Loading — fetched per-page below
         };
@@ -3151,8 +3184,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           criteria: null,
           commonName: s.common_name || null,
           gbifUrl: null,
-          gbifOccurrences: null,
-          gbifOccurrencesSinceAssessment: null,
           gbifMatchStatus: { matchType: 'NONE' },
           inatDefaultImage: undefined, // Loading
         };
@@ -3586,11 +3617,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Until then this keeps every link working.
   // Built from the shared module so the links and the queries behind the numbers
   // they sit next to can never name different checklists.
-  const GBIF_FILTERS = gbifOccurrenceParams().toString();
+  const georeferencedOnly = gbifRecords !== "all";
+  const GBIF_FILTERS = gbifOccurrenceParams({}, { georeferencedOnly }).toString();
   // Plants and fungi count preserved specimens and animals do not, so the filter
   // string follows the species: a herbarium-heavy plant linking to the animal
   // filter set lands on a search holding a fraction of the number clicked on.
-  const GBIF_FILTERS_WITH_SPECIMENS = gbifOccurrenceParams({}, { includePreservedSpecimens: true }).toString();
+  const GBIF_FILTERS_WITH_SPECIMENS = gbifOccurrenceParams({}, { includePreservedSpecimens: true, georeferencedOnly }).toString();
   const gbifFiltersFor = (taxonGroup: string | undefined) =>
     taxonGroupCountsPreservedSpecimens(taxonGroup) ? GBIF_FILTERS_WITH_SPECIMENS : GBIF_FILTERS;
   const isNE = (s: Species) => s.category === "NE";
@@ -5030,7 +5062,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip allRecords={gbifRecords === "all"} /></span>
                               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
@@ -5109,7 +5141,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip allRecords={gbifRecords === "all"} /></span>
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
@@ -5951,6 +5983,34 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <>{totalFiltered.toLocaleString()} species</>
               )}
             </span>
+            {/* Which GBIF records the counts cover. Georeferenced is what the
+                occurrence map can plot; "All" adds records with no usable
+                coordinates — for plants, mostly herbarium sheets that name a
+                locality but were never georeferenced. */}
+            <div
+              className="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0"
+              role="group"
+              aria-label="GBIF records counted"
+            >
+              {([["georeferenced", "Georeferenced"], ["all", "All records"]] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={gbifRecords === value}
+                  onClick={() => setGbifRecords(value)}
+                  title={value === "all"
+                    ? "Count every GBIF record, including ones with no usable coordinates"
+                    : "Count only GBIF records with coordinates GBIF trusts"}
+                  className={`px-2 py-1 font-medium transition-colors ${
+                    gbifRecords === value
+                      ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
                 dataset entirely), moved here from the old dedicated stat-card
                 row now that there isn't one. */}
@@ -6059,7 +6119,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={`${SPECIES_TH_LABEL} ${isNewAssessments ? "w-[96px]" : "w-[72px]"}`}>{isNewAssessments ? "GBIF Records" : "Total GBIF Records"}</span>
-                    <GbifInfoTooltip />
+                    <GbifInfoTooltip allRecords={gbifRecords === "all"} />
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6316,19 +6376,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     )}
                     {/* Total GBIF */}
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {details?.gbifOccurrences != null && details?.gbifUrl ? (
+                      {/* The row's own count, not speciesDetails' copy of it: that copy
+                          is taken once, so it would keep showing whichever records the
+                          toggle was on when the row first rendered. */}
+                      {s.gbif_occurrence_count != null && gbifSpeciesKey ? (
                         <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${details.gbifUrl.split('/').pop()}&${gbifFiltersFor(s.taxon_group)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {details.gbifOccurrences.toLocaleString()}
-                        </a>
-                      ) : s.gbif_occurrence_count != null && s.gbif_species_key ? (
-                        <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
+                          href={`https://www.gbif.org/occurrence/search?taxonKey=${gbifSpeciesKey}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
@@ -6336,6 +6389,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         >
                           {s.gbif_occurrence_count.toLocaleString()}
                         </a>
+                      ) : s === singleSpeciesPreview && speciesLoading && gbifRecords === "all" ? (
+                        // A search preview carries only the georeferenced count; the
+                        // all-records one arrives with the taxon's list.
+                        <Spinner />
                       ) : details?.gbifMatchStatus?.matchType === 'HIGHERRANK' || details?.gbifMatchStatus?.matchType === 'NONE' ? (
                         <HoverTooltip
                           text={details.gbifMatchStatus.matchType === 'HIGHERRANK'
@@ -6352,7 +6409,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       {isNE(s) ? (
                         <span className="text-zinc-400">N/A</span>
                       ) : (() => {
-                        const newObs = details?.gbifOccurrencesSinceAssessment ?? s.gbif_observations_after_assessment_year;
+                        const newObs = s.gbif_observations_after_assessment_year;
                         if (newObs == null) return "—";
                         const key = details?.gbifUrl?.split('/').pop() ?? s.gbif_species_key;
                         // A species assessed this year has no "since" range to
@@ -6379,8 +6436,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {!isNewAssessments && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
-                        const total = details?.gbifOccurrences ?? s.gbif_occurrence_count;
-                        const newObs = details?.gbifOccurrencesSinceAssessment ?? s.gbif_observations_after_assessment_year;
+                        const total = s.gbif_occurrence_count;
+                        const newObs = s.gbif_observations_after_assessment_year;
                         if (total == null || total === 0 || newObs == null) return "—";
                         const pct = (newObs / total) * 100;
                         return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;

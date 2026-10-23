@@ -114,7 +114,7 @@ export const OWN_PARAM_NAMES = [
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
   "search", "outdated", "minObs", "maxObs",
   "minAssessmentYear", "maxAssessmentYear", "minDescribedYear", "maxDescribedYear",
-  "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
+  "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir", "gbif",
 ];
 
 /**
@@ -124,6 +124,16 @@ export const OWN_PARAM_NAMES = [
  * explicit opt-in to the fuller, patchier data.
  */
 export type ThreatsScope = "threatened" | "all";
+
+/**
+ * Which GBIF records the species table counts: georeferenced only (coordinates
+ * GBIF trusts — what the occurrence map can plot, and the default), or every
+ * record, which for plants adds the herbarium sheets labelled with a locality
+ * but no coordinates. In the URL rather than a remembered preference because it
+ * changes what the GBIF-records filter and sort select, and a shared link has to
+ * select the same species for whoever opens it.
+ */
+export type GbifRecords = "georeferenced" | "all";
 
 /** Columns the species table can be sorted by. */
 export type SortField = "year" | "category" | "totalGbif" | "newGbif" | "pctNewGbif" | "describedYear";
@@ -371,6 +381,7 @@ export function parseParams(search: string, suffix: string = "") {
     sortField2: parseSortField(p.get(k("sort2"))),
     sortDirection2: (p.get(k("dir2")) === "asc" ? "asc" : "desc") as "asc" | "desc",
     mapViewMode: (p.get(k("mapview")) === "list" ? "list" : "map") as MapViewMode,
+    gbifRecords: (p.get(k("gbif")) === "all" ? "all" : "georeferenced") as GbifRecords,
     mapSortKey: (
       p.get(k("mapsort")) === "name" ? "name" :
       p.get(k("mapsort")) === "outdated" ? "outdated" :
@@ -461,6 +472,7 @@ export function buildQs(state: {
   sortField2: SortField | null;
   sortDirection2: "asc" | "desc";
   mapViewMode?: MapViewMode;
+  gbifRecords?: GbifRecords;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
   species: string | null;
@@ -533,6 +545,7 @@ export function buildQs(state: {
     if (state.sortDirection2 !== "desc") p.set(k("dir2"), state.sortDirection2);
   }
   if (state.mapViewMode === "list") p.set(k("mapview"), "list");
+  if (state.gbifRecords === "all") p.set(k("gbif"), "all");
   if (state.mapSortKey && state.mapSortKey !== "species") p.set(k("mapsort"), state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set(k("mapdir"), "asc");
   const qs = prettifyQs(p.toString());
@@ -1195,6 +1208,19 @@ export function useFilterParams(paramSuffix: string = "") {
     [syncUrl]
   );
 
+  // Not reset by clearAllFilters, like mapViewMode: it says how counts are read,
+  // and clearing filters shouldn't quietly change the numbers in the table.
+  const setGbifRecords = useCallback(
+    (value: GbifRecords) => {
+      setState(prev => {
+        const next = { ...prev, gbifRecords: value };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setMapViewMode = useCallback(
     (mode: MapViewMode) => {
       setState(prev => {
@@ -1377,6 +1403,7 @@ export function useFilterParams(paramSuffix: string = "") {
     sortField2: state.sortField2,
     sortDirection2: state.sortDirection2,
     mapViewMode: state.mapViewMode,
+    gbifRecords: state.gbifRecords ?? "georeferenced",
     mapSortKey: state.mapSortKey,
     mapSortDirection: state.mapSortDirection,
 
@@ -1421,6 +1448,7 @@ export function useFilterParams(paramSuffix: string = "") {
     setSort,
     setSort2,
     setMapViewMode,
+    setGbifRecords,
     setMapSort,
     fromPopstateRef,
     clearAllFilters,

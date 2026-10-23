@@ -238,6 +238,14 @@ describe("parseParams", () => {
     expect(parseParams("?threatsScope=nonsense").threatsScope).toBe("threatened");
   });
 
+  // Georeferenced is the default and the only count a link made before the toggle
+  // could have meant, so absent (or garbage) must read as georeferenced.
+  it("defaults gbifRecords to georeferenced, and parses gbif=all", () => {
+    expect(parseParams("").gbifRecords).toBe("georeferenced");
+    expect(parseParams("?gbif=all").gbifRecords).toBe("all");
+    expect(parseParams("?gbif=nonsense").gbifRecords).toBe("georeferenced");
+  });
+
   it("expands a region param into its country codes (no separate region state)", () => {
     const result = parseParams("?region=Sub-Saharan+Africa");
     expect(result.countries.size).toBeGreaterThan(0);
@@ -310,6 +318,11 @@ describe("buildQs", () => {
       .not.toContain("threatsScope");
     expect(buildQs({ ...emptyState, threats: new Set(["11"]), threatsScope: "all" as const }))
       .toContain("threatsScope=all");
+  });
+
+  it("omits gbif for georeferenced counts, writes it for all records", () => {
+    expect(buildQs({ ...emptyState, gbifRecords: "georeferenced" as const })).not.toContain("gbif=");
+    expect(buildQs({ ...emptyState, gbifRecords: "all" as const })).toContain("gbif=all");
   });
 
   it("includes taxa when set", () => {
@@ -1064,6 +1077,7 @@ describe("OWN_PARAM_NAMES stays in sync with buildQs", () => {
       sortField2: "newGbif" as const,
       sortDirection2: "desc" as const,
       mapViewMode: "list" as const,
+      gbifRecords: "all" as const,
       mapSortKey: "outdated" as const,
       mapSortDirection: "asc" as const,
       species: "sis-12345",

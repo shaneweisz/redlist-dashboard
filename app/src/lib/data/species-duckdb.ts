@@ -69,6 +69,27 @@ export async function getConn(): Promise<DuckDBConnection> {
 // col_ids / ne_ex_ew_col_ids) for its own colDescribed/colNe counts — reusing these
 // avoids building a second, redundant set of identical temp tables on the same
 // warm connection.
+/**
+ * Whether a parquet carries the all-records GBIF counts (gbif_occurrence_count_all
+ * and friends). A sync from before the all-records counts has none of them, and naming a
+ * missing column is a Binder Error that fails the whole request — the way the live
+ * breakdown 500'd on a backbone older than its code. Absent, the rows simply carry
+ * null all-records counts. DESCRIBE reads the footer only, and the answer is cached
+ * per file for the life of the container.
+ */
+const allRecordsColumnCache = new Map<string, Promise<boolean>>();
+function hasAllRecordsColumns(conn: DuckDBConnection, uri: string): Promise<boolean> {
+  let p = allRecordsColumnCache.get(uri);
+  if (!p) {
+    p = conn.run(`DESCRIBE SELECT * FROM read_parquet('${uri}') LIMIT 0`)
+      .then((r) => r.getRowObjects())
+      .then((rows) => rows.some((r) => String(r.column_name) === "gbif_occurrence_count_all"))
+      .catch((e) => { allRecordsColumnCache.delete(uri); throw e; });
+    allRecordsColumnCache.set(uri, p);
+  }
+  return p;
+}
+
 let neHelpersPromise: Promise<void> | null = null;
 export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
   if (!neHelpersPromise) {
@@ -88,8 +109,9 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
         FROM read_parquet('${linkUri}') l
         JOIN read_parquet('${assessedUri}') a ON a.id = l.id
         WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
+      const allCol = (await hasAllRecordsColumns(conn, unassessedUri)) ? "max(un.gbif_occurrence_count_all)" : "CAST(NULL AS BIGINT)";
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
-        SELECT sl.col_id AS col_id, any_value(un.gbif_species_key) AS gbif_species_key, max(un.gbif_occurrence_count) AS gbif_occurrence_count, any_value(un.countries) AS countries, any_value(un.common_name) AS common_name
+        SELECT sl.col_id AS col_id, any_value(un.gbif_species_key) AS gbif_species_key, max(un.gbif_occurrence_count) AS gbif_occurrence_count, ${allCol} AS gbif_occurrence_count_all, any_value(un.countries) AS countries, any_value(un.common_name) AS common_name
         FROM read_parquet('${linkUri}') sl JOIN read_parquet('${unassessedUri}') un ON un.id = sl.id
         WHERE sl.src = 'gbif' AND sl.col_id IS NOT NULL GROUP BY sl.col_id`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
@@ -152,10 +174,13 @@ export interface PreviousAssessment {
   facilitators: string | null; contributors: string | null; institutions: string | null;
 }
 
-const ASSESSED_SELECT = `
+const assessedSelect = (withAllRecords: boolean) => `
   id, assessment_id, scientific_name, common_name, family, iucn_category AS category,
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_occurrence_count, gbif_observations_after_assessment_year,
+  ${withAllRecords
+    ? "gbif_occurrence_count_all, gbif_observations_after_assessment_year_all,"
+    : "NULL AS gbif_occurrence_count_all, NULL AS gbif_observations_after_assessment_year_all,"}
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -204,6 +229,9 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     gbif_species_key: str(r.gbif_species_key),
     gbif_occurrence_count: num(r.gbif_occurrence_count),
     gbif_observations_after_assessment_year: num(r.gbif_observations_after_assessment_year),
+    // Every record, georeferenced or not — what the table shows under "All records".
+    gbif_occurrence_count_all: num(r.gbif_occurrence_count_all),
+    gbif_observations_after_assessment_year_all: num(r.gbif_observations_after_assessment_year_all),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,
@@ -310,7 +338,7 @@ export async function querySpecies(opts: {
   // (denormalized columns). The full per-species history array is fetched lazily
   // via getAssessmentHistory when a detail panel opens. This reads a single file
   // and drops ≈40% of the payload (history was ~half the bytes for large taxa).
-  const assessedSql = `SELECT ${ASSESSED_SELECT} FROM '${assessedUri}' a ${whereSql}`;
+  const assessedSql = `SELECT ${assessedSelect(await hasAllRecordsColumns(conn, assessedUri))} FROM '${assessedUri}' a ${whereSql}`;
   const rows = (await conn.runAndReadAll(assessedSql, where.params)).getRowObjects();
 
   let result = rows.map(toSpeciesRow);
@@ -351,7 +379,7 @@ export async function querySpecies(opts: {
       // universe (woolly mammoth in_base=false; American mastodon CoL-unmatched).
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year,
-               g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
+               g.gbif_species_key, g.gbif_occurrence_count, g.gbif_occurrence_count_all, g.countries, g.common_name
         FROM (
           SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
@@ -359,7 +387,7 @@ export async function querySpecies(opts: {
         LEFT JOIN ne_gbif_by_col g ON g.col_id = u.col_id`;
       const univRows = (await conn.runAndReadAll(univSql, where.params)).getRowObjects();
       for (const r of univRows) {
-        // Slim NE row — only the 13 populated fields. The other 16 (assessment-only:
+        // Slim NE row — only the 14 populated fields. The other 17 (assessment-only:
         // assessment_id/date, trend, criteria, threats, systems, assessors, …) are always
         // null/empty/false for NE, so omitting them ~halves the payload + server
         // serialization (beetles ~262k rows: 178MB → ~90MB). The client handles their
@@ -398,6 +426,7 @@ export async function querySpecies(opts: {
           described_year: num(r.described_year),
           gbif_species_key: str(r.gbif_species_key),
           gbif_occurrence_count: num(r.gbif_occurrence_count),
+          gbif_occurrence_count_all: num(r.gbif_occurrence_count_all),
         } as unknown as ReturnType<typeof toSpeciesRow>);
       }
     }

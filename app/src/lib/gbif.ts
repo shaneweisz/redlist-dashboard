@@ -179,12 +179,18 @@ export function taxonGroupCountsPreservedSpecimens(taxonGroup: string | undefine
  */
 export function gbifOccurrenceParams(
   extra: Record<string, string> = {},
-  { includePreservedSpecimens = false }: { includePreservedSpecimens?: boolean } = {},
+  {
+    includePreservedSpecimens = false,
+    georeferencedOnly = true,
+  }: {
+    includePreservedSpecimens?: boolean;
+    /** Off for links that should show every record — the table's "All records" counts. */
+    georeferencedOnly?: boolean;
+  } = {},
 ): URLSearchParams {
   const params = new URLSearchParams({
     checklistKey: GBIF_CHECKLIST_KEY,
-    hasCoordinate: "true",
-    hasGeospatialIssue: "false",
+    ...(georeferencedOnly ? { hasCoordinate: "true", hasGeospatialIssue: "false" } : {}),
     ...extra,
   });
   includedBasisOfRecord(includePreservedSpecimens).forEach((b) =>

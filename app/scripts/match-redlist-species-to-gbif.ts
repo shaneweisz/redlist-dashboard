@@ -27,7 +27,7 @@ import {
   mapConcurrent,
 } from "./utils";
 import { readRedlistCsv } from "./fetch-redlist-species";
-import { readGbifCsv } from "./fetch-gbif-species";
+import { readGbifCsv, GBIF_ALL_ONLY_DIR } from "./fetch-gbif-species";
 import { allTaxaUnchecked } from "./taxa";
 import { decideKey, type Verdict } from "./species-key";
 import { GBIF_CHECKLIST_KEY } from "../src/lib/gbif";
@@ -402,6 +402,11 @@ export function loadAllGbifKeys(): Set<string> {
     if (!fs.existsSync(csvPath)) continue;
     const map = readGbifCsv(taxon.id);
     for (const key of map.keys()) keys.add(key);
+    // Species whose records are all ungeoreferenced are fetched too, just into a
+    // separate file. Leaving them out would refuse an assessed species the only key
+    // that holds its records — a plant known solely from herbarium sheets would go
+    // on reading "no GBIF data" under the all-records count as well.
+    for (const key of readGbifCsv(taxon.id, GBIF_ALL_ONLY_DIR).keys()) keys.add(key);
   }
   return keys;
 }

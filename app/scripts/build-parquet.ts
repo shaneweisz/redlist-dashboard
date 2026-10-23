@@ -26,6 +26,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR, REDLIST_DIR, GBIF_DIR, CSV_QUOTING, writeCsv } from "./utils";
+import { GBIF_ALL_ONLY_DIR } from "./fetch-gbif-species";
 import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../src/lib/data/taxonomy-constants";
 import { chooseRepresentative, type Verdict } from "./species-key";
 
@@ -56,6 +57,15 @@ export async function run(): Promise<void> {
   // preferring the more specific group (the one whose file lists fewer species,
   // i.e. the narrower definition), then the group name, so the choice is stable
   // across runs rather than depending on file order.
+  // The all-records columns are absent from CSVs a sync wrote before they existed,
+  // and naming a column no file has is a binder error rather than a NULL — so a
+  // rebuild from older per-group files (a partial sync, or build-parquet run on
+  // its own) would fail outright instead of simply lacking the new counts.
+  const csvHasColumn = (dir: string, column: string) =>
+    fs.existsSync(dir) && fs.readdirSync(dir).filter((f) => f.endsWith(".csv")).some((f) =>
+      fs.readFileSync(path.join(dir, f), "utf-8").split("\n", 1)[0].split(",").includes(column));
+  const gbifHasAll = csvHasColumn(GBIF_DIR, "total_count_all");
+
   await conn.run(`
     CREATE TEMP TABLE gbif_rows AS
       SELECT
@@ -65,6 +75,8 @@ export async function run(): Promise<void> {
         lower(class_name) AS class_name, lower(order_name) AS order_name, lower(family) AS family,
         CAST(total_count AS BIGINT)              AS total_count,
         CAST(count_after_assessment_year AS BIGINT) AS count_after,
+        ${gbifHasAll ? "CAST(total_count_all AS BIGINT)" : "CAST(NULL AS BIGINT)"} AS total_count_all,
+        ${gbifHasAll ? "CAST(count_after_assessment_year_all AS BIGINT)" : "CAST(NULL AS BIGINT)"} AS count_after_all,
         countries
       FROM read_csv_auto('${gbifGlob}', union_by_name=true, ${CSV_QUOTING});
   `);
@@ -79,6 +91,29 @@ export async function run(): Promise<void> {
       SELECT taxon_group, count(*) AS n FROM gbif_rows GROUP BY 1;
   `);
 
+  // Species with records but none georeferenced (see GBIF_ALL_ONLY_DIR). Folded in
+  // after group sizes are measured, for the same reason as the directly-counted
+  // rows below, and with no georeferenced count: NULL, not the 0 in the file,
+  // because a 0 reads as "has GBIF data, none of it usable" to everything that
+  // counts coverage, and these species do not have georeferenced data at all.
+  const allOnlyGlob = path.join(GBIF_ALL_ONLY_DIR, "*.csv");
+  if (csvHasColumn(GBIF_ALL_ONLY_DIR, "total_count_all")) {
+    await conn.run(`
+      INSERT INTO gbif_rows
+        SELECT
+          CAST(gbif_species_key AS VARCHAR), scientific_name, common_name, taxon_group_table1a,
+          lower(class_name), lower(order_name), lower(family),
+          NULL, NULL,
+          CAST(total_count_all AS BIGINT), CAST(count_after_assessment_year_all AS BIGINT),
+          countries
+        FROM read_csv_auto('${allOnlyGlob}', union_by_name=true, ${CSV_QUOTING},
+                           types={'countries': 'VARCHAR', 'common_name': 'VARCHAR'})
+        WHERE CAST(gbif_species_key AS VARCHAR) NOT IN (SELECT gbif_species_key FROM gbif_rows);
+    `);
+    const n = (await conn.runAndReadAll(`SELECT count(*) c FROM gbif_rows WHERE total_count IS NULL`)).getRowObjects()[0].c;
+    console.log(`  species with no georeferenced records folded in: ${Number(n).toLocaleString()}`);
+  }
+
   // Species whose key the facet enumeration cannot emit — synonyms kept after a
   // lump was refused, and taxa CoL ranks below species. Counted directly by
   // fetch-lumped-own-counts into its own file, and folded in here. The facet rows
@@ -86,6 +121,8 @@ export async function run(): Promise<void> {
   // source.
   const lumpedCsv = path.join(DATA_DIR, "lumped-own-counts.csv");
   if (fs.existsSync(lumpedCsv)) {
+    // A file from before the all-records columns existed has neither (see csvHasColumn).
+    const lumpedHasAll = fs.readFileSync(lumpedCsv, "utf-8").split("\n", 1)[0].split(",").includes("total_count_all");
     const countRows = async () =>
       Number((await conn.runAndReadAll(`SELECT count(*) c FROM gbif_rows`)).getRowObjects()[0].c);
     const before = await countRows();
@@ -101,6 +138,8 @@ export async function run(): Promise<void> {
           '' AS class_name, '' AS order_name, '' AS family,
           CAST(l.total_count AS BIGINT),
           CAST(l.count_after_assessment_year AS BIGINT),
+          ${lumpedHasAll ? "CAST(l.total_count_all AS BIGINT)" : "NULL"},
+          ${lumpedHasAll ? "CAST(l.count_after_assessment_year_all AS BIGINT)" : "NULL"},
           '' AS countries
         FROM read_csv_auto('${lumpedCsv}', ${CSV_QUOTING}) l
         WHERE l.gbif_species_key NOT IN (SELECT gbif_species_key FROM gbif_rows);
@@ -223,6 +262,8 @@ export async function run(): Promise<void> {
         c.sis_taxon_id,
         g.total_count  AS gbif_occurrence_count,
         g.count_after  AS gbif_observations_after_assessment_year,
+        g.total_count_all AS gbif_occurrence_count_all,
+        g.count_after_all AS gbif_observations_after_assessment_year_all,
         c.gbif_species_key
       FROM chosen_link c
       JOIN gbif_all g ON g.gbif_species_key = c.gbif_species_key;
@@ -310,6 +351,8 @@ export async function run(): Promise<void> {
         e.gbif_species_key,
         e.gbif_occurrence_count,
         e.gbif_observations_after_assessment_year,
+        e.gbif_occurrence_count_all,
+        e.gbif_observations_after_assessment_year_all,
         -- arrays kept as raw ';'-joined strings (query layer splits, matching
         -- loadRedlistForGroup); booleans as 'true'.
         nullif(r.population_trend, '')    AS population_trend,
@@ -376,7 +419,8 @@ export async function run(): Promise<void> {
         'NE'                             AS iucn_category,
         g.countries,
         g.gbif_species_key,
-        g.total_count                    AS gbif_occurrence_count
+        g.total_count                    AS gbif_occurrence_count,
+        g.total_count_all                AS gbif_occurrence_count_all
       FROM gbif_all g
       LEFT JOIN species_vernaculars v ON v.col_id = g.gbif_species_key
       WHERE g.gbif_species_key NOT IN (SELECT DISTINCT gbif_species_key FROM map)
@@ -414,10 +458,11 @@ export async function run(): Promise<void> {
   const a = (await q(`
     SELECT count(*) n,
            count(*) FILTER (gbif_occurrence_count IS NOT NULL) with_obs,
-           count(*) FILTER (gbif_observations_after_assessment_year IS NOT NULL) with_caa
+           count(*) FILTER (gbif_observations_after_assessment_year IS NOT NULL) with_caa,
+           count(*) FILTER (gbif_occurrence_count_all IS NOT NULL) with_obs_all
     FROM '${assessedOut}'`))[0];
   const ne = (await q(`SELECT count(*) n FROM '${unassessedOut}'`))[0];
-  console.log(`Wrote ${assessedOut}: ${a.n} assessed (with occurrence_count ${a.with_obs}, with count-after ${a.with_caa})`);
+  console.log(`Wrote ${assessedOut}: ${a.n} assessed (with occurrence_count ${a.with_obs}, with count-after ${a.with_caa}, with any record at all ${a.with_obs_all})`);
   console.log(`Wrote ${unassessedOut}: ${ne.n} unassessed (NE)`);
   const h = (await q(`SELECT count(*) nrows, count(DISTINCT sis_taxon_id) species FROM '${assessmentsOut}'`))[0];
   console.log(`Wrote ${assessmentsOut}: ${h.nrows} assessment events across ${h.species} species`);
@@ -444,15 +489,24 @@ export async function run(): Promise<void> {
   // exactly this reason. The threshold separates that noise from a systematic
   // fault; the count is always reported.
   const IMPOSSIBLE_TOLERANCE = 20;
+  // Checked for both counts, plus the one relation between them: every record can
+  // never be fewer than the georeferenced ones. The sync scripts enforce that last
+  // one outright, so any breach here means the two columns have come from
+  // different keys.
   const impossible = Number((await q(
-    `SELECT count(*) c FROM '${assessedOut}' WHERE gbif_observations_after_assessment_year > gbif_occurrence_count`
+    `SELECT count(*) c FROM '${assessedOut}'
+     WHERE gbif_observations_after_assessment_year > gbif_occurrence_count
+        OR gbif_observations_after_assessment_year_all > gbif_occurrence_count_all
+        OR gbif_occurrence_count > gbif_occurrence_count_all
+        OR gbif_observations_after_assessment_year > gbif_observations_after_assessment_year_all`
   ))[0].c);
   if (impossible > 0) {
-    console.log(`  species with since-assessment above total (facet approximation): ${impossible}`);
+    console.log(`  species with a count above one that contains it (facet approximation): ${impossible}`);
   }
   if (impossible > IMPOSSIBLE_TOLERANCE) {
     throw new Error(
-      `build-parquet: ${impossible} species have more records since assessment than in total, ` +
+      `build-parquet: ${impossible} species have a count above one that contains it (records since ` +
+      `assessment above the total, or georeferenced above all records), ` +
       `above the ${IMPOSSIBLE_TOLERANCE} expected from facet approximation. That many means counts ` +
       `from different taxa are being combined.`
     );

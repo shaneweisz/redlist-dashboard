@@ -148,9 +148,9 @@ Live external APIs:
 The key innovation — linking assessment data to real-world observations:
 
 1. **Species matching**: each IUCN species is matched to GBIF via their species-matching API (exact, fuzzy, and variant matches). Results stored in `data/mapping.csv`.
-2. **Observation counts**: **Total GBIF** (all geo-referenced records), **New GBIF** (records added after the assessment year), and **% New GBIF**. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only georeferenced record a species has.
+2. **Observation counts**: **Total GBIF**, **New GBIF** (records added after the assessment year), and **% New GBIF**. A toggle above the table switches every count between **Georeferenced** records (coordinates GBIF trusts — the default, and what the occurrence map can plot) and **All records**, which adds records with no usable coordinates: for plants, mostly herbarium sheets that name a locality but were never georeferenced. It is in the URL (`gbif=all`) because it changes what the GBIF-records filter selects. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only record a species has.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
-4. **Quality filters**: only geo-referenced records without coordinate issues.
+4. **Quality filters**: under Georeferenced (the default), only geo-referenced records without coordinate issues.
 
 Match quality is surfaced in the UI, since it affects how far to trust a count:
 - **EXACT** — reliable match
@@ -183,14 +183,14 @@ Phases 2–4 build the **Catalogue of Life backbone** (full sync only) — the d
 
 4b. `derive-gbif-taxon-keys` — Red List groups + `backbone.parquet` → `src/config/gbif-taxon-keys.json`. Pins each group to the GBIF *index* of the CoL release being built against, rather than whatever GBIF currently considers newest. **Committed to git**
 
-Phases 5–8 pull from GBIF, keyed on what phases 2–4 produced:
+Phases 5–8 pull from GBIF, keyed on what phases 2–4 produced. Phases 5, 8 and 8b count every species twice — georeferenced records, and every record — by running each query once with GBIF's coordinate filters and once without:
 
-5. `fetch-gbif-species` — GBIF facets + backbone → per-taxon CSVs in `data/gbif/`
+5. `fetch-gbif-species` — GBIF facets + backbone → per-taxon CSVs in `data/gbif/` (species with georeferenced records) and `data/gbif-all-only/` (species whose records are all ungeoreferenced), each with both counts
 6. `match-redlist-species-to-gbif` — GBIF Match API → `data/mapping.csv`. Retries a name GBIF can't place below genus with IUCN's authorship as its own parameter, and refuses to let one assessed species claim another's key
-7. `fetch-gbif-country-data` — GBIF API → per-species country occurrence counts
-8. `fetch-gbif-new-counts` — GBIF API → updates GBIF CSVs with temporal splits
+7. `fetch-gbif-country-data` — GBIF API → per-species country occurrence counts (georeferenced records only)
+8. `fetch-gbif-new-counts` — GBIF API → updates GBIF CSVs with records since each species' assessment, both counts
 
-8b. `fetch-lumped-own-counts` — GBIF API → counts for keys the facets can't emit
+8b. `fetch-lumped-own-counts` — GBIF API → counts for keys the facets can't emit, both counts
 
 Phases 9–12 build the read layer:
 
