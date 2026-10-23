@@ -5,8 +5,8 @@
       "name": "Insects",
       "estimatedDescribed": 1008355,
       "totalAssessed": 14531,
-      "outdated": 6117,
-      "gbifNeSpeciesCount": 252492,
+      "outdated": 6136,
+      "gbifNeSpeciesCount": 252804,
       "byCategory": {
         "VU": 1086,
         "EN": 1185,
@@ -20,16 +20,16 @@
         "EW": 1,
         "LR/cd": 3
       },
-      "colDescribed": 926420,
-      "colNe": 912777
+      "colDescribed": 923576,
+      "colNe": 909938
     },
     {
       "id": "inv-arachnids",
       "name": "Arachnids",
       "estimatedDescribed": 98006,
       "totalAssessed": 1057,
-      "outdated": 247,
-      "gbifNeSpeciesCount": 22838,
+      "outdated": 248,
+      "gbifNeSpeciesCount": 22868,
       "byCategory": {
         "EN": 165,
         "VU": 104,
@@ -39,16 +39,16 @@
         "CR": 123,
         "EX": 9
       },
-      "colDescribed": 99668,
-      "colNe": 98630
+      "colDescribed": 99657,
+      "colNe": 98619
     },
     {
       "id": "inv-molluscs",
       "name": "Molluscs",
       "estimatedDescribed": 89129,
       "totalAssessed": 9957,
-      "outdated": 5263,
-      "gbifNeSpeciesCount": 26856,
+      "outdated": 5278,
+      "gbifNeSpeciesCount": 26882,
       "byCategory": {
         "CR": 782,
         "EN": 771,
@@ -61,8 +61,8 @@
         "LR/lc": 16,
         "EW": 12
       },
-      "colDescribed": 89340,
-      "colNe": 79856
+      "colDescribed": 89046,
+      "colNe": 79596
     },
     {
       "id": "inv-crustaceans",
@@ -70,7 +70,7 @@
       "estimatedDescribed": 83805,
       "totalAssessed": 3410,
       "outdated": 3097,
-      "gbifNeSpeciesCount": 25753,
+      "gbifNeSpeciesCount": 25764,
       "byCategory": {
         "VU": 429,
         "CR": 182,
@@ -84,8 +84,8 @@
         "LR/nt": 1,
         "EW": 1
       },
-      "colDescribed": 69246,
-      "colNe": 65905
+      "colDescribed": 69219,
+      "colNe": 65885
     },
     {
       "id": "inv-corals",
@@ -93,7 +93,7 @@
       "estimatedDescribed": 5695,
       "totalAssessed": 916,
       "outdated": 18,
-      "gbifNeSpeciesCount": 2676,
+      "gbifNeSpeciesCount": 2675,
       "byCategory": {
         "VU": 57,
         "DD": 131,
@@ -102,8 +102,8 @@
         "EN": 245,
         "NT": 24
       },
-      "colDescribed": 5732,
-      "colNe": 4823
+      "colDescribed": 5724,
+      "colNe": 4815
     },
     {
       "id": "inv-velvet_worms",
@@ -142,8 +142,8 @@
       "name": "Other Invertebrates",
       "estimatedDescribed": 171981,
       "totalAssessed": 1153,
-      "outdated": 578,
-      "gbifNeSpeciesCount": 21515,
+      "outdated": 596,
+      "gbifNeSpeciesCount": 21540,
       "byCategory": {
         "CR": 67,
         "VU": 50,
@@ -154,8 +154,8 @@
         "EX": 6,
         "NT": 99
       },
-      "colDescribed": 142291,
-      "colNe": 141195
+      "colDescribed": 142178,
+      "colNe": 141081
     }
   ],
   "plantae": [
@@ -164,8 +164,8 @@
       "name": "Flowering Plants",
       "estimatedDescribed": 369000,
       "totalAssessed": 76102,
-      "outdated": 19130,
-      "gbifNeSpeciesCount": 230370,
+      "outdated": 19263,
+      "gbifNeSpeciesCount": 230707,
       "byCategory": {
         "LR/cd": 102,
         "VU": 10376,
@@ -179,8 +179,8 @@
         "EX": 138,
         "LR/lc": 116
       },
-      "colDescribed": 356235,
-      "colNe": 280999
+      "colDescribed": 355817,
+      "colNe": 280702
     },
     {
       "id": "pl-gymnosperms",
@@ -198,7 +198,7 @@
         "DD": 18,
         "EW": 5
       },
-      "colDescribed": 1215,
+      "colDescribed": 1216,
       "colNe": 152
     },
     {
@@ -207,7 +207,7 @@
       "estimatedDescribed": 11800,
       "totalAssessed": 839,
       "outdated": 536,
-      "gbifNeSpeciesCount": 11945,
+      "gbifNeSpeciesCount": 11955,
       "byCategory": {
         "DD": 110,
         "NT": 55,
@@ -218,16 +218,16 @@
         "EX": 2,
         "EW": 1
       },
-      "colDescribed": 14134,
-      "colNe": 13261
+      "colDescribed": 14132,
+      "colNe": 13259
     },
     {
       "id": "pl-mosses",
       "name": "Mosses, Liverworts & Hornworts",
       "estimatedDescribed": 19539,
       "totalAssessed": 327,
-      "outdated": 115,
-      "gbifNeSpeciesCount": 14508,
+      "outdated": 116,
+      "gbifNeSpeciesCount": 14522,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -247,7 +247,7 @@
       "estimatedDescribed": 14739,
       "totalAssessed": 18,
       "outdated": 13,
-      "gbifNeSpeciesCount": 3479,
+      "gbifNeSpeciesCount": 3482,
       "byCategory": {
         "DD": 6,
         "LC": 11,
@@ -281,7 +281,7 @@
       "estimatedDescribed": 157648,
       "totalAssessed": 1351,
       "outdated": 56,
-      "gbifNeSpeciesCount": 93056,
+      "gbifNeSpeciesCount": 93081,
       "byCategory": {
         "EN": 130,
         "CR": 48,
@@ -290,8 +290,8 @@
         "LC": 534,
         "DD": 293
       },
-      "colDescribed": 156521,
-      "colNe": 155294
+      "colDescribed": 156520,
+      "colNe": 155293
     },
     {
       "id": "fu-brown_algae",
