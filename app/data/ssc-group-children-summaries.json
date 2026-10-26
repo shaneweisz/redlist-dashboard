@@ -1156,7 +1156,7 @@
       "name": "Bat Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 1336,
-      "outdated": 685,
+      "outdated": 687,
       "gbifNeSpeciesCount": 93,
       "byCategory": {
         "VU": 109,
@@ -3354,7 +3354,7 @@
       "name": "Primate Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 527,
-      "outdated": 237,
+      "outdated": 240,
       "gbifNeSpeciesCount": 9,
       "byCategory": {
         "LC": 118,
@@ -16844,7 +16844,7 @@
       "name": "Mollusc Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 9957,
-      "outdated": 5278,
+      "outdated": 5282,
       "gbifNeSpeciesCount": 26882,
       "byCategory": {
         "CR": 782,
@@ -19886,7 +19886,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1643,
       "outdated": 1033,
-      "gbifNeSpeciesCount": 10275,
+      "gbifNeSpeciesCount": 10273,
       "byCategory": {
         "VU": 220,
         "EN": 197,
@@ -21649,7 +21649,7 @@
       "name": "Dragonfly Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 6229,
-      "outdated": 3123,
+      "outdated": 3125,
       "gbifNeSpeciesCount": 188,
       "byCategory": {
         "EN": 313,
@@ -30470,7 +30470,7 @@
       "name": "Earthworm Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 355,
-      "outdated": 24,
+      "outdated": 30,
       "gbifNeSpeciesCount": 545,
       "byCategory": {
         "VU": 12,
@@ -31140,7 +31140,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 3946,
       "outdated": 1319,
-      "gbifNeSpeciesCount": 256952,
+      "gbifNeSpeciesCount": 256953,
       "byCategory": {
         "VU": 449,
         "EN": 447,
@@ -36448,7 +36448,7 @@
       "name": "Orchid Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 2443,
-      "outdated": 1221,
+      "outdated": 1226,
       "gbifNeSpeciesCount": 18960,
       "byCategory": {
         "VU": 315,
@@ -37875,7 +37875,7 @@
       "name": "Bryophyte Specialist Group",
       "estimatedDescribed": 0,
       "totalAssessed": 327,
-      "outdated": 116,
+      "outdated": 118,
       "gbifNeSpeciesCount": 14522,
       "byCategory": {
         "CR": 48,
@@ -41768,8 +41768,8 @@
       "name": "No / Other SSC Group",
       "estimatedDescribed": 0,
       "totalAssessed": 71284,
-      "outdated": 16363,
-      "gbifNeSpeciesCount": 228380,
+      "outdated": 16367,
+      "gbifNeSpeciesCount": 228381,
       "byCategory": {
         "LR/cd": 95,
         "VU": 9845,
@@ -87266,7 +87266,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 55,
       "outdated": 1,
-      "gbifNeSpeciesCount": 44719,
+      "gbifNeSpeciesCount": 44718,
       "byCategory": {
         "VU": 8,
         "LC": 7,
