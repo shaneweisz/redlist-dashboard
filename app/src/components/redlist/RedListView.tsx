@@ -5058,10 +5058,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {/* Charts row 2 (new-assessments mode only): Country map + Year
               Described + GBIF Records, 3-col, 1/3 each. For
-              reassessments, Country map + Threats live in More Filters
-              instead (below) — decluttered out of the always-visible primary
-              view now that they're not the only geographic/threat filter
-              (see countryMapCard/threatsCard, defined above). */}
+              reassessments, everything past Charts row 1 (Country, Threats,
+              etc.) lives in More Filters instead (below) — decluttered out of
+              the always-visible primary view (see countryMapCard/threatsCard,
+              defined above). */}
           {isNewAssessments && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {countryMapCard}
@@ -5135,16 +5135,34 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           </div>
           )}
 
-          {/* Country + Threats are always visible, alongside Charts row 1
-              above — everything past that (Growth Form, Assessment
-              Criteria/Number of Assessments, Realm/Movement/Trend,
-              Habitat/Assessors-Reviewers) lives behind the "More Filters"
-              toggle below. No independently-scrollable panel here anymore
-              — nested scrollbars (the panel's own, inside the page's) read as
-              confusing, so this reverts to plain click-to-expand instead. */}
+          {/* Charts row 1 is the only always-visible filter row in reassessments
+              mode. Everything else (Country, Assessors/Reviewers, Growth Form,
+              Assessment Criteria / Number of Assessments, Realm/Movement/Trend,
+              Habitat/Threats, Taxonomic revision) lives behind the "More Filters"
+              toggle below. No independently-scrollable panel here: nested
+              scrollbars read as confusing, so this is plain click-to-expand. */}
           {!isNewAssessments && (
             <>
-                {/* Country alongside the assessment credits. */}
+                <button
+                  onClick={() => setMoreFiltersOpen(prev => !prev)}
+                  className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  <svg className={`w-3.5 h-3.5 transition-transform ${moreFiltersOpen ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  More Filters
+                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size > 0) && (
+                    <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
+                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size} active
+                    </span>
+                  )}
+                </button>
+            </>
+          )}
+
+          {!isNewAssessments && moreFiltersOpen && (
+            <>
+                {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {countryMapCard}
                   {isSingleSpecies && singleSpecies ? (() => {
@@ -5204,25 +5222,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   )}
                 </div>
 
-                <button
-                  onClick={() => setMoreFiltersOpen(prev => !prev)}
-                  className="w-full flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-                >
-                  <svg className={`w-3.5 h-3.5 transition-transform ${moreFiltersOpen ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                  More Filters
-                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size > 0) && (
-                    <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
-                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size} active
-                    </span>
-                  )}
-                </button>
-            </>
-          )}
-
-          {!isNewAssessments && moreFiltersOpen && (
-            <>
                 {/* Growth Form (plants/fungi only) */}
                 {(() => {
                   if (speciesLoading && assessedSpecies.length === 0) {
