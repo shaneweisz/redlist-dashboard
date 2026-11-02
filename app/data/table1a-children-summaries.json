@@ -5,8 +5,8 @@
       "name": "Insects",
       "estimatedDescribed": 1008355,
       "totalAssessed": 14531,
-      "outdated": 6138,
-      "gbifNeSpeciesCount": 252803,
+      "outdated": 6146,
+      "gbifNeSpeciesCount": 252963,
       "byCategory": {
         "VU": 1086,
         "EN": 1185,
@@ -29,7 +29,7 @@
       "estimatedDescribed": 98006,
       "totalAssessed": 1057,
       "outdated": 248,
-      "gbifNeSpeciesCount": 22868,
+      "gbifNeSpeciesCount": 22876,
       "byCategory": {
         "EN": 165,
         "VU": 104,
@@ -47,8 +47,8 @@
       "name": "Molluscs",
       "estimatedDescribed": 89129,
       "totalAssessed": 9957,
-      "outdated": 5282,
-      "gbifNeSpeciesCount": 26882,
+      "outdated": 5305,
+      "gbifNeSpeciesCount": 26921,
       "byCategory": {
         "CR": 782,
         "EN": 771,
@@ -70,7 +70,7 @@
       "estimatedDescribed": 83805,
       "totalAssessed": 3410,
       "outdated": 3097,
-      "gbifNeSpeciesCount": 25764,
+      "gbifNeSpeciesCount": 25770,
       "byCategory": {
         "VU": 429,
         "CR": 182,
@@ -142,8 +142,8 @@
       "name": "Other Invertebrates",
       "estimatedDescribed": 171981,
       "totalAssessed": 1153,
-      "outdated": 602,
-      "gbifNeSpeciesCount": 21540,
+      "outdated": 616,
+      "gbifNeSpeciesCount": 21544,
       "byCategory": {
         "CR": 67,
         "VU": 50,
@@ -164,8 +164,8 @@
       "name": "Flowering Plants",
       "estimatedDescribed": 369000,
       "totalAssessed": 76102,
-      "outdated": 19272,
-      "gbifNeSpeciesCount": 230708,
+      "outdated": 19278,
+      "gbifNeSpeciesCount": 230746,
       "byCategory": {
         "LR/cd": 102,
         "VU": 10376,
@@ -226,8 +226,8 @@
       "name": "Mosses, Liverworts & Hornworts",
       "estimatedDescribed": 19539,
       "totalAssessed": 327,
-      "outdated": 118,
-      "gbifNeSpeciesCount": 14522,
+      "outdated": 120,
+      "gbifNeSpeciesCount": 14524,
       "byCategory": {
         "CR": 48,
         "NT": 35,
@@ -247,7 +247,7 @@
       "estimatedDescribed": 14739,
       "totalAssessed": 18,
       "outdated": 13,
-      "gbifNeSpeciesCount": 3482,
+      "gbifNeSpeciesCount": 3485,
       "byCategory": {
         "DD": 6,
         "LC": 11,
@@ -281,7 +281,7 @@
       "estimatedDescribed": 157648,
       "totalAssessed": 1351,
       "outdated": 56,
-      "gbifNeSpeciesCount": 93080,
+      "gbifNeSpeciesCount": 93152,
       "byCategory": {
         "EN": 130,
         "CR": 48,
