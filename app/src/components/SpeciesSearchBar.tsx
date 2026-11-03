@@ -37,6 +37,8 @@ export interface SearchResult {
   // The node this species sits in — its family where known — see selectResult.
   node_id: string | null;
   matched_synonym?: string | null;
+  // The other common name that matched, when it isn't the one shown (see SearchResult).
+  matched_common_name?: string | null;
 }
 
 // A taxon (class/order/family/genus) the query matched — pinned above the species
@@ -48,6 +50,7 @@ interface TaxonSuggestion {
   rank: "class" | "order" | "family" | "genus";
   taxon: string;
   nodeId: string | null;
+  common_name?: string | null;
 }
 
 /**
@@ -415,6 +418,9 @@ export function SpeciesSearchBar() {
                 {/* Genus names are italicised by taxonomic convention (as the species
                     hits below already are); class/order/family names are not. */}
                 Browse <span className={`font-medium${t.rank === "genus" ? " italic" : ""}`}>{t.name}</span>
+                {t.common_name && (
+                  <span className="text-zinc-500 dark:text-zinc-400 ml-1">({t.common_name})</span>
+                )}
               </span>
               <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                 {t.rank}
@@ -451,6 +457,11 @@ export function SpeciesSearchBar() {
                   {result.matched_synonym && (
                     <span className="text-xs text-zinc-400 dark:text-zinc-500 ml-1">
                       syn. <span className="italic">{result.matched_synonym}</span>
+                    </span>
+                  )}
+                  {result.matched_common_name && (
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500 ml-1">
+                      also “{result.matched_common_name}”
                     </span>
                   )}
                   <span className="text-xs text-zinc-400 dark:text-zinc-500 ml-2">

@@ -43,7 +43,8 @@ describe("rankSpecies (the route's tier-0 ORDER BY)", () => {
 });
 
 describe("rankTaxa (suggestTaxa's tiers and slots)", () => {
-  const t = (name: string, rp: number): ShardTaxonRow => ({ name, rp, rank: (["class", "order", "family", "genus"] as const)[rp], nodeId: `n-${name}` });
+  const t = (name: string, rp: number, taxon = name, common: string | null = null): ShardTaxonRow =>
+    ({ name, rp, rank: (["class", "order", "family", "genus"] as const)[rp], nodeId: `n-${taxon}`, taxon, common });
 
   it("reserves a slot for the best genus, and puts an exact match first", () => {
     const rows = [t("ursidae", 2), t("ursus", 3), t("urs", 3), t("ursinia", 3)];
@@ -51,7 +52,14 @@ describe("rankTaxa (suggestTaxa's tiers and slots)", () => {
   });
 
   it("prettifies the name and carries the baked-in node id", () => {
-    expect(rankTaxa([t("felidae", 2)], "fel")).toEqual([{ name: "Felidae", rank: "family", taxon: "felidae", nodeId: "n-felidae" }]);
+    expect(rankTaxa([t("felidae", 2)], "fel")).toEqual([{ name: "Felidae", rank: "family", taxon: "felidae", nodeId: "n-felidae", common_name: null }]);
+  });
+
+  it("suggests a taxon by its common name, once even when both names match", () => {
+    const rows = [t("adansonia", 3, "adansonia", "Baobabs"), t("baobabs", 3, "adansonia", "Baobabs"), t("adansoniaceae", 2)];
+    expect(rankTaxa(rows, "baobab")).toEqual([{ name: "Adansonia", rank: "genus", taxon: "adansonia", nodeId: "n-adansonia", common_name: "Baobabs" }]);
+    // "adans" reaches the genus through its own name; it is offered once, not twice.
+    expect(rankTaxa(rows, "adans").map((s) => s.taxon)).toEqual(["adansoniaceae", "adansonia"]);
   });
 });
 

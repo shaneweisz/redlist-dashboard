@@ -43,6 +43,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "./utils";
+import { buildVernaculars } from "./build-vernaculars";
 
 // The browsable species universe is status='accepted' ONLY. CoL also marks names
 // 'provisionally accepted' — its uncertainty hedge, a grab-bag of dubious names
@@ -306,84 +307,15 @@ export async function run(
     TO '${backboneOut}' (FORMAT PARQUET, COMPRESSION ZSTD);
   `);
 
-  // vernacular-names.json — lowercased scientific name -> one common name, for
-  // class/order/family/genus ranks only (species already get a common name from
-  // our own Red List/GBIF data — see species-store.ts — so those ranks are
-  // deliberately excluded here to avoid a second, potentially-conflicting source).
-  // A taxon can have several vernacular names (e.g. Anseriformes: "Ducks",
-  // "Geese", "Swans", "Waterfowl", "Screamers") — pick one per col:taxonID via
-  // ROW_NUMBER, preferring col:preferred=true, else the shortest name (a decent
-  // proxy for "the primary/most generic" one), alphabetical as a final tiebreak
-  // for determinism. Multiple col_ids can share the same scientific_name (e.g. a
-  // synonym and its accepted name) — collapse to one row per name the same way.
-  // Two data-quality fixes applied at the final SELECT (checked against real
-  // 2026-07-21 CoL XR data): (1) ~3.8% of entries are just the scientific name
-  // itself relisted as its own "vernacular name" (e.g. "Acacia" -> "acacia") —
-  // pure noise, filtered out; (2) CoL's own casing is inconsistent (~31% start
-  // lowercase, e.g. "rodentia" -> "rodents") — the first letter is capitalized
-  // for a more consistent display (this DuckDB build has no initcap(); a plain
-  // first-letter capitalization is enough to stop a name from looking like a
-  // typo without mangling multi-word phrases DuckDB has no easy word-boundary
-  // function for).
-  const vernacularOut = path.join(outDir, "vernacular-names.json");
+  // Common names: vernacular-names.json (higher ranks), species-vernaculars.parquet (one
+  // display name per species) and species-vernacular-names.parquet (every English name,
+  // for search) — see build-vernaculars.ts, also runnable on its own against a sync.
   if (hasVernacularNames) {
-    await conn.run(`
-      CREATE TEMP TABLE vern_best AS
-        SELECT col_id, name FROM (
-          SELECT "col:taxonID" AS col_id, "col:name" AS name,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY "col:taxonID"
-                   ORDER BY (lower(coalesce("col:preferred", '')) = 'true') DESC, length("col:name") ASC, "col:name" ASC
-                 ) AS rn
-          FROM read_csv('${vernacularTsv}', delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)
-          WHERE "col:language" = 'eng' AND "col:name" IS NOT NULL AND trim("col:name") != ''
-        ) WHERE rn = 1;
-    `);
-    const rows = (await (await conn.run(`
-      SELECT name_lower, name FROM (
-        SELECT lower(n.scientific_name) AS name_lower,
-               upper(substr(v.name, 1, 1)) || substr(v.name, 2) AS name,
-               ROW_NUMBER() OVER (PARTITION BY lower(n.scientific_name) ORDER BY length(v.name) ASC, v.name ASC) AS rn
-        FROM vern_best v
-        JOIN nu n ON n.col_id = v.col_id
-        WHERE n.rank IN ('class', 'order', 'family', 'genus')
-          -- Some CoL vernacular entries are just the scientific name itself
-          -- (e.g. "Acacia" -> "acacia") — pure noise, not an actual common name.
-          AND lower(v.name) != lower(n.scientific_name)
-      ) WHERE rn = 1;
-    `)).getRowObjects());
-    const vernacularMap: Record<string, string> = {};
-    for (const r of rows) vernacularMap[String(r.name_lower)] = String(r.name);
-    fs.writeFileSync(vernacularOut, JSON.stringify(vernacularMap, null, 0));
-    console.log(`Wrote ${vernacularOut}: ${Object.keys(vernacularMap).length.toLocaleString()} class/order/family/genus common names`);
-
-    // species-vernaculars.parquet — col_id -> common name at species rank.
-    //
-    // Common names for GBIF species used to come from the GBIF species API, one
-    // request per species. Its replacement (v2 match) returns no vernacular field
-    // at all, and dropping that source silently emptied the common name of all
-    // 668,970 unassessed species — making ~88.5k of them unfindable by the only
-    // name most people know them by.
-    //
-    // Best-effort by construction: this is keyed by Catalogue of Life ids from
-    // the published export, and GBIF's index carries some usages that export does
-    // not, so a few species will not match. A name for most of them beats a name
-    // for none.
-    const speciesVernacularOut = path.join(outDir, "species-vernaculars.parquet");
-    await conn.run(`
-      COPY (
-        SELECT v.col_id,
-               upper(substr(v.name, 1, 1)) || substr(v.name, 2) AS vernacular_name
-        FROM vern_best v
-        JOIN nu n ON n.col_id = v.col_id
-        WHERE n.rank = 'species'
-          AND lower(v.name) != lower(n.scientific_name)
-      ) TO '${speciesVernacularOut}' (FORMAT PARQUET, COMPRESSION ZSTD);
-    `);
-    const speciesVernCount = (await (await conn.run(
-      `SELECT count(*) AS n FROM '${speciesVernacularOut}'`
-    )).getRowObjects())[0].n;
-    console.log(`Wrote ${speciesVernacularOut}: ${Number(speciesVernCount).toLocaleString()} species common names`);
+    await buildVernaculars(conn, {
+      vernacularTsv,
+      outDir,
+      usages: "SELECT col_id, rank, scientific_name FROM nu",
+    });
   }
 
   // Plausible-publication-year window. Upper bound: next calendar year (tolerates

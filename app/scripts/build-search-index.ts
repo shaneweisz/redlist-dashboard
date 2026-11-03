@@ -59,7 +59,7 @@ const RANK_TO_MATCH_SQL: Record<(typeof SUGGEST_RANKS)[number], string> = {
 };
 
 /** Ranking tiers, mirrored by searchSpecies' ORDER BY. Keep the two in step. */
-export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3 } as const;
+export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3, altCommon: 4, altCommonWord: 5 } as const;
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
@@ -78,18 +78,22 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // searchSpecies keys them that way (see species_key in SearchResult).
   await conn.run(`
     CREATE TEMP TABLE species AS
-      SELECT id, scientific_name, common_name, taxon_group, iucn_category AS category,
-             gbif_species_key, gbif_occurrence_count,
-             assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date,
-             countries, class_name, order_name, family,
-             true AS assessed, CAST(NULL AS VARCHAR) AS col_id
-      FROM read_parquet('${assessed}')
+      SELECT a.id, a.scientific_name, a.common_name, a.taxon_group, a.iucn_category AS category,
+             a.gbif_species_key, a.gbif_occurrence_count,
+             a.assessment_id, CAST(a.assessment_date AS VARCHAR) AS assessment_date,
+             a.countries, a.class_name, a.order_name, a.family,
+             true AS assessed, CAST(NULL AS VARCHAR) AS col_id, ra.col_id AS name_col_id
+      FROM read_parquet('${assessed}') a
+      LEFT JOIN (
+        SELECT id, any_value(col_id) AS col_id FROM read_parquet('${link}')
+        WHERE src = 'redlist' AND col_id IS NOT NULL GROUP BY 1
+      ) ra ON ra.id = a.id
       UNION ALL
       SELECT u.id, u.scientific_name, u.common_name, u.taxon_group, u.iucn_category,
              u.gbif_species_key, u.gbif_occurrence_count,
              NULL, NULL,
              u.countries, u.class_name, u.order_name, u.family,
-             false, l.col_id
+             false, l.col_id, l.col_id
       FROM read_parquet('${unassessed}') u
       LEFT JOIN (
         -- One col_id per GBIF key. 3,756 col_ids carry more than one key, but a key maps
@@ -105,23 +109,38 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
     gbif_occurrence_count, assessment_id, assessment_date, countries,
     class_name, order_name, family, assessed, col_id`;
 
+  // Every other English common name CoL gives the species (build-vernaculars), so
+  // "baobab" finds Adansonia digitata through "African baobab" even though its display
+  // name is a different one — and an assessed species with no IUCN common name is still
+  // findable by its CoL names. Absent on syncs built before that file existed.
+  const altNames = path.join(dir, "species-vernacular-names.parquet");
+  await conn.run(fs.existsSync(altNames)
+    ? `CREATE TEMP TABLE alt_names AS
+         SELECT s.*, v.name AS alt_name FROM species s
+         JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id
+         WHERE lower(v.name) <> lower(coalesce(s.common_name, ''))`
+    : `CREATE TEMP TABLE alt_names AS SELECT *, CAST(NULL AS VARCHAR) AS alt_name FROM species WHERE false`);
+
   await conn.run(`
     COPY (
-      SELECT name_lo, matched_name, name_kind, ${payload} FROM (
+      -- rank_name is the common name a row is RANKED by: the display one, except on a row
+      -- reached through an alternative name, which ranks by the name it actually matched
+      -- (so "monkeybread" exactly matching an alternative name ranks as an exact match).
+      SELECT name_lo, matched_name, name_kind, rank_name, ${payload} FROM (
         -- Scientific name.
         SELECT lower(scientific_name) AS name_lo, scientific_name AS matched_name,
-               ${NAME_KIND.scientific} AS name_kind, ${payload}
+               ${NAME_KIND.scientific} AS name_kind, common_name AS rank_name, ${payload}
         FROM species WHERE scientific_name IS NOT NULL AND scientific_name <> ''
         UNION ALL
         -- Common name. Stored '' rather than NULL when absent (see build-parquet).
-        SELECT lower(common_name), common_name, ${NAME_KIND.common}, ${payload}
+        SELECT lower(common_name), common_name, ${NAME_KIND.common}, common_name, ${payload}
         FROM species WHERE nullif(common_name, '') IS NOT NULL
         UNION ALL
         -- Specific epithet, so the half of a binomial people actually remember ("leo",
         -- "tigris") is a prefix hit rather than an interior substring only the slow tier
         -- could find. Monomials contribute nothing here — their epithet row would just
         -- duplicate the scientific-name row.
-        SELECT lower(split_part(scientific_name, ' ', 2)), scientific_name, ${NAME_KIND.epithet}, ${payload}
+        SELECT lower(split_part(scientific_name, ' ', 2)), scientific_name, ${NAME_KIND.epithet}, common_name, ${payload}
         FROM species
         WHERE scientific_name LIKE '% %' AND nullif(split_part(scientific_name, ' ', 2), '') IS NOT NULL
         UNION ALL
@@ -129,9 +148,18 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
         -- prefix index would otherwise lose to the old substring scan: "elephant" has to
         -- find African Elephant, and "eagle" Steller's Sea Eagle. Ranked below the tiers
         -- above (see name_kind), so a real prefix hit is never displaced by a word match.
-        SELECT lower(w.word), s.common_name, ${NAME_KIND.commonWord}, ${payload}
+        SELECT lower(w.word), s.common_name, ${NAME_KIND.commonWord}, s.common_name, ${payload}
         FROM species s, unnest(string_split(s.common_name, ' ')) WITH ORDINALITY AS w(word, pos)
         WHERE nullif(s.common_name, '') IS NOT NULL AND w.pos > 1 AND nullif(w.word, '') IS NOT NULL
+        UNION ALL
+        -- Each alternative common name, and each of its later words — the same two
+        -- treatments the display name gets above.
+        SELECT lower(alt_name), alt_name, ${NAME_KIND.altCommon}, alt_name, ${payload}
+        FROM alt_names
+        UNION ALL
+        SELECT lower(w.word), a.alt_name, ${NAME_KIND.altCommonWord}, a.alt_name, ${payload}
+        FROM alt_names a, unnest(string_split(a.alt_name, ' ')) WITH ORDINALITY AS w(word, pos)
+        WHERE w.pos > 1 AND nullif(w.word, '') IS NOT NULL
       )
       ORDER BY name_lo
     ) TO '${out}' (FORMAT parquet, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)`);
@@ -174,7 +202,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
   ).join(" UNION ALL ");
 
   await conn.run(`
-    COPY (
+    CREATE TEMP TABLE rank_sci AS
       SELECT name, (min(s)).rp AS rp, (min(s)).tg AS taxon_group,
              (min(s)).cls AS class_name, (min(s)).ord AS order_name, (min(s)).fam AS family
       FROM (
@@ -182,6 +210,35 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
         FROM (${part("assessed.parquet")} UNION ALL ${part("unassessed.parquet")})
       )
       WHERE name <> ''
+      GROUP BY name`);
+
+  // Common names of the ranks themselves (vernacular-names.json: "adansonia" →
+  // "Baobabs", "felidae" → "Cats"), so "baobab" offers "Browse Adansonia (Baobabs)".
+  // Each becomes its own searchable row pointing at its taxon; every row also carries
+  // the common name for display. A common name that is itself some taxon's scientific
+  // name is left out (the scientific row wins), and one shared by several taxa goes to
+  // the coarsest rank, then the alphabetically first taxon — the same struct-min rule.
+  const vernFile = path.join(dir, "vernacular-names.json");
+  const vern: Record<string, string> = fs.existsSync(vernFile) ? JSON.parse(fs.readFileSync(vernFile, "utf-8")) : {};
+  const tmp = path.join(dir, ".rank-vernaculars.ndjson");
+  fs.writeFileSync(tmp, Object.entries(vern).map(([sci, common]) => JSON.stringify({ sci, common })).join("\n"));
+  await conn.run(`CREATE TEMP TABLE rank_vern AS SELECT * FROM read_json('${tmp}', format='newline_delimited', columns={sci: 'VARCHAR', common: 'VARCHAR'})`);
+  fs.rmSync(tmp);
+
+  await conn.run(`
+    COPY (
+      SELECT r.name, r.rp, r.taxon_group, r.class_name, r.order_name, r.family,
+             r.name AS taxon, v.common
+      FROM rank_sci r LEFT JOIN rank_vern v ON v.sci = r.name
+      UNION ALL
+      SELECT name, (min(s)).rp, (min(s)).tg, (min(s)).cls, (min(s)).ord, (min(s)).fam, (min(s)).taxon, (min(s)).common
+      FROM (
+        SELECT lower(v.common) AS name,
+               {'rp': r.rp, 'tg': r.taxon_group, 'taxon': r.name, 'cls': r.class_name, 'ord': r.order_name,
+                'fam': r.family, 'common': v.common} AS s
+        FROM rank_vern v JOIN rank_sci r ON r.name = v.sci
+        WHERE lower(v.common) NOT IN (SELECT name FROM rank_sci)
+      )
       GROUP BY name
       ORDER BY name
     ) TO '${out}' (FORMAT parquet, COMPRESSION ZSTD, ROW_GROUP_SIZE 20000)`);

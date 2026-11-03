@@ -15,7 +15,7 @@ import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { NODE_INDEX, getTaxonGroupsForNode, getAncestors, stripNodePrefix } from "@/lib/taxonomy-utils";
 import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
-import { dedupeByRowKey } from "@/lib/search-shards/rank";
+import { dedupeByRowKey, pickTaxa } from "@/lib/search-shards/rank";
 import { getTaxaSummary, getColRevisions } from "@/lib/data/species-store";
 import { isDynamicNodeId, dynamicNodeFilter, buildDynamicNodeId, rankOrderFor, isLiveDrilldownNode, type DynamicRank, type DynamicSegment } from "@/lib/dynamic-taxon";
 import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
@@ -456,6 +456,12 @@ export interface SearchResult {
   // Set when the result was matched via a synonym (the old name the user typed) rather than
   // its accepted name — the dropdown shows "(syn. <name>)". scientific_name is the accepted name.
   matched_synonym?: string | null;
+  /**
+   * Set when the hit came through one of the species' OTHER common names (CoL lists
+   * several; the result shows one) — the name that matched, so the dropdown can say why
+   * "baobab" offered Adansonia digitata.
+   */
+  matched_common_name?: string | null;
 }
 
 interface Lineage { class_name?: string | null; order_name?: string | null; family?: string | null }
@@ -639,6 +645,8 @@ export function toSearchResult(r: Record<string, unknown>, colIdOverride: string
     countries: splitList(r.countries),
     ...lineage,
     node_id: nodeIdForSpecies(tg, lineage),
+    // name_kind 4/5 are the alternative-common-name rows of name-index.parquet.
+    ...(Number(r.name_kind) >= 4 && r.matched_name != null ? { matched_common_name: String(r.matched_name) } : {}),
   };
 }
 
@@ -659,8 +667,19 @@ export function toSearchResult(r: Record<string, unknown>, colIdOverride: string
 //
 // Returns [] (never throws) when the index isn't in this sync prefix — an older sync
 // still searches, just via the tiers below.
+// name-index.parquet from syncs before every CoL common name was indexed has no
+// rank_name; there the display common name is what every row ranks by.
+let nameIndexRankCol: Promise<string> | null = null;
+function rankCol(conn: DuckDBConnection): Promise<string> {
+  nameIndexRankCol ??= conn.runAndReadAll(`DESCRIBE SELECT * FROM read_parquet('${parquetUri("name-index.parquet")}')`)
+    .then((r) => (r.getRowObjects().some((c) => c.column_name === "rank_name") ? "rank_name" : "common_name"))
+    .catch(() => { nameIndexRankCol = null; return "common_name"; });
+  return nameIndexRankCol;
+}
+
 async function prefixSearch(conn: DuckDBConnection, q: string, lim: number): Promise<SearchResult[]> {
   try {
+    const rc = await rankCol(conn);
     const rows = (await conn.runAndReadAll(
       `SELECT * FROM read_parquet('${parquetUri("name-index.parquet")}')
        WHERE name_lo >= $q AND name_lo < $q || chr(1114111)
@@ -671,8 +690,10 @@ async function prefixSearch(conn: DuckDBConnection, q: string, lim: number): Pro
        -- common and scientific name outranks one matching only its common name. Ranking
        -- off name_kind instead put Elephant Trunk Snake above Elephant's Foot for
        -- "elephant", which is the old order inverted.
-       ORDER BY (lower(common_name) = $q) DESC,
-                (lower(common_name) LIKE $q || '%') DESC,
+       -- rank_name is the common name the row ranks by: the display one, or the
+       -- alternative common name the row was reached through (see build-search-index).
+       ORDER BY (lower(${rc}) = $q) DESC,
+                (lower(${rc}) LIKE $q || '%') DESC,
                 (lower(scientific_name) LIKE $q || '%') DESC,
                 lower(scientific_name)
        -- Over-fetched: several name rows can collapse to one species below.
@@ -1226,6 +1247,8 @@ export interface TaxonSuggestion {
    * section) reachable only via SSC groups mode, not a substitute for the plain
    * by-taxon node a tree-click would reach. */
   nodeId: string | null;
+  /** The taxon's common name, if CoL gives one ("Baobabs") — shown beside the name. */
+  common_name?: string | null;
 }
 
 // SSC Specialist Group nodes (taxonomy-tree.ts's "ssc-groups"/"ssc-reptile-groups"/etc.
@@ -1412,6 +1435,16 @@ export const SUGGEST_RANKS: DynamicRank[] = ["class", "order", "family", "genus"
 // assessed and zero GBIF-observed species won't surface — acceptable: those are exactly
 // the taxa a user wouldn't browse to, and the direct species/synonym search still
 // answers by name.
+// rank-index.parquet from syncs before taxon common names were indexed has no taxon /
+// common columns; there every row is the taxon's own name and carries no common name.
+let rankTaxonCols: Promise<string> | null = null;
+function rankIndexTaxonCols(conn: DuckDBConnection): Promise<string> {
+  rankTaxonCols ??= conn.runAndReadAll(`DESCRIBE SELECT * FROM read_parquet('${parquetUri("rank-index.parquet")}')`)
+    .then((r) => (r.getRowObjects().some((c) => c.column_name === "taxon") ? "taxon, common" : "name AS taxon, NULL AS common"))
+    .catch(() => { rankTaxonCols = null; return "name AS taxon, NULL AS common"; });
+  return rankTaxonCols;
+}
+
 export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSuggestion[]> {
   if (query.length < 2) return [];
   const conn = await getConn();
@@ -1424,7 +1457,7 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
   // or shipped back.
   const order = `(name = $q) DESC, length(name), name`;
   const tail = `
-    QUALIFY row_number() OVER (PARTITION BY rp = ${genusRp} ORDER BY ${order}) <= ${lim}
+    QUALIFY row_number() OVER (PARTITION BY rp = ${genusRp} ORDER BY ${order}) <= ${lim * 2}
     ORDER BY rp = ${genusRp}, ${order}`;
 
   // rank-index.parquet is one row per name, sorted by it, so this is a pruned range read
@@ -1435,7 +1468,8 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
   let rows: Record<string, unknown>[] | null = null;
   try {
     rows = (await conn.runAndReadAll(
-      `SELECT name, rp, taxon_group, class_name, order_name, family, true AS has_lineage
+      `SELECT name, rp, taxon_group, class_name, order_name, family, true AS has_lineage,
+              ${await rankIndexTaxonCols(conn)}
        FROM read_parquet('${parquetUri("rank-index.parquet")}')
        WHERE name >= $q AND name < $q || chr(1114111)${tail}`, { q })).getRowObjects();
   } catch { /* not in this sync prefix — fall through */ }
@@ -1449,7 +1483,7 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
     // flowering plants, and two identical searches could offer to browse it in either.
     rows = (await conn.runAndReadAll(
       `SELECT name, rp, taxon_group, NULL AS class_name, NULL AS order_name, NULL AS family,
-              false AS has_lineage FROM (
+              false AS has_lineage, name AS taxon, NULL AS common FROM (
          SELECT name, (min(s)).rp AS rp, (min(s)).tg AS taxon_group
          FROM (SELECT name, {'rp': rp, 'tg': taxon_group} AS s
                FROM ${await rankSource(conn)} WHERE name LIKE $q || '%')
@@ -1457,31 +1491,22 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
        )${tail}`, { q })).getRowObjects();
   }
 
-  // One slot is reserved for the best genus hit whenever there is one — so searching a
-  // genus that shares a prefix with its own family ("urs" → Ursidae + Ursus) shows both,
-  // and neither tier can shut the other out. Genus expands to fill whatever the higher
-  // ranks leave unused (a bare genus query like "panthera" matches nothing else, and
-  // gets the whole dropdown).
-  const higher = rows.filter((r) => Number(r.rp) !== SUGGEST_RANKS.indexOf("genus"));
-  const genus = rows.filter((r) => Number(r.rp) === SUGGEST_RANKS.indexOf("genus"));
-  const genusSlots = genus.length === 0 ? 0 : Math.max(1, lim - higher.length);
-  const chosen = [...higher.slice(0, lim - genusSlots), ...genus.slice(0, genusSlots)];
-  // An exact match is what the user typed — it leads regardless of rank. Array.sort is
-  // stable, so everything else keeps the tier order above.
-  chosen.sort((a, b) => Number(String(b.name) === q) - Number(String(a.name) === q));
-
-  return Promise.all(chosen.map(async (r) => {
-    const name = String(r.name);
+  // Rows are in the SQL's order (higher ranks, then genus, each capped at 2 × lim — a
+  // taxon can match by its own name AND a common name, so pickTaxa de-duplicates before
+  // taking lim). One slot goes to the best genus whenever there is one, so "urs" shows
+  // both Ursidae and Ursus; an exact match leads. pickTaxa is shared with the browser's
+  // search shards (lib/search-shards/rank.ts), so both choose identically.
+  const withNodes = await Promise.all(rows.map(async (r) => {
+    const taxon = String(r.taxon ?? r.name);
     const rank = SUGGEST_RANKS[Number(r.rp)];
     return {
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      rank,
-      taxon: name,
+      name: String(r.name), rp: Number(r.rp), rank, taxon, common: str(r.common),
       // rank-index.parquet rows carry the lineage; fallback rows don't and pass null, so
       // the lookup still runs. Flagged explicitly rather than inferred from the columns
       // being null — a taxon with no class/order/family at all is a real, indexed row.
-      nodeId: await resolveTaxonSuggestionNode(conn, rank, name, String(r.taxon_group),
+      nodeId: await resolveTaxonSuggestionNode(conn, rank, taxon, String(r.taxon_group),
         r.has_lineage ? { class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family) } : null),
     };
   }));
+  return pickTaxa(withNodes, q, lim);
 }

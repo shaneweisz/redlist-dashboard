@@ -352,6 +352,36 @@ export async function run(): Promise<void> {
     console.warn(`  ${vernacularParquet} not found — unassessed species will have no common names this run.`);
   }
 
+  // Display-name stability. The GBIF CSV's common_name is CoL's pick from when the GBIF
+  // phase last ran; build-vernaculars may now pick differently. Swapping every such name
+  // churned ~12.8k species for little gain (search matches every CoL name regardless —
+  // build-search-index), so the current name is kept unless it looks wrong: it shares no
+  // word (4+ letters) with the common names of the other species in its genus, while the
+  // new pick does. That catches misspellings ("Boabab" → "Baobab Tree"), placeholders
+  // ("Othonna Sp. A") and a slur listed as a butterfly's name (Orsotriaena medus), and
+  // leaves sideways swaps ("Gaur" → "Domestic gaur") alone — ~2.7k changes, not ~12.8k.
+  const allNames = path.join(DATA_DIR, "species-vernacular-names.parquet");
+  const backboneParquet = path.join(DATA_DIR, "backbone.parquet");
+  if (fs.existsSync(allNames) && fs.existsSync(backboneParquet)) {
+    await conn.run(`
+      CREATE TEMP TABLE genus_words AS
+        SELECT genus, w, count(DISTINCT col_id) AS n FROM (
+          SELECT DISTINCT v.col_id, split_part(b.scientific_name, ' ', 1) AS genus, t.w
+          FROM read_parquet('${allNames}') v JOIN read_parquet('${backboneParquet}') b USING (col_id),
+               unnest(regexp_split_to_array(lower(v.name), '[^a-z]+')) AS t(w)
+          WHERE length(t.w) >= 4
+        ) GROUP BY genus, w;`);
+  } else {
+    await conn.run(`CREATE TEMP TABLE genus_words (genus VARCHAR, w VARCHAR, n BIGINT);`);
+  }
+  // How many OTHER species of the genus share a word with the name.
+  await conn.run(`
+    CREATE MACRO name_genus_score(nm, gen) AS (
+      SELECT coalesce(sum(g.n - 1), 0) FROM (
+        SELECT DISTINCT t.w FROM unnest(regexp_split_to_array(lower(nm), '[^a-z]+')) AS t(w) WHERE length(t.w) >= 4
+      ) x JOIN genus_words g ON g.genus = gen AND g.w = x.w
+    );`);
+
   // Unassessed (GBIF species with no IUCN assessment) — cold, huge under CoL,
   // lean schema (no assessment-only columns).
   await conn.run(`
@@ -371,7 +401,15 @@ export async function run(): Promise<void> {
         -- uniqueness on every build rather than assuming it.
         -(hash(g.gbif_species_key) % 9007199254740992)::BIGINT AS id,
         g.scientific_name,
-        coalesce(nullif(g.common_name, ''), v.vernacular_name, '') AS common_name,
+        -- The CSV's name where CoL offers none or the same one; CoL's pick where there was
+        -- no name, or where the old one looks wrong (see genus_words above).
+        CASE
+          WHEN nullif(g.common_name, '') IS NULL THEN coalesce(v.vernacular_name, '')
+          WHEN v.vernacular_name IS NULL OR lower(v.vernacular_name) = lower(g.common_name) THEN g.common_name
+          WHEN name_genus_score(g.common_name, split_part(g.scientific_name, ' ', 1)) = 0
+           AND name_genus_score(v.vernacular_name, split_part(g.scientific_name, ' ', 1)) > 0 THEN v.vernacular_name
+          ELSE g.common_name
+        END AS common_name,
         g.taxon_group, g.class_name, g.order_name, g.family,
         'NE'                             AS iucn_category,
         g.countries,

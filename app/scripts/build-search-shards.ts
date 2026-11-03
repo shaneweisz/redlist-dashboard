@@ -38,21 +38,31 @@ async function main() {
   fs.mkdirSync(path.join(outDir, "p2"), { recursive: true });
   fs.mkdirSync(path.join(outDir, "p3"), { recursive: true });
   const conn = await getConn();
+  // Syncs built before every CoL common name was indexed lack these columns (see
+  // build-search-index); fall back to what they mean there, so code and data can ship
+  // in either order.
+  const cols = async (f: string) => new Set((await conn.runAndReadAll(`DESCRIBE SELECT * FROM '${parquetUri(f)}'`))
+    .getRowObjects().map((r) => String(r.column_name)));
+  const nameCols = await cols("name-index.parquet");
+  const rankCols = await cols("rank-index.parquet");
+  const rankNameSql = nameCols.has("rank_name") ? "rank_name" : "common_name";
+  const taxonSql = rankCols.has("taxon") ? "taxon, common" : "name AS taxon, NULL AS common";
 
   // Taxon suggestions: small (116k rows), so load all and bucket by two-letter key.
   const taxaByP2 = new Map<string, ShardTaxonRow[]>();
   const rankRows = (await conn.runAndReadAll(
-    `SELECT name, rp, taxon_group, class_name, order_name, family FROM '${parquetUri("rank-index.parquet")}'`,
+    `SELECT name, rp, taxon_group, class_name, order_name, family, ${taxonSql} FROM '${parquetUri("rank-index.parquet")}'`,
   )).getRowObjects();
   for (const r of rankRows) {
     const name = String(r.name);
     const k = prefixKey(name, 2);
     if (!k) continue; // a one-character name can't match a query (min length 2)
     const rank = SUGGEST_RANKS[Number(r.rp)];
-    const nodeId = await resolveTaxonSuggestionNode(conn, rank, name, String(r.taxon_group),
+    const taxon = String(r.taxon ?? name);
+    const nodeId = await resolveTaxonSuggestionNode(conn, rank, taxon, String(r.taxon_group),
       { class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family) });
     if (!taxaByP2.has(k)) taxaByP2.set(k, []);
-    taxaByP2.get(k)!.push({ name, rp: Number(r.rp), rank, nodeId });
+    taxaByP2.get(k)!.push({ name, rp: Number(r.rp), rank, nodeId, taxon, common: str(r.common) });
   }
 
   // Species names: bucket keys + counts first, then read one two-letter range at a time
@@ -81,7 +91,7 @@ async function main() {
 
   for (const k of keys) {
     const species: ShardSpeciesRow[] = (p2Counts.get(k) ?? 0) === 0 ? [] : (await conn.runAndReadAll(
-      `SELECT *, lower(common_name) AS cl, lower(scientific_name) AS sl
+      `SELECT *, lower(${rankNameSql}) AS cl, lower(scientific_name) AS sl
        FROM '${parquetUri("name-index.parquet")}'
        WHERE name_lo >= $k AND name_lo < $k || chr(1114111)`, { k },
     )).getRowObjects().map((r) => ({

@@ -32,7 +32,9 @@ globalThis.fetch = (async (input: string) => {
 }) as typeof fetch;
 
 const sortKey = (r: SearchResult, q: string) => {
-  const cl = r.common_name?.toLowerCase() ?? null, sl = r.scientific_name.toLowerCase();
+  // The common name the row ranks by: the one it matched through, else the display one.
+  const cn = r.matched_common_name ?? r.common_name;
+  const cl = cn?.toLowerCase() ?? null, sl = r.scientific_name.toLowerCase();
   return JSON.stringify([cl == null ? 0 : cl === q ? 2 : 1, cl == null ? 0 : cl.startsWith(q) ? 2 : 1, sl.startsWith(q) ? 2 : 1, sl]);
 };
 
