@@ -222,13 +222,13 @@ export default function InatContributorsChart({
                 )}
               />
               <Tooltip
-                formatter={(value: number) => [
-                  value.toLocaleString(),
+                formatter={(value) => [
+                  Number(value ?? 0).toLocaleString(),
                   countLabel,
                 ]}
-                labelFormatter={(login: string) => {
+                labelFormatter={(login) => {
                   const c = activeData.find((o) => o.login === login);
-                  return c?.name || login;
+                  return c?.name || String(login);
                 }}
                 contentStyle={{
                   backgroundColor: "#18181b",

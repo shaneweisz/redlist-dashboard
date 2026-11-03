@@ -188,12 +188,12 @@ export default function YearBarChart({
             // Held off during a drag — it otherwise sits on top of the band
             // being dragged out, hiding exactly what the drag is selecting
             active={drag ? false : undefined}
-            formatter={(value: number, _name, props: { payload?: { label?: string } }) => [
+            formatter={(value, _name, item) => [
               // Prefer the precomputed "count (pct%)" label if present, otherwise fall back to raw count
-              props?.payload?.label ?? value.toLocaleString(),
+              (item?.payload as { label?: string } | undefined)?.label ?? Number(value ?? 0).toLocaleString(),
               "Species",
             ]}
-            labelFormatter={(year: string) => `Assessed ${year}`}
+            labelFormatter={(year) => `Assessed ${String(year)}`}
             contentStyle={{
               backgroundColor: "#18181b",
               border: "1px solid #3f3f46",
