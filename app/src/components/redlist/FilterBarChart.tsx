@@ -187,8 +187,8 @@ export default function FilterBarChart({
             // Held off during a drag — it otherwise sits on top of the band
             // being dragged out, hiding exactly what the drag is selecting
             active={drag ? false : undefined}
-            formatter={(value: number) => [value.toLocaleString(), "Species"]}
-            labelFormatter={labelFormatter}
+            formatter={(value) => [Number(value ?? 0).toLocaleString(), "Species"]}
+            labelFormatter={labelFormatter && ((label) => labelFormatter(String(label)))}
             contentStyle={{
               backgroundColor: "#18181b",
               border: "1px solid #3f3f46",

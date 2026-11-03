@@ -27,6 +27,17 @@ const eslintConfig = defineConfig([
       // dimensions are unknown, and per-image Vercel optimization would add real
       // cost across many occurrence thumbnails. Plain <img> is the deliberate choice.
       "@next/next/no-img-element": "off",
+      // eslint-plugin-react-hooks 7.1 (pulled in by eslint-config-next 16.4)
+      // flags ~70 existing call sites under its React Compiler rules. They're
+      // warnings until a dedicated PR works through them, so a security update
+      // doesn't have to carry a refactor of 15 components.
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/refs": "warn",
+      "react-hooks/immutability": "warn",
+      "react-hooks/static-components": "warn",
+      "react-hooks/use-memo": "warn",
+      "react-hooks/purity": "warn",
+      "react-hooks/preserve-manual-memoization": "warn",
       "@typescript-eslint/no-unused-vars": "off",
       "unused-imports/no-unused-imports": "error",
       "unused-imports/no-unused-vars": [
