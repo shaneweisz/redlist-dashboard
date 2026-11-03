@@ -10,8 +10,6 @@ Treat the PR body as a living summary, not a one-time snapshot. Every time a com
 
 For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done. Playwright is already an `app/` devDependency. If a view comes up empty or full of zeros, first check whether the precomputed `app/data/*.json` behind it is stale and needs regenerating (see the README's data sync pipeline, e.g. `npx tsx scripts/build-taxa-summary.ts`) before assuming the UI is broken.
 
-Passing typecheck, lint, tests or API checks is not a substitute. If the browser check can't run, fix whatever's stopping it or ask.
-
 ## Use a git worktree for each new piece of work
 
 Start a new git worktree (a dedicated branch checked out to its own directory) for each new, substantial feature or fix, rather than branching in place in the main checkout — this keeps unrelated in-progress work isolated and lets multiple pieces of work proceed in parallel without one clobbering another's uncommitted state. Not worth it for a one-line fix or a quick doc change — use judgment on "substantial."
