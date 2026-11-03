@@ -131,6 +131,44 @@ export interface ProtectedArea {
   /** The site's boundary, generalised to the zoom it was asked for, so the
    *  clicked area can be outlined on the map. Absent for point-only sites. */
   geometry?: GeoJSON.MultiPolygon | null;
+  /** WDPA's whole record for the site, labelled as the service labels it —
+   *  for an assessor who wants more than the summary line. See siteDetails. */
+  details: ProtectedAreaDetail[];
+}
+
+export interface ProtectedAreaDetail {
+  label: string;
+  value: string;
+}
+
+/** Bookkeeping columns, not facts about the site: the row id and geometry. */
+function isInternalField(key: string): boolean {
+  const k = key.toLowerCase();
+  return k === "objectid" || k === "fid" || k.startsWith("shape") || k.startsWith("st_");
+}
+
+/**
+ * Every attribute of a site, in the order the service lists them.
+ *
+ * Unlike the summary fields, "Not Reported" is kept here: that a country
+ * didn't report an IUCN category or a management plan is itself something an
+ * assessor may want to know. "Not Applicable", "Null" and blanks are dropped,
+ * since they describe fields that don't apply (no-take rules on a terrestrial
+ * park) rather than gaps. Areas (any field in km²) are rounded to two
+ * decimals with thousands separators; ids and years are left exactly as given.
+ */
+export function siteDetails(attributes: Record<string, unknown>): ProtectedAreaDetail[] {
+  const details: ProtectedAreaDetail[] = [];
+  for (const [label, raw] of Object.entries(attributes)) {
+    if (raw == null || isInternalField(label)) continue;
+    let value = String(raw).trim();
+    if (value === "" || value === "Null" || value === "N/A" || value === "Not Applicable") continue;
+    if (/km²/.test(label) && /^-?\d+(\.\d+)?$/.test(value)) {
+      value = Number(value).toLocaleString("en", { maximumFractionDigits: 2 });
+    }
+    details.push({ label, value });
+  }
+  return details;
 }
 
 /**
@@ -263,6 +301,12 @@ function num(value: unknown): number | null {
  * wilderness — and they're all true at once, so all of them are kept. The order
  * ArcGIS returns them in carries no ranking, which is exactly why we can't just
  * take the first one.
+ *
+ * Attributes are read by field name or by alias, in any case. The service used
+ * to key them by upper-case field name (`SITE_ID`, `NAME_ENG`); after a
+ * republish its fields went lower-case and `identify` started keying them by
+ * display alias instead (`"Site ID"`, `"English Name"`). Reading only the old
+ * names dropped every result, so a click on a park found nothing at all.
  */
 export function parseIdentifyResponse(json: unknown): ProtectedArea[] {
   const results = (json as { results?: unknown })?.results;
@@ -270,10 +314,18 @@ export function parseIdentifyResponse(json: unknown): ProtectedArea[] {
   const seen = new Set<string>();
   const areas: ProtectedArea[] = [];
   for (const result of results) {
-    const attributes = (result as { attributes?: Record<string, unknown> })?.attributes;
-    if (!attributes) continue;
-    const siteId = text(attributes.SITE_ID) ?? text(attributes.WDPAID);
-    const sitePid = text(attributes.SITE_PID) ?? text(attributes.WDPA_PID) ?? siteId;
+    const raw = (result as { attributes?: Record<string, unknown> })?.attributes;
+    if (!raw) continue;
+    const attributes = new Map(Object.entries(raw).map(([key, value]) => [key.toLowerCase(), value]));
+    const attr = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = text(attributes.get(key.toLowerCase()));
+        if (value !== undefined) return value;
+      }
+      return undefined;
+    };
+    const siteId = attr("SITE_ID", "Site ID", "WDPAID");
+    const sitePid = attr("SITE_PID", "Site Parcel ID", "WDPA_PID") ?? siteId;
     if (!siteId || !sitePid) continue;
     if (seen.has(sitePid)) continue;
     seen.add(sitePid);
@@ -281,17 +333,17 @@ export function parseIdentifyResponse(json: unknown): ProtectedArea[] {
       siteId,
       sitePid,
       name:
-        text(attributes.NAME_ENG) ??
-        text(attributes.NAME) ??
+        attr("NAME_ENG", "English Name", "NAME", "Original Name") ??
         text((result as { value?: unknown }).value) ??
         "Protected area",
-      designation: text(attributes.DESIG_ENG) ?? text(attributes.DESIG),
-      iucnCategory: text(attributes.IUCN_CAT),
-      status: text(attributes.STATUS),
-      statusYear: num(attributes.STATUS_YR) || null,
-      siteType: text(attributes.SITE_TYPE),
-      reportedAreaKm2: num(attributes.REP_AREA),
+      designation: attr("DESIG_ENG", "English Designation", "DESIG", "Designation"),
+      iucnCategory: attr("IUCN_CAT", "IUCN Management Category"),
+      status: attr("STATUS"),
+      statusYear: num(attr("STATUS_YR", "Status Year")) || null,
+      siteType: attr("SITE_TYPE", "Site Type"),
+      reportedAreaKm2: num(attr("REP_AREA", "Reported Area (km²)")),
       geometry: esriRingsToMultiPolygon((result as { geometry?: { rings?: unknown } })?.geometry?.rings),
+      details: siteDetails(raw),
     });
   }
   return areas;
