@@ -28,6 +28,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR, REDLIST_DIR, GBIF_DIR, CSV_QUOTING, writeCsv } from "./utils";
 import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../src/lib/data/taxonomy-constants";
 import { chooseRepresentative, type Verdict } from "./species-key";
+import { inatKingdomSql } from "./fetch-inat-vernaculars";
 
 export async function run(): Promise<void> {
   const redlistGlob = path.join(REDLIST_DIR, "*.csv");
@@ -294,11 +295,22 @@ export async function run(): Promise<void> {
   `);
 
   // Assessed (IUCN Red List) — the hot, bounded, rich dataset.
+  // iNaturalist's curated preferred English name (fetch-inat-vernaculars), matched by
+  // scientific name within a kingdom. CoL never marks a preferred English name, so this is
+  // the display name of choice after IUCN's own: it fills assessed species that IUCN gives
+  // no common name, and is the display name of every unassessed species it covers.
+  const inatParquet = path.join(DATA_DIR, "inat-vernaculars.parquet");
+  await conn.run(fs.existsSync(inatParquet)
+    ? `CREATE TEMP TABLE inat_names AS SELECT scientific_name, kingdom, preferred_name FROM read_parquet('${inatParquet}')`
+    : `CREATE TEMP TABLE inat_names (scientific_name VARCHAR, kingdom VARCHAR, preferred_name VARCHAR)`);
+
   await conn.run(`
     COPY (
       SELECT
         CAST(r.sis_taxon_id AS BIGINT)   AS id,
-        r.scientific_name, r.common_name,
+        r.scientific_name,
+        -- IUCN's name, else iNaturalist's (see inat_names).
+        coalesce(nullif(r.common_name, ''), inat.preferred_name, r.common_name) AS common_name,
         r.taxon_group_table1a            AS taxon_group,
         lower(r.class_name) AS class_name, lower(r.order_name) AS order_name, lower(r.family) AS family,
         r.iucn_category,
@@ -326,6 +338,7 @@ export async function run(): Promise<void> {
       LEFT JOIN enrich e ON e.sis_taxon_id = r.sis_taxon_id
       LEFT JOIN latest_assess la ON la.sis_taxon_id = r.sis_taxon_id
       LEFT JOIN assess_count ac ON ac.sis_taxon_id = r.sis_taxon_id
+      LEFT JOIN inat_names inat ON inat.scientific_name = r.scientific_name AND inat.kingdom = ${inatKingdomSql("r.taxon_group_table1a")}
       ORDER BY class_name, order_name, family, scientific_name
     ) TO '${assessedOut}' (FORMAT PARQUET, COMPRESSION ZSTD);
   `);
@@ -401,9 +414,12 @@ export async function run(): Promise<void> {
         -- uniqueness on every build rather than assuming it.
         -(hash(g.gbif_species_key) % 9007199254740992)::BIGINT AS id,
         g.scientific_name,
-        -- The CSV's name where CoL offers none or the same one; CoL's pick where there was
-        -- no name, or where the old one looks wrong (see genus_words above).
+        -- iNaturalist's preferred name first (unless it is the current name in another
+        -- case — keep that spelling). Without one: the CSV's name where CoL offers none or
+        -- the same one; CoL's pick where there was no name, or where the old one looks
+        -- wrong (see genus_words above).
         CASE
+          WHEN inat.preferred_name IS NOT NULL AND lower(inat.preferred_name) <> lower(coalesce(g.common_name, '')) THEN inat.preferred_name
           WHEN nullif(g.common_name, '') IS NULL THEN coalesce(v.vernacular_name, '')
           WHEN v.vernacular_name IS NULL OR lower(v.vernacular_name) = lower(g.common_name) THEN g.common_name
           WHEN name_genus_score(g.common_name, split_part(g.scientific_name, ' ', 1)) = 0
@@ -417,6 +433,7 @@ export async function run(): Promise<void> {
         g.total_count                    AS gbif_occurrence_count
       FROM gbif_all g
       LEFT JOIN species_vernaculars v ON v.col_id = g.gbif_species_key
+      LEFT JOIN inat_names inat ON inat.scientific_name = g.scientific_name AND inat.kingdom = ${inatKingdomSql("g.taxon_group")}
       WHERE g.gbif_species_key NOT IN (SELECT DISTINCT gbif_species_key FROM map)
         AND g.gbif_species_key NOT IN (${domesticated})
         -- ...and not a second usage of a species that IS assessed.

@@ -12,6 +12,7 @@
  *   Phase 7: fetch-gbif-country-data (GBIF API → country occurrences per species)
  *   Phase 8: fetch-gbif-new-counts  (GBIF API → updates GBIF CSVs)
  *   Phase 8b: fetch-lumped-own-counts (GBIF API → counts for keys facets cannot emit)
+ *   Phase 8c: fetch-inat-vernaculars (iNaturalist taxonomy export → inat-vernaculars.parquet, display common names)
  *   Phase 9: build-parquet          (CSVs → assessed/unassessed parquets + search)
  *   Phase 10: build-matching        (→ species_link.parquet, IUCN/GBIF → col_id)
  *   Phase 11: build-synonym-index   (→ synonym-index.parquet, search)
@@ -53,6 +54,7 @@ import { run as fetchGbifSpecies } from "./fetch-gbif-species";
 import { run as matchRedlistSpeciesToGbif } from "./match-redlist-species-to-gbif";
 import { run as fetchGbifNewCounts } from "./fetch-gbif-new-counts";
 import { run as fetchLumpedOwnCounts } from "./fetch-lumped-own-counts";
+import { run as fetchInatVernaculars } from "./fetch-inat-vernaculars";
 import { run as fetchGbifCountryData } from "./fetch-gbif-country-data";
 import { run as buildTaxaSummary } from "./build-taxa-summary";
 import { run as buildColRevisions } from "./build-col-revisions";
@@ -257,6 +259,18 @@ async function main() {
     } else {
       console.log("\nPhase 8b (lumped own counts): skipped on a partial-taxa sync — it rewrites the");
       console.log("whole file, so running it filtered would delete the other taxa's rows.");
+    }
+
+    // Phase 8c: iNaturalist's curated English common names — the display name of choice
+    // after IUCN's (see fetch-inat-vernaculars). Best-effort: a failed download keeps the
+    // previous sync's inat-vernaculars.parquet (fetched into data/ with everything else),
+    // so names stay as they were rather than failing an hours-long run.
+    console.log("\nPhase 8c: fetch-inat-vernaculars (→ inat-vernaculars.parquet)");
+    console.log("═".repeat(60));
+    try {
+      await fetchInatVernaculars();
+    } catch (e) {
+      console.warn(`  fetch-inat-vernaculars failed — keeping the previous names: ${e instanceof Error ? e.message : e}`);
     }
 
     // Phase 9: Build DuckDB read-layer parquets (#261) — also powers search.
