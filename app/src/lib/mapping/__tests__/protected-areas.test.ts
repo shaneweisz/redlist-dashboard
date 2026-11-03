@@ -214,6 +214,52 @@ describe("parseIdentifyResponse", () => {
     expect(areas[1].reportedAreaKm2).toBeCloseTo(8991.2);
   });
 
+  it("reads the alias-keyed attributes the service returns since its republish", () => {
+    // Trimmed from a real response for a click inside Kruger (Nov 2026): the
+    // fields went lower-case and identify now keys them by display alias.
+    const areas = parseIdentifyResponse({
+      results: [
+        {
+          layerId: 1,
+          value: "Kruger National Park",
+          attributes: {
+            objectid: "194034",
+            "Site ID": "873",
+            "Site Parcel ID": "873",
+            "Site Type": "PA",
+            "English Name": "Kruger National Park",
+            "Original Name": "Kruger National Park",
+            Designation: "National Park",
+            "English Designation": "National Park",
+            "IUCN Management Category": "Not Reported",
+            "Reported Area (km²)": "19169.153595",
+            Status: "Designated",
+            "Status Year": "1926",
+          },
+        },
+      ],
+    });
+    expect(areas).toHaveLength(1);
+    expect(areas[0]).toMatchObject({
+      siteId: "873",
+      sitePid: "873",
+      name: "Kruger National Park",
+      designation: "National Park",
+      status: "Designated",
+      statusYear: 1926,
+      siteType: "PA",
+    });
+    expect(areas[0].iucnCategory).toBeUndefined();
+    expect(areas[0].reportedAreaKm2).toBeCloseTo(19169.15);
+  });
+
+  it("reads lower-case field names", () => {
+    const areas = parseIdentifyResponse({
+      results: [{ attributes: { site_id: "873", site_pid: "873", name_eng: "Kruger National Park" } }],
+    });
+    expect(areas[0]).toMatchObject({ siteId: "873", name: "Kruger National Park" });
+  });
+
   it("still reads the pre-2025 field names", () => {
     const areas = parseIdentifyResponse({
       results: [{ attributes: { WDPAID: "23", WDPA_PID: "23_1", NAME: "San Guillermo" } }],
