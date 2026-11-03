@@ -17,6 +17,7 @@ import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
+import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
@@ -2151,8 +2152,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // not-evaluated universe by a CoL id collision (see taxaFilteredSpecies).
     if (!searchFilter) return;
     let cancelled = false;
-    fetch(`/api/search?q=${encodeURIComponent(searchFilter)}&limit=10`)
-      .then(r => (r.ok ? r.json() : null))
+    search(searchFilter, 10)
       .then((data: { results?: SearchResult[] } | null) => {
         if (cancelled || !data) return;
         const hit = data.results?.find(r => r.species_key === urlSpecies);
