@@ -23,6 +23,9 @@ const COL_ARTIFACTS = [
 ];
 
 const nextConfig: NextConfig = {
+  // Don't have `next dev` write app/AGENTS.md (its "read the bundled docs"
+  // block for AI agents) — kept out of the repo deliberately.
+  agentRules: false,
   // Proxy PostHog through our own origin so ad/tracking blockers (which match the
   // posthog.com domain directly) can't drop analytics for the academic audience.
   // /static + /array hit the asset host (it keeps cache-control headers the main

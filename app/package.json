@@ -29,7 +29,7 @@
     "@turf/boolean-point-in-polygon": "^7.3.5",
     "@vercel/analytics": "^1.6.1",
     "@vercel/speed-insights": "^2.0.0",
-    "maplibre-gl": "^5.21.1",
+    "maplibre-gl": "^6.16.0",
     "mcp-handler": "^1.1.0",
     "next": "^16.4.4",
     "next-themes": "^0.4.6",
@@ -61,5 +61,11 @@
     "tailwindcss": "^4",
     "typescript": "5.9.3",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "@sentry/bundler-plugins": {
+      "glob": "^14.0.3"
+    },
+    "d3-color": "^3.1.0"
   }
 }

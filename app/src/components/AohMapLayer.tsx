@@ -183,7 +183,7 @@ function AohMapLayerInner({ sisTaxonId, taxonGroup, visible, panelId = "main", m
 }
 
 // Need to import maplibregl type for ImageSource
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 
 const AohMapLayer = dynamic(
   () => Promise.resolve(AohMapLayerInner),
