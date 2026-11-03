@@ -32,8 +32,6 @@ import {
   type SpeciesListManifest,
 } from "./format";
 
-/** Same cap the live route applies: a view needing more NE rows prompts a drilldown instead. */
-export const NE_CAP = 400_000;
 
 const SYNC = process.env.NEXT_PUBLIC_SPECIES_LISTS_SYNC ?? "";
 const base = () => `/species-lists/${SYNC}`;
@@ -125,10 +123,9 @@ export async function speciesEntryFromFiles(url: string): Promise<SpeciesCacheEn
   if (!groups) return null;
   const kind: SpeciesListKind = req.ne ? "ne" : "assessed";
 
-  if (req.ne) {
-    const neTotal = groups.reduce((s, g) => s + manifest.groups[g].ne.rows, 0);
-    if (neTotal > NE_CAP) return { species: [], truncated: false, tooLarge: true, neTotal };
-  }
+  // No size cap: the live route caps Not Evaluated lists at 400k rows (it can't build a
+  // bigger response), but the files load any group in full — all 1.3M NE invertebrates
+  // open in ~3.6s and use ~470MB in a desktop browser, with charts drawn ~2s later.
   const parts = await Promise.all(groups.map((g) => loadGroup(g, kind)));
   const species = parts.length === 1 ? parts[0] : parts.flat();
   return { species, truncated: false, tooLarge: false, neTotal: null };

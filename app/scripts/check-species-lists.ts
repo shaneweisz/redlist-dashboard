@@ -7,7 +7,9 @@
  *   - the route's rows (querySpecies — what the route returns), and
  *   - the files' rows (the groups lib/species-lists/loader picks, decoded),
  * narrows both with the client's own speciesMatchesNode (what RedListView shows), and
- * compares species keys and every field. The one intended difference is ignored: NE
+ * compares species keys and every field. Above the route's 400k NE cap (insects,
+ * invertebrates) the route returns only a count, which the files' row total must match.
+ * The one intended difference is ignored: NE
  * rows' taxon_id is the group's display taxon in the files, the requested taxon in the
  * route (RedListView matches NE rows by node membership instead).
  *
@@ -19,7 +21,7 @@ import zlib from "node:zlib";
 import { querySpecies } from "../src/lib/data/species-duckdb";
 import { NODE_INDEX, speciesMatchesNode } from "../src/lib/taxonomy-utils";
 import { decodeColumns, speciesListFileName, type SpeciesListManifest } from "../src/lib/species-lists/format";
-import { groupsForTaxon, NE_CAP } from "../src/lib/species-lists/loader";
+import { groupsForTaxon } from "../src/lib/species-lists/loader";
 
 const APP_DIR = path.join(__dirname, "..");
 const sync = fs.readFileSync(path.join(APP_DIR, "latest-sync.txt"), "utf-8").trim();
@@ -49,12 +51,14 @@ function stable(r: Row, ne: boolean): string {
 async function check(taxon: string, ne: boolean): Promise<string | null> {
   const groups = groupsForTaxon(taxon, manifest);
   if (!groups) return `${taxon}: files can't answer (would fall back to the route)`;
-  if (ne && groups.reduce((s, g) => s + manifest.groups[g].ne.rows, 0) > NE_CAP) {
-    const live = await querySpecies({ taxon, includeNE: true });
-    return live.tooLarge ? null : `${taxon} NE: files say tooLarge, route returned ${live.species.length} rows`;
-  }
   const live = await querySpecies({ taxon, includeNE: ne });
-  if (live.tooLarge) return `${taxon}${ne ? " NE" : ""}: route says tooLarge, files would load`;
+  if (live.tooLarge) {
+    // Over the route's 400k cap it returns no rows, only a count (neTotal) — the files load
+    // them all. Check the files hold exactly that many for the same groups.
+    const fileTotal = groups.reduce((s, g) => s + manifest.groups[g].ne.rows, 0);
+    return fileTotal === live.neTotal ? null
+      : `${taxon} NE: route counts ${live.neTotal} (too large to list), files hold ${fileTotal}`;
+  }
   const liveRows = narrow((live.species as unknown as Row[]).filter((r) => (r.category === "NE") === ne), taxon);
   const fileRows = narrow(groups.flatMap((g) => groupRows(g, ne ? "ne" : "assessed")), taxon);
   const a = new Map(liveRows.map((r) => [String(r.species_key), stable(r, ne)]));
