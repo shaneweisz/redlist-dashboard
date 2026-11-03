@@ -45,6 +45,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { inatKingdomSql } from "./fetch-inat-vernaculars";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "./utils";
 
@@ -114,11 +115,26 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // name is a different one — and an assessed species with no IUCN common name is still
   // findable by its CoL names. Absent on syncs built before that file existed.
   const altNames = path.join(dir, "species-vernacular-names.parquet");
-  await conn.run(fs.existsSync(altNames)
+  // …and every English name iNaturalist gives it (fetch-inat-vernaculars), matched by
+  // scientific name within a kingdom. One row per (species, name, case-insensitive).
+  const inatNames = path.join(dir, "inat-vernaculars.parquet");
+  const sources = [
+    fs.existsSync(altNames)
+      ? `SELECT s.*, v.name AS alt_name FROM species s JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id`
+      : null,
+    fs.existsSync(inatNames)
+      ? `SELECT s.*, n.name AS alt_name FROM species s
+         JOIN (SELECT scientific_name, kingdom, unnest(names) AS name FROM read_parquet('${inatNames}')) n
+           ON n.scientific_name = s.scientific_name AND n.kingdom = ${inatKingdomSql("s.taxon_group")}`
+      : null,
+  ].filter(Boolean);
+  await conn.run(sources.length
     ? `CREATE TEMP TABLE alt_names AS
-         SELECT s.*, v.name AS alt_name FROM species s
-         JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id
-         WHERE lower(v.name) <> lower(coalesce(s.common_name, ''))`
+         SELECT * EXCLUDE (k) FROM (
+           SELECT *, row_number() OVER (PARTITION BY id, assessed, lower(alt_name) ORDER BY alt_name) AS k
+           FROM (${sources.join(" UNION ALL ")})
+           WHERE lower(alt_name) <> lower(coalesce(common_name, ''))
+         ) WHERE k = 1`
     : `CREATE TEMP TABLE alt_names AS SELECT *, CAST(NULL AS VARCHAR) AS alt_name FROM species WHERE false`);
 
   await conn.run(`
