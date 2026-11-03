@@ -534,9 +534,9 @@ function TradeFlowMap({
           <Geographies geography={GEO_URL}>
             {({ geographies }) =>
               geographies
-                .filter((geo) => geo.properties.name !== "Antarctica")
+                .filter((geo) => geo.properties?.name !== "Antarctica")
                 .map((geo) => {
-                  const name = geo.properties.name;
+                  const name = geo.properties?.name;
                   const alpha2 = NAME_TO_ALPHA2[name];
                   const role = alpha2 ? roleOf(alpha2) : null;
                   const isSuspended = alpha2 ? suspensionCountries?.has(alpha2) : false;
@@ -578,11 +578,13 @@ function TradeFlowMap({
                             }
                           : undefined
                       }
+                      // Hover is CSS (.tf-geo in globals.css) since react-simple-maps
+                      // 5 dropped the per-state style object.
+                      className="tf-geo"
                       style={{
-                        default: { outline: "none", cursor },
-                        hover: { outline: "none", fill: showTooltip ? (dark ? "#52525b" : "#e4e4e7") : fill, cursor },
-                        pressed: { outline: "none" },
-                      }}
+                        cursor,
+                        "--geo-hover-fill": showTooltip ? (dark ? "#52525b" : "#e4e4e7") : fill,
+                      } as React.CSSProperties}
                     />
                   );
                 })

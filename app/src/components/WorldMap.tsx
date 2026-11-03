@@ -691,8 +691,8 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
             minZoom={MIN_ZOOM}
             maxZoom={MAX_ZOOM}
             onMoveEnd={({ coordinates, zoom: z }) => {
-              setCenter(coordinates as [number, number]);
-              setZoom(z);
+              if (coordinates) setCenter(coordinates as [number, number]);
+              if (z !== undefined) setZoom(z);
             }}
           >
             {/* parseGeographies runs before the SVG paths are projected, which
@@ -710,8 +710,8 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                   // wins, so we centre on the country rather than its outlier.
                   const areas: Record<string, number> = {};
                   for (const geo of geographies) {
-                    const code = NAME_TO_ALPHA2[geo.properties.name];
-                    if (!code || geo.properties.name === "Antarctica") continue;
+                    const code = NAME_TO_ALPHA2[geo.properties?.name];
+                    if (!code || geo.properties?.name === "Antarctica") continue;
                     const area = geoArea(geo);
                     if (areas[code] !== undefined && areas[code] >= area) continue;
                     areas[code] = area;
@@ -721,9 +721,9 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                 }
                 /* eslint-enable react-hooks/immutability */
                 return geographies
-                  .filter((geo) => geo.properties.name !== "Antarctica")
+                  .filter((geo) => geo.properties?.name !== "Antarctica")
                   .map((geo) => {
-                  const countryName = geo.properties.name;
+                  const countryName = geo.properties?.name;
                   const alpha2 = NAME_TO_ALPHA2[countryName];
                   const isSelected = alpha2 ? selectedCountries.has(alpha2) : false;
                   const fillColor = getCountryColor(alpha2, isSelected);
@@ -755,28 +755,18 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                           onCountrySelect(alpha2, countryName, event);
                         }
                       }}
+                      // react-simple-maps 5 dropped the { default, hover, pressed }
+                      // style states, so hover/pressed are CSS (.wm-geo in
+                      // globals.css). The base colours are SVG attributes rather
+                      // than inline style, because inline style would beat :hover.
+                      className="wm-geo"
+                      fill={fillColor}
+                      stroke="#a1a1aa"
+                      strokeWidth={0.5}
                       style={{
-                        default: {
-                          fill: fillColor,
-                          stroke: "#a1a1aa",
-                          strokeWidth: 0.5,
-                          outline: "none",
-                          cursor: alpha2 ? "pointer" : "default",
-                        },
-                        hover: {
-                          fill: isSelected ? "#2563eb" : alpha2 ? "#a3e635" : "#f4f4f5",
-                          stroke: "#71717a",
-                          strokeWidth: 0.75,
-                          outline: "none",
-                          cursor: alpha2 ? "pointer" : "default",
-                        },
-                        pressed: {
-                          fill: "#1d4ed8",
-                          stroke: "#52525b",
-                          strokeWidth: 1,
-                          outline: "none",
-                        },
-                      }}
+                        cursor: alpha2 ? "pointer" : "default",
+                        "--geo-hover-fill": isSelected ? "#2563eb" : alpha2 ? "#a3e635" : "#f4f4f5",
+                      } as React.CSSProperties}
                     />
                   );
                 });
