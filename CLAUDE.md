@@ -8,7 +8,9 @@ Treat the PR body as a living summary, not a one-time snapshot. Every time a com
 
 ## Always verify UI changes in a real browser
 
-For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done — don't downgrade to "typecheck/lint/tests pass, API returns the right data, that's probably enough" as a way to route around flaky tooling. If the verification tooling itself is broken, fix the tooling (see `.claude/skills/verify-ui/` for the current Node/Playwright workaround) rather than substituting a weaker check. Only skip with explicit sign-off, and say plainly that it wasn't verified visually — don't imply it was.
+For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done — don't downgrade to "typecheck/lint/tests pass, API returns the right data, that's probably enough" as a way to route around flaky tooling. If the verification tooling itself is broken, fix the tooling rather than substituting a weaker check. Only skip with explicit sign-off, and say plainly that it wasn't verified visually — don't imply it was.
+
+One Playwright gotcha: PostHog never sends events from a Playwright-driven browser (posthog-js treats `navigator.webdriver` and a headless user agent as a bot and silently drops every `capture()`), so a Playwright run can't tell you whether analytics work.
 
 ## Use a git worktree for each new piece of work
 
