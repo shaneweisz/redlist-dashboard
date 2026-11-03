@@ -104,10 +104,15 @@ describe("speciesEntryFromFiles", () => {
     expect(entry?.tooLarge).toBe(false);
   });
 
-  it("flags tooLarge from the manifest without downloading anything", async () => {
-    const entry = await loader.speciesEntryFromFiles("/api/redlist/species?taxon=insects&category=NE");
-    expect(entry).toMatchObject({ species: [], tooLarge: true, neTotal: 500_000 });
-    expect(requested).toEqual([]);
+  it("loads a giant aggregate in full — no NE cap on the files", async () => {
+    const p = loader.speciesEntryFromFiles("/api/redlist/species?taxon=insects&category=NE");
+    await flush();
+    expect(requested.sort()).toEqual(["beetles.ne.json.br", "butterflies_and_moths.ne.json.br"]);
+    await release("beetles.ne.json.br");
+    await release("butterflies_and_moths.ne.json.br");
+    const entry = await p;
+    expect(entry).toMatchObject({ tooLarge: false, neTotal: null });
+    expect(entry?.species.map((s) => s.species_key).sort()).toEqual(["beetles-ne-1", "butterflies_and_moths-ne-1"]);
   });
 
   it("returns null (route fallback) when this deployment has no files", async () => {
