@@ -52,7 +52,7 @@ const COL_CLASS_ALIASES: Record<string, string[]> = {
   thecostraca: ["theocostraca"],
   hoplonemertea: ["nemertea"],
 };
-function expandClasses(names: string[]): string[] {
+export function expandClasses(names: string[]): string[] {
   // Include the canonical name itself, not just its aliases (expandOrders' own
   // pattern) — filterToSql runs against BOTH species/ (CoL, which never uses the
   // coarse canonical label) AND assessed.parquet (IUCN, which ONLY uses the coarse
@@ -185,7 +185,7 @@ const COL_ORDER_ALIASES: Record<string, string[]> = {
   // (582/616 assessed species) — same category of split as Pinales above.
   capparales: ["brassicales"],
 };
-function expandOrders(names: string[]): string[] {
+export function expandOrders(names: string[]): string[] {
   return names.flatMap((n) => [n, ...(COL_ORDER_ALIASES[n.toLowerCase()] ?? [])]);
 }
 
