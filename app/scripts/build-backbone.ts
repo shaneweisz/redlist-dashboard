@@ -419,8 +419,8 @@ export async function run(
                      regexp_extract_all(
                        regexp_replace("col:citation", 'https?://\\S+|10\\.\\d{4,9}/\\S+', ' ', 'g'),
                        '\\d{4}'),
-                     x -> TRY_CAST(x AS INTEGER)),
-                   y -> y >= ${minYear} AND y <= ${maxYear}
+                     lambda x: TRY_CAST(x AS INTEGER)),
+                   lambda y: y >= ${minYear} AND y <= ${maxYear}
                  ))
                ) AS ryr
         FROM read_csv('${referenceTsv}', delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)
