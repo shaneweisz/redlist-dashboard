@@ -1,7 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as Sentry from "@sentry/nextjs";
 import { shouldSkipRequest, toCacheEntry, type SpeciesCacheEntry } from "./species-cache-logic";
+import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
 
 export type { SpeciesCacheEntry };
 
@@ -51,16 +53,26 @@ export function SpeciesCacheProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     abortControllersRef.current[url] = controller;
     setLoadingUrls(prev => new Set(prev).add(url));
-    fetch(url, { signal: controller.signal })
+    const fromRoute = () => fetch(url, { signal: controller.signal })
       .then(async res => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Species API returned ${res.status}`);
         }
-        return res.json();
+        return toCacheEntry(await res.json());
+      });
+    // The pre-built per-group files answer almost every request (lib/species-lists);
+    // null means they can't (no files for this deployment, or an arbitrary-rank taxon)
+    // and a failed file load falls back too — reported, since no server log sees it.
+    speciesEntryFromFiles(url)
+      .catch(err => {
+        Sentry.captureException(err, { tags: { feature: "species-lists" }, extra: { url } });
+        return null;
       })
-      .then(data => {
-        setEntries(prev => ({ ...prev, [url]: toCacheEntry(data) }));
+      .then(entry => entry ?? fromRoute())
+      .then(entry => {
+        if (controller.signal.aborted) return; // provider unmounted; nothing left to update
+        setEntries(prev => ({ ...prev, [url]: entry }));
       })
       .catch(err => {
         if (controller.signal.aborted) return; // provider unmounted; nothing left to update

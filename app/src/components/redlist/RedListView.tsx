@@ -1633,22 +1633,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return null;
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.errors, speciesApiUrl]);
 
-  // Prefetch all species on mount so taxa clicks feel instant (skip for new-assessments — NE
-  // dataset too large). Idempotent via the shared cache's request() — a no-op once
-  // `?taxon=all` is cached or already in flight (e.g. requested by another compare-mode panel,
-  // or by the per-taxon effect below reaching "all" first).
-  useEffect(() => {
-    if (isNewAssessments) return;
-    cache.request(`${SPECIES_API}?taxon=all`);
-  // Depends on cache.request specifically, not the whole cache object: the
-  // linter conservatively wants the whole object for any method call off a
-  // hook-returned value, but cache.request's identity only ever changes
-  // together with cache.entries (see SpeciesCacheContext) — depending on the
-  // whole object here would additionally re-run this effect on every
-  // loadingUrls/errors-only update, e.g. another compare-mode panel's fetch
-  // completing or failing, which has nothing to do with this taxon.
-  }, [isNewAssessments, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Determine which taxa need fetching, and request them from the shared cache
   useEffect(() => {
     if (selectedTaxa.size === 0) return;
@@ -1669,8 +1653,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       cache.request(speciesApiUrl(taxonId, categoryParam));
     }
   // cache.entries (for the "all" fast-path check above) + cache.request
-  // specifically, not the whole cache object — see the prefetch effect
-  // above for why depending on the whole object over-triggers this.
+  // specifically, not the whole cache object: the linter conservatively wants
+  // the whole object for any method call off a hook-returned value, but
+  // cache.request's identity only ever changes together with cache.entries (see
+  // SpeciesCacheContext) — depending on the whole object would additionally
+  // re-run this on every loadingUrls/errors-only update, e.g. another
+  // compare-mode panel's fetch completing or failing.
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, cache.request, speciesApiUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Loading" means one of THIS panel's currently-relevant URLs is still in flight —
@@ -1721,8 +1709,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // (#261). Genus is derived from the leading word of the scientific name, the
       // same way the server's resolveWhere does it (no genus column exists).
       const arbitrary = [...selectedTaxa].filter((t) => t !== "all" && !findNode(t)).map((t) => t.toLowerCase());
+      // NE rows come from per-group files stamped with their group's display taxon
+      // (lib/species-lists), not the requested taxon as the route once stamped them, so
+      // a non-display-root selection (e.g. an SSC root) matches them by node membership.
+      const nodeRoots = [...selectedTaxa].filter((t) => t !== "all" && findNode(t));
       filtered = filtered.filter((s) =>
         (s.taxon_id != null && selectedTaxa.has(s.taxon_id)) ||
+        (s.category === "NE" && nodeRoots.some((t) => speciesMatchesNode(s, t))) ||
         (arbitrary.length > 0 && arbitrary.some((v) =>
           (s.class_name ?? "").toLowerCase() === v ||
           (s.order_name ?? "").toLowerCase() === v ||
