@@ -16,6 +16,7 @@ import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
+import { prefetchAllowed } from "@/lib/species-lists/loader";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
@@ -1637,9 +1638,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // dataset too large). Idempotent via the shared cache's request() — a no-op once
   // `?taxon=all` is cached or already in flight (e.g. requested by another compare-mode panel,
   // or by the per-taxon effect below reaching "all" first).
+  // Low priority: it downloads one group file at a time behind whatever the user
+  // clicks (lib/species-lists), and is skipped on cellular / data-saver connections.
   useEffect(() => {
-    if (isNewAssessments) return;
-    cache.request(`${SPECIES_API}?taxon=all`);
+    if (isNewAssessments || !prefetchAllowed()) return;
+    cache.request(`${SPECIES_API}?taxon=all`, { priority: "low" });
   // Depends on cache.request specifically, not the whole cache object: the
   // linter conservatively wants the whole object for any method call off a
   // hook-returned value, but cache.request's identity only ever changes
@@ -1721,8 +1724,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // (#261). Genus is derived from the leading word of the scientific name, the
       // same way the server's resolveWhere does it (no genus column exists).
       const arbitrary = [...selectedTaxa].filter((t) => t !== "all" && !findNode(t)).map((t) => t.toLowerCase());
+      // NE rows come from per-group files stamped with their group's display taxon
+      // (lib/species-lists), not the requested taxon as the route once stamped them, so
+      // a non-display-root selection (e.g. an SSC root) matches them by node membership.
+      const nodeRoots = [...selectedTaxa].filter((t) => t !== "all" && findNode(t));
       filtered = filtered.filter((s) =>
         (s.taxon_id != null && selectedTaxa.has(s.taxon_id)) ||
+        (s.category === "NE" && nodeRoots.some((t) => speciesMatchesNode(s, t))) ||
         (arbitrary.length > 0 && arbitrary.some((v) =>
           (s.class_name ?? "").toLowerCase() === v ||
           (s.order_name ?? "").toLowerCase() === v ||

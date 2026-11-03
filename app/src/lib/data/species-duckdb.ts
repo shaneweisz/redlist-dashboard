@@ -273,9 +273,20 @@ export async function querySpecies(opts: {
   includeNE?: boolean;
   limit?: number;
   offset?: number;
+  /**
+   * Query exactly one taxon_group partition instead of resolving `taxon` — what the
+   * build-time per-group species-list files (scripts/build-species-lists.ts) are made
+   * from. NE rows are stamped with the group's own display taxon (mapTaxonId), the
+   * same value assessed rows carry, so one group file serves every view that needs
+   * the group; and the NE cap never applies (the browser enforces it over the groups
+   * a view needs — see lib/species-lists).
+   */
+  group?: string;
 }): Promise<{ species: ReturnType<typeof toSpeciesRow>[]; truncated: boolean; tooLarge: boolean; neTotal: number | null }> {
   const conn = await getConn();
-  const where = resolveWhere(opts.taxon);
+  const where: WhereParts = opts.group
+    ? { clauses: ["taxon_group = $g"], params: { g: opts.group } }
+    : resolveWhere(opts.taxon);
   const whereSql = where.clauses.length ? `WHERE ${where.clauses.join(" AND ")}` : "";
   const assessedUri = parquetUri("assessed.parquet");
   // Cap the Not-Evaluated additions: a giant aggregate (insects ~1M, invertebrates
@@ -294,7 +305,7 @@ export async function querySpecies(opts: {
   // per-group sum is an upper bound for any sub-group, so it never falsely blocks a
   // manageable one (only the two aggregates exceed the cap). Best-effort: if taxa-summary
   // isn't bundled in this function, fall through to the live count below (still correct).
-  if (opts.includeNE) {
+  if (opts.includeNE && !opts.group) {
     try {
       const groups = getTaxonGroupsForNode(canonicalizeTaxonId(opts.taxon));
       const neEstimate = groups.reduce((sum, g) => sum + (neByGroup().get(g) ?? 0), 0);
@@ -324,7 +335,7 @@ export async function querySpecies(opts: {
   // already-assessed col_ids, with GBIF occurrences overlaid; (B) GBIF-observed species
   // not represented in that universe (orphans). Safety-capped.
   if (opts.includeNE && whereSql) {
-    const taxonId = canonicalizeTaxonId(opts.taxon);
+    const taxonId = opts.group ? mapTaxonId(opts.group) : canonicalizeTaxonId(opts.taxon);
     // Build (once per warm container) the global de-dup set + GBIF overlay map.
     await ensureNeHelpers(conn);
     const assessedColIds = "(SELECT col_id FROM ne_assessed_col_ids)"; // assessed col_ids (de-dup key)
@@ -342,7 +353,7 @@ export async function querySpecies(opts: {
     const univCount = Number((await conn.runAndReadAll(
       `SELECT count(*) AS c FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}`,
       where.params)).getRowObjects()[0].c);
-    if (univCount > NE_CAP) {
+    if (univCount > NE_CAP && !opts.group) {
       tooLarge = true;
       neTotal = univCount;
     } else {

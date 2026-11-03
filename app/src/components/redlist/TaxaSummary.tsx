@@ -26,6 +26,7 @@ import { sisRowKey } from "@/lib/species-row-key";
 // see lib/col-revision.ts (both surfaces must explain a reason the same way).
 import { neSplitSentence, neSynonymSentence, reasonComposition, displayReason, NE_SPLIT_EVIDENCE } from "@/lib/col-revision";
 import { NoMatchLine } from "@/components/redlist/revision-links";
+import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
 
 // See scripts/build-taxa-summary.ts's classifyNoMatch for what each reason means.
 // Modular/additive on top of colBreakdown[].noMatchIds — safe to drop independently
@@ -599,11 +600,18 @@ function SpeciesListPanel({
     const controller = new AbortController();
     const qs = new URLSearchParams({ taxon: nodeId });
     if (isNe) qs.set("category", "NE");
-    fetch(`/api/redlist/species?${qs.toString()}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Species fetch failed (${res.status})`))))
-      .then((data: { species: RedListSpecies[] }) => {
-        cacheRef.current.set(cacheKey, data.species);
-        setRows(data.species);
+    const url = `/api/redlist/species?${qs.toString()}`;
+    // Same per-group files RedListView reads (lib/species-lists), shared with it, so the
+    // popover is usually instant; the live route answers whatever the files can't.
+    speciesEntryFromFiles(url)
+      .catch(() => null)
+      .then((entry) => entry?.species ?? fetch(url, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Species fetch failed (${res.status})`))))
+        .then((data: { species: RedListSpecies[] }) => data.species))
+      .then((species) => {
+        if (controller.signal.aborted) return;
+        cacheRef.current.set(cacheKey, species);
+        setRows(species);
       })
       .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Failed to load species"); });
     return () => controller.abort();

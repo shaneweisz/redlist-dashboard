@@ -44,6 +44,8 @@ yarn-error.log*
 # Build-time caches for the sync scripts; never published (see fetch-gbif-species).
 /.sync-cache/
 
+# Generated at build time by scripts/build-species-lists.ts (~40MB) — never commit.
+/public/species-lists/
 /data/*
 !/data/taxa-summary.json
 !/data/table1a-children-summaries.json

@@ -1,7 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as Sentry from "@sentry/nextjs";
 import { shouldSkipRequest, toCacheEntry, type SpeciesCacheEntry } from "./species-cache-logic";
+import { speciesEntryFromFiles, type LoadPriority } from "@/lib/species-lists/loader";
 
 export type { SpeciesCacheEntry };
 
@@ -11,8 +13,9 @@ interface SpeciesCacheValue {
   errors: Record<string, string>;
   // Idempotent: fetches `url` at most once, no matter how many callers request it
   // concurrently (e.g. two compare-mode panels both selecting "Birds") — later
-  // callers for an already-cached or in-flight url are a no-op.
-  request: (url: string) => void;
+  // callers for an already-cached or in-flight url are a no-op. `priority: "low"`
+  // marks a background prefetch, which never delays what the user clicks.
+  request: (url: string, opts?: { priority?: LoadPriority }) => void;
 }
 
 const SpeciesCacheContext = createContext<SpeciesCacheValue | null>(null);
@@ -45,22 +48,32 @@ export function SpeciesCacheProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const request = useCallback((url: string) => {
+  const request = useCallback((url: string, opts?: { priority?: LoadPriority }) => {
     if (shouldSkipRequest(url, entries, inFlightRef.current)) return;
     inFlightRef.current.add(url);
     const controller = new AbortController();
     abortControllersRef.current[url] = controller;
     setLoadingUrls(prev => new Set(prev).add(url));
-    fetch(url, { signal: controller.signal })
+    const fromRoute = () => fetch(url, { signal: controller.signal })
       .then(async res => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `Species API returned ${res.status}`);
         }
-        return res.json();
+        return toCacheEntry(await res.json());
+      });
+    // The pre-built per-group files answer almost every request (lib/species-lists);
+    // null means they can't (no files for this deployment, or an arbitrary-rank taxon)
+    // and a failed file load falls back too — reported, since no server log sees it.
+    speciesEntryFromFiles(url, opts?.priority ?? "high")
+      .catch(err => {
+        Sentry.captureException(err, { tags: { feature: "species-lists" }, extra: { url } });
+        return null;
       })
-      .then(data => {
-        setEntries(prev => ({ ...prev, [url]: toCacheEntry(data) }));
+      .then(entry => entry ?? fromRoute())
+      .then(entry => {
+        if (controller.signal.aborted) return; // provider unmounted; nothing left to update
+        setEntries(prev => ({ ...prev, [url]: entry }));
       })
       .catch(err => {
         if (controller.signal.aborted) return; // provider unmounted; nothing left to update

@@ -1,5 +1,7 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
+import fs from "node:fs";
+import path from "node:path";
 
 // Runtime deps every DuckDB-backed route needs traced in: the dlopen'd
 // libduckdb.so (file-tracing misses dlopen deps), the sync pointer used to build
@@ -22,7 +24,31 @@ const COL_ARTIFACTS = [
   "**/data/synonym-index.parquet",
 ];
 
+// The sync the pre-built species-list files belong to (public/species-lists/<sync>/,
+// written by scripts/build-species-lists.ts). Baked into the client bundle so a page
+// asks for exactly the files its own deployment was built with.
+const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
+
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_SPECIES_LISTS_SYNC: SPECIES_LISTS_SYNC,
+  },
+  // The species-list files are stored brotli-compressed. Without these headers Vercel
+  // serves them as application/octet-stream and compresses the already-compressed
+  // bytes again, so the browser gets brotli bytes instead of JSON (verified on a
+  // preview). The path carries the sync timestamp, so a year's immutable cache is safe.
+  async headers() {
+    return [
+      {
+        source: "/species-lists/:path*.json.br",
+        headers: [
+          { key: "Content-Encoding", value: "br" },
+          { key: "Content-Type", value: "application/json" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+    ];
+  },
   // Proxy PostHog through our own origin so ad/tracking blockers (which match the
   // posthog.com domain directly) can't drop analytics for the academic audience.
   // /static + /array hit the asset host (it keeps cache-control headers the main
