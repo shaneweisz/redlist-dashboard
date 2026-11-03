@@ -46,6 +46,7 @@ yarn-error.log*
 
 # Generated at build time by scripts/build-species-lists.ts (~40MB) — never commit.
 /public/species-lists/
+/public/search-shards/
 /data/*
 !/data/taxa-summary.json
 !/data/table1a-children-summaries.json

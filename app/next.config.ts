@@ -47,6 +47,15 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
+      {
+        // Search prefix shards (scripts/build-search-shards.ts) — same storage, same reason.
+        source: "/search-shards/:path*.json.br",
+        headers: [
+          { key: "Content-Encoding", value: "br" },
+          { key: "Content-Type", value: "application/json" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
     ];
   },
   // Don't have `next dev` write app/AGENTS.md (its "read the bundled docs"
