@@ -16,7 +16,6 @@ import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
-import { prefetchAllowed } from "@/lib/species-lists/loader";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
@@ -1634,24 +1633,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return null;
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.errors, speciesApiUrl]);
 
-  // Prefetch all species on mount so taxa clicks feel instant (skip for new-assessments — NE
-  // dataset too large). Idempotent via the shared cache's request() — a no-op once
-  // `?taxon=all` is cached or already in flight (e.g. requested by another compare-mode panel,
-  // or by the per-taxon effect below reaching "all" first).
-  // Low priority: it downloads one group file at a time behind whatever the user
-  // clicks (lib/species-lists), and is skipped on cellular / data-saver connections.
-  useEffect(() => {
-    if (isNewAssessments || !prefetchAllowed()) return;
-    cache.request(`${SPECIES_API}?taxon=all`, { priority: "low" });
-  // Depends on cache.request specifically, not the whole cache object: the
-  // linter conservatively wants the whole object for any method call off a
-  // hook-returned value, but cache.request's identity only ever changes
-  // together with cache.entries (see SpeciesCacheContext) — depending on the
-  // whole object here would additionally re-run this effect on every
-  // loadingUrls/errors-only update, e.g. another compare-mode panel's fetch
-  // completing or failing, which has nothing to do with this taxon.
-  }, [isNewAssessments, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Determine which taxa need fetching, and request them from the shared cache
   useEffect(() => {
     if (selectedTaxa.size === 0) return;
@@ -1672,8 +1653,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       cache.request(speciesApiUrl(taxonId, categoryParam));
     }
   // cache.entries (for the "all" fast-path check above) + cache.request
-  // specifically, not the whole cache object — see the prefetch effect
-  // above for why depending on the whole object over-triggers this.
+  // specifically, not the whole cache object: the linter conservatively wants
+  // the whole object for any method call off a hook-returned value, but
+  // cache.request's identity only ever changes together with cache.entries (see
+  // SpeciesCacheContext) — depending on the whole object would additionally
+  // re-run this on every loadingUrls/errors-only update, e.g. another
+  // compare-mode panel's fetch completing or failing.
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, cache.request, speciesApiUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Loading" means one of THIS panel's currently-relevant URLs is still in flight —

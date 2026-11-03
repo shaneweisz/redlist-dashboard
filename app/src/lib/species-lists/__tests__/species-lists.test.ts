@@ -120,63 +120,24 @@ describe("speciesEntryFromFiles", () => {
   });
 });
 
-describe("prefetch queue", () => {
-  it("downloads low-priority files one at a time", async () => {
-    loader.loadGroup("mammals", "assessed", "low");
-    loader.loadGroup("beetles", "assessed", "low");
+describe("group downloads", () => {
+  it("shares one download per group across requests", async () => {
+    const a = loader.speciesEntryFromFiles("/api/redlist/species?taxon=plantae");
+    const b = loader.speciesEntryFromFiles("/api/redlist/species?taxon=ssc-orchid");
     await flush();
-    expect(requested).toEqual(["mammals.assessed.json.br"]);
-    await release("mammals.assessed.json.br");
-    expect(requested).toEqual(["mammals.assessed.json.br", "beetles.assessed.json.br"]);
-  });
-
-  it("starts a click at once and holds the queue until it lands", async () => {
-    loader.loadGroup("mammals", "assessed", "low");
-    loader.loadGroup("beetles", "assessed", "low");
-    await flush();
-    loader.loadGroup("flowering_plants", "ne", "high");
-    await flush();
-    expect(requested).toEqual(["mammals.assessed.json.br", "flowering_plants.ne.json.br"]);
-    await release("mammals.assessed.json.br");
-    expect(requested).not.toContain("beetles.assessed.json.br"); // still paused behind the click
-    await release("flowering_plants.ne.json.br");
-    expect(requested).toContain("beetles.assessed.json.br");
-  });
-
-  it("promotes a queued file the user asks for, and never downloads it twice", async () => {
-    loader.loadGroup("mammals", "assessed", "low");
-    const queued = loader.loadGroup("beetles", "assessed", "low");
-    await flush();
-    const clicked = loader.loadGroup("beetles", "assessed", "high");
-    await flush();
-    expect(clicked).toBe(queued);
-    expect(requested).toEqual(["mammals.assessed.json.br", "beetles.assessed.json.br"]);
-    await release("beetles.assessed.json.br");
-    await release("mammals.assessed.json.br");
-    expect(requested.filter((r) => r === "beetles.assessed.json.br")).toHaveLength(1);
+    expect(requested).toEqual(["flowering_plants.assessed.json.br"]);
+    await release("flowering_plants.assessed.json.br");
+    expect((await a)?.species).toBe((await b)?.species); // the very same rows, not a copy
   });
 
   it("lets a later request retry a file that failed", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("", { status: 404 }))));
-    await expect(loader.loadGroup("mammals", "assessed", "high")).rejects.toThrow(/404/);
+    await expect(loader.loadGroup("mammals", "assessed")).rejects.toThrow(/404/);
     stubFetch();
-    const retry = loader.loadGroup("mammals", "assessed", "high");
+    const retry = loader.loadGroup("mammals", "assessed");
     await flush();
     expect(requested).toEqual(["mammals.assessed.json.br"]);
     await release("mammals.assessed.json.br");
     await expect(retry).resolves.toHaveLength(1);
-  });
-});
-
-describe("prefetchAllowed", () => {
-  it("is off on cellular and data-saver connections", () => {
-    vi.stubGlobal("navigator", { connection: { type: "cellular" } });
-    expect(loader.prefetchAllowed()).toBe(false);
-    vi.stubGlobal("navigator", { connection: { saveData: true } });
-    expect(loader.prefetchAllowed()).toBe(false);
-    vi.stubGlobal("navigator", { connection: { type: "wifi", effectiveType: "4g" } });
-    expect(loader.prefetchAllowed()).toBe(true);
-    vi.stubGlobal("navigator", {}); // Safari/Firefox: no Network Information API → allowed
-    expect(loader.prefetchAllowed()).toBe(true);
   });
 });

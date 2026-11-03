@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Sentry from "@sentry/nextjs";
 import { shouldSkipRequest, toCacheEntry, type SpeciesCacheEntry } from "./species-cache-logic";
-import { speciesEntryFromFiles, type LoadPriority } from "@/lib/species-lists/loader";
+import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
 
 export type { SpeciesCacheEntry };
 
@@ -13,9 +13,8 @@ interface SpeciesCacheValue {
   errors: Record<string, string>;
   // Idempotent: fetches `url` at most once, no matter how many callers request it
   // concurrently (e.g. two compare-mode panels both selecting "Birds") — later
-  // callers for an already-cached or in-flight url are a no-op. `priority: "low"`
-  // marks a background prefetch, which never delays what the user clicks.
-  request: (url: string, opts?: { priority?: LoadPriority }) => void;
+  // callers for an already-cached or in-flight url are a no-op.
+  request: (url: string) => void;
 }
 
 const SpeciesCacheContext = createContext<SpeciesCacheValue | null>(null);
@@ -48,7 +47,7 @@ export function SpeciesCacheProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const request = useCallback((url: string, opts?: { priority?: LoadPriority }) => {
+  const request = useCallback((url: string) => {
     if (shouldSkipRequest(url, entries, inFlightRef.current)) return;
     inFlightRef.current.add(url);
     const controller = new AbortController();
@@ -65,7 +64,7 @@ export function SpeciesCacheProvider({ children }: { children: ReactNode }) {
     // The pre-built per-group files answer almost every request (lib/species-lists);
     // null means they can't (no files for this deployment, or an arbitrary-rank taxon)
     // and a failed file load falls back too — reported, since no server log sees it.
-    speciesEntryFromFiles(url, opts?.priority ?? "high")
+    speciesEntryFromFiles(url)
       .catch(err => {
         Sentry.captureException(err, { tags: { feature: "species-lists" }, extra: { url } });
         return null;
