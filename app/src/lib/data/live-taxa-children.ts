@@ -40,7 +40,7 @@ import {
 
 // Keep in sync with the same constant in scripts/build-taxa-summary.ts and
 // species-duckdb.ts — Homo sapiens, which IUCN omits from its Red List export.
-const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
+export const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
 
 // Mirrors filterToSql's own column derivation exactly (taxonomy-sql.ts) — genus
 // is always derived from scientific_name, never a raw `genus` column, so a
@@ -52,7 +52,7 @@ const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
 // uses in place of IUCN's coarser Actinopterygii/Chondrichthyes) fold into the
 // one real-world order/class both datasets otherwise agree on, instead of
 // surfacing as their own misleading "0% assessed" buckets.
-const RANK_COLUMN_SQL: Record<DynamicRank, string> = {
+export const RANK_COLUMN_SQL: Record<DynamicRank, string> = {
   class: canonicalClassColumnSql("class_name"),
   order: canonicalOrderColumnSql("order_name", "scientific_name"),
   family: "coalesce(lower(family), '')",

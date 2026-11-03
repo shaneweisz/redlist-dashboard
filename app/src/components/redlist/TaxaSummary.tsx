@@ -27,6 +27,7 @@ import { sisRowKey } from "@/lib/species-row-key";
 import { neSplitSentence, neSynonymSentence, reasonComposition, displayReason, NE_SPLIT_EVIDENCE } from "@/lib/col-revision";
 import { NoMatchLine } from "@/components/redlist/revision-links";
 import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
+import { treeChildrenFromFiles } from "@/lib/tree-children/loader";
 
 // See scripts/build-taxa-summary.ts's classifyNoMatch for what each reason means.
 // Modular/additive on top of colBreakdown[].noMatchIds — safe to drop independently
@@ -1634,6 +1635,16 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     setLoadingSubgroups((prev) => new Set(prev).add(taxonId));
     const requestScopeKey = scopeKey;
     try {
+      // Unscoped live-drilldown expands come from the pre-built tree files (one
+      // download per root, shared by every expand under it — lib/tree-children); the
+      // route answers scoped expands and anything the files can't.
+      if (!scopeQs) {
+        const prebuilt = await treeChildrenFromFiles(taxonId);
+        if (prebuilt) {
+          if (scopeKeyRef.current === requestScopeKey) setSubgroupData((prev) => ({ ...prev, [taxonId]: prebuilt }));
+          return;
+        }
+      }
       const res = await fetch(`/api/redlist/taxa-subgroups?nodeId=${taxonId}${scopeQs ? `&${scopeQs}` : ""}`);
       // Bail if the country changed while this was in flight — scopeKey
       // changing already clears subgroupData wholesale (see the effect
