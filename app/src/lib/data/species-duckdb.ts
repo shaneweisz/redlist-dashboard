@@ -15,6 +15,7 @@ import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { NODE_INDEX, getTaxonGroupsForNode, getAncestors, stripNodePrefix } from "@/lib/taxonomy-utils";
 import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
+import { dedupeByRowKey } from "@/lib/search-shards/rank";
 import { getTaxaSummary, getColRevisions } from "@/lib/data/species-store";
 import { isDynamicNodeId, dynamicNodeFilter, buildDynamicNodeId, rankOrderFor, isLiveDrilldownNode, type DynamicRank, type DynamicSegment } from "@/lib/dynamic-taxon";
 import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
@@ -613,7 +614,7 @@ async function rankSource(conn: DuckDBConnection): Promise<string> {
 }
 
 /** A search hit's parquet/temp-table row → the shape the dropdown renders. */
-function toSearchResult(r: Record<string, unknown>, colIdOverride: string | null): SearchResult {
+export function toSearchResult(r: Record<string, unknown>, colIdOverride: string | null): SearchResult {
   const tg = String(r.taxon_group);
   const lineage = { class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family) };
   // assessed.parquet's id column IS the SIS taxon id; unassessed.parquet's is an
@@ -641,27 +642,7 @@ function toSearchResult(r: Record<string, unknown>, colIdOverride: string | null
   };
 }
 
-// One entry per species, in the order the hits arrived. unassessed.parquet is one row per
-// GBIF species key, and CoL lumps some of those: 3,756 col_ids carry more than one key, so
-// a name like Abutilon halophilum matched twice (keys VLWL9 and 8N4F) and listed twice in
-// the dropdown — two rows that now resolve to the same species and would select the same
-// table row. The NE list already shows one row per col_id (ne_gbif_by_col groups by it), so
-// collapsing here is what makes search agree with the list it selects into. Keep the
-// best-observed key of the group, which is the most useful one to preview from; ties keep
-// the first, which is the better-ranked one. The name index adds a second way to arrive at
-// the same species (a hit on its scientific name AND its epithet, say), and this collapses
-// that too. Null keys are never collapsed — those species have no shared identity to merge on.
-function dedupeByRowKey(hits: SearchResult[]): SearchResult[] {
-  const bestByKey = new Map<string, SearchResult>();
-  for (const r of hits) {
-    if (!r.species_key) continue;
-    const prev = bestByKey.get(r.species_key);
-    if (!prev || (r.gbif_occurrence_count ?? -1) > (prev.gbif_occurrence_count ?? -1)) {
-      bestByKey.set(r.species_key, r);
-    }
-  }
-  return hits.filter((r) => !r.species_key || bestByKey.get(r.species_key) === r);
-}
+// dedupeByRowKey lives in lib/search-shards/rank.ts — shared with the browser's shard search.
 
 // Tier 0: prefix hits from the name-sorted index (scripts/build-search-index.ts).
 //
@@ -710,6 +691,12 @@ async function prefixSearch(conn: DuckDBConnection, q: string, lim: number): Pro
 // prefix hits (one pruned range read) → substring hits (the in-memory index) → the CoL
 // universe (species/) → synonyms. The gate is what keeps a precise query like "Panthera
 // leo" from ever touching the heavy tiers.
+/** Tier 0 alone (the prefix search the static shards replace) — for scripts/check-search-shards.ts. */
+export async function prefixSearchSpecies(query: string, limit = 10): Promise<SearchResult[]> {
+  if (query.length < 2) return []; // as searchSpecies / the route
+  return prefixSearch(await getConn(), query.toLowerCase(), Math.min(Math.max(limit, 1), 50));
+}
+
 export async function searchSpecies(query: string, limit = 10): Promise<SearchResult[]> {
   if (query.length < 2) return [];
   const conn = await getConn();
@@ -1356,7 +1343,7 @@ function findViewLeafForGroup(taxonGroup: string): string | null {
 // lookup against a representative row (cheap: at most 2 columns, exact-match on already-
 // warm parquets, LIMIT 1). Falls back to null (old bare ?taxa= browse) only if the root
 // isn't live-drillable at all, or an ancestor rank's lookup comes back empty.
-async function resolveTaxonSuggestionNode(
+export async function resolveTaxonSuggestionNode(
   conn: DuckDBConnection, rank: DynamicRank, value: string, taxonGroup: string,
   // The representative row's lineage when the suggestion came from rank-index.parquet,
   // which bakes it in at build time (chosen by the same struct min that picks the taxon
@@ -1413,7 +1400,7 @@ async function resolveTaxonSuggestionNode(
 // of genera, so without an explicit tier it would crowd the higher ranks out of a
 // three-slot dropdown purely on the "shortest name wins" tie-break (typing "chi" would
 // surface a handful of 4-letter genera instead of Chiroptera).
-const SUGGEST_RANKS: DynamicRank[] = ["class", "order", "family", "genus"];
+export const SUGGEST_RANKS: DynamicRank[] = ["class", "order", "family", "genus"];
 
 // Recognize a taxon (class / order / family / genus) the user is typing, so the search
 // bar can offer "Browse Felidae → " above the species hits. All four are ranks

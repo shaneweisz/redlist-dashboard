@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "npm run fetch-data-from-r2 && npm run fetch-duckdb-ext && npm run build-species-lists && npm run build-tree-children",
+    "prebuild": "npm run fetch-data-from-r2 && npm run fetch-duckdb-ext && npm run build-species-lists && npm run build-search-shards && npm run build-tree-children",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -16,6 +16,7 @@
     "diff-data-vs-r2": "npx tsx scripts/diff-data-vs-r2.ts",
     "fetch-duckdb-ext": "npx tsx scripts/fetch-duckdb-ext.ts",
     "build-species-lists": "npx tsx scripts/build-species-lists.ts",
+    "build-search-shards": "npx tsx scripts/build-search-shards.ts",
     "build-tree-children": "npx tsx scripts/build-tree-children.ts",
     "build-narratives": "npx tsx scripts/build-narratives.ts",
     "upload-narratives-to-r2": "npx tsx scripts/upload-narratives-to-r2.ts"

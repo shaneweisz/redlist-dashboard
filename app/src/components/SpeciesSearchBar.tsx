@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { buildQs, type ViewMode } from "../hooks/useFilterParams";
 import { CATEGORY_COLORS } from "../config/taxa";
 import { findNode, getViewRootForNode } from "../lib/taxonomy-utils";
+import { search } from "../lib/search-shards/client";
 import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "../lib/habitat-filter";
 import {
   captureSearchNoResults,
@@ -108,12 +109,10 @@ export function SpeciesSearchBar() {
 
       setLoading(true);
       try {
-        const res = await fetch(
-          `/api/search?q=${encodeURIComponent(query)}&limit=10`,
-          { signal: controller.signal }
-        );
-        if (!res.ok) throw new Error("Search failed");
-        const data = await res.json();
+        // Static prefix shards first (instant once a prefix's shard is loaded), the live
+        // route only for what they can't answer — see lib/search-shards/client.
+        const data = await search(query, 10, controller.signal);
+        if (controller.signal.aborted) return;
         setResults(data.results);
         setTaxaResults(data.taxa ?? []);
         setIsOpen(true);
@@ -126,7 +125,9 @@ export function SpeciesSearchBar() {
       } finally {
         setLoading(false);
       }
-    }, 250);
+    // Short: a keystroke under an already-loaded shard is a local filter, and a new
+    // prefix is one small CDN file. (Was 250ms when every keystroke hit the server.)
+    }, 60);
 
     return () => {
       clearTimeout(timeout);
