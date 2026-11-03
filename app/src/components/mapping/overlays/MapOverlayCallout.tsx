@@ -15,11 +15,12 @@
  * Rendered inside the map, and imported with `ssr: false`.
  */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import MapShapeCallout from "@/components/mapping/MapShapeCallout";
 import type { MapOverlays } from "@/hooks/mapping/useMapOverlays";
 import { effortAt } from "@/hooks/mapping/useSamplingEffort";
 import { highlightColour, protectedPlanetUrl, type ProtectedArea } from "@/lib/mapping/protected-areas";
+import ProtectedAreaDetails, { ProtectedAreaDetailsToggle } from "@/components/mapping/overlays/ProtectedAreaDetails";
 import { HABITAT_SCHEME_URL } from "@/lib/mapping/habitat-map";
 import { hasForestAnswer } from "@/lib/mapping/forest-point-query";
 import { FOREST_LOSS_CANOPY_THRESHOLD } from "@/lib/mapping/forest-loss";
@@ -28,6 +29,10 @@ import { EFFORT_GROUP_LABELS, formatEffort, gbifSearchUrl } from "@/lib/mapping/
 // The table's own labels, so a basis of record is worded the same wherever it
 // appears.
 import { BASIS_LABELS } from "@/components/mapping/OccurrenceListTable";
+
+/** The callout's width while a protected area's full record is open — wide
+ *  enough for WDPA's labels and values to sit side by side. */
+const DETAILS_WIDTH = 300;
 
 /** Every position in a geometry, flattened — enough to take a bounding box. */
 function positionsOf(geometry: GeoJSON.Geometry): GeoJSON.Position[] {
@@ -77,6 +82,9 @@ export default function MapOverlayCallout({
   width?: number;
 }) {
   const o = overlays;
+  // Which sites have their full record open, by parcel id. Kept here rather
+  // than per row because an open record widens the whole callout.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const areasHere = o.clickedAreas?.panelId === panelId ? o.clickedAreas : null;
   const eco = o.showEcoregions && o.selectedEcoregion?.panelId === panelId ? o.selectedEcoregion : null;
   const hab = o.showHabitat && o.clickedHabitat?.panelId === panelId ? o.clickedHabitat : null;
@@ -107,6 +115,19 @@ export default function MapOverlayCallout({
         : [position[0], position[1], position[0], position[1]];
     }
   }
+  const anyExpanded = areasHere?.areas.some((area) => expanded.has(area.sitePid)) ?? false;
+  // Never wider than the screen itself: on a phone the map is narrower still,
+  // and a panel running off the edge would hide the values it was widened for.
+  const calloutWidth = anyExpanded
+    ? Math.min(Math.max(width ?? 0, DETAILS_WIDTH), window.innerWidth - 16)
+    : width;
+  const toggleExpanded = (sitePid: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(sitePid)) next.add(sitePid);
+      return next;
+    });
+
   const at = header ?? areasHere ?? eco ?? forest ?? hab ?? effort!;
 
   // A rule above every section but the first, whichever that turns out to be.
@@ -114,7 +135,7 @@ export default function MapOverlayCallout({
   const divider = () => (sections++ > 0 ? "pt-1.5 border-t border-zinc-100 dark:border-zinc-700" : "");
 
   return (
-    <MapShapeCallout bounds={bounds} lng={at.lng} lat={at.lat} width={width}>
+    <MapShapeCallout bounds={bounds} lng={at.lng} lat={at.lat} width={calloutWidth}>
       <div className="bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-zinc-200 dark:border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-700 dark:text-zinc-200 space-y-1.5">
         {header && <div className={divider()}>{header.content}</div>}
         {areasHere && (
@@ -146,7 +167,7 @@ export default function MapOverlayCallout({
                       title="This site's outline on the map"
                     />
                   )}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <a
                       href={protectedPlanetUrl(area)}
                       target="_blank"
@@ -165,6 +186,12 @@ export default function MapOverlayCallout({
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
+                    <ProtectedAreaDetailsToggle
+                      open={expanded.has(area.sitePid)}
+                      count={area.details.length}
+                      onToggle={() => toggleExpanded(area.sitePid)}
+                    />
+                    {expanded.has(area.sitePid) && <ProtectedAreaDetails details={area.details} />}
                     {areaAction?.(area, index)}
                   </div>
                 </div>

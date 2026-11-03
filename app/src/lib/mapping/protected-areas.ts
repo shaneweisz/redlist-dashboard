@@ -131,6 +131,44 @@ export interface ProtectedArea {
   /** The site's boundary, generalised to the zoom it was asked for, so the
    *  clicked area can be outlined on the map. Absent for point-only sites. */
   geometry?: GeoJSON.MultiPolygon | null;
+  /** WDPA's whole record for the site, labelled as the service labels it —
+   *  for an assessor who wants more than the summary line. See siteDetails. */
+  details: ProtectedAreaDetail[];
+}
+
+export interface ProtectedAreaDetail {
+  label: string;
+  value: string;
+}
+
+/** Bookkeeping columns, not facts about the site: the row id and geometry. */
+function isInternalField(key: string): boolean {
+  const k = key.toLowerCase();
+  return k === "objectid" || k === "fid" || k.startsWith("shape") || k.startsWith("st_");
+}
+
+/**
+ * Every attribute of a site, in the order the service lists them.
+ *
+ * Unlike the summary fields, "Not Reported" is kept here: that a country
+ * didn't report an IUCN category or a management plan is itself something an
+ * assessor may want to know. "Not Applicable", "Null" and blanks are dropped,
+ * since they describe fields that don't apply (no-take rules on a terrestrial
+ * park) rather than gaps. Areas (any field in km²) are rounded to two
+ * decimals with thousands separators; ids and years are left exactly as given.
+ */
+export function siteDetails(attributes: Record<string, unknown>): ProtectedAreaDetail[] {
+  const details: ProtectedAreaDetail[] = [];
+  for (const [label, raw] of Object.entries(attributes)) {
+    if (raw == null || isInternalField(label)) continue;
+    let value = String(raw).trim();
+    if (value === "" || value === "Null" || value === "N/A" || value === "Not Applicable") continue;
+    if (/km²/.test(label) && /^-?\d+(\.\d+)?$/.test(value)) {
+      value = Number(value).toLocaleString("en", { maximumFractionDigits: 2 });
+    }
+    details.push({ label, value });
+  }
+  return details;
 }
 
 /**
@@ -305,6 +343,7 @@ export function parseIdentifyResponse(json: unknown): ProtectedArea[] {
       siteType: attr("SITE_TYPE", "Site Type"),
       reportedAreaKm2: num(attr("REP_AREA", "Reported Area (km²)")),
       geometry: esriRingsToMultiPolygon((result as { geometry?: { rings?: unknown } })?.geometry?.rings),
+      details: siteDetails(raw),
     });
   }
   return areas;

@@ -3,6 +3,7 @@ import {
   esriRingsToMultiPolygon,
   identifyUrl,
   parseIdentifyResponse,
+  siteDetails,
   protectedPlanetUrl,
   PROTECTED_AREAS_COLOR,
   PROTECTED_AREAS_HUE_ROTATION,
@@ -304,5 +305,42 @@ describe("parseIdentifyResponse", () => {
 
   it("skips records with no id, which nothing could be linked to", () => {
     expect(parseIdentifyResponse({ results: [{ attributes: { NAME: "Somewhere" } }] })).toEqual([]);
+  });
+});
+
+describe("siteDetails", () => {
+  const kruger = {
+    objectid: "194034",
+    "Site ID": "873",
+    "English Name": "Kruger National Park",
+    "IUCN Management Category": "Not Reported",
+    "International Criteria": "Not Applicable",
+    "Reported Area (km²)": "19169.153595",
+    "GIS Area (km²)": "31044",
+    "Status Year": "1926",
+    "Governance Type": "Federal or national ministry or agency",
+    "Management Authority": "South African National Parks",
+    "Supplementary Information": "",
+    shape: "Polygon",
+    "st_area(shape)": "1.701502",
+    "st_length(shape)": "10.714304",
+  };
+
+  it("lists every field in the service's order, under the service's labels", () => {
+    expect(siteDetails(kruger)).toEqual([
+      { label: "Site ID", value: "873" },
+      { label: "English Name", value: "Kruger National Park" },
+      { label: "IUCN Management Category", value: "Not Reported" },
+      { label: "Reported Area (km²)", value: "19,169.15" },
+      { label: "GIS Area (km²)", value: "31,044" },
+      { label: "Status Year", value: "1926" },
+      { label: "Governance Type", value: "Federal or national ministry or agency" },
+      { label: "Management Authority", value: "South African National Parks" },
+    ]);
+  });
+
+  it("is attached to each parsed site", () => {
+    const [area] = parseIdentifyResponse({ results: [{ attributes: kruger }] });
+    expect(area.details.map((d) => d.label)).toContain("Management Authority");
   });
 });
