@@ -384,7 +384,7 @@ function prefixRows(index: string, word: string, weight: number, clause: number)
 function phraseRows(index: string, atom: Atom, weight: number, clause: number): string {
   if (atom.kind !== "phrase") throw new Error("not a phrase");
   const parts = atom.tokens.map((t, i) => {
-    const shift = t.pos === 0 ? "positions" : `list_transform(positions, p -> p - ${t.pos})`;
+    const shift = t.pos === 0 ? "positions" : `list_transform(positions, lambda p: p - ${t.pos})`;
     return `(SELECT assessment_id, ${shift} AS anchors FROM read_parquet(${lit(index)})
              WHERE term = ${lit(t.word)}) t${i}`;
   });

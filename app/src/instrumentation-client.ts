@@ -3,6 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { SENTRY_DATA_COLLECTION } from "@/lib/sentry-data-collection";
 import posthog from "posthog-js";
 
 Sentry.init({
@@ -10,8 +11,7 @@ Sentry.init({
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
   tracesSampleRate: 1,
-  // Enable logs to be sent to Sentry
-  enableLogs: true,
+  dataCollection: SENTRY_DATA_COLLECTION,
 
   integrations: [
     // Ties the two tools together in both directions: each Sentry issue gains a
@@ -26,7 +26,7 @@ Sentry.init({
     //
     // NOTE the functional form. PostHog's own docstring still shows
     // `new posthog.SentryIntegration(posthog)`, which is the Sentry v7 class
-    // shape; @sentry/nextjs is on v10, where integrations are plain objects.
+    // shape; @sentry/nextjs is on v11, where integrations are plain objects.
     posthog.sentryIntegration({
       organization: "shane-weisz",
       // The NUMERIC project id, from the DSN's path above — not the

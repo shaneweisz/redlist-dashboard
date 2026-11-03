@@ -283,3 +283,33 @@ input[type="range"].dual-range-thumb:focus-visible::-moz-range-thumb {
   display: block;
   white-space: normal;
 }
+
+/*
+ * Country shapes on the react-simple-maps world maps (WorldMap, TradeFlowMap).
+ * v5 dropped Geography's { default, hover, pressed } style states, so the
+ * per-state styling lives here. The base fill/stroke are SVG attributes on
+ * the <path>, which these rules override; each shape's dynamic hover colour
+ * arrives as --geo-hover-fill. :focus-visible, not :focus — the paths are
+ * focusable, and :focus would leave a clicked country lit after the mouse
+ * leaves. Plain CSS rather than Tailwind's hover: variant, which is wrapped
+ * in @media (hover: hover) and would drop the tap highlight on touch screens.
+ */
+.wm-geo,
+.tf-geo {
+  outline: none;
+}
+.wm-geo:hover,
+.wm-geo:focus-visible {
+  fill: var(--geo-hover-fill);
+  stroke: #71717a;
+  stroke-width: 0.75;
+}
+.wm-geo:active {
+  fill: #1d4ed8;
+  stroke: #52525b;
+  stroke-width: 1;
+}
+.tf-geo:hover,
+.tf-geo:focus-visible {
+  fill: var(--geo-hover-fill);
+}
