@@ -94,7 +94,7 @@ A per-country landing page and country list, combining live DuckDB queries with 
 `/compare` renders two independent dashboard panels side by side, each with its own filters and view mode and both synced to the URL — so two filtered views can be compared directly, and the comparison shared as a link.
 
 ### Agent access (MCP)
-An MCP server at `/api/mcp` (`@modelcontextprotocol/sdk` + `mcp-handler`) exposes the dashboard's data to agents. Results carry a verifiable `dashboard_url` that resolves to the equivalent UI view.
+An MCP server at `/api/mcp` (`@modelcontextprotocol/server` + `mcp-handler`) exposes the dashboard's data to agents. Results carry a verifiable `dashboard_url` that resolves to the equivalent UI view.
 
 ### Accounts
 Sign-in is handled by Supabase Auth with OAuth providers (GitHub, Google, and Microsoft/Entra). Roles are stored in a `user_roles` table and checked server-side (`src/lib/auth/roles.ts`); `admin` is currently the only role, and it gates the range map and AOH layers below. Schema lives in `app/supabase/migrations/`.
@@ -320,7 +320,7 @@ Contributor conventions (PR descriptions, UI verification, worktrees, screenshot
 - **Recharts** — charts
 - **MapLibre GL** (react-map-gl) / **react-simple-maps** — maps
 - **Supabase** — auth and roles
-- **MCP** (`@modelcontextprotocol/sdk`, `mcp-handler`) — agent access
+- **MCP** (`@modelcontextprotocol/server`, `mcp-handler`) — agent access
 - **Zod** — schema validation
 - **Vitest** — testing
 - **Sentry** / **PostHog** / **Vercel Analytics** — monitoring and analytics
