@@ -6,10 +6,11 @@
  * originate off the sandbox (no egress allowlist). Tools call runBrowseQuery directly
  * — the same logic /browse uses, so results are identical.
  *
- * Served at /api/mcp (streamable HTTP). mcp-handler matches the request pathname
- * against `${basePath}/mcp`, so a static `api/mcp` route is all that's needed — no
- * dynamic `[transport]` segment (its brackets are a glob char-class that breaks the
- * next.config tracing keys, bundling all of data/ and blowing the function-size cap).
+ * Served at /api/mcp (streamable HTTP). mcp-handler 2 serves whatever route it's
+ * mounted at rather than matching the pathname, so this static `api/mcp` route is all
+ * that's needed — no dynamic `[transport]` segment (its brackets are a glob char-class
+ * that breaks the next.config tracing keys, bundling all of data/ and blowing the
+ * function-size cap).
  *
  * Unauthenticated — the same read-only data is already public via /browse, so a token
  * would guard nothing it doesn't, while blocking claude.ai web connectors (which speak
@@ -71,7 +72,7 @@ const handler = createMcpHandler(
         title: "Browse a taxon",
         description:
           "List/aggregate IUCN Red List species under a taxon, with GBIF + Catalogue of Life data. `taxa` works at ANY rank: a curated group (birds, corals), a sub-group (sharks-rays, flatworms), or a scientific class/order/family/genus name (felidae, odonata, panthera). Returns total + by-category breakdown + an `outdated`/`stats` block (use it for percentage questions like '% of mammals needing updating') + a capped species list. Combine optional filters (AND across filters; OR within a list).",
-        inputSchema: { taxa: z.string().describe("A taxonomic group, sub-group, or scientific name (any rank)."), ...FILTERS },
+        inputSchema: z.object({ taxa: z.string().describe("A taxonomic group, sub-group, or scientific name (any rank)."), ...FILTERS }),
       },
       async (args) => {
         const { taxa, region, ...rest } = args as { taxa: string; region?: string } & Record<string, unknown>;
@@ -85,7 +86,7 @@ const handler = createMcpHandler(
       {
         title: "Look up a species by name",
         description: "Find a species by scientific or common name, including synonyms / old names (they resolve to the accepted species). Returns the matching species with IUCN category, GBIF/CoL info, and (if matched via an old name) the matched synonym.",
-        inputSchema: { name: z.string().describe("Scientific or common name, e.g. 'tiger' or 'Felis jubata'.") },
+        inputSchema: z.object({ name: z.string().describe("Scientific or common name, e.g. 'tiger' or 'Felis jubata'.") }),
       },
       async (args) => {
         const { name } = args as { name: string };
@@ -98,13 +99,13 @@ const handler = createMcpHandler(
       {
         title: "Get the valid filter vocabulary",
         description: "Returns the valid values for browse_taxon: featured taxon groups, IUCN threat categories, status categories, IUCN regions, systems, population trends, movement patterns, growth forms, and the endemic flag. Call this first if unsure what values to pass.",
-        inputSchema: {},
+        // An explicit empty object, not an omitted schema: without one the SDK
+        // passes the request context as the callback's first argument.
+        inputSchema: z.object({}),
       },
       async () => asText(buildVocabulary()),
     );
   },
-  {},
-  { basePath: "/api" },
 );
 
 // Run the MCP handler inside the origin context so tool callbacks can build
