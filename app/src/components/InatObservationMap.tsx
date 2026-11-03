@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
+import { loadMapGL } from "@/lib/mapping/load-map";
 import type { MapRef, MapLayerMouseEvent } from "react-map-gl/maplibre";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { InatObservation, getThumbUrl } from "./InatPhotoCard";
 
-const MapGL = dynamic(() => import("react-map-gl/maplibre").then((m) => m.Map), { ssr: false });
+const MapGL = dynamic(loadMapGL, { ssr: false });
 const Source = dynamic(() => import("react-map-gl/maplibre").then((m) => m.Source), { ssr: false });
 const Layer = dynamic(() => import("react-map-gl/maplibre").then((m) => m.Layer), { ssr: false });
 const ScaleControl = dynamic(() => import("react-map-gl/maplibre").then((m) => m.ScaleControl), { ssr: false });

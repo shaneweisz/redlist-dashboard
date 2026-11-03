@@ -6,7 +6,7 @@
  * basemaps under the same names, or the same names over different tiles, is the
  * kind of drift that only shows up when someone compares two screenshots.
  */
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 
 // Basemap style options for MapLibre GL
 export function makeRasterStyle(tileUrl: string, attribution: string): maplibregl.StyleSpecification {
