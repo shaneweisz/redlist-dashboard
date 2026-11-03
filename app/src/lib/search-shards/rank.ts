@@ -41,16 +41,21 @@ export interface ShardSpeciesRow extends SearchResult {
 
 /** A rank-index row as shipped in a shard: the finished suggestion plus its sort keys. */
 export interface ShardTaxonRow {
+  /** The searchable name: the taxon's own (lowercased), or one of its common names. */
   name: string;
   rp: number;
   rank: TaxonSuggestion["rank"];
   nodeId: string | null;
+  /** The taxon's lowercased scientific name — what a suggestion browses to. */
+  taxon: string;
+  /** The taxon's common name, for display ("Browse Adansonia (Baobabs)"), if any. */
+  common: string | null;
 }
 
 /** How many rows a two-letter shard keeps per query: prefixSearch's over-fetch at the API's max limit (50). */
 export const SPECIES_TOP_K = 50 * 3 + 5;
-/** suggestTaxa's per-tier cap at its max limit (10). */
-export const TAXA_TOP_K = 10;
+/** suggestTaxa's per-tier cap (twice its limit — see pickTaxa) at its max limit (10). */
+export const TAXA_TOP_K = 20;
 
 // SQL three-valued booleans under DuckDB's default NULLS LAST, as a DESC sort key:
 // true (2) before false (1) before NULL (0).
@@ -97,19 +102,32 @@ export function rankTaxonRows<T extends ShardTaxonRow>(rows: readonly T[], q: st
   return [...higher, ...genus];
 }
 
-/** The finished taxon half of a search — suggestTaxa's slot logic over rankTaxonRows. */
-export function rankTaxa(rows: readonly ShardTaxonRow[], q: string, limit = 3): TaxonSuggestion[] {
+/**
+ * suggestTaxa's choice from rows already in its SQL order (higher ranks, then genus,
+ * each tier capped at twice the limit): one row per taxon — a taxon can be reached by
+ * its own name and by a common name at once — then a slot reserved for the best genus,
+ * an exact match first. Shared by the route and the browser, so both pick alike.
+ */
+export function pickTaxa(ranked: readonly ShardTaxonRow[], q: string, limit = 3): TaxonSuggestion[] {
   const lim = Math.min(Math.max(limit, 1), 10);
-  const ranked = rankTaxonRows(rows, q, lim);
-  const higher = ranked.filter((r) => r.rp !== GENUS_RP);
-  const genus = ranked.filter((r) => r.rp === GENUS_RP);
+  const seen = new Set<string>();
+  const unique = ranked.filter((r) => (seen.has(r.taxon) ? false : (seen.add(r.taxon), true)));
+  const higher = unique.filter((r) => r.rp !== GENUS_RP);
+  const genus = unique.filter((r) => r.rp === GENUS_RP);
   const genusSlots = genus.length === 0 ? 0 : Math.max(1, lim - higher.length);
   const chosen = [...higher.slice(0, lim - genusSlots), ...genus.slice(0, genusSlots)];
   chosen.sort((a, b) => Number(b.name === q) - Number(a.name === q));
   return chosen.map((r) => ({
-    name: r.name.charAt(0).toUpperCase() + r.name.slice(1),
+    name: r.taxon.charAt(0).toUpperCase() + r.taxon.slice(1),
     rank: r.rank,
-    taxon: r.name,
+    taxon: r.taxon,
     nodeId: r.nodeId,
+    common_name: r.common,
   }));
+}
+
+/** The finished taxon half of a search, in the browser: rankTaxonRows + pickTaxa. */
+export function rankTaxa(rows: readonly ShardTaxonRow[], q: string, limit = 3): TaxonSuggestion[] {
+  const lim = Math.min(Math.max(limit, 1), 10);
+  return pickTaxa(rankTaxonRows(rows, q, lim * 2), q, lim);
 }
