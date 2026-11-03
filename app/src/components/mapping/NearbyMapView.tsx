@@ -30,6 +30,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { loadMapGL } from "@/lib/mapping/load-map";
 import type { MapRef, MapLayerMouseEvent } from "react-map-gl/maplibre";
 import NearbySpeciesPanel from "@/components/mapping/NearbySpeciesPanel";
 import MapOverlayMenu from "@/components/mapping/overlays/MapOverlayMenu";
@@ -56,7 +57,7 @@ import {
   type NearbyRadiusKm,
 } from "@/lib/mapping/nearby-species";
 
-const MapGL = dynamic(() => import("react-map-gl/maplibre").then((mod) => mod.Map), { ssr: false });
+const MapGL = dynamic(loadMapGL, { ssr: false });
 const Source = dynamic(() => import("react-map-gl/maplibre").then((mod) => mod.Source), { ssr: false });
 const Layer = dynamic(() => import("react-map-gl/maplibre").then((mod) => mod.Layer), { ssr: false });
 const MapLibreMarker = dynamic(() => import("react-map-gl/maplibre").then((mod) => mod.Marker), { ssr: false });

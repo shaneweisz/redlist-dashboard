@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
+import { loadMapGL } from "@/lib/mapping/load-map";
 import Link from "next/link";
 import type { MapRef, ViewStateChangeEvent, MapLayerMouseEvent, MapTouchEvent } from "react-map-gl/maplibre";
 import { InatObservation, getThumbUrl, InatPhotoWithPreview } from "@/components/InatPhotoCard";
@@ -91,7 +92,7 @@ const INAT_PAGE_SIZE = 10;
 
 // Dynamically import MapLibre GL components
 const MapGL = dynamic(
-  () => import("react-map-gl/maplibre").then((mod) => mod.Map),
+  loadMapGL,
   { ssr: false }
 );
 const Source = dynamic(
