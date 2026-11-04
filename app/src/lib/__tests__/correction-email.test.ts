@@ -1,16 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { buildBreakdownCorrectionBody, buildBreakdownCorrectionMailto, CORRECTIONS_EMAIL } from "@/lib/correction-email";
 
-const rows = [
-  { name: "Syngnathidae", count: 313, trueAssessed: 286, noMatch: 2, neCount: 25 },
-  { name: "Solenostomidae", count: 7, trueAssessed: 4, noMatch: 0, neCount: 3 },
-];
 const input = {
-  groupLabel: "Seahorses & Pipefishes",
+  groupLabel: "Snake Specialist Group",
   rankLabel: "Family",
-  rows,
-  sourceLabel: "COL26.6 XR",
-  pageUrl: "https://www.dashforlife.org/?taxa=fishes",
+  names: ["Boidae", "Colubridae", "Elapidae"],
+  pageUrl: "https://www.dashforlife.org/?layout=ssc",
 };
 
 function parse(link: string) {
@@ -23,43 +18,49 @@ function parse(link: string) {
 }
 
 describe("buildBreakdownCorrectionBody", () => {
-  it("writes out the current breakdown, then leaves room for the correction", () => {
+  it("says what the dashboard has, then asks what it should be", () => {
     const body = buildBreakdownCorrectionBody(input);
-    expect(body).toContain("Family: described / assessed / no 1:1 CoL match / not evaluated");
-    expect(body).toContain("Syngnathidae: 313 / 286 / 2 / 25");
-    expect(body).toContain("COL26.6 XR");
-    expect(body.indexOf("Syngnathidae")).toBeLessThan(body.indexOf("I believe it should be:"));
+    expect(body).toContain("According to the dashboard, the Snake Specialist Group has the following 3 families: Boidae, Colubridae, Elapidae.");
+    expect(body.indexOf("According to the dashboard")).toBeLessThan(body.indexOf("It should actually be:"));
+  });
+
+  it("uses the rank's plural, and drops 'the' for a plain taxon", () => {
+    const body = buildBreakdownCorrectionBody({ ...input, groupLabel: "Anoles", rankLabel: "Genus", names: ["Anolis", "Norops"] });
+    expect(body).toContain("According to the dashboard, Anoles has the following 2 genera: Anolis, Norops.");
+  });
+
+  it("describes a catch-all group by its scope, since it has no list of names", () => {
+    const body = buildBreakdownCorrectionBody({ ...input, groupLabel: "Lizard and Tuatara Red List Authority", rankLabel: "Group", names: ["Lizard and Tuatara Red List Authority"], scopeText: "Lizards not claimed by any other group." });
+    expect(body).toContain("According to the dashboard, the Lizard and Tuatara Red List Authority covers: Lizards not claimed by any other group.");
   });
 
   it("records the page the report came from, and omits it when there isn't one", () => {
-    expect(buildBreakdownCorrectionBody(input)).toContain("Reported from https://www.dashforlife.org/?taxa=fishes");
+    expect(buildBreakdownCorrectionBody(input)).toContain("Reported from https://www.dashforlife.org/?layout=ssc");
     expect(buildBreakdownCorrectionBody({ ...input, pageUrl: undefined })).not.toContain("Reported from");
   });
 });
 
 describe("buildBreakdownCorrectionMailto", () => {
-  it("addresses the maintainer with the subject and body prefilled", () => {
+  it("addresses the maintainer with a 'Suggested correction' subject", () => {
     const { to, subject, body } = parse(buildBreakdownCorrectionMailto(input));
     expect(to).toBe(CORRECTIONS_EMAIL);
-    expect(subject).toBe("Described-species breakdown for Seahorses & Pipefishes looks wrong");
-    expect(body).toContain("Syngnathidae: 313 / 286 / 2 / 25");
+    expect(subject).toBe("Suggested correction for the Snake Specialist Group");
+    expect(body).toContain("Boidae, Colubridae, Elapidae");
   });
 
   // "&" would end the subject early, and "+" would show literally in most mail
   // clients, if the query weren't percent-encoded.
   it("percent-encodes the subject and body", () => {
-    const link = buildBreakdownCorrectionMailto(input);
+    const link = buildBreakdownCorrectionMailto({ ...input, groupLabel: "Seahorses & Pipefishes" });
     expect(link).not.toContain("Seahorses & Pipefishes");
     expect(link).not.toContain("+");
-    expect(link).toContain("%20");
   });
 
-  it("cuts a long breakdown to fit the mailto length budget and says how much it kept", () => {
-    const many = Array.from({ length: 120 }, (_, i) => ({ name: `Family${i}`, count: i, trueAssessed: i, noMatch: 0, neCount: 0 }));
-    const link = buildBreakdownCorrectionMailto({ ...input, rows: many });
+  it("cuts a long name list to fit the mailto length budget and says how many it left out", () => {
+    const names = Array.from({ length: 300 }, (_, i) => `Familyname${i}`);
+    const link = buildBreakdownCorrectionMailto({ ...input, names });
     expect(link.length).toBeLessThanOrEqual(1900);
     const { body } = parse(link);
-    expect(body).toMatch(/\(first \d+ of 120 rows; the rest are on the page below\)/);
-    expect(body).toContain("Family0: 0 / 0 / 0 / 0");
+    expect(body).toMatch(/has the following 300 families: Familyname0, .*, and \d+ more \(see the page below\)\./);
   });
 });

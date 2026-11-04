@@ -10,55 +10,53 @@
 
 export const CORRECTIONS_EMAIL = "sw984@cam.ac.uk";
 
-export interface BreakdownCorrectionRow {
-  /** Display name, already resolved (e.g. "Syngnathidae"). */
-  name: string;
-  /** # Described, per Catalogue of Life. */
-  count: number;
-  /** Assessed → Total. */
-  trueAssessed: number;
-  /** Assessed → No 1:1 CoL Match. */
-  noMatch: number;
-  /** # Not Evaluated. */
-  neCount: number;
-}
-
 export interface BreakdownCorrectionInput {
-  /** The node the popover is describing, e.g. "Seahorses & Pipefishes". */
+  /** The node the popover is describing, e.g. "Snake Specialist Group". */
   groupLabel: string;
-  /** What the first column holds — "Family", "Order", ... */
+  /** What the names are — "Family", "Genus", ... */
   rankLabel: string;
-  rows: BreakdownCorrectionRow[];
-  /** The CoL release the numbers came from, e.g. "COL26.6 XR". */
-  sourceLabel: string;
+  /** The names the dashboard puts in this group, already display-cased. */
+  names: string[];
+  /** For a catch-all group, which has no list of names: its scope in words. */
+  scopeText?: string;
   /** The dashboard URL the reporter was looking at, so we can reproduce it. */
   pageUrl?: string;
 }
 
 // Some mail clients (Outlook on Windows among them) silently drop a mailto:
-// link longer than ~2,000 characters, so the table is cut to fit this budget
-// for the whole encoded link, and the email says how many rows it kept.
+// link longer than ~2,000 characters, so the name list is cut to fit this
+// budget for the whole encoded link, and the email says how many it left out.
 const MAX_MAILTO_LENGTH = 1900;
 
-export function buildBreakdownCorrectionSubject(groupLabel: string): string {
-  return `Described-species breakdown for ${groupLabel} looks wrong`;
+const PLURALS: Record<string, string> = { Class: "classes", Order: "orders", Family: "families", Genus: "genera", Species: "species" };
+
+/** "the Snake Specialist Group", but plain "Mammals". */
+function groupPhrase(groupLabel: string): string {
+  return /(Group|Authority)$/.test(groupLabel) ? `the ${groupLabel}` : groupLabel;
 }
 
-export function buildBreakdownCorrectionBody(input: BreakdownCorrectionInput, maxRows = input.rows.length): string {
-  const { groupLabel, rankLabel, rows, sourceLabel, pageUrl } = input;
-  const shown = rows.slice(0, maxRows);
+export function buildBreakdownCorrectionSubject(groupLabel: string): string {
+  return `Suggested correction for ${groupPhrase(groupLabel)}`;
+}
+
+export function buildBreakdownCorrectionBody(input: BreakdownCorrectionInput, maxNames = input.names.length): string {
+  const { groupLabel, rankLabel, names, scopeText, pageUrl } = input;
+  const group = groupPhrase(groupLabel);
+  let current: string;
+  if (scopeText) {
+    current = `According to the dashboard, ${group} covers: ${scopeText}`;
+  } else {
+    const noun = names.length === 1 ? rankLabel.toLowerCase() : PLURALS[rankLabel] ?? `${rankLabel.toLowerCase()}s`;
+    const shown = names.slice(0, maxNames);
+    const rest = names.length - shown.length;
+    current = `According to the dashboard, ${group} has the following ${names.length} ${noun}: ${shown.join(", ")}${rest > 0 ? `, and ${rest} more (see the page below)` : ""}.`;
+  }
   return [
-    `The dashboard breaks down ${groupLabel}'s described species like this (source: ${sourceLabel}):`,
+    current,
     "",
-    `${rankLabel}: described / assessed / no 1:1 CoL match / not evaluated`,
-    ...shown.map((r) => `${r.name}: ${r.count} / ${r.trueAssessed} / ${r.noMatch} / ${r.neCount}`),
-    ...(rows.length > shown.length ? [`(first ${shown.length} of ${rows.length} rows; the rest are on the page below)`] : []),
+    "It should actually be: ",
     "",
-    "I believe it should be:",
-    "",
-    "[Which groups belong here and which don't, and why. A published circumscription or the specialist group's own scope helps.]",
-    "",
-    ...(pageUrl ? [`Reported from ${pageUrl}`] : []),
+    ...(pageUrl ? ["", `Reported from ${pageUrl}`] : []),
   ].join("\n");
 }
 
@@ -70,7 +68,7 @@ function toMailto(subject: string, body: string): string {
 
 export function buildBreakdownCorrectionMailto(input: BreakdownCorrectionInput): string {
   const subject = buildBreakdownCorrectionSubject(input.groupLabel);
-  for (let n = input.rows.length; n > 0; n--) {
+  for (let n = input.names.length; n > 0; n--) {
     const link = toMailto(subject, buildBreakdownCorrectionBody(input, n));
     if (link.length <= MAX_MAILTO_LENGTH) return link;
   }

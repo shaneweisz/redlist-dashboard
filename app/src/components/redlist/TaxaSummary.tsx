@@ -1435,14 +1435,11 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                     href={buildBreakdownCorrectionMailto({
                       groupLabel: breakdownGroupLabel,
                       rankLabel: breakdownDim.label,
-                      rows: effectiveBreakdown.map((b) => ({
-                        name: breakdownDisplayName(breakdownDim.rank, b.name),
-                        count: b.count,
-                        trueAssessed: b.trueAssessed,
-                        noMatch: b.noMatchIds.length,
-                        neCount: b.neCount,
-                      })),
-                      sourceLabel: COL_RELEASE_LABEL,
+                      names: effectiveBreakdown.map((b) => breakdownDisplayName(breakdownDim.rank, b.name)),
+                      // A catch-all's only "row" is its own name, so say what it covers instead.
+                      scopeText: breakdownDim.rank === "remainder"
+                        ? describeFilter(filter, node ? nodeId : undefined).map((seg) => seg.text).join("")
+                        : undefined,
                       pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
                     })}
                     className="text-blue-300 hover:text-blue-200 underline inline-flex items-center gap-1.5"
