@@ -47,7 +47,7 @@ const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
 interface BackboneHelpers {
   hasBackbone: boolean;
   /** See BreakdownQueryContext.hasChecklistColumns — false for a data sync whose
-   *  backbone.parquet was built before build-backbone stamped these columns. */
+   *  backbone.parquet was built before build-taxa stamped these columns. */
   hasChecklistColumns: boolean;
 }
 let backboneHelpersPromise: Promise<BackboneHelpers> | null = null;

@@ -2,7 +2,7 @@
 
 ## `wcvp-native-countries.parquet` (~983k names, full WCVP checklist, ~17MB)
 
-Native-country lookup (ISO 3166-1 alpha-2 codes) for the "POWO" native-range source in `OccurrenceMapRow.tsx` (issue #82), alongside the Red List assessment-location-based source (`s.countries`, computed in `scripts/fetch-redlist-species.ts`).
+Native-country lookup (ISO 3166-1 alpha-2 codes) for the "POWO" native-range source in `OccurrenceMapRow.tsx` (issue #82), alongside the Red List assessment-location-based source (`s.countries`, computed in `scripts/pipeline/build-assessments.ts`).
 
 **Parquet, not JSON** — `/api/wcvp-native-range` queries this file directly via DuckDB (`read_parquet(...) WHERE name = $name`), the same pattern `species-duckdb.ts` uses elsewhere in this app. A plain JSON import was tried first and reverted: importing a ~49MB JSON module forces parsing the *entire* file into a JS object on every cold start just to answer a single-name lookup — measured ~3s, and since that parse is synchronous it blocked Node's single-threaded event loop for the whole duration, visibly delaying the rest of the page (including the occurrence map itself) on a cold request. Parquet + DuckDB reads only the matching row; the same lookup now takes ~200ms cold, ~20ms warm. Committed directly to git (not R2-hosted) per the same reasoning as before — it's still bundled with the `/api/wcvp-native-range` function (traced explicitly in `next.config.ts`, the same class of fix as the dlopen'd `libduckdb.so` other DuckDB routes already need).
 
@@ -19,4 +19,4 @@ Regenerate with:
 npx tsx scripts/fetch-wcvp-native-range.ts
 ```
 
-(WCVP ships periodic updates; re-run occasionally, not part of the regular weekly sync.)
+(WCVP ships periodic updates; re-run occasionally, not part of the regular monthly sync.)

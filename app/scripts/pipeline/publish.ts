@@ -33,6 +33,17 @@ export function publish(opts: { upload?: boolean } = {}): void {
   if (opts.upload !== false) {
     execFileSync("npx", ["tsx", "scripts/upload-data-to-r2.ts"], { cwd: path.join(__dirname, "..", ".."), stdio: "inherit" });
   }
+  console.log(`\nStage the data PR with:\n  git add ${[...trackedDataFiles(), "app/latest-sync.txt", "app/src/config/"].join(" ")}`);
+}
+
+/**
+ * The data/ files git tracks: exactly the ones .gitignore un-ignores by name,
+ * read from it rather than kept as a second list that could drift.
+ */
+export function trackedDataFiles(): string[] {
+  return fs.readFileSync(path.join(__dirname, "..", "..", ".gitignore"), "utf-8").split("\n")
+    .map((l) => l.trim()).filter((l) => l.startsWith("!/data/") && !l.endsWith("/"))
+    .map((l) => `app/${l.slice(2)}`);
 }
 
 const isDirectRun = process.argv[1]?.endsWith("pipeline/publish.ts") || process.argv[1]?.endsWith("pipeline/publish.js");

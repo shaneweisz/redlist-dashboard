@@ -16,7 +16,7 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { NODE_INDEX, getTaxonGroupsForNode, getAncestors, stripNodePrefix } from "@/lib/taxonomy-utils";
 import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
 import { dedupeByRowKey, pickTaxa } from "@/lib/search-shards/rank";
-import { getTaxaSummary, getColRevisions } from "@/lib/data/species-store";
+import { getTaxaSummary, getColRevisions, type CreditSource, type HistoryMap } from "@/lib/data/species-store";
 import { isDynamicNodeId, dynamicNodeFilter, buildDynamicNodeId, rankOrderFor, isLiveDrilldownNode, type DynamicRank, type DynamicSegment } from "@/lib/dynamic-taxon";
 import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { sisRowKey, colRowKey, speciesRowKey, type SpeciesRowKey } from "@/lib/species-row-key";
@@ -140,7 +140,7 @@ export function resolveWhere(taxonId: string): WhereParts {
 }
 
 // species/ is Hive-partitioned by `taxon_group` (the IUCN Table 1a group, assigned at
-// build time from the lineage — see build-backbone's TAXON_GROUP_CASE). So the NE
+// build time from the lineage — see build-taxa's TAXON_GROUP_CASE). So the NE
 // universe is filtered with the SAME `whereSql` resolveWhere() builds for the
 // assessed/unassessed parquets, and the partition prunes to the queried group(s). No
 // separate node→CoL lineage mapping or per-query partition logic is needed.
@@ -200,7 +200,7 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     taxon_id: mapTaxonId(taxonGroup),
     // Species description year from CoL (NE rows only; null for assessed species,
     // whose parquet has no such column). Coalesced upstream from the author-year
-    // columns with a cited-reference-year fallback — see build-backbone.
+    // columns with a cited-reference-year fallback — see build-taxa.
     described_year: num(r.described_year),
     gbif_species_key: str(r.gbif_species_key),
     gbif_occurrence_count: num(r.gbif_occurrence_count),
@@ -523,7 +523,7 @@ export function nodeIdForSpecies(taxonGroup: string, lineage: Lineage): string |
 // to re-scan the name columns of assessed+unassessed straight off R2 — ~25MB pulled
 // and decompressed per request, with no pruning possible (a substring ILIKE can't use
 // row-group statistics, and both parquets are written ORDER BY class_name, order_name,
-// family, so names are scattered across every row group anyway — see build-parquet).
+// family, so names are scattered across every row group anyway — see build-read-models).
 // Measured against production: ~2.2s per uncached query, essentially all of it this
 // scan, with searchSpecies and suggestTaxa serialized behind one another on the shared
 // connection. A cold no-match, which falls through to species/** and synonym-index,
@@ -1028,7 +1028,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
       class_name: str(r.class_name),
       category: String(r.category ?? ""),
       criteria: (r.criteria as string) ?? null,
-      // ";"-separated in the parquet, written by fetch-redlist-species.
+      // ";"-separated in the parquet, written by build-assessments.
       threat_codes: String(r.threat_codes ?? "").split(";").filter(Boolean),
       // Free to carry: the row is already being read, so this is two more
       // columns off the same scan rather than another query.
@@ -1122,7 +1122,7 @@ export async function warmConnection(): Promise<void> {
 export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
   const conn = await getConn();
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
-  // rebuilt by a separate scheduled sync (scripts/build-parquet.ts), not by this
+  // rebuilt by a separate scheduled sync (scripts/pipeline/build-read-models.ts), not by this
   // deploy, so there's a window where the deployed code expects a column the
   // currently-synced parquet doesn't have yet. Naming it would throw a DuckDB
   // Binder Error for every request in that window — this deploy's whole history
@@ -1473,4 +1473,49 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
     };
   }));
   return pickTaxa(withNodes, q, lim);
+}
+
+// ─── Credit candidates ──────────────────────────────────────────────────────
+
+const creditSources = new Map<string, Promise<CreditSource>>();
+
+/**
+ * One group's assessed species and their published histories, for the credit
+ * candidates panel. Two reads per group per warm container: assessed.parquet's
+ * rows in the group, and their assessments.parquet history.
+ */
+export function getCreditSource(group: string): Promise<CreditSource> {
+  let p = creditSources.get(group);
+  if (!p) {
+    p = (async () => {
+      const conn = await getConn();
+      const rows = (await conn.runAndReadAll(`
+        SELECT id, assessment_id, scientific_name, class_name, order_name, family, iucn_category,
+               CAST(assessment_date AS VARCHAR) AS assessment_date, year_published, countries
+        FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE taxon_group = $g`, { g: group })).getRowObjects();
+      const hist = (await conn.runAndReadAll(`
+        SELECT h.sis_taxon_id, h.id, h."year", h.category, h."date", h.assessors, h.reviewers, h.facilitators
+        FROM read_parquet('${parquetUri("assessments.parquet")}') h
+        WHERE h.sis_taxon_id IN (SELECT id FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE taxon_group = $g)
+        ORDER BY h.sis_taxon_id, h.seq`, { g: group })).getRowObjects();
+      const history: HistoryMap = {};
+      for (const h of hist) {
+        (history[String(h.sis_taxon_id)] ??= []).push({
+          id: Number(h.id), year: String(h.year ?? ""), category: String(h.category ?? ""), date: str(h.date),
+          assessors: str(h.assessors), reviewers: str(h.reviewers), facilitators: str(h.facilitators),
+        });
+      }
+      return {
+        rows: rows.map((r) => ({
+          sis_taxon_id: Number(r.id), assessment_id: Number(r.assessment_id), scientific_name: String(r.scientific_name),
+          class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family),
+          category: String(r.iucn_category ?? ""), assessment_date: str(r.assessment_date),
+          year_published: String(r.year_published ?? ""), countries: splitList(r.countries),
+        })),
+        history,
+      };
+    })().catch((e) => { creditSources.delete(group); throw e; });
+    creditSources.set(group, p);
+  }
+  return p;
 }

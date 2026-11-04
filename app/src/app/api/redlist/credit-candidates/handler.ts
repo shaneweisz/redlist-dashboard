@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCreditCandidates } from "@/lib/data/species-store";
+import { getCreditSource } from "@/lib/data/species-duckdb";
 import { CREDIT_ROLES, type CreditRole, type CandidateRank } from "@/lib/credit-candidates";
 import { findNode } from "@/lib/taxonomy-utils";
 import { buildDynamicNodeId, dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
@@ -59,7 +60,7 @@ function rankLabels(
 const isCreditRole = (v: string | null): v is CreditRole =>
   !!v && (CREDIT_ROLES as readonly string[]).includes(v);
 
-export function handleCandidatesRequest(request: NextRequest): NextResponse {
+export async function handleCandidatesRequest(request: NextRequest): Promise<NextResponse> {
   const searchParams = request.nextUrl.searchParams;
   const taxonGroup = searchParams.get("taxonGroup");
   const roleParam = searchParams.get("role");
@@ -86,7 +87,8 @@ export function handleCandidatesRequest(request: NextRequest): NextResponse {
   const countries = countriesParam.split(";").filter(Boolean);
 
   try {
-    const { candidates, ranks, defaultRank } = getCreditCandidates(role, target, countries);
+    const source = await getCreditSource(target.taxonGroup);
+    const { candidates, ranks, defaultRank } = getCreditCandidates(role, target, countries, source);
     return NextResponse.json(
       { candidates, ranks, defaultRank, labels: rankLabels(ranks, target) },
       { headers: CACHE_5M },

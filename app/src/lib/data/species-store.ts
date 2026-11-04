@@ -7,7 +7,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { readCsv } from "./csv";
 import { countryToRegion } from "../regions";
 import type { ColRevision } from "../col-revision";
 import type { NoMatchReason, NoMatchDetail } from "./col-breakdown";
@@ -22,7 +21,6 @@ import {
 // =============================================================================
 
 const DATA_DIR = path.join(process.cwd(), "data");
-const REDLIST_DIR = path.join(DATA_DIR, "redlist");
 const TAXA_SUMMARY_PATH = path.join(DATA_DIR, "taxa-summary.json");
 const TABLE1A_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, "table1a-children-summaries.json");
 const SSC_GROUP_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, "ssc-group-children-summaries.json");
@@ -34,28 +32,21 @@ const COL_REVISIONS_PATH = path.join(DATA_DIR, "col-revisions.json");
 // TYPES
 // =============================================================================
 
-interface RedlistRow {
+/**
+ * An assessed species as credit candidates need it: its latest assessment and
+ * lineage. Read from assessed.parquet by getCreditSource (species-duckdb.ts).
+ */
+export interface CreditRow {
   sis_taxon_id: number;
   assessment_id: number;
   scientific_name: string;
-  common_name: string | null;
   class_name: string | null;
   order_name: string | null;
   family: string | null;
   category: string;
   assessment_date: string | null;
   year_published: string;
-  population_trend: string | null;
   countries: string[];
-  taxon_group_table1a: string;
-  systems: string[];
-  growth_forms: string[];
-  movement_pattern: string | null;
-  possibly_extinct: boolean;
-  possibly_extinct_in_the_wild: boolean;
-  criteria: string | null;
-  threat_codes: string[];
-  habitat_codes: string[];
 }
 
 export interface PreviousAssessment {
@@ -71,8 +62,8 @@ export interface PreviousAssessment {
    * person and the facilitator line is the only one that can.
    *
    * Optional because it is optional in the FILES, not just the type: history
-   * JSON written before fetch-redlist-species started emitting the field has no
-   * such key (same story as `criteria` — see build-parquet.ts, which reads these
+   * JSON written before build-assessments started emitting the field has no
+   * such key (same story as `criteria` — see build-read-models.ts, which reads these
    * same files and coalesces both).
    */
   facilitators?: string | null;
@@ -93,43 +84,15 @@ export interface TaxaSummaryRow {
 }
 
 // =============================================================================
-// CSV PARSERS
-// =============================================================================
-
-function parseRedlistRow(r: Record<string, string>): RedlistRow {
-  return {
-    sis_taxon_id: parseInt(r.sis_taxon_id, 10),
-    assessment_id: parseInt(r.assessment_id, 10),
-    scientific_name: r.scientific_name,
-    common_name: r.common_name || null,
-    class_name: r.class_name || null,
-    order_name: r.order_name || null,
-    family: r.family || null,
-    category: r.iucn_category || "",
-    assessment_date: r.assessment_date || null,
-    year_published: r.year_published || "",
-    population_trend: r.population_trend || null,
-    countries: r.countries ? r.countries.split(";").filter(Boolean) : [],
-    taxon_group_table1a: r.taxon_group_table1a,
-    systems: r.systems ? r.systems.split(";").filter(Boolean) : [],
-    growth_forms: r.growth_forms ? r.growth_forms.split(";").filter(Boolean) : [],
-    movement_pattern: r.movement_pattern || null,
-    possibly_extinct: r.possibly_extinct === "true",
-    possibly_extinct_in_the_wild: r.possibly_extinct_in_the_wild === "true",
-    criteria: r.criteria || null,
-    threat_codes: r.threat_codes ? r.threat_codes.split(";").filter(Boolean) : [],
-    habitat_codes: r.habitat_codes ? r.habitat_codes.split(";").filter(Boolean) : [],
-  };
-}
-
-// =============================================================================
 // CACHE
 // =============================================================================
 
-type HistoryMap = Record<string, PreviousAssessment[]>;
+/** sis_taxon_id → its published assessments, newest first (assessments.parquet). */
+export type HistoryMap = Record<string, PreviousAssessment[]>;
 
-const redlistCache = new Map<string, RedlistRow[]>();
-const historyCache = new Map<string, HistoryMap>();
+/** One group's assessed species and their histories: what credit candidates are drawn from. */
+export interface CreditSource { rows: CreditRow[]; history: HistoryMap }
+
 let taxaSummaryCache: TaxaSummaryRow[] | null = null;
 let nodeChildrenSummariesCache: Record<string, NodeSummary[]> | null = null;
 let countryStatsCache: Record<string, { species: number; outdated: number }> | null = null;
@@ -137,36 +100,10 @@ let colRevisionsCache: Map<number, ColRevision> | null = null;
 
 /** @internal Reset all module-level caches (for tests only). */
 export function _resetCaches(): void {
-  redlistCache.clear();
-  historyCache.clear();
   taxaSummaryCache = null;
   nodeChildrenSummariesCache = null;
   countryStatsCache = null;
   colRevisionsCache = null;
-}
-
-function loadRedlistForGroup(group: string): RedlistRow[] {
-  if (redlistCache.has(group)) return redlistCache.get(group)!;
-  const csvPath = path.join(REDLIST_DIR, `${group}.csv`);
-  if (!fs.existsSync(csvPath)) {
-    redlistCache.set(group, []);
-    return [];
-  }
-  const rows = readCsv(csvPath, parseRedlistRow);
-  redlistCache.set(group, rows);
-  return rows;
-}
-
-function loadHistoryForGroup(group: string): HistoryMap {
-  if (historyCache.has(group)) return historyCache.get(group)!;
-  const jsonPath = path.join(REDLIST_DIR, "history", `${group}.json`);
-  if (!fs.existsSync(jsonPath)) {
-    historyCache.set(group, {});
-    return {};
-  }
-  const data = JSON.parse(fs.readFileSync(jsonPath, "utf-8")) as HistoryMap;
-  historyCache.set(group, data);
-  return data;
 }
 
 // =============================================================================
@@ -356,6 +293,7 @@ export function getCreditCandidates(
   role: CreditRole,
   target: TargetLineage,
   countries: string[],
+  source: CreditSource,
 ): CandidateResult {
   const countrySet = new Set(countries.map((c) => c.toUpperCase()));
   const genus = genusOf(target.scientificName);
@@ -363,8 +301,8 @@ export function getCreditCandidates(
   const orderLc = lc(target.orderName);
   const classLc = lc(target.className);
 
-  const redlistRows = loadRedlistForGroup(target.taxonGroup);
-  const historyMap = loadHistoryForGroup(target.taxonGroup);
+  const redlistRows = source.rows;
+  const historyMap = source.history;
 
   // name -> rank -> tier, holding ONLY rows whose deepest match is that rank
   // until the roll-up below.
@@ -395,8 +333,7 @@ export function getCreditCandidates(
       year: row.year_published,
       category: row.category,
       date: row.assessment_date,
-      // The per-group CSV carries no credit columns at all, so a species with no
-      // history file contributes nobody, whichever role is asked for.
+      // A species with no published history contributes nobody, whichever role is asked for.
       assessors: null as string | null,
       reviewers: null as string | null,
       facilitators: null as string | null,

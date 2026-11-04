@@ -334,7 +334,7 @@ export const SPLIT_CANDIDATES_SQL = (bb: string, assessedPath: string, assessedC
  *
  * status = 'synonym' exactly, never LIKE '%synonym%': 'ambiguous synonym' is CoL
  * saying the name's application is UNCERTAIN, which is the opposite of evidence
- * that these two names are one taxon (same rule as build-backbone's, and the same
+ * that these two names are one taxon (same rule as build-taxa's, and the same
  * trap Pararge xiphia fell into there).
  *
  * One assessed species per NE species, or no claim — CoL can file two names IUCN
@@ -399,7 +399,7 @@ export interface BreakdownQueryContext {
   /** Whether split_candidates/col_to_assessed (backbone-dependent) have been built. */
   hasBackbone: boolean;
   /**
-   * Whether backbone.parquet actually carries build-backbone's checklist-derived
+   * Whether backbone.parquet actually carries build-taxa's checklist-derived
    * columns (in_checklist / checklist_parent_id / checklist_name). Separate from
    * hasBackbone because those three were added to the backbone AFTER the queries
    * that read them: the sync only rebuilds the backbone when a CoL release moves,
@@ -415,7 +415,7 @@ export interface BreakdownQueryContext {
   backbonePath?: string;
 }
 
-/** The build-backbone columns syn_in_checklist needs; see hasChecklistColumns. */
+/** The build-taxa columns syn_in_checklist needs; see hasChecklistColumns. */
 const CHECKLIST_COLUMNS = ["in_checklist", "checklist_parent_id", "checklist_name"];
 
 /**

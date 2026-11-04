@@ -129,7 +129,7 @@ export interface RealmStatsResponse {
  * The country equivalent (getCountryStats) reads a precomputed JSON because there
  * are ~200 countries and the landing map needs every one of them; realm has three
  * values and one GROUP BY answers all of them at once, so this stays live rather
- * than adding a fourth build artifact to the weekly sync that could drift.
+ * than adding a fourth build artifact to the monthly sync that could drift.
  *
  * A species assessed as e.g. "Freshwater;Marine" counts once toward BOTH realms
  * here — that's what the unnest does, and it's the honest reading of a bar that
