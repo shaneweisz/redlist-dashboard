@@ -97,7 +97,11 @@ export const MATCHING_CASES: MatchCase[] = [
     name: "Pseudophilautus abundus",
     why: "Shares authorship with P. procax; authorship alone matched them and abundus (EN) showed procax's records.",
     source: "species-key.ts sameOrganism; build-parquet.ts",
-    expect: { linkedTo: "Pseudophilautus abundus", gbifKeyName: "Pseudophilautus abundus", neListed: { "Pseudophilautus procax": true } },
+    // IUCN also lists "Philautus  procax" (sic, double space) as a synonym of
+    // abundus, so procax stays off the NE list; prod only missed that because it
+    // didn't normalise the space. Its records still don't count for abundus.
+    expect: { linkedTo: "Pseudophilautus abundus", gbifKeyName: "Pseudophilautus abundus", maxRecords: 100, neListed: { "Pseudophilautus procax": false } },
+    knownBug: "prod lists P. procax as Not Evaluated: IUCN's synonym is written with a double space and prod didn't normalise it",
   },
   {
     name: "Acacia koaia",
@@ -274,9 +278,9 @@ export const MATCHING_CASES: MatchCase[] = [
     expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false } },
   },
   {
-    name: "Pseudophilautus procax",
-    why: "Unassessed: an ordinary Not Evaluated species, so the list is checked for over-filtering too.",
-    source: "species-key.test.ts",
-    expect: { assessed: false, neListed: { "Pseudophilautus procax": true } },
+    name: "Syllepte belialis",
+    why: "Unassessed, GBIF-observed only through BOLD barcode records (a BIN under the species): an ordinary NE species, so the list is checked for over-filtering, and BINs for being counted.",
+    source: "build-taxa.ts BELOW_SPECIES",
+    expect: { assessed: false, neListed: { "Syllepte belialis": true } },
   },
 ];
