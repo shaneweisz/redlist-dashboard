@@ -111,10 +111,8 @@ const SEA_SNAKE_GENERA = [
  *  species in our data are still filed under — all Anoline Lizard SG. */
 const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"];
 
-/** Lizard and Tuatara RLA families, from the GRA master list, plus the two
- *  names our CoL-sourced species use instead: Trogonophidae (the GRA spells it
- *  Trogonophiidae) and Leiocephalidae (a CoL split the GRA keeps within
- *  Tropiduridae). */
+/** Lizard and Tuatara RLA families: the GRA master list's 31, then the two
+ *  names our CoL-sourced species use instead of a GRA family. */
 const LIZARD_RLA_FAMILIES = [
   "agamidae", "alopoglossidae", "amphisbaenidae", "anguidae", "anniellidae",
   "bipedidae", "blanidae", "cadeidae", "cordylidae", "corytophanidae",
@@ -123,30 +121,44 @@ const LIZARD_RLA_FAMILIES = [
   "leiosauridae", "liolaemidae", "opluridae", "phrynosomatidae",
   "polychrotidae", "rhineuridae", "shinisauridae", "sphenodontidae", "teiidae",
   "trogonophiidae", "tropiduridae", "xantusiidae", "xenosauridae",
+  // Not GRA families: the names our CoL species carry for some of them (see
+  // GRA_NAME_EQUIVALENTS). Last, so the breakdown lists the GRA's own first.
   "trogonophidae", "leiocephalidae",
 ];
 
-/** Every snake family label (bar Viperidae) found in our data or the GRA
- *  master list. Our data carries no suborder, so this list is the only thing
- *  that separates snakes from lizards inside Squamata — a snake family missing
- *  here would land in the Lizard and Tuatara RLA, and our CoL-sourced species
- *  carry CoL's spellings, so a family both use is listed both ways (Bolyeridae
- *  on the Red List, Bolyeriidae on CoL). Includes Psammodynastidae,
- *  which the GRA splits from Pseudaspididae but our data doesn't have yet. The
- *  GRA list's own spellings Atractaspidae and Xenophiidae are left out: no
- *  species in our data uses them (it has Atractaspididae and Xenophidiidae). */
+/**
+ * Family names in the reptile filters that aren't the GRA master list's own:
+ * the Red List's or CoL's name for a GRA family. The breakdown labels each with
+ * its GRA counterpart ("Trogonophidae (Trogonophiidae in the GRA list)"), and
+ * the correction email gives the GRA's name instead, so what a GRA reader sees
+ * matches their list. "within": a CoL family the GRA doesn't separate out.
+ */
+export const GRA_NAME_EQUIVALENTS: Record<string, { graName: string; relation: "spelling" | "within" }> = {
+  "family:atractaspididae": { graName: "Atractaspidae", relation: "spelling" },
+  "family:xenophidiidae": { graName: "Xenophiidae", relation: "spelling" },
+  "family:bolyeriidae": { graName: "Bolyeridae", relation: "spelling" },
+  "family:trogonophidae": { graName: "Trogonophiidae", relation: "spelling" },
+  "family:leiocephalidae": { graName: "Tropiduridae", relation: "within" },
+};
+
+/** Every snake family (bar Viperidae): the GRA master list's, then the names
+ *  our data uses for three of them. Our data carries no suborder, so this list
+ *  is the only thing that separates snakes from lizards inside Squamata — a
+ *  snake family missing here would land in no group. Includes Psammodynastidae,
+ *  which the GRA splits from Pseudaspididae but our data doesn't have yet. */
 const SNAKE_FAMILIES = [
-  "acrochordidae", "aniliidae", "anomalepididae", "anomochilidae",
-  "atractaspididae", "boidae", "bolyeridae", "bolyeriidae", "calabariidae",
-  "calamariidae", "candoiidae", "charinaidae", "colubridae", "cyclocoridae",
-  "cylindrophiidae", "dipsadidae", "elapidae", "erycidae", "gerrhopilidae",
-  "grayiidae", "homalopsidae", "lamprophiidae", "leptotyphlopidae",
-  "loxocemidae", "micrelapidae", "natricidae", "pareidae", "prosymnidae",
-  "psammodynastidae", "psammophiidae", "pseudaspididae", "pseudoxenodontidae",
-  "pseudoxyrhophiidae", "pythonidae", "sanziniidae", "sibynophiidae",
-  "tropidophiidae", "typhlopidae", "ungaliophiidae", "uropeltidae",
-  "xenodermidae", "xenopeltidae", "xenophidiidae",
-  "xenotyphlopidae",
+  "acrochordidae", "aniliidae", "anomalepididae", "anomochilidae", "boidae",
+  "bolyeridae", "calabariidae", "calamariidae", "candoiidae", "charinaidae",
+  "colubridae", "cyclocoridae", "cylindrophiidae", "dipsadidae", "elapidae",
+  "erycidae", "gerrhopilidae", "grayiidae", "homalopsidae", "lamprophiidae",
+  "leptotyphlopidae", "loxocemidae", "micrelapidae", "natricidae", "pareidae",
+  "prosymnidae", "psammodynastidae", "psammophiidae", "pseudaspididae",
+  "pseudoxenodontidae", "pseudoxyrhophiidae", "pythonidae", "sanziniidae",
+  "sibynophiidae", "tropidophiidae", "typhlopidae", "ungaliophiidae",
+  "uropeltidae", "xenodermidae", "xenopeltidae", "xenotyphlopidae",
+  // Our data's spellings of three GRA families (see GRA_NAME_EQUIVALENTS).
+  // Last, so the breakdown lists the GRA's own first.
+  "atractaspididae", "xenophidiidae", "bolyeriidae",
 ];
 const COL_2025 = "Catalogue of Life 2025";
 const COL_2025_URL = "https://doi.org/10.48580/dgnfb";
@@ -1022,8 +1034,8 @@ export const TAXONOMY_TREE: TaxonomyNode = {
         // and Lizard RLA): every lizard and amphisbaenian family without its own
         // group, plus the tuatara. Listed family by family from the GRA master
         // list, the way the GRA defines it, rather than as "everything not
-        // claimed above", so its breakdown names its families. Still pinned
-        // last in the SSC view as the section's residual group.
+        // claimed above", so its breakdown names its families. Sorts by
+        // assessed count in the SSC view like any named group.
         {
           id: "ssc-lizard-tuatara-rla",
           name: "Lizard and Tuatara Red List Authority",

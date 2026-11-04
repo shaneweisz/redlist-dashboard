@@ -6,7 +6,7 @@
  * and taxon-groups (getTaxonGroups).
  */
 
-import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
+import { TAXONOMY_TREE, GRA_NAME_EQUIVALENTS, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
 import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
 import { NODE_DESCRIPTION_OVERRIDES, COL_NODE_TOOLTIP_NOTES, COL_EXCLUDE_ALL_NODES, COL_SPECIES_NAME_OVERRIDES } from "@/config/col-described-overrides";
@@ -645,13 +645,39 @@ export function colAliasNote(rank: FilterRank, name: string): string | undefined
   return "note" in label ? label.note : `${label.colName}${label.suffix}`;
 }
 
-/** A name's segments: linked as is, or plain with its CoL name linked in brackets. */
+/** For a filter name that isn't the GRA master list's own, what it is in the
+ *  GRA's terms: "Trogonophiidae in the GRA list", "part of Tropiduridae in the
+ *  GRA list". Undefined for any other name. */
+export function graNameNote(rank: FilterRank, name: string): string | undefined {
+  const eq = GRA_NAME_EQUIVALENTS[`${rank}:${name.toLowerCase()}`];
+  if (!eq) return undefined;
+  return eq.relation === "within" ? `part of ${eq.graName} in the GRA list` : `${eq.graName} in the GRA list`;
+}
+
+/** The names as the GRA list would give them, for text addressed to a GRA
+ *  reader: a variant spelling becomes the GRA's, and a family the GRA folds
+ *  into another (or a spelling of one already listed) drops out. */
+export function graDisplayNames(rank: FilterRank, names: string[], display: (n: string) => string): string[] {
+  const out: string[] = [];
+  for (const n of names) {
+    const eq = GRA_NAME_EQUIVALENTS[`${rank}:${n.toLowerCase()}`];
+    if (eq?.relation === "within") continue;
+    const shown = eq ? eq.graName : display(n);
+    if (!out.some((o) => o.toLowerCase() === shown.toLowerCase())) out.push(shown);
+  }
+  return out;
+}
+
+/** A name's segments: linked as is, or plain with its CoL name linked in
+ *  brackets; then, for a name the GRA list writes differently, its GRA name. */
 function nameSegments(rank: FilterRank, display: string, name: string, liveColIds?: Record<string, string>): DescribeFilterSegment[] {
   const href = breakdownHref(rank, name, liveColIds);
   const label = colAliasLabel(rank, name);
-  if (!label) return [{ text: display, href }];
-  if ("note" in label) return [{ text: display, href }, { text: ` (${label.note})` }];
-  return [{ text: display }, { text: " (" }, { text: label.colName, href }, { text: `${label.suffix})` }];
+  const gra = graNameNote(rank, name);
+  const graSeg: DescribeFilterSegment[] = gra ? [{ text: ` (${gra})` }] : [];
+  if (!label) return [{ text: display, href }, ...graSeg];
+  if ("note" in label) return [{ text: display, href }, { text: ` (${label.note})` }, ...graSeg];
+  return [{ text: display }, { text: " (" }, { text: label.colName, href }, { text: `${label.suffix})` }, ...graSeg];
 }
 
 export function breakdownHref(rank: FilterRank, name: string, liveColIds?: Record<string, string>): string | undefined {

@@ -10,7 +10,7 @@ import TaxaIcon from "@/components/TaxaIcon";
 import { CATEGORY_COLORS, CATEGORY_NAMES, CATEGORY_ORDER } from "@/config/taxa";
 import {
   hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, collapseTaxaToTokens, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
-  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasLabel,
+  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasLabel, graNameNote, graDisplayNames,
   matchesBreakdownName, speciesMatchesNode,
   type FilterRank, type DescribeFilterSegment,
 } from "@/lib/taxonomy-utils";
@@ -85,9 +85,12 @@ const SSC_ROWS_COLLAPSED = 2;
 // SSC groups mode — one section per taxon that has an SSC pilot built out.
 // Add an entry here (nodeId, parentTaxon, title, catch-all id) when a new
 // taxon's SSC groups are added.
-const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchAllId: string }[] = [
+// catchAllId: the section's residual "everything else" group, pinned last.
+// Reptiles has none: every reptile group, the Lizard and Tuatara RLA included,
+// is defined by its own families or genera.
+const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchAllId?: string }[] = [
   { nodeId: "ssc-groups", parentTaxon: "mammals", title: "MAMMAL SPECIALIST GROUPS", catchAllId: "ssc-other-mammals" },
-  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS", catchAllId: "ssc-lizard-tuatara-rla" },
+  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS" },
   { nodeId: "ssc-fish-groups", parentTaxon: "fishes", title: "FISH SPECIALIST GROUPS", catchAllId: "ssc-other-fish" },
   { nodeId: "ssc-invertebrate-groups", parentTaxon: "invertebrates", title: "INVERTEBRATE SPECIALIST GROUPS", catchAllId: "ssc-other-invertebrates" },
   { nodeId: "ssc-plant-groups", parentTaxon: "plantae", title: "PLANT SPECIALIST GROUPS", catchAllId: "ssc-other-plants" },
@@ -1038,6 +1041,10 @@ function BreakdownList({
                     rowLabel
                   )}
                   {alias && "note" in alias && <span className="text-zinc-400"> ({alias.note})</span>}
+                  {(() => {
+                    const gra = graNameNote(rank, b.name);
+                    return gra ? <span className="text-zinc-400"> ({gra})</span> : null;
+                  })()}
                 </td>
                 <td className="px-2 py-1 text-right text-zinc-300">{b.count}</td>
                 <td className="px-2 py-1 text-right">
@@ -1456,7 +1463,8 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                     href={buildBreakdownCorrectionMailto({
                       groupLabel: breakdownGroupLabel,
                       rankLabel: breakdownDim.label,
-                      names: effectiveBreakdown.map((b) => breakdownDisplayName(breakdownDim.rank, b.name)),
+                      // In the GRA list's own names, so the draft matches the reader's list.
+                      names: graDisplayNames(breakdownDim.rank, effectiveBreakdown.map((b) => b.name), (n) => breakdownDisplayName(breakdownDim.rank, n)),
                       // A catch-all's only "row" is its own name, so say what it covers instead.
                       scopeText: breakdownDim.rank === "remainder"
                         ? describeFilter(filter, node ? nodeId : undefined).map((seg) => seg.text).join("")
@@ -3207,14 +3215,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           <td className={flexTdClasses}>{renderBreakdownBar(subByCategory)}</td>
                         )}
                       </tr>
-                      {/* Section rows — all named groups always shown; the catch-all
-                          row is pulled out and rendered last, since it's usually the
-                          largest, most load-bearing row. Table 1a mode has no
-                          catch-all concept (section.catchAllId is undefined there),
-                          so it always renders every row too. */}
+                      {/* Section rows — a section's catch-all row, if it has one, is
+                          pulled out and rendered last. SSC sections collapse to their
+                          top groups; Table 1a mode always renders every row. */}
                       {(() => {
-                        const isSscSection = sscMode && section.catchAllId != null;
-                        const catchAllRow = isSscSection ? rows.find(r => r.group === section.catchAllId) : undefined;
+                        const isSscSection = sscMode;
+                        const catchAllRow = section.catchAllId != null ? rows.find(r => r.group === section.catchAllId) : undefined;
                         const namedRows = catchAllRow ? rows.filter(r => r.group !== section.catchAllId) : rows;
                         const renderGroupRow = (row: (typeof rows)[number]) => (
                         <tr

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeFilter, breakdownHref, colAliasNote } from "../taxonomy-utils";
+import { describeFilter, breakdownHref, colAliasNote, graNameNote, graDisplayNames } from "../taxonomy-utils";
 
 // Regression coverage for a bug that shipped and got silently reverted once
 // already in this same PR (35f10ce fixed it, a35ff0f's diff accidentally
@@ -81,5 +81,24 @@ describe("names CoL files differently", () => {
 
   it("adds nothing for a name CoL accepts as is", () => {
     expect(colAliasNote("family", "acipenseridae")).toBeUndefined();
+  });
+});
+
+describe("names the GRA master list writes differently", () => {
+  it("labels a CoL or Red List spelling with the GRA's, and a CoL split with the GRA family it sits in", () => {
+    expect(graNameNote("family", "trogonophidae")).toBe("Trogonophiidae in the GRA list");
+    expect(graNameNote("family", "leiocephalidae")).toBe("part of Tropiduridae in the GRA list");
+    expect(graNameNote("family", "teiidae")).toBeUndefined();
+  });
+
+  it("puts the GRA label in the tooltip text after the name", () => {
+    const segs = describeFilter({ taxonGroups: ["reptiles"], families: ["leiocephalidae"] });
+    expect(segs.map((s) => s.text).join("")).toBe("Family: Leiocephalidae (part of Tropiduridae in the GRA list)");
+  });
+
+  it("gives a GRA reader the GRA's names: spellings swapped, splits and duplicates dropped", () => {
+    const names = ["tropiduridae", "trogonophiidae", "trogonophidae", "leiocephalidae", "atractaspididae"];
+    const cap = (n: string) => n[0].toUpperCase() + n.slice(1);
+    expect(graDisplayNames("family", names, cap)).toEqual(["Tropiduridae", "Trogonophiidae", "Atractaspidae"]);
   });
 });
