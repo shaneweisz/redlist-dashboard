@@ -84,7 +84,7 @@ interface Table1aSectionData {
 // taxon's SSC groups are added.
 const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchAllId: string }[] = [
   { nodeId: "ssc-groups", parentTaxon: "mammals", title: "MAMMAL SPECIALIST GROUPS", catchAllId: "ssc-other-mammals" },
-  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS", catchAllId: "ssc-snake-lizard-rla" },
+  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS", catchAllId: "ssc-lizard-tuatara-rla" },
   { nodeId: "ssc-fish-groups", parentTaxon: "fishes", title: "FISH SPECIALIST GROUPS", catchAllId: "ssc-other-fish" },
   { nodeId: "ssc-invertebrate-groups", parentTaxon: "invertebrates", title: "INVERTEBRATE SPECIALIST GROUPS", catchAllId: "ssc-other-invertebrates" },
   { nodeId: "ssc-plant-groups", parentTaxon: "plantae", title: "PLANT SPECIALIST GROUPS", catchAllId: "ssc-other-plants" },

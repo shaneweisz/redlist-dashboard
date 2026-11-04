@@ -1,0 +1,584 @@
+{
+ "families": {
+  "acrochordidae": "ssc-snake",
+  "agamidae": "ssc-lizard-tuatara-rla",
+  "alligatoridae": "ssc-crocodile",
+  "alopoglossidae": "ssc-lizard-tuatara-rla",
+  "amphisbaenidae": "ssc-lizard-tuatara-rla",
+  "anguidae": "ssc-lizard-tuatara-rla",
+  "aniliidae": "ssc-snake",
+  "anniellidae": "ssc-lizard-tuatara-rla",
+  "anolidae": "ssc-anoline-lizard",
+  "anomalepididae": "ssc-snake",
+  "anomochilidae": "ssc-snake",
+  "atractaspidae": "ssc-snake",
+  "bipedidae": "ssc-lizard-tuatara-rla",
+  "blanidae": "ssc-lizard-tuatara-rla",
+  "boidae": "ssc-snake",
+  "bolyeridae": "ssc-snake",
+  "cadeidae": "ssc-lizard-tuatara-rla",
+  "calabariidae": "ssc-snake",
+  "calamariidae": "ssc-snake",
+  "candoiidae": "ssc-snake",
+  "carettochelyidae": "ssc-tortoise-freshwater-turtle",
+  "carphodactylidae": "ssc-gekkota",
+  "chamaeleonidae": "ssc-chameleon",
+  "charinaidae": "ssc-snake",
+  "chelidae": "ssc-tortoise-freshwater-turtle",
+  "cheloniidae": "ssc-marine-turtle",
+  "chelydridae": "ssc-tortoise-freshwater-turtle",
+  "colubridae": "ssc-snake",
+  "cordylidae": "ssc-lizard-tuatara-rla",
+  "corytophanidae": "ssc-lizard-tuatara-rla",
+  "crocodylidae": "ssc-crocodile",
+  "crotaphytidae": "ssc-lizard-tuatara-rla",
+  "cyclocoridae": "ssc-snake",
+  "cylindrophiidae": "ssc-snake",
+  "dermatemydidae": "ssc-tortoise-freshwater-turtle",
+  "dermochelyidae": "ssc-marine-turtle",
+  "dibamidae": "ssc-lizard-tuatara-rla",
+  "diplodactylidae": "ssc-gekkota",
+  "diploglossidae": "ssc-lizard-tuatara-rla",
+  "dipsadidae": "ssc-snake",
+  "elapidae": "split",
+  "emydidae": "ssc-tortoise-freshwater-turtle",
+  "erycidae": "ssc-snake",
+  "eublepharidae": "ssc-gekkota",
+  "gavialidae": "ssc-crocodile",
+  "gekkonidae": "ssc-gekkota",
+  "geoemydidae": "ssc-tortoise-freshwater-turtle",
+  "gerrhopilidae": "ssc-snake",
+  "gerrhosauridae": "ssc-lizard-tuatara-rla",
+  "grayiidae": "ssc-snake",
+  "gymnophthalmidae": "ssc-lizard-tuatara-rla",
+  "helodermatidae": "ssc-lizard-tuatara-rla",
+  "homalopsidae": "ssc-snake",
+  "hoplocercidae": "ssc-lizard-tuatara-rla",
+  "iguanidae": "ssc-iguana",
+  "kinosternidae": "ssc-tortoise-freshwater-turtle",
+  "lacertidae": "ssc-lizard-tuatara-rla",
+  "lamprophiidae": "ssc-snake",
+  "lanthanotidae": "ssc-monitor-lizard",
+  "leiosauridae": "ssc-lizard-tuatara-rla",
+  "leptotyphlopidae": "ssc-snake",
+  "liolaemidae": "ssc-lizard-tuatara-rla",
+  "loxocemidae": "ssc-snake",
+  "micrelapidae": "ssc-snake",
+  "natricidae": "ssc-snake",
+  "opluridae": "ssc-lizard-tuatara-rla",
+  "pareidae": "ssc-snake",
+  "pelomedusidae": "ssc-tortoise-freshwater-turtle",
+  "phrynosomatidae": "ssc-lizard-tuatara-rla",
+  "phyllodactylidae": "ssc-gekkota",
+  "platysternidae": "ssc-tortoise-freshwater-turtle",
+  "podocnemididae": "ssc-tortoise-freshwater-turtle",
+  "polychrotidae": "ssc-lizard-tuatara-rla",
+  "prosymnidae": "ssc-snake",
+  "psammodynastidae": "ssc-snake",
+  "psammophiidae": "ssc-snake",
+  "pseudaspididae": "ssc-snake",
+  "pseudoxenodontidae": "ssc-snake",
+  "pseudoxyrhophiidae": "ssc-snake",
+  "pygopodidae": "ssc-gekkota",
+  "pythonidae": "ssc-snake",
+  "rhineuridae": "ssc-lizard-tuatara-rla",
+  "sanziniidae": "ssc-snake",
+  "scincidae": "ssc-skink",
+  "shinisauridae": "ssc-lizard-tuatara-rla",
+  "sibynophiidae": "ssc-snake",
+  "sphaerodactylidae": "ssc-gekkota",
+  "sphenodontidae": "ssc-lizard-tuatara-rla",
+  "teiidae": "ssc-lizard-tuatara-rla",
+  "testudinidae": "ssc-tortoise-freshwater-turtle",
+  "trionychidae": "ssc-tortoise-freshwater-turtle",
+  "trogonophiidae": "ssc-lizard-tuatara-rla",
+  "tropidophiidae": "ssc-snake",
+  "tropiduridae": "ssc-lizard-tuatara-rla",
+  "typhlopidae": "ssc-snake",
+  "ungaliophiidae": "ssc-snake",
+  "uropeltidae": "ssc-snake",
+  "varanidae": "ssc-monitor-lizard",
+  "viperidae": "ssc-viper",
+  "xantusiidae": "ssc-lizard-tuatara-rla",
+  "xenodermidae": "ssc-snake",
+  "xenopeltidae": "ssc-snake",
+  "xenophiidae": "ssc-snake",
+  "xenosauridae": "ssc-lizard-tuatara-rla",
+  "xenotyphlopidae": "ssc-snake"
+ },
+ "elapidaeGenera": {
+  "acanthophis": "ssc-snake",
+  "aipysurus": "ssc-sea-snake",
+  "antaioserpens": "ssc-snake",
+  "aspidelaps": "ssc-snake",
+  "aspidomorphus": "ssc-snake",
+  "austrelaps": "ssc-snake",
+  "brachyurophis": "ssc-snake",
+  "bungarus": "ssc-snake",
+  "cacophis": "ssc-snake",
+  "calliophis": "ssc-snake",
+  "cryptophis": "ssc-snake",
+  "demansia": "ssc-snake",
+  "dendroaspis": "ssc-snake",
+  "denisonia": "ssc-snake",
+  "drysdalia": "ssc-snake",
+  "echiopsis": "ssc-snake",
+  "elapognathus": "ssc-snake",
+  "elapsoidea": "ssc-snake",
+  "emydocephalus": "ssc-sea-snake",
+  "ephalophis": "ssc-sea-snake",
+  "furina": "ssc-snake",
+  "hemachatus": "ssc-snake",
+  "hemiaspis": "ssc-snake",
+  "hemibungarus": "ssc-snake",
+  "hoplocephalus": "ssc-snake",
+  "hydrelaps": "ssc-sea-snake",
+  "hydrophis": "ssc-sea-snake",
+  "laticauda": "ssc-sea-snake",
+  "loveridgelaps": "ssc-snake",
+  "microcephalophis": "ssc-sea-snake",
+  "micropechis": "ssc-snake",
+  "micruroides": "ssc-snake",
+  "micrurus": "ssc-snake",
+  "naja": "ssc-snake",
+  "narophis": "ssc-snake",
+  "neelaps": "ssc-snake",
+  "notechis": "ssc-snake",
+  "ogmodon": "ssc-snake",
+  "ophiophagus": "ssc-snake",
+  "oxyuranus": "ssc-snake",
+  "parahydrophis": "ssc-sea-snake",
+  "parapistocalamus": "ssc-snake",
+  "paroplocephalus": "ssc-snake",
+  "pseudechis": "ssc-snake",
+  "pseudohaje": "ssc-snake",
+  "pseudonaja": "ssc-snake",
+  "rhinoplocephalus": "ssc-snake",
+  "salomonelaps": "ssc-snake",
+  "simoselaps": "ssc-snake",
+  "sinomicrurus": "ssc-snake",
+  "suta": "ssc-snake",
+  "toxicocalamus": "ssc-snake",
+  "tropidechis": "ssc-snake",
+  "vermicella": "ssc-snake",
+  "walterinnesia": "ssc-snake"
+ },
+ "examples": [
+  [
+   "acrochordidae",
+   "Acrochordus arafurae"
+  ],
+  [
+   "agamidae",
+   "Acanthocercus adramitanus"
+  ],
+  [
+   "alligatoridae",
+   "Alligator mississippiensis"
+  ],
+  [
+   "alopoglossidae",
+   "Alopoglossus amazonius"
+  ],
+  [
+   "amphisbaenidae",
+   "Amphisbaena absaberi"
+  ],
+  [
+   "anguidae",
+   "Abronia antauges"
+  ],
+  [
+   "aniliidae",
+   "Anilius scytale"
+  ],
+  [
+   "anniellidae",
+   "Anniella alexanderae"
+  ],
+  [
+   "anolidae",
+   "Anolis acutus"
+  ],
+  [
+   "anomalepididae",
+   "Anomalepis aspinosus"
+  ],
+  [
+   "anomochilidae",
+   "Anomochilus leonardi"
+  ],
+  [
+   "atractaspidae",
+   "Amblyodipsas concolor"
+  ],
+  [
+   "bipedidae",
+   "Bipes biporus"
+  ],
+  [
+   "blanidae",
+   "Blanus alexandri"
+  ],
+  [
+   "boidae",
+   "Boa atlantica"
+  ],
+  [
+   "bolyeridae",
+   "Bolyeria multocarinata"
+  ],
+  [
+   "cadeidae",
+   "Cadea blanoides"
+  ],
+  [
+   "calabariidae",
+   "Calabaria reinhardtii"
+  ],
+  [
+   "calamariidae",
+   "Calamaria abramovi"
+  ],
+  [
+   "candoiidae",
+   "Candoia aspera"
+  ],
+  [
+   "carettochelyidae",
+   "Carettochelys insculpta"
+  ],
+  [
+   "carphodactylidae",
+   "Carphodactylus laevis"
+  ],
+  [
+   "chamaeleonidae",
+   "Archaius tigris"
+  ],
+  [
+   "charinaidae",
+   "Charina bottae"
+  ],
+  [
+   "chelidae",
+   "Acanthochelys macrocephala"
+  ],
+  [
+   "cheloniidae",
+   "Caretta caretta"
+  ],
+  [
+   "chelydridae",
+   "Chelydra acutirostris"
+  ],
+  [
+   "colubridae",
+   "Aeluroglena cucullata"
+  ],
+  [
+   "cordylidae",
+   "Chamaesaura aenea"
+  ],
+  [
+   "corytophanidae",
+   "Basiliscus basiliscus"
+  ],
+  [
+   "crocodylidae",
+   "Crocodylus acutus"
+  ],
+  [
+   "crotaphytidae",
+   "Crotaphytus antiquus"
+  ],
+  [
+   "cyclocoridae",
+   "Cyclocorus lineatus"
+  ],
+  [
+   "cylindrophiidae",
+   "Cylindrophis aruensis"
+  ],
+  [
+   "dermatemydidae",
+   "Dermatemys mawii"
+  ],
+  [
+   "dermochelyidae",
+   "Dermochelys coriacea"
+  ],
+  [
+   "dibamidae",
+   "Anelytropsis papillosus"
+  ],
+  [
+   "diplodactylidae",
+   "Amalosia capensis"
+  ],
+  [
+   "diploglossidae",
+   "Advenus montisilvestris"
+  ],
+  [
+   "dipsadidae",
+   "Adelphicos daryi"
+  ],
+  [
+   "emydidae",
+   "Actinemys marmorata"
+  ],
+  [
+   "erycidae",
+   "Eryx borrii"
+  ],
+  [
+   "eublepharidae",
+   "Aeluroscalabotes felinus"
+  ],
+  [
+   "gavialidae",
+   "Gavialis gangeticus"
+  ],
+  [
+   "gekkonidae",
+   "Afroedura africana"
+  ],
+  [
+   "geoemydidae",
+   "Batagur affinis"
+  ],
+  [
+   "gerrhopilidae",
+   "Cathetorhinus melanocephalus"
+  ],
+  [
+   "gerrhosauridae",
+   "Broadleysaurus major"
+  ],
+  [
+   "grayiidae",
+   "Grayia caesar"
+  ],
+  [
+   "gymnophthalmidae",
+   "Acratosaura mentalis"
+  ],
+  [
+   "helodermatidae",
+   "Heloderma alvarezi"
+  ],
+  [
+   "homalopsidae",
+   "Bitia hydroides"
+  ],
+  [
+   "hoplocercidae",
+   "Enyalioides altotambo"
+  ],
+  [
+   "iguanidae",
+   "Amblyrhynchus cristatus"
+  ],
+  [
+   "kinosternidae",
+   "Claudius angustatus"
+  ],
+  [
+   "lacertidae",
+   "Acanthodactylus aegyptius"
+  ],
+  [
+   "lamprophiidae",
+   "Boaedon angolensis"
+  ],
+  [
+   "lanthanotidae",
+   "Lanthanotus borneensis"
+  ],
+  [
+   "leiosauridae",
+   "Diplolaemus bibronii"
+  ],
+  [
+   "leptotyphlopidae",
+   "Epacrophis boulengeri"
+  ],
+  [
+   "liolaemidae",
+   "Ctenoblepharys adspersa"
+  ],
+  [
+   "loxocemidae",
+   "Loxocemus bicolor"
+  ],
+  [
+   "micrelapidae",
+   "Brachyophis cornii"
+  ],
+  [
+   "natricidae",
+   "Afronatrix anoscopus"
+  ],
+  [
+   "opluridae",
+   "Chalarodon madagascariensis"
+  ],
+  [
+   "pareidae",
+   "Aplopeltura boa"
+  ],
+  [
+   "pelomedusidae",
+   "Pelomedusa barbata"
+  ],
+  [
+   "phrynosomatidae",
+   "Callisaurus draconoides"
+  ],
+  [
+   "phyllodactylidae",
+   "Asaccus andersoni"
+  ],
+  [
+   "platysternidae",
+   "Platysternon megacephalum"
+  ],
+  [
+   "podocnemididae",
+   "Erymnochelys madagascariensis"
+  ],
+  [
+   "polychrotidae",
+   "Polychrus acutirostris"
+  ],
+  [
+   "prosymnidae",
+   "Prosymna ambigua"
+  ],
+  [
+   "psammodynastidae",
+   "Psammodynastes pictus"
+  ],
+  [
+   "psammophiidae",
+   "Dipsina multimaculata"
+  ],
+  [
+   "pseudaspididae",
+   "Pseudaspis cana"
+  ],
+  [
+   "pseudoxenodontidae",
+   "Plagiopholis blakewayi"
+  ],
+  [
+   "pseudoxyrhophiidae",
+   "Alluaudina bellyi"
+  ],
+  [
+   "pygopodidae",
+   "Aprasia aurita"
+  ],
+  [
+   "pythonidae",
+   "Antaresia childreni"
+  ],
+  [
+   "rhineuridae",
+   "Rhineura floridana"
+  ],
+  [
+   "sanziniidae",
+   "Acrantophis dumerili"
+  ],
+  [
+   "scincidae",
+   "Ablepharus alaicus"
+  ],
+  [
+   "shinisauridae",
+   "Shinisaurus crocodilurus"
+  ],
+  [
+   "sibynophiidae",
+   "Colubroelaps adleri"
+  ],
+  [
+   "sphaerodactylidae",
+   "Aristelliger barbouri"
+  ],
+  [
+   "sphenodontidae",
+   "Sphenodon punctatus"
+  ],
+  [
+   "teiidae",
+   "Ameiva aggerecusans"
+  ],
+  [
+   "testudinidae",
+   "Astrochelys radiata"
+  ],
+  [
+   "trionychidae",
+   "Amyda cartilaginea"
+  ],
+  [
+   "trogonophiidae",
+   "Agamodon anguliceps"
+  ],
+  [
+   "tropidophiidae",
+   "Tropidophis battersbyi"
+  ],
+  [
+   "tropiduridae",
+   "Eurolophosaurus amathites"
+  ],
+  [
+   "typhlopidae",
+   "Acutotyphlops banaorum"
+  ],
+  [
+   "ungaliophiidae",
+   "Exiliboa placata"
+  ],
+  [
+   "uropeltidae",
+   "Melanophidium bilineatum"
+  ],
+  [
+   "varanidae",
+   "Varanus acanthurus"
+  ],
+  [
+   "viperidae",
+   "Agkistrodon bilineatus"
+  ],
+  [
+   "xantusiidae",
+   "Cricosaura typica"
+  ],
+  [
+   "xenodermidae",
+   "Achalinus ater"
+  ],
+  [
+   "xenopeltidae",
+   "Xenopeltis unicolor"
+  ],
+  [
+   "xenophiidae",
+   "Pelodiscus huike"
+  ],
+  [
+   "xenosauridae",
+   "Xenosaurus agrenon"
+  ],
+  [
+   "xenotyphlopidae",
+   "Xenotyphlops grandidieri"
+  ]
+ ]
+}
