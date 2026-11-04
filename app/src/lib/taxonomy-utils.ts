@@ -574,9 +574,14 @@ const COL_TAXON_ID_MAP: Record<string, string> = COL_TAXON_IDS;
 // count can undercount colDescribed by that node's EX/EW additions. A species-rank
 // name has no "species under it" to browse, so it links straight to its own taxon
 // page instead.
+//
+// "Not extinct" is two filter values, not one. Some CoL sources mark living
+// species extinct=false; others, the Reptile Database among them, leave the
+// field empty. extinct=0 alone matched none of the latter, so every reptile
+// link opened on an empty search; repeating the parameter ORs the two.
 function colHref(rank: FilterRank, colId: string): string {
   if (rank === "species") return `${COL_SOURCE_URL}data/taxon/${colId}`;
-  return `${COL_SOURCE_URL}data/search?TAXON_ID=${colId}&extinct=0&rank=species&status=accepted`;
+  return `${COL_SOURCE_URL}data/search?TAXON_ID=${colId}&extinct=0&extinct=_NULL&rank=species&status=accepted`;
 }
 
 // Which of a filter's include fields enumerates this node's species (its "primary

@@ -41,6 +41,14 @@ describe("describeFilter", () => {
 });
 
 describe("breakdownHref", () => {
+  // CoL leaves extinct unset for some sources' living species (all of the
+  // Reptile Database's), so the link must ask for unset as well as false.
+  it("asks CoL for species not marked extinct, whether false or unset", () => {
+    const href = new URL(breakdownHref("family", "acrochordidae")!);
+    expect(href.searchParams.getAll("extinct")).toEqual(["0", "_NULL"]);
+    expect(href.searchParams.get("status")).toBe("accepted");
+  });
+
   it("prefers the static snapshot over liveColIds when both resolve the same name", () => {
     const href = breakdownHref("family", "acipenseridae", { "family:acipenseridae": "OTHERID" });
     expect(href).toContain("TAXON_ID=KTYZ7");
