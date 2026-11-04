@@ -19,7 +19,7 @@ import { IUCN_SOURCE_URL } from "@/config/taxonomy-tree";
 import { isLiveDrilldownNode, nextDynamicRank, isDynamicNodeId, dynamicNodeDisplayName, dynamicNodeFilter, dynamicNodeRankInfo, parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import type { RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { prettifyQs } from "@/lib/query-string";
-import { buildBreakdownIssueUrl } from "@/lib/github-issue";
+import { buildBreakdownCorrectionMailto } from "@/lib/correction-email";
 import type { LayoutMode } from "@/hooks/useFilterParams";
 import { sisRowKey } from "@/lib/species-row-key";
 // Reason labels are shared with the main dashboard's taxonomic-revision flag —
@@ -1425,15 +1425,14 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                 .
               </p>
               {/* The reader most likely to spot a wrong breakdown is a specialist
-                  group member who knows the group's real circumscription — until
-                  now they had nowhere to say so from. Opens GitHub's new-issue
-                  form with the table above already written out and a blank "we
-                  believe it should be" section; nothing is submitted until they
-                  edit it and press the button there. */}
+                  group member who knows the group's real circumscription. Opens
+                  an email draft to the maintainer with the table above already
+                  written out and a blank "I believe it should be" section;
+                  nothing is sent until they edit it and press send. */}
               {effectiveBreakdown?.length && breakdownDim ? (
                 <p className="mt-1">
                   <a
-                    href={buildBreakdownIssueUrl({
+                    href={buildBreakdownCorrectionMailto({
                       groupLabel: breakdownGroupLabel,
                       rankLabel: breakdownDim.label,
                       rows: effectiveBreakdown.map((b) => ({
@@ -1446,8 +1445,6 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                       sourceLabel: COL_RELEASE_LABEL,
                       pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
                     })}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="text-blue-300 hover:text-blue-200 underline inline-flex items-center gap-1.5"
                   >
                     <FaFlag size={9} aria-hidden className="shrink-0" />
