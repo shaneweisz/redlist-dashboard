@@ -71,6 +71,9 @@ const COL_EQUIVALENTS: Record<string, { name: string; rank: string; why: string 
   "family:sibynophiidae": { name: "Sibynophiinae", rank: "subfamily", why: "a subfamily of Colubridae on CoL" },
   "family:charinaidae": { name: "Charininae", rank: "subfamily", why: "a subfamily of Boidae on CoL" },
   "family:ungaliophiidae": { name: "Ungaliophiinae", rank: "subfamily", why: "a subfamily of Boidae on CoL" },
+  // CoL holds Ctenonotus as a synonym of two genera: the anole Anolis and the
+  // flea Tarsopsylla. The tree means the anole (it is an Anoline SG genus).
+  "genus:ctenonotus": { name: "Anolis", rank: "genus", why: "the anole, not the flea genus Tarsopsylla" },
   "class:chondrichthyes": { name: "Chondrichthyes", rank: "parvphylum", why: "CoL ranks it a parvphylum, not a class" },
   "genus:deltorrhinum": { name: "Deltorhinum", rank: "genus", why: "misspelling the tree keeps to match Red List data" },
   "species:arachnochium mirabile": { name: "Arachnochium mirabilis", rank: "species", why: "CoL's spelling of the epithet" },

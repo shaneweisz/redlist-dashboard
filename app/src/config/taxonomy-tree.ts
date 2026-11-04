@@ -111,6 +111,21 @@ const SEA_SNAKE_GENERA = [
  *  species in our data are still filed under — all Anoline Lizard SG. */
 const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"];
 
+/** Lizard and Tuatara RLA families, from the GRA master list, plus the two
+ *  names our CoL-sourced species use instead: Trogonophidae (the GRA spells it
+ *  Trogonophiidae) and Leiocephalidae (a CoL split the GRA keeps within
+ *  Tropiduridae). */
+const LIZARD_RLA_FAMILIES = [
+  "agamidae", "alopoglossidae", "amphisbaenidae", "anguidae", "anniellidae",
+  "bipedidae", "blanidae", "cadeidae", "cordylidae", "corytophanidae",
+  "crotaphytidae", "dibamidae", "diploglossidae", "gerrhosauridae",
+  "gymnophthalmidae", "helodermatidae", "hoplocercidae", "lacertidae",
+  "leiosauridae", "liolaemidae", "opluridae", "phrynosomatidae",
+  "polychrotidae", "rhineuridae", "shinisauridae", "sphenodontidae", "teiidae",
+  "trogonophiidae", "tropiduridae", "xantusiidae", "xenosauridae",
+  "trogonophidae", "leiocephalidae",
+];
+
 /** Every snake family label (bar Viperidae) found in our data or the GRA
  *  master list. Our data carries no suborder, so this list is the only thing
  *  that separates snakes from lizards inside Squamata — a snake family missing
@@ -1003,34 +1018,20 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           // file snakes the Sea Snake SG used to hold.
           sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-snake-specialist-group",
         },
-        // Catch-all: NOT a "no group" placeholder like ssc-other-mammals — the
-        // IUCN SSC Lizard and Tuatara Red List Authority (formerly the Snake
-        // and Lizard RLA) really is residual by design, covering every lizard
-        // and amphisbaenian without its own group, plus the tuatara
-        // (Rhynchocephalia, so outside every Squamata rule — added via
-        // extraSpeciesNames). Kept in sync manually: a new reptile group
-        // above must be excluded here too. Anole genera are excluded by genus as
-        // well as by family so an anole with no family label isn't counted
-        // under both the Anoline SG and here.
+        // The IUCN SSC Lizard and Tuatara Red List Authority (formerly the Snake
+        // and Lizard RLA): every lizard and amphisbaenian family without its own
+        // group, plus the tuatara. Listed family by family from the GRA master
+        // list, the way the GRA defines it, rather than as "everything not
+        // claimed above", so its breakdown names its families. Still pinned
+        // last in the SSC view as the section's residual group.
         {
           id: "ssc-lizard-tuatara-rla",
           name: "Lizard and Tuatara Red List Authority",
           filter: {
             taxonGroups: ["reptiles"],
-            excludeFamilies: [
-              "crocodylidae", "alligatoridae", "gavialidae",
-              "geoemydidae", "testudinidae", "chelidae", "emydidae", "kinosternidae",
-              "trionychidae", "pelomedusidae", "podocnemididae", "chelydridae",
-              "platysternidae", "dermatemydidae", "carettochelyidae",
-              "cheloniidae", "dermochelyidae",
-              "scincidae", "chamaeleonidae", "varanidae", "lanthanotidae", "iguanidae",
-              "anolidae", "dactyloidae",
-              "gekkonidae", "eublepharidae", "phyllodactylidae", "sphaerodactylidae", "diplodactylidae", "carphodactylidae", "pygopodidae",
-              "viperidae",
-              ...SNAKE_FAMILIES,
-              "sphenodontidae",
-            ],
-            excludeGenera: ANOLE_GENERA,
+            families: LIZARD_RLA_FAMILIES,
+            // CoL leaves the tuatara's order unset (see canonicalOrderColumnSql
+            // in taxonomy-sql.ts); claim it by name as well, whatever its family.
             extraSpeciesNames: ["sphenodon punctatus"],
           },
           sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-lizard-and-tuatara-red-list-authority",

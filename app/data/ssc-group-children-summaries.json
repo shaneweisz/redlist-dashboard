@@ -8682,7 +8682,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 2361,
       "outdated": 1570,
-      "gbifNeSpeciesCount": 362,
+      "gbifNeSpeciesCount": 355,
       "byCategory": {
         "EN": 187,
         "EX": 6,
@@ -8696,48 +8696,19 @@
       "colNe": 560,
       "colBreakdown": [
         {
-          "name": "Lizard and Tuatara Red List Authority",
-          "count": 2899,
-          "neCount": 560,
-          "trueAssessed": 2361,
+          "name": "agamidae",
+          "count": 629,
+          "neCount": 125,
+          "trueAssessed": 504,
           "noMatchIds": [
             9370,
-            63704,
-            64165,
-            64250,
-            64253,
-            64255,
-            64256,
-            64265,
-            64286,
             164690,
             170412,
-            176227,
-            203073,
             17451105,
-            56039161,
-            56039246,
-            56051847,
-            56051939,
-            56052108,
-            56058825,
-            56059651,
-            56064369,
-            56064748,
-            56077250,
-            56098897,
-            56152121,
-            56155898,
-            56249143,
-            56251581,
-            63488699,
-            75160413,
-            78586482,
             91866800,
             91866903,
             91866961,
             107660605,
-            109619258,
             127902161,
             163632493,
             218917968
@@ -8752,85 +8723,6 @@
               "detailColId": "3GY6L",
               "colId": "3GY6L",
               "colName": "Gonocephalus doriae"
-            },
-            {
-              "id": 63704,
-              "name": "Elgaria nana",
-              "reason": "infraspecific",
-              "detail": "Elgaria multicarinata",
-              "detailId": 63703,
-              "detailColId": "399YC",
-              "rank": "subspecies",
-              "colId": "7GS44"
-            },
-            {
-              "id": 64165,
-              "name": "Uma rufopunctata",
-              "reason": "lumped",
-              "detail": "Uma notata",
-              "detailId": 64163,
-              "detailColId": "7DH42",
-              "colId": "7DH42",
-              "colName": "Uma notata"
-            },
-            {
-              "id": 64250,
-              "name": "Aspidoscelis bacatus",
-              "reason": "lumped",
-              "detail": "Aspidoscelis tigris",
-              "detailId": 64290,
-              "detailColId": "HHJP",
-              "colId": "HHJP",
-              "colName": "Aspidoscelis tigris"
-            },
-            {
-              "id": 64253,
-              "name": "Aspidoscelis canus",
-              "reason": "lumped",
-              "detail": "Aspidoscelis tigris",
-              "detailId": 64290,
-              "detailColId": "HHJP",
-              "colId": "HHJP",
-              "colName": "Aspidoscelis tigris"
-            },
-            {
-              "id": 64255,
-              "name": "Aspidoscelis catalinensis",
-              "reason": "lumped",
-              "detail": "Aspidoscelis tigris",
-              "detailId": 64290,
-              "detailColId": "HHJP",
-              "colId": "HHJP",
-              "colName": "Aspidoscelis tigris"
-            },
-            {
-              "id": 64256,
-              "name": "Aspidoscelis celeripes",
-              "reason": "lumped",
-              "detail": "Aspidoscelis tigris",
-              "detailId": 64290,
-              "detailColId": "HHJP",
-              "colId": "HHJP",
-              "colName": "Aspidoscelis tigris"
-            },
-            {
-              "id": 64265,
-              "name": "Aspidoscelis flagellicauda",
-              "reason": "lumped",
-              "detail": "Aspidoscelis sonorae",
-              "detailId": 64288,
-              "detailColId": "HHJL",
-              "colId": "HHJL",
-              "colName": "Aspidoscelis sonorae"
-            },
-            {
-              "id": 64286,
-              "name": "Aspidoscelis septemvittata",
-              "reason": "infraspecific",
-              "detail": "Aspidoscelis scalaris",
-              "detailColId": "HHJH",
-              "rank": "subspecies",
-              "colId": "LS7JY"
             },
             {
               "id": 164690,
@@ -8850,6 +8742,126 @@
               "colName": "Phrynocephalus guttatus"
             },
             {
+              "id": 17451105,
+              "name": "Ctenophorus aurita",
+              "reason": "not_in_base",
+              "colId": "V9F8P",
+              "colName": "Ctenophorus aurita"
+            },
+            {
+              "id": 91866800,
+              "name": "Phrynocephalus alpherakii",
+              "reason": "lumped",
+              "detail": "Phrynocephalus guttatus",
+              "detailId": 157278,
+              "detailColId": "4GWDM",
+              "colId": "4GWDM",
+              "colName": "Phrynocephalus guttatus"
+            },
+            {
+              "id": 91866903,
+              "name": "Phrynocephalus kuschakewitschi",
+              "reason": "lumped",
+              "detail": "Phrynocephalus guttatus",
+              "detailId": 157278,
+              "detailColId": "4GWDM",
+              "colId": "4GWDM",
+              "colName": "Phrynocephalus guttatus"
+            },
+            {
+              "id": 91866961,
+              "name": "Phrynocephalus moltschanovi",
+              "reason": "not_in_base",
+              "colId": "RQC86",
+              "colName": "Phrynocephalus moltschanovi"
+            },
+            {
+              "id": 107660605,
+              "name": "Phrynocephalus incertus",
+              "reason": "not_in_base",
+              "colId": "RQC2D",
+              "colName": "Phrynocephalus incertus"
+            },
+            {
+              "id": 127902161,
+              "name": "Sitana bahiri",
+              "reason": "lumped",
+              "detail": "Sitana ponticeriana",
+              "detailId": 127902230,
+              "detailColId": "4XT57",
+              "colId": "4XT57",
+              "colName": "Sitana ponticeriana"
+            },
+            {
+              "id": 163632493,
+              "name": "Phrynocephalus sogdianus",
+              "reason": "not_in_base",
+              "colId": "RQCTM",
+              "colName": "Phrynocephalus sogdianus"
+            },
+            {
+              "id": 218917968,
+              "name": "Phrynocephalus longicaudatus",
+              "reason": "not_in_base",
+              "colId": "RQC5Q",
+              "colName": "Phrynocephalus longicaudatus"
+            }
+          ],
+          "splitDetails": [
+            {
+              "colId": "8SK63",
+              "parentId": 164681,
+              "parentName": "Calotes versicolor",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C7XSH",
+              "parentId": 48835941,
+              "parentName": "Phrynocephalus helioscopus",
+              "parentCategory": "LC"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "C6M54",
+              "assessedId": 164681,
+              "assessedName": "Calotes versicolor",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "C88MK",
+              "assessedId": 104676960,
+              "assessedName": "Ptyctolaemus gularis",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "V37VH",
+              "assessedId": 202864,
+              "assessedName": "Calotes paulus",
+              "assessedCategory": "EN"
+            }
+          ]
+        },
+        {
+          "name": "alopoglossidae",
+          "count": 33,
+          "neCount": 11,
+          "trueAssessed": 21,
+          "noMatchIds": []
+        },
+        {
+          "name": "amphisbaenidae",
+          "count": 186,
+          "neCount": 21,
+          "trueAssessed": 168,
+          "noMatchIds": [
+            176227,
+            56039161,
+            56039246,
+            75160413
+          ],
+          "noMatchDetails": [
+            {
               "id": 176227,
               "name": "Amphisbaena lumbricalis",
               "reason": "lumped",
@@ -8858,23 +8870,6 @@
               "detailColId": "D5H8",
               "colId": "D5H8",
               "colName": "Amphisbaena carvalhoi"
-            },
-            {
-              "id": 203073,
-              "name": "Sceloporus prezygus",
-              "reason": "lumped",
-              "detail": "Sceloporus serrifer",
-              "detailId": 64143,
-              "detailColId": "4V5BX",
-              "colId": "4V5BX",
-              "colName": "Sceloporus serrifer"
-            },
-            {
-              "id": 17451105,
-              "name": "Ctenophorus aurita",
-              "reason": "not_in_base",
-              "colId": "V9F8P",
-              "colName": "Ctenophorus aurita"
             },
             {
               "id": 56039161,
@@ -8896,6 +8891,323 @@
               "colId": "D5HJ",
               "colName": "Amphisbaena darwinii"
             },
+            {
+              "id": 75160413,
+              "name": "Amphisbaena ibijara",
+              "reason": "lumped",
+              "detail": "Amphisbaena frontalis",
+              "detailId": 75159900,
+              "detailColId": "D5HQ",
+              "colId": "D5HQ",
+              "colName": "Amphisbaena frontalis"
+            }
+          ]
+        },
+        {
+          "name": "anguidae",
+          "count": 90,
+          "neCount": 17,
+          "trueAssessed": 72,
+          "noMatchIds": [
+            63704
+          ],
+          "noMatchDetails": [
+            {
+              "id": 63704,
+              "name": "Elgaria nana",
+              "reason": "infraspecific",
+              "detail": "Elgaria multicarinata",
+              "detailId": 63703,
+              "detailColId": "399YC",
+              "rank": "subspecies",
+              "colId": "7GS44"
+            }
+          ],
+          "splitDetails": [
+            {
+              "colId": "KR66",
+              "parentId": 63693,
+              "parentName": "Barisia imbricata",
+              "parentCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "anniellidae",
+          "count": 1,
+          "neCount": 0,
+          "trueAssessed": 3,
+          "noMatchIds": []
+        },
+        {
+          "name": "bipedidae",
+          "count": 4,
+          "neCount": 0,
+          "trueAssessed": 4,
+          "noMatchIds": []
+        },
+        {
+          "name": "blanidae",
+          "count": 8,
+          "neCount": 0,
+          "trueAssessed": 8,
+          "noMatchIds": []
+        },
+        {
+          "name": "cadeidae",
+          "count": 3,
+          "neCount": 0,
+          "trueAssessed": 3,
+          "noMatchIds": []
+        },
+        {
+          "name": "cordylidae",
+          "count": 70,
+          "neCount": 2,
+          "trueAssessed": 68,
+          "noMatchIds": []
+        },
+        {
+          "name": "corytophanidae",
+          "count": 12,
+          "neCount": 2,
+          "trueAssessed": 10,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "8952Y",
+              "parentId": 197492,
+              "parentName": "Laemanctus longipes",
+              "parentCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "crotaphytidae",
+          "count": 13,
+          "neCount": 0,
+          "trueAssessed": 13,
+          "noMatchIds": []
+        },
+        {
+          "name": "dibamidae",
+          "count": 31,
+          "neCount": 6,
+          "trueAssessed": 25,
+          "noMatchIds": []
+        },
+        {
+          "name": "diploglossidae",
+          "count": 91,
+          "neCount": 39,
+          "trueAssessed": 51,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "V7G4V",
+              "parentId": 203030,
+              "parentName": "Wetmorena haetiana",
+              "parentCategory": "EN"
+            },
+            {
+              "colId": "V7HJC",
+              "parentId": 203030,
+              "parentName": "Wetmorena haetiana",
+              "parentCategory": "EN"
+            }
+          ]
+        },
+        {
+          "name": "gerrhosauridae",
+          "count": 40,
+          "neCount": 0,
+          "trueAssessed": 40,
+          "noMatchIds": []
+        },
+        {
+          "name": "gymnophthalmidae",
+          "count": 298,
+          "neCount": 66,
+          "trueAssessed": 231,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "69KCL",
+              "parentId": 44578534,
+              "parentName": "Cercosaura ocellata",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8H692",
+              "parentId": 44578534,
+              "parentName": "Cercosaura ocellata",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C7MRC",
+              "parentId": 44578602,
+              "parentName": "Iphisa elegans",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C83ZT",
+              "parentId": 44578730,
+              "parentName": "Potamites strangulatus",
+              "parentCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "helodermatidae",
+          "count": 6,
+          "neCount": 0,
+          "trueAssessed": 6,
+          "noMatchIds": []
+        },
+        {
+          "name": "hoplocercidae",
+          "count": 23,
+          "neCount": 5,
+          "trueAssessed": 18,
+          "noMatchIds": []
+        },
+        {
+          "name": "lacertidae",
+          "count": 390,
+          "neCount": 63,
+          "trueAssessed": 326,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "88RPK",
+              "parentId": 164641,
+              "parentName": "Eremias strauchi",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8GPZZ",
+              "parentId": 164728,
+              "parentName": "Mesalina brevirostris",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8GQ22",
+              "parentId": 164728,
+              "parentName": "Mesalina brevirostris",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8H5TF",
+              "parentId": 157286,
+              "parentName": "Eremias velox",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8H6LD",
+              "parentId": 216864496,
+              "parentName": "Lacerta trilineata",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "8VSL",
+              "parentId": 164678,
+              "parentName": "Acanthodactylus scutellatus",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C6T5H",
+              "parentId": 164658,
+              "parentName": "Darevskia parvula",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C6T5L",
+              "parentId": 164633,
+              "parentName": "Darevskia rudis",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C6T5M",
+              "parentId": 164753,
+              "parentName": "Darevskia raddei",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C6T5N",
+              "parentId": 164633,
+              "parentName": "Darevskia rudis",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "C6T5V",
+              "parentId": 164707,
+              "parentName": "Darevskia valentini",
+              "parentCategory": "LC"
+            },
+            {
+              "colId": "KZQG4",
+              "parentId": 164744,
+              "parentName": "Anatololacerta danfordi",
+              "parentCategory": "LC"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "8GPPT",
+              "assessedId": 164623,
+              "assessedName": "Eremias persica",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "8GPZY",
+              "assessedId": 199611,
+              "assessedName": "Mesalina adramitana",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "8GPZZ",
+              "assessedId": 164728,
+              "assessedName": "Mesalina brevirostris",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "8GQ23",
+              "assessedId": 164728,
+              "assessedName": "Mesalina brevirostris",
+              "assessedCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "leiosauridae",
+          "count": 37,
+          "neCount": 4,
+          "trueAssessed": 33,
+          "noMatchIds": []
+        },
+        {
+          "name": "liolaemidae",
+          "count": 346,
+          "neCount": 69,
+          "trueAssessed": 291,
+          "noMatchIds": [
+            56051847,
+            56051939,
+            56052108,
+            56058825,
+            56059651,
+            56064369,
+            56064748,
+            56077250,
+            56098897,
+            56152121,
+            56155898,
+            56249143,
+            56251581,
+            78586482,
+            109619258
+          ],
+          "noMatchDetails": [
             {
               "id": 56051847,
               "name": "Liolaemus camarones",
@@ -9023,26 +9335,6 @@
               "colName": "Phymaturus spurcus"
             },
             {
-              "id": 63488699,
-              "name": "Contomastix charrua",
-              "reason": "lumped",
-              "detail": "Contomastix lacertoides",
-              "detailId": 50012209,
-              "detailColId": "XVRN",
-              "colId": "XVRN",
-              "colName": "Contomastix lacertoides"
-            },
-            {
-              "id": 75160413,
-              "name": "Amphisbaena ibijara",
-              "reason": "lumped",
-              "detail": "Amphisbaena frontalis",
-              "detailId": 75159900,
-              "detailColId": "D5HQ",
-              "colId": "D5HQ",
-              "colName": "Amphisbaena frontalis"
-            },
-            {
               "id": 78586482,
               "name": "Liolaemus nigrocoeruleus",
               "reason": "lumped",
@@ -9053,40 +9345,6 @@
               "colName": "Liolaemus velosoi"
             },
             {
-              "id": 91866800,
-              "name": "Phrynocephalus alpherakii",
-              "reason": "lumped",
-              "detail": "Phrynocephalus guttatus",
-              "detailId": 157278,
-              "detailColId": "4GWDM",
-              "colId": "4GWDM",
-              "colName": "Phrynocephalus guttatus"
-            },
-            {
-              "id": 91866903,
-              "name": "Phrynocephalus kuschakewitschi",
-              "reason": "lumped",
-              "detail": "Phrynocephalus guttatus",
-              "detailId": 157278,
-              "detailColId": "4GWDM",
-              "colId": "4GWDM",
-              "colName": "Phrynocephalus guttatus"
-            },
-            {
-              "id": 91866961,
-              "name": "Phrynocephalus moltschanovi",
-              "reason": "not_in_base",
-              "colId": "RQC86",
-              "colName": "Phrynocephalus moltschanovi"
-            },
-            {
-              "id": 107660605,
-              "name": "Phrynocephalus incertus",
-              "reason": "not_in_base",
-              "colId": "RQC2D",
-              "colName": "Phrynocephalus incertus"
-            },
-            {
               "id": 109619258,
               "name": "Liolaemus islugensis",
               "reason": "lumped",
@@ -9095,30 +9353,61 @@
               "detailColId": "3V6M7",
               "colId": "3V6M7",
               "colName": "Liolaemus schmidti"
-            },
+            }
+          ],
+          "splitDetails": [
             {
-              "id": 127902161,
-              "name": "Sitana bahiri",
+              "colId": "8SHRK",
+              "parentId": 178395,
+              "parentName": "Liolaemus signifer",
+              "parentCategory": "NT"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "C7P7C",
+              "assessedId": 56064105,
+              "assessedName": "Liolaemus kingii",
+              "assessedCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "opluridae",
+          "count": 9,
+          "neCount": 1,
+          "trueAssessed": 8,
+          "noMatchIds": []
+        },
+        {
+          "name": "phrynosomatidae",
+          "count": 173,
+          "neCount": 41,
+          "trueAssessed": 134,
+          "noMatchIds": [
+            64165,
+            203073
+          ],
+          "noMatchDetails": [
+            {
+              "id": 64165,
+              "name": "Uma rufopunctata",
               "reason": "lumped",
-              "detail": "Sitana ponticeriana",
-              "detailId": 127902230,
-              "detailColId": "4XT57",
-              "colId": "4XT57",
-              "colName": "Sitana ponticeriana"
+              "detail": "Uma notata",
+              "detailId": 64163,
+              "detailColId": "7DH42",
+              "colId": "7DH42",
+              "colName": "Uma notata"
             },
             {
-              "id": 163632493,
-              "name": "Phrynocephalus sogdianus",
-              "reason": "not_in_base",
-              "colId": "RQCTM",
-              "colName": "Phrynocephalus sogdianus"
-            },
-            {
-              "id": 218917968,
-              "name": "Phrynocephalus longicaudatus",
-              "reason": "not_in_base",
-              "colId": "RQC5Q",
-              "colName": "Phrynocephalus longicaudatus"
+              "id": 203073,
+              "name": "Sceloporus prezygus",
+              "reason": "lumped",
+              "detail": "Sceloporus serrifer",
+              "detailId": 64143,
+              "detailColId": "4V5BX",
+              "colId": "4V5BX",
+              "colName": "Sceloporus serrifer"
             }
           ],
           "splitDetails": [
@@ -9159,33 +9448,9 @@
               "parentCategory": "LC"
             },
             {
-              "colId": "5CBK3",
-              "parentId": 64369,
-              "parentName": "Xenosaurus grandis",
-              "parentCategory": "VU"
-            },
-            {
-              "colId": "69KCL",
-              "parentId": 44578534,
-              "parentName": "Cercosaura ocellata",
-              "parentCategory": "LC"
-            },
-            {
               "colId": "6LY5R",
               "parentId": 64065,
               "parentName": "Holbrookia maculata",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "7FWPY",
-              "parentId": 64368,
-              "parentName": "Xantusia vigilis",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "88RPK",
-              "parentId": 164641,
-              "parentName": "Eremias strauchi",
               "parentCategory": "LC"
             },
             {
@@ -9200,6 +9465,142 @@
               "parentName": "Phrynosoma douglasii",
               "parentCategory": "LC"
             },
+            {
+              "colId": "89BZW",
+              "parentId": 64163,
+              "parentName": "Uma notata",
+              "parentCategory": "NT"
+            },
+            {
+              "colId": "C8898",
+              "parentId": 64155,
+              "parentName": "Sceloporus torquatus",
+              "parentCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "polychrotidae",
+          "count": 9,
+          "neCount": 1,
+          "trueAssessed": 8,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "8GQ7T",
+              "parentId": 203164,
+              "parentName": "Polychrus marmoratus",
+              "parentCategory": "LC"
+            }
+          ]
+        },
+        {
+          "name": "rhineuridae",
+          "count": 2,
+          "neCount": 0,
+          "trueAssessed": 2,
+          "noMatchIds": []
+        },
+        {
+          "name": "shinisauridae",
+          "count": 2,
+          "neCount": 0,
+          "trueAssessed": 2,
+          "noMatchIds": []
+        },
+        {
+          "name": "sphenodontidae",
+          "count": 1,
+          "neCount": 0,
+          "trueAssessed": 1,
+          "noMatchIds": []
+        },
+        {
+          "name": "teiidae",
+          "count": 175,
+          "neCount": 32,
+          "trueAssessed": 149,
+          "noMatchIds": [
+            64250,
+            64253,
+            64255,
+            64256,
+            64265,
+            64286,
+            63488699
+          ],
+          "noMatchDetails": [
+            {
+              "id": 64250,
+              "name": "Aspidoscelis bacatus",
+              "reason": "lumped",
+              "detail": "Aspidoscelis tigris",
+              "detailId": 64290,
+              "detailColId": "HHJP",
+              "colId": "HHJP",
+              "colName": "Aspidoscelis tigris"
+            },
+            {
+              "id": 64253,
+              "name": "Aspidoscelis canus",
+              "reason": "lumped",
+              "detail": "Aspidoscelis tigris",
+              "detailId": 64290,
+              "detailColId": "HHJP",
+              "colId": "HHJP",
+              "colName": "Aspidoscelis tigris"
+            },
+            {
+              "id": 64255,
+              "name": "Aspidoscelis catalinensis",
+              "reason": "lumped",
+              "detail": "Aspidoscelis tigris",
+              "detailId": 64290,
+              "detailColId": "HHJP",
+              "colId": "HHJP",
+              "colName": "Aspidoscelis tigris"
+            },
+            {
+              "id": 64256,
+              "name": "Aspidoscelis celeripes",
+              "reason": "lumped",
+              "detail": "Aspidoscelis tigris",
+              "detailId": 64290,
+              "detailColId": "HHJP",
+              "colId": "HHJP",
+              "colName": "Aspidoscelis tigris"
+            },
+            {
+              "id": 64265,
+              "name": "Aspidoscelis flagellicauda",
+              "reason": "lumped",
+              "detail": "Aspidoscelis sonorae",
+              "detailId": 64288,
+              "detailColId": "HHJL",
+              "colId": "HHJL",
+              "colName": "Aspidoscelis sonorae"
+            },
+            {
+              "id": 64286,
+              "name": "Aspidoscelis septemvittata",
+              "reason": "infraspecific",
+              "detail": "Aspidoscelis scalaris",
+              "detailColId": "HHJH",
+              "rank": "subspecies",
+              "colId": "LS7JY"
+            },
+            {
+              "id": 63488699,
+              "name": "Contomastix charrua",
+              "reason": "lumped",
+              "detail": "Contomastix lacertoides",
+              "detailId": 50012209,
+              "detailColId": "XVRN",
+              "colId": "XVRN",
+              "colName": "Contomastix lacertoides"
+            }
+          ],
+          "splitDetails": [
             {
               "colId": "8924H",
               "parentId": 197436,
@@ -9249,153 +9650,9 @@
               "parentCategory": "LC"
             },
             {
-              "colId": "8952Y",
-              "parentId": 197492,
-              "parentName": "Laemanctus longipes",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "89BZW",
-              "parentId": 64163,
-              "parentName": "Uma notata",
-              "parentCategory": "NT"
-            },
-            {
-              "colId": "89DS9",
-              "parentId": 64369,
-              "parentName": "Xenosaurus grandis",
-              "parentCategory": "VU"
-            },
-            {
-              "colId": "8GPZZ",
-              "parentId": 164728,
-              "parentName": "Mesalina brevirostris",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8GQ22",
-              "parentId": 164728,
-              "parentName": "Mesalina brevirostris",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8GQ7T",
-              "parentId": 203164,
-              "parentName": "Polychrus marmoratus",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8H5TF",
-              "parentId": 157286,
-              "parentName": "Eremias velox",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8H692",
-              "parentId": 44578534,
-              "parentName": "Cercosaura ocellata",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8H6LD",
-              "parentId": 216864496,
-              "parentName": "Lacerta trilineata",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8SHRK",
-              "parentId": 178395,
-              "parentName": "Liolaemus signifer",
-              "parentCategory": "NT"
-            },
-            {
-              "colId": "8SK63",
-              "parentId": 164681,
-              "parentName": "Calotes versicolor",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "8VSL",
-              "parentId": 164678,
-              "parentName": "Acanthodactylus scutellatus",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C6T5H",
-              "parentId": 164658,
-              "parentName": "Darevskia parvula",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C6T5L",
-              "parentId": 164633,
-              "parentName": "Darevskia rudis",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C6T5M",
-              "parentId": 164753,
-              "parentName": "Darevskia raddei",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C6T5N",
-              "parentId": 164633,
-              "parentName": "Darevskia rudis",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C6T5V",
-              "parentId": 164707,
-              "parentName": "Darevskia valentini",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C7MRC",
-              "parentId": 44578602,
-              "parentName": "Iphisa elegans",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C7XSH",
-              "parentId": 48835941,
-              "parentName": "Phrynocephalus helioscopus",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C83ZT",
-              "parentId": 44578730,
-              "parentName": "Potamites strangulatus",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C8898",
-              "parentId": 64155,
-              "parentName": "Sceloporus torquatus",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "C8KC7",
-              "parentId": 64369,
-              "parentName": "Xenosaurus grandis",
-              "parentCategory": "VU"
-            },
-            {
               "colId": "HHHZ",
               "parentId": 64290,
               "parentName": "Aspidoscelis tigris",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "KR66",
-              "parentId": 63693,
-              "parentName": "Barisia imbricata",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "KZQG4",
-              "parentId": 164744,
-              "parentName": "Anatololacerta danfordi",
               "parentCategory": "LC"
             },
             {
@@ -9403,18 +9660,6 @@
               "parentId": 89931365,
               "parentName": "Aspidoscelis inornatus",
               "parentCategory": "LC"
-            },
-            {
-              "colId": "V7G4V",
-              "parentId": 203030,
-              "parentName": "Wetmorena haetiana",
-              "parentCategory": "EN"
-            },
-            {
-              "colId": "V7HJC",
-              "parentId": 203030,
-              "parentName": "Wetmorena haetiana",
-              "parentCategory": "EN"
             },
             {
               "colId": "WGYL",
@@ -9443,60 +9688,6 @@
           ],
           "neSynonymDetails": [
             {
-              "colId": "8GPPT",
-              "assessedId": 164623,
-              "assessedName": "Eremias persica",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "8GPZY",
-              "assessedId": 199611,
-              "assessedName": "Mesalina adramitana",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "8GPZZ",
-              "assessedId": 164728,
-              "assessedName": "Mesalina brevirostris",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "8GQ23",
-              "assessedId": 164728,
-              "assessedName": "Mesalina brevirostris",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "8KP9H",
-              "assessedId": 64350,
-              "assessedName": "Lepidophyma gaigeae",
-              "assessedCategory": "VU"
-            },
-            {
-              "colId": "C6M54",
-              "assessedId": 164681,
-              "assessedName": "Calotes versicolor",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "C7P7C",
-              "assessedId": 56064105,
-              "assessedName": "Liolaemus kingii",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "C88MK",
-              "assessedId": 104676960,
-              "assessedName": "Ptyctolaemus gularis",
-              "assessedCategory": "LC"
-            },
-            {
-              "colId": "V37VH",
-              "assessedId": 202864,
-              "assessedName": "Calotes paulus",
-              "assessedCategory": "EN"
-            },
-            {
               "colId": "WGYL",
               "assessedId": 203182,
               "assessedName": "Cnemidophorus lemniscatus",
@@ -9509,6 +9700,84 @@
               "assessedCategory": "LC"
             }
           ]
+        },
+        {
+          "name": "trogonophiidae",
+          "count": 1,
+          "neCount": 0,
+          "trueAssessed": 1,
+          "noMatchIds": []
+        },
+        {
+          "name": "tropiduridae",
+          "count": 154,
+          "neCount": 30,
+          "trueAssessed": 150,
+          "noMatchIds": []
+        },
+        {
+          "name": "xantusiidae",
+          "count": 39,
+          "neCount": 11,
+          "trueAssessed": 28,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "7FWPY",
+              "parentId": 64368,
+              "parentName": "Xantusia vigilis",
+              "parentCategory": "LC"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "8KP9H",
+              "assessedId": 64350,
+              "assessedName": "Lepidophyma gaigeae",
+              "assessedCategory": "VU"
+            }
+          ]
+        },
+        {
+          "name": "xenosauridae",
+          "count": 15,
+          "neCount": 8,
+          "trueAssessed": 7,
+          "noMatchIds": [],
+          "splitDetails": [
+            {
+              "colId": "5CBK3",
+              "parentId": 64369,
+              "parentName": "Xenosaurus grandis",
+              "parentCategory": "VU"
+            },
+            {
+              "colId": "89DS9",
+              "parentId": 64369,
+              "parentName": "Xenosaurus grandis",
+              "parentCategory": "VU"
+            },
+            {
+              "colId": "C8KC7",
+              "parentId": 64369,
+              "parentName": "Xenosaurus grandis",
+              "parentCategory": "VU"
+            }
+          ]
+        },
+        {
+          "name": "trogonophidae",
+          "count": 7,
+          "neCount": 0,
+          "trueAssessed": 7,
+          "noMatchIds": []
+        },
+        {
+          "name": "leiocephalidae",
+          "count": 33,
+          "neCount": 6,
+          "trueAssessed": 1,
+          "noMatchIds": []
         }
       ]
     }
