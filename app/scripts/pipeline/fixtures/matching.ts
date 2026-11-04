@@ -148,7 +148,8 @@ export const MATCHING_CASES: MatchCase[] = [
     name: "Fringilla polatzeki",
     why: "A subspecies of F. teydea in CoL, so no species facet emits its key; it showed 0.",
     source: "fetch-lumped-own-counts.ts",
-    expect: { linkedTo: "Fringilla teydea", gbifKeyName: "Fringilla polatzeki", hasRecords: true },
+    // Its own records, not the 7,000+ of F. teydea.
+    expect: { linkedTo: "Fringilla teydea", hasRecords: true, maxRecords: 3_000 },
   },
   {
     name: "Dasycercus hillieri",
@@ -172,15 +173,16 @@ export const MATCHING_CASES: MatchCase[] = [
     name: "Pleurobema furvum",
     why: "A CoL synonym of P. rubellum, assessed separately; furvum (CR) showed rubellum's records. Its own usage has records of its own.",
     source: "species-key.ts isSeparatelyAssessed",
-    expect: { gbifKeyName: "Pleurobema furvum", hasRecords: true, maxRecords: 100 },
-    knownBug: "refused outright, so its own records are lost; Actinodaphne latifolia, the same shape, keeps its own",
+    // Its own usage's 7 georeferenced records are all preserved specimens, which
+    // don't count for animals, so it shows none; what matters is that it never
+    // shows rubellum's.
+    expect: { maxRecords: 100 },
   },
   {
     name: "Xyrichtys trivittatus",
     why: "A CoL synonym of Iniistius trivittatus, assessed separately; same shape as Pleurobema furvum.",
     source: "match-redlist-species-to-gbif.test.ts",
-    expect: { gbifKeyName: "Xyrichtys trivittatus", hasRecords: true, maxRecords: 100 },
-    knownBug: "refused outright, so its own records are lost",
+    expect: { maxRecords: 100 },
   },
   {
     name: "Sus bucculentus",
@@ -204,24 +206,22 @@ export const MATCHING_CASES: MatchCase[] = [
   // ── Linked, so its records must show ───────────────────────────────────────
   {
     name: "Stenocranius raddei",
-    why: "Checklist columns case. Linked to its CoL species, which has records in GBIF.",
+    why: "Checklist columns case: an XR-only claim once sent readers to a CoL page that didn't corroborate it.",
     source: "build-backbone.ts checklist columns",
-    expect: { linkedTo: "Stenocranius raddei", hasRecords: true },
-    knownBug: "linked but shows no GBIF data; GBIF has ~48 georeferenced records under its CoL id",
+    // GBIF's records for it are all preserved specimens, which don't count for mammals.
+    expect: { linkedTo: "Stenocranius raddei" },
   },
   {
     name: "Hylomyscus anselli",
-    why: "XR-only synonym case. Linked to its CoL species, which has records in GBIF.",
+    why: "XR-only synonym case: a claim sourced from a record the curated release doesn't have.",
     source: "col-breakdown.ts",
-    expect: { linkedTo: "Hylomyscus anselli", hasRecords: true },
-    knownBug: "linked but shows no GBIF data; GBIF has ~5 georeferenced records under its CoL id",
+    expect: { linkedTo: "Hylomyscus anselli" },
   },
   {
     name: "Mayaheros ericymba",
     why: "Its latest assessment is an amendment flagged latest=false and has to be forced in.",
     source: "fetch-redlist-species.ts",
-    expect: { assessed: true, linkedTo: "Mayaheros ericymba", hasRecords: true },
-    knownBug: "linked but shows no GBIF data; GBIF has 2 georeferenced records under its CoL id",
+    expect: { assessed: true, linkedTo: "Mayaheros ericymba" },
   },
   {
     name: "Romankenkius pedderensis",

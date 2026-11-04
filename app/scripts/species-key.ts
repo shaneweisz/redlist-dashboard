@@ -17,6 +17,10 @@
  * fact: whether the other name is itself separately assessed.
  */
 
+import { canonicalEpithet } from "../src/lib/name-parts";
+
+const genusOf = (scientificName: string) => scientificName.trim().toLowerCase().split(/\s+/)[0] ?? "";
+
 /** A name as the taxonomies give it: the binomial, and its author citation if known. */
 export interface TaxonName {
   scientificName: string;
@@ -80,7 +84,9 @@ const MAX_RESPELLING_EDITS = 3;
  *
  *   2. The same epithet under a different genus — a genus transfer, which is a
  *      rename and nothing more. Hylatomus pileatus -> Dryocopus pileatus,
- *      Drepanis coccinea -> Vestiaria coccinea.
+ *      Drepanis coccinea -> Vestiaria coccinea. The epithet may have changed
+ *      gender to agree with the new genus (Meiostemon tetrandrus -> Combretum
+ *      tetrandrum); that is still the same name.
  *
  *   3. The same author, and an epithet within a couple of letters — a respelling
  *      or a gender agreement. Pica nutalli -> nuttallii, Sminthopsis fuliginosa
@@ -109,6 +115,11 @@ export function sameOrganism(a: TaxonName, b: TaxonName): boolean {
   const epB = epithetOf(b.scientificName);
   if (!epA || !epB) return false;
   if (epA === epB) return true;
+  // A genus transfer whose epithet changed gender to agree with its new genus
+  // (Meiostemon tetrandrus -> Combretum tetrandrum). Both codes require the
+  // change (ICZN Art. 34.2, ICN Art. 23.5), so it is the same name, and only
+  // across genera: within one genus a termination is the variant passes' call.
+  if (genusOf(a.scientificName) !== genusOf(b.scientificName) && canonicalEpithet(epA) === canonicalEpithet(epB)) return true;
 
   const authA = normaliseAuthorship(a.authorship);
   const authB = normaliseAuthorship(b.authorship);

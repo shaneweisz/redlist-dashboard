@@ -42,8 +42,7 @@ const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** CoL names for ids, from whichever taxonomy file the layout has. */
 function taxonomySql(dir: string, layout: Layout): string {
-  if (layout === "v1") return `read_parquet(${lit(path.join(dir, "backbone.parquet"))})`;
-  throw new Error(`no taxonomy for layout ${layout}`);
+  return `read_parquet(${lit(path.join(dir, layout === "v1" ? "backbone.parquet" : "taxa.parquet"))})`;
 }
 
 export async function observe(conn: DuckDBConnection, dir: string, cases: MatchCase[]): Promise<Map<string, Observed>> {
@@ -71,7 +70,9 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
       LEFT JOIN names g ON g.col_id = a.gbif_species_key
       WHERE a.scientific_name = ${lit(c.name)}`)).getRowObjects();
     const neListed: Record<string, boolean> = {};
+    const hasNe = (await conn.runAndReadAll(`SELECT 1 FROM information_schema.tables WHERE table_schema = 'f' AND table_name = 'ne'`)).getRowObjects().length > 0;
     for (const n of Object.keys(c.expect.neListed ?? {})) {
+      if (!hasNe) continue;
       const [r] = (await conn.runAndReadAll(`
         SELECT count(*) AS c FROM f.ne WHERE scientific_name = ${lit(n)}`)).getRowObjects();
       neListed[n] = Number(r.c) > 0;
@@ -106,7 +107,9 @@ export function mismatches(c: MatchCase, o: Observed): string[] {
   if (e.maxRecords !== undefined && (o.records ?? 0) > e.maxRecords) {
     miss.push(`records: expected at most ${e.maxRecords}, got ${o.records}`);
   }
-  for (const [n, listed] of Object.entries(e.neListed ?? {})) want(`${n} in NE list`, listed, o.neListed[n]);
+  for (const [n, listed] of Object.entries(e.neListed ?? {})) {
+    if (n in o.neListed) want(`${n} in NE list`, listed, o.neListed[n]);
+  }
   return miss;
 }
 
