@@ -622,13 +622,36 @@ export function breakdownDisplayName(rank: FilterRank, name: string): string {
 // Their link goes to the CoL taxon, so the label has to say which one.
 const COL_TAXON_ALIAS_MAP: Record<string, { name: string; rank: string }> = COL_TAXON_ALIASES;
 
-/** "Calamariinae on CoL" for a name CoL files differently, else undefined. When
- *  CoL keeps the name but not the rank, says the rank: "a parvphylum on CoL". */
-export function colAliasNote(rank: FilterRank, name: string): string | undefined {
+/**
+ * How to label a name CoL files differently, with its link on CoL's name:
+ * "Bolyeridae (Bolyeriidae on CoL)" splits into
+ * { colName: "Bolyeriidae", suffix: " on CoL" }, rendered as
+ * `${name} (${colName}${suffix})` with only colName linked. When CoL keeps the
+ * name but not the rank there is no second name, so the name itself stays the
+ * link and only a note follows: { note: "a parvphylum on CoL" }.
+ * Undefined for a name CoL accepts as written.
+ */
+export function colAliasLabel(rank: FilterRank, name: string): { colName: string; suffix: string } | { note: string } | undefined {
   const alias = COL_TAXON_ALIAS_MAP[`${rank}:${name.toLowerCase()}`];
   if (!alias) return undefined;
-  if (alias.name.toLowerCase() === name.toLowerCase()) return `${/^[aeiou]/i.test(alias.rank) ? "an" : "a"} ${alias.rank} on CoL`;
-  return `${alias.name} on CoL`;
+  if (alias.name.toLowerCase() === name.toLowerCase()) return { note: `${/^[aeiou]/i.test(alias.rank) ? "an" : "a"} ${alias.rank} on CoL` };
+  return { colName: alias.name, suffix: " on CoL" };
+}
+
+/** The label as plain text, e.g. for an email or a title attribute. */
+export function colAliasNote(rank: FilterRank, name: string): string | undefined {
+  const label = colAliasLabel(rank, name);
+  if (!label) return undefined;
+  return "note" in label ? label.note : `${label.colName}${label.suffix}`;
+}
+
+/** A name's segments: linked as is, or plain with its CoL name linked in brackets. */
+function nameSegments(rank: FilterRank, display: string, name: string, liveColIds?: Record<string, string>): DescribeFilterSegment[] {
+  const href = breakdownHref(rank, name, liveColIds);
+  const label = colAliasLabel(rank, name);
+  if (!label) return [{ text: display, href }];
+  if ("note" in label) return [{ text: display, href }, { text: ` (${label.note})` }];
+  return [{ text: display }, { text: " (" }, { text: label.colName, href }, { text: `${label.suffix})` }];
 }
 
 export function breakdownHref(rank: FilterRank, name: string, liveColIds?: Record<string, string>): string | undefined {
@@ -701,9 +724,7 @@ function joinSegments(rank: FilterRank, names: string[], liveColIds?: Record<str
   const segs: DescribeFilterSegment[] = [];
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
-    segs.push({ text: capitalize(n), href: breakdownHref(rank, n, liveColIds) });
-    const note = colAliasNote(rank, n);
-    if (note) segs.push({ text: ` (${note})` });
+    segs.push(...nameSegments(rank, capitalize(n), n, liveColIds));
   });
   return segs;
 }
@@ -712,9 +733,7 @@ function speciesSegments(names: string[], liveColIds?: Record<string, string>): 
   const segs: DescribeFilterSegment[] = [];
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
-    segs.push({ text: capitalizeSpeciesName(n), href: breakdownHref("species", n, liveColIds) });
-    const note = colAliasNote("species", n);
-    if (note) segs.push({ text: ` (${note})` });
+    segs.push(...nameSegments("species", capitalizeSpeciesName(n), n, liveColIds));
   });
   return segs;
 }

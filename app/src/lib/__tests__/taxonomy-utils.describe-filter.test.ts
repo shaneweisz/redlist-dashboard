@@ -57,10 +57,17 @@ describe("breakdownHref", () => {
 });
 
 describe("names CoL files differently", () => {
-  it("links a family CoL ranks as a subfamily, and says so", () => {
+  it("puts the link on CoL's name, not the tree's, for a family CoL ranks as a subfamily", () => {
     const segs = describeFilter({ taxonGroups: ["reptiles"], families: ["calamariidae"] });
     expect(segs.map((s) => s.text).join("")).toBe("Family: Calamariidae (Calamariinae on CoL)");
-    expect(segs.find((s) => s.text === "Calamariidae")?.href).toContain("TAXON_ID=");
+    expect(segs.find((s) => s.text === "Calamariidae")?.href).toBeUndefined();
+    expect(segs.find((s) => s.text === "Calamariinae")?.href).toContain("TAXON_ID=");
+  });
+
+  it("keeps the link on the name itself when CoL only changes the rank", () => {
+    const segs = describeFilter({ taxonGroups: ["fishes"], classNames: ["chondrichthyes"] });
+    expect(segs.map((s) => s.text).join("")).toBe("Class: Chondrichthyes (a parvphylum on CoL)");
+    expect(segs.find((s) => s.text === "Chondrichthyes")?.href).toContain("TAXON_ID=");
   });
 
   it("follows CoL's synonym record for a species", () => {

@@ -10,7 +10,7 @@ import TaxaIcon from "@/components/TaxaIcon";
 import { CATEGORY_COLORS, CATEGORY_NAMES, CATEGORY_ORDER } from "@/config/taxa";
 import {
   hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, collapseTaxaToTokens, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
-  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasNote,
+  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasLabel,
   matchesBreakdownName, speciesMatchesNode,
   type FilterRank, type DescribeFilterSegment,
 } from "@/lib/taxonomy-utils";
@@ -1001,12 +1001,30 @@ function BreakdownList({
           {breakdown.map((b) => {
             const rowLabel = breakdownDisplayName(rank, b.name);
             const href = breakdownHref(rank, b.name, liveColIds);
-            const aliasNote = colAliasNote(rank, b.name);
+            const alias = colAliasLabel(rank, b.name);
             return (
               <tr key={b.name} className="border-t border-zinc-700/60">
                 <td className="pr-3 py-1 whitespace-nowrap">
                   {label}:{" "}
-                  {href ? (
+                  {href && alias && "colName" in alias ? (
+                    // CoL files this name differently: the link goes on CoL's name.
+                    <>
+                      {rowLabel}
+                      <span className="text-zinc-400">
+                        {" ("}
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-300 hover:text-blue-200 underline"
+                          title={`View ${alias.colName} on Catalogue of Life`}
+                        >
+                          {alias.colName}
+                        </a>
+                        {`${alias.suffix})`}
+                      </span>
+                    </>
+                  ) : href ? (
                     <a
                       href={href}
                       target="_blank"
@@ -1019,7 +1037,7 @@ function BreakdownList({
                   ) : (
                     rowLabel
                   )}
-                  {aliasNote && <span className="text-zinc-400"> ({aliasNote})</span>}
+                  {alias && "note" in alias && <span className="text-zinc-400"> ({alias.note})</span>}
                 </td>
                 <td className="px-2 py-1 text-right text-zinc-300">{b.count}</td>
                 <td className="px-2 py-1 text-right">
