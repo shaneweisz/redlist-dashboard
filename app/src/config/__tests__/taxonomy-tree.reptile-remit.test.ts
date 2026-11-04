@@ -31,3 +31,17 @@ describe("reptile SSC remits match the GRA master list", () => {
     expect(claimedBy("elapidae", `${genus} sp`)).toEqual([group]);
   });
 });
+
+// Our Catalogue of Life species carry CoL's family names, which the GRA list
+// doesn't use: a spelling variant, or a split the GRA doesn't make. Each must
+// still land in the group its GRA counterpart is in, or that family's CoL
+// species silently move group (Bolyeriidae once fell to the lizard RLA).
+describe("CoL-only reptile family names follow their GRA counterpart", () => {
+  it.each([
+    ["bolyeriidae", "Bolyeria multocarinata", "ssc-snake"],          // GRA: Bolyeridae
+    ["trogonophidae", "Agamodon anguliceps", "ssc-lizard-tuatara-rla"], // GRA: Trogonophiidae
+    ["leiocephalidae", "Leiocephalus altavelensis", "ssc-lizard-tuatara-rla"], // GRA: within Tropiduridae
+  ])("%s (%s) is claimed by %s only", (family, name, group) => {
+    expect(claimedBy(family, name)).toEqual([group]);
+  });
+});

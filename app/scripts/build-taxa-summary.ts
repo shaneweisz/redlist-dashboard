@@ -256,7 +256,7 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
         const breakdown = [];
         for (const name of bucketNames) {
           const narrowed: NodeFilter = dim ? { ...node.filter, [dim.field]: [name] } : node.filter;
-          breakdown.push(await computeBreakdownEntry(breakdownCtx, name, narrowed, node.id));
+          breakdown.push(await computeBreakdownEntry(breakdownCtx, name, narrowed, node.id, node.filter));
           breakdownQueries++;
         }
         child.colBreakdown = breakdown;

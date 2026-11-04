@@ -177,6 +177,20 @@ describe("computeNoMatchDetails — the query, not just the classifier", () => {
   // live-drilldown breakdown started returning a 500 while the data sync,
   // gated only on the CoL release pins, kept declining to rebuild the file.
   // With the columns gone the rename claim goes with them; nothing else does.
+  // The Calamariidae shape: the Red List files a species under a family CoL
+  // treats as a subfamily of another family in the same group. Scoped to that
+  // one family name, CoL has nothing; scoped to the group, the match is clean.
+  it("counts a counterpart elsewhere in the group as a match, and one outside it as not", async () => {
+    const bucketOnly = await computeNoMatchDetails(ctx, "lower(family) = 'felinae'", "scientific_name = 'Clean species'");
+    expect(bucketOnly.map((d) => [d.id, d.reason])).toEqual([[1, "classified_elsewhere"]]);
+
+    const withinGroup = await computeNoMatchDetails(ctx, "lower(family) = 'felinae'", "scientific_name = 'Clean species'", "lower(order_name) = 'carnivora'");
+    expect(withinGroup).toEqual([]);
+
+    const outsideGroup = await computeNoMatchDetails(ctx, "lower(family) = 'felinae'", "scientific_name = 'Clean species'", "lower(class_name) = 'gastropoda'");
+    expect(outsideGroup.map((d) => d.reason)).toEqual(["classified_elsewhere"]);
+  });
+
   it("degrades instead of throwing when the backbone predates the checklist columns", async () => {
     const legacyBackbone = path.join(tmp, "backbone-legacy.parquet");
     await conn.run(`COPY (

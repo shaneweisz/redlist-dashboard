@@ -109,13 +109,15 @@ const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"]
 /** Every snake family label (bar Viperidae) found in our data or the GRA
  *  master list. Our data carries no suborder, so this list is the only thing
  *  that separates snakes from lizards inside Squamata — a snake family missing
- *  here would land in the Lizard and Tuatara RLA. Includes Psammodynastidae,
+ *  here would land in the Lizard and Tuatara RLA, and our CoL-sourced species
+ *  carry CoL's spellings, so a family both use is listed both ways (Bolyeridae
+ *  on the Red List, Bolyeriidae on CoL). Includes Psammodynastidae,
  *  which the GRA splits from Pseudaspididae but our data doesn't have yet. The
  *  GRA list's own spellings Atractaspidae and Xenophiidae are left out: no
  *  species in our data uses them (it has Atractaspididae and Xenophidiidae). */
 const SNAKE_FAMILIES = [
   "acrochordidae", "aniliidae", "anomalepididae", "anomochilidae",
-  "atractaspididae", "boidae", "bolyeridae", "calabariidae",
+  "atractaspididae", "boidae", "bolyeridae", "bolyeriidae", "calabariidae",
   "calamariidae", "candoiidae", "charinaidae", "colubridae", "cyclocoridae",
   "cylindrophiidae", "dipsadidae", "elapidae", "erycidae", "gerrhopilidae",
   "grayiidae", "homalopsidae", "lamprophiidae", "leptotyphlopidae",
