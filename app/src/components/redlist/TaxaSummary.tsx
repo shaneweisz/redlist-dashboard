@@ -74,10 +74,13 @@ interface Table1aSectionData {
   title: string;
   rows: Table1aRowData[];
   /** SSC mode only — the section's catch-all row id (e.g. "ssc-other-mammals"),
-   * so the collapse-to-5 UI can always keep it visible regardless of collapse
-   * state. Undefined in Table 1a mode, which has no catch-all concept. */
+   * so it can be pinned below the named groups. Undefined in Table 1a mode,
+   * which has no catch-all concept. */
   catchAllId?: string;
 }
+
+// SSC groups mode: how many groups each taxon shows before its "Show N more" row.
+const SSC_ROWS_COLLAPSED = 2;
 
 // SSC groups mode — one section per taxon that has an SSC pilot built out.
 // Add an entry here (nodeId, parentTaxon, title, catch-all id) when a new
@@ -1884,6 +1887,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // isn't offered there — and the query is cleared on leaving SSC mode so coming
   // back doesn't land on a mysteriously short table.
   const [groupFilter, setGroupFilter] = useState("");
+  // SSC view: each taxon shows its first SSC_ROWS_COLLAPSED groups until its
+  // "Show N more" row is clicked. Keyed by section title.
+  const [sscExpandedSections, setSscExpandedSections] = useState<Set<string>>(new Set());
   useEffect(() => { if (!sscMode) setGroupFilter(""); }, [sscMode]);
 
   // Matching a SECTION title keeps that whole section (typing "invertebrates"
@@ -2293,7 +2299,10 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     isSelected?: boolean,
     available = true,
     isAllRow = false,
-    gbifObs?: { total?: number; mean?: number; median?: number; speciesCount?: number; gbifNeCount?: number; distribution?: Record<string, number>; colDescribed?: number; colNe?: number }
+    gbifObs?: { total?: number; mean?: number; median?: number; speciesCount?: number; gbifNeCount?: number; distribution?: Record<string, number>; colDescribed?: number; colNe?: number },
+    /** Replaces the default select-this-taxon click (the SSC view's taxon rows
+     *  leave the view as well as selecting). */
+    onRowClick?: (e: React.MouseEvent) => void,
   ) => {
     const isAllSelected = isAllRow && selectedTaxa.has("all");
     const rowBg = isAllRow
@@ -2323,6 +2332,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         onClick={(e) => {
           if (allDisabled) return;
           if (!isAllRow && !available) return;
+          if (onRowClick) { onRowClick(e); return; }
           // Expand taxa table when Cmd/Ctrl+clicking a taxon row (not "all")
           if (!isAllRow && (e.metaKey || e.ctrlKey)) {
             setTaxaExpanded(true);
@@ -3133,10 +3143,29 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                   const subGbifObs = rows.reduce((s, r) => s + (r.totalGbifObservations ?? 0), 0);
                   const subMeanGbif = subGbifSpecies > 0 ? Math.round(subGbifObs / subGbifSpecies) : undefined;
 
+                  // SSC view: the section is headed by the taxon's own row, exactly as
+                  // the home view shows it (icon, name, the taxon's own totals).
+                  // Clicking it leaves the SSC view for that taxon.
+                  const sscTaxon = sscMode ? perTaxa.find((t) => t.id === rows[0]?.parentTaxon) : undefined;
+                  const sscTaxonRow = sscTaxon && renderRow(
+                    sscTaxon.id, sscTaxon.name, sscTaxon.color,
+                    sscTaxon.estimatedDescribed, sscTaxon.totalAssessed, sscTaxon.percentAssessed,
+                    sscTaxon.outdated, sscTaxon.percentOutdated, sscTaxon.byCategory,
+                    false, sscTaxon.available, false,
+                    {
+                      total: sscTaxon.totalGbifObservations, mean: sscTaxon.meanGbifObsPerSpecies,
+                      median: sscTaxon.medianGbifObsPerSpecies, speciesCount: sscTaxon.gbifSpeciesCount,
+                      gbifNeCount: sscTaxon.gbifNeSpeciesCount, distribution: sscTaxon.gbifObsDistribution,
+                      colDescribed: sscTaxon.colDescribed, colNe: sscTaxon.colNe,
+                    },
+                    (e) => { onLayoutModeChange(null); onToggleTaxon(sscTaxon.id, e); },
+                  );
+
                   return (
                     <React.Fragment key={section.title}>
-                      {/* Section header — shows the section's subtotals directly, so they're
-                          visible without scrolling past every row to reach the bottom. */}
+                      {sscTaxonRow || (
+                      /* Section header — shows the section's subtotals directly, so they're
+                          visible without scrolling past every row to reach the bottom. */
                       <tr className="bg-zinc-100 dark:bg-zinc-800/80 border-b border-zinc-200 dark:border-zinc-700">
                         <td className={`${stickyClasses} ${taxonCellPad} whitespace-nowrap w-0 bg-zinc-100 dark:bg-zinc-800/80`}>
                           <span className="text-xs font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-wider">
@@ -3183,6 +3212,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           <td className={flexTdClasses}>{renderBreakdownBar(subByCategory)}</td>
                         )}
                       </tr>
+                      )}
                       {/* Section rows — all named groups always shown; the catch-all
                           row is pulled out and rendered last, since it's usually the
                           largest, most load-bearing row. Table 1a mode has no
@@ -3324,10 +3354,33 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           )}
                         </tr>
                         );
+                        const ordered = catchAllRow ? [...namedRows, catchAllRow] : namedRows;
+                        // A group-name search shows every match; otherwise an SSC section
+                        // starts at its top SSC_ROWS_COLLAPSED groups.
+                        const collapsible = isSscSection && !groupFilterActive && ordered.length > SSC_ROWS_COLLAPSED;
+                        const expanded = sscExpandedSections.has(section.title);
+                        const shownRows = collapsible && !expanded ? ordered.slice(0, SSC_ROWS_COLLAPSED) : ordered;
+                        const hiddenCount = ordered.length - SSC_ROWS_COLLAPSED;
                         return (
                           <>
-                            {namedRows.map(renderGroupRow)}
-                            {catchAllRow && renderGroupRow(catchAllRow)}
+                            {shownRows.map(renderGroupRow)}
+                            {collapsible && (
+                              <tr
+                                className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer"
+                                onClick={() => setSscExpandedSections((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(section.title)) next.delete(section.title); else next.add(section.title);
+                                  return next;
+                                })}
+                              >
+                                <td colSpan={visibleColCount} className={`${taxonCellPad} bg-white dark:bg-zinc-900`}>
+                                  <span className="inline-flex items-center gap-1.5 pl-4 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                                    <FaChevronRight size={10} className={`transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden />
+                                    {expanded ? "Show fewer" : `Show ${hiddenCount} more`}
+                                  </span>
+                                </td>
+                              </tr>
+                            )}
                           </>
                         );
                       })()}
