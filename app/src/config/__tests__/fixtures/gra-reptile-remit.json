@@ -91,7 +91,7 @@
   "teiidae": "ssc-lizard-tuatara-rla",
   "testudinidae": "ssc-tortoise-freshwater-turtle",
   "trionychidae": "ssc-tortoise-freshwater-turtle",
-  "trogonophiidae": "ssc-lizard-tuatara-rla",
+  "trogonophidae": "ssc-lizard-tuatara-rla",
   "tropidophiidae": "ssc-snake",
   "tropiduridae": "ssc-lizard-tuatara-rla",
   "typhlopidae": "ssc-snake",
@@ -525,7 +525,7 @@
    "Amyda cartilaginea"
   ],
   [
-   "trogonophiidae",
+   "trogonophidae",
    "Agamodon anguliceps"
   ],
   [

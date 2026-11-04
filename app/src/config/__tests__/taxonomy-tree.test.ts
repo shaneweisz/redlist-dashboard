@@ -610,8 +610,7 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
       { class_name: "Reptilia", order_name: "Squamata", family: "Acrochordidae", scientific_name: "Acrochordus javanicus" },
       { class_name: "Reptilia", order_name: "Squamata", family: "Boidae", scientific_name: "Boa constrictor" },
       { class_name: "Reptilia", order_name: "Squamata", family: "Pythonidae", scientific_name: "Python bivittatus" },
-      // The tuatara — claimed by the RLA itself via extraSpeciesNames, must not
-      // also match the RLA's own base (exclude-everything-else) filter twice.
+      // The tuatara — claimed by the RLA itself, through Sphenodontidae.
       { class_name: "Reptilia", order_name: "Rhynchocephalia", family: "Sphenodontidae", scientific_name: "Sphenodon punctatus" },
     ];
     for (const row of cases) {
@@ -619,7 +618,7 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
       const named = ["ssc-crocodile", "ssc-tortoise-freshwater-turtle", "ssc-marine-turtle", "ssc-skink", "ssc-chameleon", "ssc-monitor-lizard", "ssc-iguana", "ssc-anoline-lizard", "ssc-gekkota", "ssc-viper", "ssc-sea-snake", "ssc-snake"];
       const matchesNamed = named.some((id) => speciesMatchesNode({ ...row, taxon_group: "reptiles" }, id));
       expect(matchesNamed, row.scientific_name).toBe(!isTuatara);
-      // The RLA only claims the tuatara (via extraSpeciesNames) among these
+      // The RLA only claims the tuatara among these
       // cases — everything else here is already claimed by a named group, so
       // the RLA's exclude-everything-else base filter must not also match it.
       expect(speciesMatchesNode({ ...row, taxon_group: "reptiles" }, "ssc-lizard-tuatara-rla")).toBe(isTuatara);
@@ -639,7 +638,7 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
     expect(speciesMatchesNode(gecko, "ssc-lizard-tuatara-rla")).toBe(false);
   });
 
-  it("ssc-lizard-tuatara-rla explicitly claims the tuatara via extraSpeciesNames despite it not being Squamata", () => {
+  it("ssc-lizard-tuatara-rla claims the tuatara through its family, Sphenodontidae, despite it not being Squamata", () => {
     const tuatara = { class_name: "Reptilia", order_name: "Rhynchocephalia", family: "Sphenodontidae", scientific_name: "Sphenodon punctatus", taxon_group: "reptiles" };
     expect(speciesMatchesNode(tuatara, "ssc-lizard-tuatara-rla")).toBe(true);
   });

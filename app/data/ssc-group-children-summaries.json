@@ -8697,9 +8697,9 @@
       "colBreakdown": [
         {
           "name": "agamidae",
-          "count": 629,
+          "count": 628,
           "neCount": 125,
-          "trueAssessed": 504,
+          "trueAssessed": 503,
           "noMatchIds": [
             9370,
             164690,
@@ -8844,16 +8844,16 @@
         },
         {
           "name": "alopoglossidae",
-          "count": 33,
+          "count": 32,
           "neCount": 11,
-          "trueAssessed": 21,
+          "trueAssessed": 20,
           "noMatchIds": []
         },
         {
           "name": "amphisbaenidae",
-          "count": 186,
+          "count": 185,
           "neCount": 21,
-          "trueAssessed": 168,
+          "trueAssessed": 167,
           "noMatchIds": [
             176227,
             56039161,
@@ -8905,9 +8905,9 @@
         },
         {
           "name": "anguidae",
-          "count": 90,
+          "count": 89,
           "neCount": 17,
-          "trueAssessed": 72,
+          "trueAssessed": 71,
           "noMatchIds": [
             63704
           ],
@@ -8934,44 +8934,44 @@
         },
         {
           "name": "anniellidae",
-          "count": 1,
+          "count": 0,
           "neCount": 0,
-          "trueAssessed": 3,
+          "trueAssessed": 2,
           "noMatchIds": []
         },
         {
           "name": "bipedidae",
-          "count": 4,
-          "neCount": 0,
-          "trueAssessed": 4,
-          "noMatchIds": []
-        },
-        {
-          "name": "blanidae",
-          "count": 8,
-          "neCount": 0,
-          "trueAssessed": 8,
-          "noMatchIds": []
-        },
-        {
-          "name": "cadeidae",
           "count": 3,
           "neCount": 0,
           "trueAssessed": 3,
           "noMatchIds": []
         },
         {
+          "name": "blanidae",
+          "count": 7,
+          "neCount": 0,
+          "trueAssessed": 7,
+          "noMatchIds": []
+        },
+        {
+          "name": "cadeidae",
+          "count": 2,
+          "neCount": 0,
+          "trueAssessed": 2,
+          "noMatchIds": []
+        },
+        {
           "name": "cordylidae",
-          "count": 70,
+          "count": 69,
           "neCount": 2,
-          "trueAssessed": 68,
+          "trueAssessed": 67,
           "noMatchIds": []
         },
         {
           "name": "corytophanidae",
-          "count": 12,
+          "count": 11,
           "neCount": 2,
-          "trueAssessed": 10,
+          "trueAssessed": 9,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -8984,23 +8984,23 @@
         },
         {
           "name": "crotaphytidae",
-          "count": 13,
+          "count": 12,
           "neCount": 0,
-          "trueAssessed": 13,
+          "trueAssessed": 12,
           "noMatchIds": []
         },
         {
           "name": "dibamidae",
-          "count": 31,
+          "count": 30,
           "neCount": 6,
-          "trueAssessed": 25,
+          "trueAssessed": 24,
           "noMatchIds": []
         },
         {
           "name": "diploglossidae",
-          "count": 91,
+          "count": 90,
           "neCount": 39,
-          "trueAssessed": 51,
+          "trueAssessed": 50,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9019,16 +9019,16 @@
         },
         {
           "name": "gerrhosauridae",
-          "count": 40,
+          "count": 39,
           "neCount": 0,
-          "trueAssessed": 40,
+          "trueAssessed": 39,
           "noMatchIds": []
         },
         {
           "name": "gymnophthalmidae",
-          "count": 298,
+          "count": 297,
           "neCount": 66,
-          "trueAssessed": 231,
+          "trueAssessed": 230,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9059,23 +9059,23 @@
         },
         {
           "name": "helodermatidae",
-          "count": 6,
+          "count": 5,
           "neCount": 0,
-          "trueAssessed": 6,
+          "trueAssessed": 5,
           "noMatchIds": []
         },
         {
           "name": "hoplocercidae",
-          "count": 23,
+          "count": 22,
           "neCount": 5,
-          "trueAssessed": 18,
+          "trueAssessed": 17,
           "noMatchIds": []
         },
         {
           "name": "lacertidae",
-          "count": 390,
+          "count": 389,
           "neCount": 63,
-          "trueAssessed": 326,
+          "trueAssessed": 325,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9180,16 +9180,16 @@
         },
         {
           "name": "leiosauridae",
-          "count": 37,
+          "count": 36,
           "neCount": 4,
-          "trueAssessed": 33,
+          "trueAssessed": 32,
           "noMatchIds": []
         },
         {
           "name": "liolaemidae",
-          "count": 346,
+          "count": 345,
           "neCount": 69,
-          "trueAssessed": 291,
+          "trueAssessed": 290,
           "noMatchIds": [
             56051847,
             56051939,
@@ -9374,16 +9374,16 @@
         },
         {
           "name": "opluridae",
-          "count": 9,
+          "count": 8,
           "neCount": 1,
-          "trueAssessed": 8,
+          "trueAssessed": 7,
           "noMatchIds": []
         },
         {
           "name": "phrynosomatidae",
-          "count": 173,
+          "count": 172,
           "neCount": 41,
-          "trueAssessed": 134,
+          "trueAssessed": 133,
           "noMatchIds": [
             64165,
             203073
@@ -9481,9 +9481,9 @@
         },
         {
           "name": "polychrotidae",
-          "count": 9,
+          "count": 8,
           "neCount": 1,
-          "trueAssessed": 8,
+          "trueAssessed": 7,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9496,16 +9496,16 @@
         },
         {
           "name": "rhineuridae",
-          "count": 2,
+          "count": 1,
           "neCount": 0,
-          "trueAssessed": 2,
+          "trueAssessed": 1,
           "noMatchIds": []
         },
         {
           "name": "shinisauridae",
-          "count": 2,
+          "count": 1,
           "neCount": 0,
-          "trueAssessed": 2,
+          "trueAssessed": 1,
           "noMatchIds": []
         },
         {
@@ -9517,9 +9517,9 @@
         },
         {
           "name": "teiidae",
-          "count": 175,
+          "count": 174,
           "neCount": 32,
-          "trueAssessed": 149,
+          "trueAssessed": 148,
           "noMatchIds": [
             64250,
             64253,
@@ -9702,24 +9702,17 @@
           ]
         },
         {
-          "name": "trogonophiidae",
-          "count": 1,
-          "neCount": 0,
-          "trueAssessed": 1,
-          "noMatchIds": []
-        },
-        {
           "name": "tropiduridae",
-          "count": 154,
+          "count": 153,
           "neCount": 30,
-          "trueAssessed": 150,
+          "trueAssessed": 149,
           "noMatchIds": []
         },
         {
           "name": "xantusiidae",
-          "count": 39,
+          "count": 38,
           "neCount": 11,
-          "trueAssessed": 28,
+          "trueAssessed": 27,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9740,9 +9733,9 @@
         },
         {
           "name": "xenosauridae",
-          "count": 15,
+          "count": 14,
           "neCount": 8,
-          "trueAssessed": 7,
+          "trueAssessed": 6,
           "noMatchIds": [],
           "splitDetails": [
             {
@@ -9767,16 +9760,16 @@
         },
         {
           "name": "trogonophidae",
-          "count": 7,
+          "count": 6,
           "neCount": 0,
-          "trueAssessed": 7,
+          "trueAssessed": 6,
           "noMatchIds": []
         },
         {
           "name": "leiocephalidae",
-          "count": 33,
+          "count": 32,
           "neCount": 6,
-          "trueAssessed": 1,
+          "trueAssessed": 0,
           "noMatchIds": []
         }
       ]

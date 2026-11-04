@@ -111,8 +111,9 @@ const SEA_SNAKE_GENERA = [
  *  species in our data are still filed under — all Anoline Lizard SG. */
 const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"];
 
-/** Lizard and Tuatara RLA families: the GRA master list's 31, then the two
- *  names our CoL-sourced species use instead of a GRA family. */
+/** Lizard and Tuatara RLA families: the GRA master list's, then the two names
+ *  our data uses instead of a GRA family. The GRA's Trogonophiidae appears
+ *  only as Trogonophidae, the spelling both the Red List and CoL use. */
 const LIZARD_RLA_FAMILIES = [
   "agamidae", "alopoglossidae", "amphisbaenidae", "anguidae", "anniellidae",
   "bipedidae", "blanidae", "cadeidae", "cordylidae", "corytophanidae",
@@ -120,8 +121,8 @@ const LIZARD_RLA_FAMILIES = [
   "gymnophthalmidae", "helodermatidae", "hoplocercidae", "lacertidae",
   "leiosauridae", "liolaemidae", "opluridae", "phrynosomatidae",
   "polychrotidae", "rhineuridae", "shinisauridae", "sphenodontidae", "teiidae",
-  "trogonophiidae", "tropiduridae", "xantusiidae", "xenosauridae",
-  // Not GRA families: the names our CoL species carry for some of them (see
+  "tropiduridae", "xantusiidae", "xenosauridae",
+  // Not the GRA's names: our data's for two of its families (see
   // GRA_NAME_EQUIVALENTS). Last, so the breakdown lists the GRA's own first.
   "trogonophidae", "leiocephalidae",
 ];
@@ -1041,10 +1042,10 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           name: "Lizard and Tuatara Red List Authority",
           filter: {
             taxonGroups: ["reptiles"],
+            // The tuatara comes in through Sphenodontidae, its family in both the
+            // Red List and CoL. (It used to be added by name too, which the
+            // per-family breakdown then counted once in every row.)
             families: LIZARD_RLA_FAMILIES,
-            // CoL leaves the tuatara's order unset (see canonicalOrderColumnSql
-            // in taxonomy-sql.ts); claim it by name as well, whatever its family.
-            extraSpeciesNames: ["sphenodon punctatus"],
           },
           sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-lizard-and-tuatara-red-list-authority",
         },
