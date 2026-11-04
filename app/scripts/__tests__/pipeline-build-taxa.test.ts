@@ -37,6 +37,8 @@ beforeAll(async () => {
     { "col:ID": "SSP", "col:parentID": "LEO", "col:status": "accepted", "col:rank": "subspecies", "col:scientificName": "Panthera leo persica", ...lineage },
     { "col:ID": "VAR", "col:parentID": "SSP", "col:status": "accepted", "col:rank": "variety", "col:scientificName": "Panthera leo persica alba", ...lineage },
     { "col:ID": "SSPSYN", "col:parentID": "SSP", "col:status": "synonym", "col:rank": "subspecies", "col:scientificName": "Felis leo persicus", ...lineage },
+    { "col:ID": "BIN", "col:parentID": "LEO", "col:status": "accepted", "col:rank": "unranked", "col:scientificName": "BOLD:AAA0001", ...lineage },
+    { "col:ID": "GBIN", "col:parentID": "G", "col:status": "accepted", "col:rank": "unranked", "col:scientificName": "BOLD:AAA0002", ...lineage },
     { "col:ID": "SUBG", "col:parentID": "G", "col:status": "accepted", "col:rank": "species", "col:scientificName": "Panthera (Tigris) tigris", ...lineage },
     { "col:ID": "SPLIT", "col:parentID": "G", "col:status": "accepted", "col:rank": "species", "col:scientificName": "Panthera melanochaita", ...lineage },
     { "col:ID": "CAT", "col:parentID": "G", "col:status": "accepted", "col:rank": "species", "col:scientificName": "Felis catus", ...lineage },
@@ -49,6 +51,8 @@ beforeAll(async () => {
   writeTsv(cl, [
     { "col:ID": "LEO", "col:status": "accepted", "col:rank": "species", "col:scientificName": "Panthera leo" },
     { "col:ID": "SPLIT", "col:parentID": "LEO", "col:status": "synonym", "col:rank": "species", "col:scientificName": "Panthera melanochaita" },
+    { "col:ID": "BIN", "col:parentID": "LEO", "col:status": "accepted", "col:rank": "unranked", "col:scientificName": "BOLD:AAA0001", ...lineage },
+    { "col:ID": "GBIN", "col:parentID": "G", "col:status": "accepted", "col:rank": "unranked", "col:scientificName": "BOLD:AAA0002", ...lineage },
     { "col:ID": "SUBG", "col:status": "accepted", "col:rank": "species", "col:scientificName": "Panthera tygris" },
   ], ["col:ID", "col:parentID", "col:status", "col:rank", "col:scientificName"]);
 
@@ -69,6 +73,10 @@ describe("species_id", () => {
     expect(rows.SSP.species_id).toBe("LEO");
     expect(rows.VAR.species_id).toBe("LEO");
     expect(rows.SSPSYN.species_id).toBe("LEO");
+  });
+  it("credits a BOLD BIN to the species above it, and leaves one under a genus unresolved", () => {
+    expect(rows.BIN.species_id).toBe("LEO");
+    expect(rows.GBIN.species_id).toBeNull();
   });
   it("is NULL for misapplied names and above species rank", () => {
     expect(rows.MIS.species_id).toBeNull();

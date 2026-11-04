@@ -43,6 +43,13 @@ import { TAXON_GROUP_CASE, NE_EXCLUDED } from "./taxon-groups";
 import { CORE_DIR, OUT_DIR } from "./paths";
 
 const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','natio','aberration','infraspecific name','infrasubspecific name')";
+/**
+ * Ranks that count towards the species above them. 'unranked' is mostly BOLD
+ * BINs (887k usages in COL26.6 XR); GBIF matches DNA-barcode records to them and
+ * credits the parent species, so a BIN under a species counts towards it. One
+ * under a genus or family stays unresolved, as GBIF leaves it.
+ */
+const BELOW_SPECIES = INFRASPECIFIC.replace("(", "('unranked',");
 
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const tsv = (p: string) => `read_csv(${lit(p)}, delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)`;
@@ -104,8 +111,8 @@ export async function buildTaxa(
     : `SELECT NULL::VARCHAR rid, NULL::INTEGER ryr WHERE false`}`);
 
   // species_id in two hops: a synonym to its accepted usage, then an
-  // infraspecific to the species above it (twice, for a variety under a
-  // subspecies). Ambiguous synonyms follow CoL's parent like GBIF does;
+  // infraspecific or BIN to the species above it (twice, for a variety under a
+  // subspecies or a BIN under a subspecies). Ambiguous synonyms follow CoL's parent like GBIF does;
   // misapplied names are someone else's concept and count towards nothing.
   await conn.run(`CREATE OR REPLACE TEMP TABLE resolved AS
     WITH acc AS (
@@ -116,8 +123,8 @@ export async function buildTaxa(
       FROM nu n)
     SELECT acc.col_id,
            CASE WHEN a.rank = 'species' THEN a.col_id
-                WHEN a.rank IN ${INFRASPECIFIC} AND p1.rank = 'species' THEN p1.col_id
-                WHEN a.rank IN ${INFRASPECIFIC} AND p1.rank IN ${INFRASPECIFIC} AND p2.rank = 'species' THEN p2.col_id
+                WHEN a.rank IN ${BELOW_SPECIES} AND p1.rank = 'species' THEN p1.col_id
+                WHEN a.rank IN ${BELOW_SPECIES} AND p1.rank IN ${BELOW_SPECIES} AND p2.rank = 'species' THEN p2.col_id
            END AS species_id
     FROM acc
     LEFT JOIN nu a ON a.col_id = acc.acc_id AND a.status NOT ILIKE '%synonym%'
