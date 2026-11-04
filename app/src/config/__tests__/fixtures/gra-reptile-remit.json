@@ -11,7 +11,7 @@
   "anolidae": "ssc-anoline-lizard",
   "anomalepididae": "ssc-snake",
   "anomochilidae": "ssc-snake",
-  "atractaspidae": "ssc-snake",
+  "atractaspididae": "ssc-snake",
   "bipedidae": "ssc-lizard-tuatara-rla",
   "blanidae": "ssc-lizard-tuatara-rla",
   "boidae": "ssc-snake",
@@ -102,7 +102,7 @@
   "xantusiidae": "ssc-lizard-tuatara-rla",
   "xenodermidae": "ssc-snake",
   "xenopeltidae": "ssc-snake",
-  "xenophiidae": "ssc-snake",
+  "xenophidiidae": "ssc-snake",
   "xenosauridae": "ssc-lizard-tuatara-rla",
   "xenotyphlopidae": "ssc-snake"
  },
@@ -209,7 +209,7 @@
    "Anomochilus leonardi"
   ],
   [
-   "atractaspidae",
+   "atractaspididae",
    "Amblyodipsas concolor"
   ],
   [
@@ -569,7 +569,7 @@
    "Xenopeltis unicolor"
   ],
   [
-   "xenophiidae",
+   "xenophidiidae",
    "Pelodiscus huike"
   ],
   [

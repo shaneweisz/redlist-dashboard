@@ -102,23 +102,20 @@ const SEA_SNAKE_GENERA = [
   "enhydrina", "kerilia", "kolpophis", "lapemis", "pelamis", "thalassophis", "thalassophina",
 ];
 
-/** Anolis plus the genera it has been split into (Nicholson et al. 2012),
- *  which some of our CoL names still use — all Anoline Lizard SG. */
-const ANOLE_GENERA = [
-  "anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx", "chamaelinorops",
-  "xiphosurus", "audantia",
-];
+/** Anolis plus the genera it was split into (Nicholson et al. 2012) that some
+ *  species in our data are still filed under — all Anoline Lizard SG. */
+const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"];
 
-/** Every snake family label (bar Viperidae) found in either the GRA master
- *  list or our own data. Our data carries no suborder, so this list is the
- *  only thing that separates snakes from lizards inside Squamata — a snake
- *  family missing here would land in the Lizard and Tuatara RLA. The two
- *  sources spell or split some families differently (Atractaspidae vs.
- *  Atractaspididae, Xenophiidae vs. Xenophidiidae; the GRA also splits
- *  Psammodynastidae from Pseudaspididae), so both spellings are listed. */
+/** Every snake family label (bar Viperidae) found in our data or the GRA
+ *  master list. Our data carries no suborder, so this list is the only thing
+ *  that separates snakes from lizards inside Squamata — a snake family missing
+ *  here would land in the Lizard and Tuatara RLA. Includes Psammodynastidae,
+ *  which the GRA splits from Pseudaspididae but our data doesn't have yet. The
+ *  GRA list's own spellings Atractaspidae and Xenophiidae are left out: no
+ *  species in our data uses them (it has Atractaspididae and Xenophidiidae). */
 const SNAKE_FAMILIES = [
   "acrochordidae", "aniliidae", "anomalepididae", "anomochilidae",
-  "atractaspidae", "atractaspididae", "boidae", "bolyeridae", "calabariidae",
+  "atractaspididae", "boidae", "bolyeridae", "calabariidae",
   "calamariidae", "candoiidae", "charinaidae", "colubridae", "cyclocoridae",
   "cylindrophiidae", "dipsadidae", "elapidae", "erycidae", "gerrhopilidae",
   "grayiidae", "homalopsidae", "lamprophiidae", "leptotyphlopidae",
@@ -126,7 +123,7 @@ const SNAKE_FAMILIES = [
   "psammodynastidae", "psammophiidae", "pseudaspididae", "pseudoxenodontidae",
   "pseudoxyrhophiidae", "pythonidae", "sanziniidae", "sibynophiidae",
   "tropidophiidae", "typhlopidae", "ungaliophiidae", "uropeltidae",
-  "xenodermidae", "xenopeltidae", "xenophiidae", "xenophidiidae",
+  "xenodermidae", "xenopeltidae", "xenophidiidae",
   "xenotyphlopidae",
 ];
 const COL_2025 = "Catalogue of Life 2025";

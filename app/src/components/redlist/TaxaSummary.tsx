@@ -10,7 +10,7 @@ import TaxaIcon from "@/components/TaxaIcon";
 import { CATEGORY_COLORS, CATEGORY_NAMES, CATEGORY_ORDER } from "@/config/taxa";
 import {
   hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, collapseTaxaToTokens, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
-  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref,
+  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasNote,
   matchesBreakdownName, speciesMatchesNode,
   type FilterRank, type DescribeFilterSegment,
 } from "@/lib/taxonomy-utils";
@@ -998,6 +998,7 @@ function BreakdownList({
           {breakdown.map((b) => {
             const rowLabel = breakdownDisplayName(rank, b.name);
             const href = breakdownHref(rank, b.name, liveColIds);
+            const aliasNote = colAliasNote(rank, b.name);
             return (
               <tr key={b.name} className="border-t border-zinc-700/60">
                 <td className="pr-3 py-1 whitespace-nowrap">
@@ -1015,6 +1016,7 @@ function BreakdownList({
                   ) : (
                     rowLabel
                   )}
+                  {aliasNote && <span className="text-zinc-400"> ({aliasNote})</span>}
                 </td>
                 <td className="px-2 py-1 text-right text-zinc-300">{b.count}</td>
                 <td className="px-2 py-1 text-right">

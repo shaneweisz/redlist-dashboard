@@ -11,6 +11,7 @@ import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
 import { NODE_DESCRIPTION_OVERRIDES, COL_NODE_TOOLTIP_NOTES, COL_EXCLUDE_ALL_NODES, COL_SPECIES_NAME_OVERRIDES } from "@/config/col-described-overrides";
 import COL_TAXON_IDS from "@/config/col-taxon-ids.json";
+import COL_TAXON_ALIASES from "@/config/col-taxon-aliases.json";
 import COL_RELEASE from "@/config/col-release.json";
 // dynamic-taxon.ts imports NODE_INDEX/getAncestors back from this file — a
 // circular import, but a safe one: both sides only reference the other inside
@@ -616,6 +617,20 @@ export function breakdownDisplayName(rank: FilterRank, name: string): string {
  *  resolveLiveColTaxonIds — since a genus like "Chaetodipus" reached purely via live
  *  drilldown is never referenced by any static SpeciesFilter and so never in the
  *  snapshot). */
+// Tree names CoL files under a different name or rank (a synonym, a spelling
+// variant, or a family CoL ranks as a subfamily), built alongside COL_TAXON_IDS.
+// Their link goes to the CoL taxon, so the label has to say which one.
+const COL_TAXON_ALIAS_MAP: Record<string, { name: string; rank: string }> = COL_TAXON_ALIASES;
+
+/** "Calamariinae on CoL" for a name CoL files differently, else undefined. When
+ *  CoL keeps the name but not the rank, says the rank: "a parvphylum on CoL". */
+export function colAliasNote(rank: FilterRank, name: string): string | undefined {
+  const alias = COL_TAXON_ALIAS_MAP[`${rank}:${name.toLowerCase()}`];
+  if (!alias) return undefined;
+  if (alias.name.toLowerCase() === name.toLowerCase()) return `${/^[aeiou]/i.test(alias.rank) ? "an" : "a"} ${alias.rank} on CoL`;
+  return `${alias.name} on CoL`;
+}
+
 export function breakdownHref(rank: FilterRank, name: string, liveColIds?: Record<string, string>): string | undefined {
   const key = `${rank}:${name.toLowerCase()}`;
   const colId = COL_TAXON_ID_MAP[key] ?? liveColIds?.[key];
@@ -687,6 +702,8 @@ function joinSegments(rank: FilterRank, names: string[], liveColIds?: Record<str
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
     segs.push({ text: capitalize(n), href: breakdownHref(rank, n, liveColIds) });
+    const note = colAliasNote(rank, n);
+    if (note) segs.push({ text: ` (${note})` });
   });
   return segs;
 }
@@ -696,6 +713,8 @@ function speciesSegments(names: string[], liveColIds?: Record<string, string>): 
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
     segs.push({ text: capitalizeSpeciesName(n), href: breakdownHref("species", n, liveColIds) });
+    const note = colAliasNote("species", n);
+    if (note) segs.push({ text: ` (${note})` });
   });
   return segs;
 }

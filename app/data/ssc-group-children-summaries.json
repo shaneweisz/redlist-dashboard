@@ -6685,27 +6685,6 @@
           "neCount": 0,
           "trueAssessed": 0,
           "noMatchIds": []
-        },
-        {
-          "name": "chamaelinorops",
-          "count": 0,
-          "neCount": 0,
-          "trueAssessed": 0,
-          "noMatchIds": []
-        },
-        {
-          "name": "xiphosurus",
-          "count": 0,
-          "neCount": 0,
-          "trueAssessed": 0,
-          "noMatchIds": []
-        },
-        {
-          "name": "audantia",
-          "count": 0,
-          "neCount": 0,
-          "trueAssessed": 0,
-          "noMatchIds": []
         }
       ]
     },
@@ -7579,13 +7558,6 @@
           "count": 3,
           "neCount": 0,
           "trueAssessed": 3,
-          "noMatchIds": []
-        },
-        {
-          "name": "atractaspidae",
-          "count": 0,
-          "neCount": 0,
-          "trueAssessed": 0,
           "noMatchIds": []
         },
         {
@@ -18897,13 +18869,6 @@
           "count": 3,
           "neCount": 1,
           "trueAssessed": 2,
-          "noMatchIds": []
-        },
-        {
-          "name": "xenophiidae",
-          "count": 0,
-          "neCount": 0,
-          "trueAssessed": 0,
           "noMatchIds": []
         },
         {

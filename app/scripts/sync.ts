@@ -17,7 +17,7 @@
  *   Phase 10: build-matching        (→ species_link.parquet, IUCN/GBIF → col_id)
  *   Phase 11: build-synonym-index   (→ synonym-index.parquet, search)
  *   Phase 11b: build-search-index   (→ name-index.parquet + rank-index.parquet, search)
- *   Phase 12: build-col-taxon-ids   (taxonomy tree + backbone.parquet → src/config/col-taxon-ids.json, committed to git)
+ *   Phase 12: build-col-taxon-ids   (taxonomy tree + backbone.parquet → src/config/col-taxon-ids.json + col-taxon-aliases.json, committed to git)
  *   Phase 13: build-taxa-summary    (CSVs + CoL artifacts → taxa-summary.json, incl. col counts)
  *   Phase 13a: build-col-revisions  (CoL artifacts → col-revisions.json, the dashboard-wide
  *                                    "possible taxonomic revision" flag)
@@ -302,7 +302,7 @@ async function main() {
       // Small + derived from committed source (the taxonomy tree), so this writes to
       // src/config/ and gets committed to git, unlike the R2-published data/ outputs
       // above — re-run whenever a node's filter changes, not just on every data sync.
-      console.log("\nPhase 12: build-col-taxon-ids (→ src/config/col-taxon-ids.json)");
+      console.log("\nPhase 12: build-col-taxon-ids (→ src/config/col-taxon-ids.json + col-taxon-aliases.json)");
       console.log("═".repeat(60));
       await buildColTaxonIds();
     } else {

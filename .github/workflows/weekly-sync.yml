@@ -144,7 +144,7 @@ jobs:
           # both changed between COL26.6 and 26.7, and Rhodophyta is red_algae's
           # only key. If it is not committed back, the next run starts from the
           # stale keys again and fails the same way, forever.
-          git add src/config/col-taxon-ids.json src/config/col-release.json src/config/gbif-taxon-keys.json
+          git add src/config/col-taxon-ids.json src/config/col-taxon-aliases.json src/config/col-release.json src/config/gbif-taxon-keys.json
 
           if git diff --cached --quiet; then
             echo "Nothing to commit — skipping PR."
