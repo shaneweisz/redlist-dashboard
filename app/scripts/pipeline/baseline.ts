@@ -14,13 +14,11 @@
  */
 
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { loadEnvFiles } from "../utils";
 import { downloadSync } from "./r2";
-
-export const CACHE_ROOT = path.join(os.homedir(), ".cache", "redlist-dashboard");
+import { CACHE_ROOT } from "./paths";
 
 /** Data files tracked in git instead of uploaded (see upload-data-to-r2.ts). */
 const REPO_OWNED = ["col-revisions.json"];

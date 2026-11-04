@@ -44,6 +44,7 @@ import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "./utils";
 import { buildVernaculars } from "./build-vernaculars";
+import { TAXON_GROUP_CASE } from "./pipeline/taxon-groups";
 
 // The browsable species universe is status='accepted' ONLY. CoL also marks names
 // 'provisionally accepted' — its uncertainty hedge, a grab-bag of dubious names
@@ -77,46 +78,8 @@ const DEMOTED_PREDICATE = `
   OR (lower(status) IN ('accepted', 'provisionally accepted')
       AND lower(rank) IN ('subspecies','variety','form','subvariety','subform','natio','aberration'))`;
 
-// CoL lineage → IUCN Table 1a group, per Table 1a's footnote definitions (2025-2):
-// crustaceans = note 6's 7 classes (Maxillopoda split into CoL's copepoda/thecostraca/
-// hexanauplia/ichthyostraca); corals = Octocorallia + orders Antipatharia/Corallimorpharia/
-// Scleractinia; mosses = note 8; ferns&allies = note 9 (CoL lumps most into polypodiopsida/
-// lycopodiopsida); brown_algae = Phaeophyceae (the actual brown seaweeds, not all
-// Ochrophytina which includes diatoms). Evaluated top-down: specific groups before the
-// `animalia`/kingdom catch-alls. Anything outside the 28 groups → 'other' (not surfaced).
-// Lineage columns are already lowercased in the subquery this is applied over.
-const TAXON_GROUP_CASE = `
-  CASE
-    WHEN class_name = 'mammalia' THEN 'mammals'
-    WHEN class_name = 'aves' THEN 'birds'
-    WHEN class_name = 'reptilia' THEN 'reptiles'
-    WHEN class_name = 'amphibia' THEN 'amphibians'
-    WHEN class_name IN ('teleostei','elasmobranchii','holocephali','myxini','petromyzonti','chondrostei','cladistii','holostei','dipneusti','coelacanthi') THEN 'fishes'
-    WHEN order_name = 'coleoptera' THEN 'beetles'
-    WHEN order_name = 'lepidoptera' THEN 'butterflies_and_moths'
-    WHEN order_name = 'diptera' THEN 'flies_and_mosquitoes'
-    WHEN order_name = 'hymenoptera' THEN 'bees_wasps_and_ants'
-    WHEN order_name = 'hemiptera' THEN 'true_bugs'
-    WHEN order_name = 'orthoptera' THEN 'grasshoppers_crickets_locusts'
-    WHEN order_name = 'odonata' THEN 'dragonflies_and_damselflies'
-    WHEN class_name = 'insecta' THEN 'other_insects'
-    WHEN class_name = 'arachnida' THEN 'arachnids'
-    WHEN phylum = 'mollusca' THEN 'molluscs'
-    WHEN class_name IN ('malacostraca','branchiopoda','ostracoda','copepoda','thecostraca','hexanauplia','ichthyostraca','remipedia','cephalocarida','mystacocarida','tantulocarida') THEN 'crustaceans'
-    WHEN class_name = 'octocorallia' OR order_name IN ('scleractinia','antipatharia','corallimorpharia') THEN 'corals'
-    WHEN phylum = 'onychophora' THEN 'velvet_worms'
-    WHEN class_name = 'merostomata' THEN 'horseshoe_crabs'
-    WHEN kingdom = 'animalia' THEN 'other_invertebrates'
-    WHEN class_name IN ('magnoliopsida','liliopsida') THEN 'flowering_plants'
-    WHEN class_name IN ('pinopsida','cycadopsida','ginkgoopsida','gnetopsida') THEN 'gymnosperms'
-    WHEN class_name IN ('polypodiopsida','lycopodiopsida','isoetopsida','equisetopsida','marattiopsida','psilotopsida') THEN 'ferns_and_allies'
-    WHEN phylum IN ('bryophyta','marchantiophyta','anthocerotophyta') THEN 'mosses'
-    WHEN phylum IN ('chlorophyta','charophyta') THEN 'green_algae'
-    WHEN phylum = 'rhodophyta' THEN 'red_algae'
-    WHEN kingdom = 'fungi' THEN 'mushrooms'
-    WHEN class_name = 'phaeophyceae' THEN 'brown_algae'
-    ELSE 'other'
-  END`;
+// CoL lineage → IUCN Table 1a group: one definition, shared with the rewrite's build-taxa.
+
 
 /**
  * Every column the COPY below writes into backbone.parquet. Declared here, beside
