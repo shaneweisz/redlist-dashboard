@@ -92,14 +92,19 @@ const SSC_GROUP_URL_BASE = "https://iucn.org/our-union/commissions/group/";
 // taxonomy-tree.reptile-remit.test.ts checks every node below against a
 // family/genus table derived from that list.
 
-/** Sea Snake SG genera — all Elapidae. The first eight are the valid genera
- *  in the GRA's scheme; the rest are synonymised genera the group still
- *  claims (plus Thalassophina, the old genus of Hydrophis viperinus), kept so
- *  a name filed under an old genus doesn't fall through. */
+/** Sea Snake SG genera — all Elapidae, exactly as the GRA defines the group:
+ *  its eight valid genera, then the six synonymised genera it still claims
+ *  (Enhydrina, Kerilia, Kolpophis, Lapemis, Pelamis, Thalassophis). No species
+ *  in our data or in CoL is filed under those six today (CoL has folded them
+ *  into Hydrophis), so their breakdown rows read 0, but they are listed so the
+ *  remit shown is the GRA's own, and so a name filed under an old genus lands
+ *  here rather than in the Snake SG. Every other Elapidae genus, including
+ *  CoL-only ones the GRA list doesn't name (Leptomicrurus, Parasuta), is a
+ *  land elapid and belongs to the Snake SG. */
 const SEA_SNAKE_GENERA = [
-  "hydrophis", "aipysurus", "emydocephalus", "laticauda", "microcephalophis",
+  "hydrophis", "laticauda", "microcephalophis", "aipysurus", "emydocephalus",
   "hydrelaps", "ephalophis", "parahydrophis",
-  "enhydrina", "kerilia", "kolpophis", "lapemis", "pelamis", "thalassophis", "thalassophina",
+  "enhydrina", "kerilia", "kolpophis", "lapemis", "pelamis", "thalassophis",
 ];
 
 /** Anolis plus the genera it was split into (Nicholson et al. 2012) that some
@@ -958,7 +963,10 @@ export const TAXONOMY_TREE: TaxonomyNode = {
         {
           id: "ssc-sea-snake",
           name: "Sea Snake Specialist Group",
-          filter: { taxonGroups: ["reptiles"], families: ["elapidae"], genera: SEA_SNAKE_GENERA },
+          // By genus alone, the way the GRA defines this group, so the breakdown
+          // lists its genera rather than one "Elapidae" row. The names are unique
+          // within reptiles, so no family clause is needed to keep them to Elapidae.
+          filter: { taxonGroups: ["reptiles"], genera: SEA_SNAKE_GENERA },
           // Marine Elapidae only: true sea snakes and sea kraits. Homalopsidae
           // (mud snakes) and Acrochordidae (file snakes) were never in this
           // group's remit; they were in its original assessment workshop only
