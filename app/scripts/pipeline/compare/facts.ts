@@ -26,12 +26,13 @@ import { COL_DOMESTIC_EXCLUDE_NAMES } from "../../../src/config/col-described-ov
 export const FACT_KINDS = ["assessed", "ne", "groups", "nodes", "countries", "realms", "col_revisions"] as const;
 export type FactKind = (typeof FACT_KINDS)[number];
 
-export type Layout = "v1";
+export type Layout = "v1" | "v2";
 
 /** Red List categories as they appear in summary maps; missing ones read as 0. */
 const CATEGORIES = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD", "LR/cd", "LR/nt", "LR/lc"];
 
 export function detectLayout(dir: string): Layout {
+  if (fs.existsSync(path.join(dir, "assessment_link.parquet"))) return "v2";
   if (fs.existsSync(path.join(dir, "unassessed.parquet")) && fs.existsSync(path.join(dir, "species_link.parquet"))) {
     return "v1";
   }
@@ -156,10 +157,29 @@ async function loadV1(conn: DuckDBConnection, schema: string, dir: string): Prom
   await loadSummaryFacts(conn, schema, dir);
 }
 
+/**
+ * The rewrite's layout. Kinds whose files it doesn't write yet are left out,
+ * so the report lists them as baseline-only rather than as every row removed.
+ */
+async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Promise<void> {
+  const f = (name: string) => q(path.join(dir, name));
+  await conn.run(`CREATE TABLE ${schema}.assessed AS
+    SELECT CAST(a.id AS VARCHAR) AS key, a.* EXCLUDE (id), l.col_id AS link_col_id, l.method AS link_method
+    FROM read_parquet(${f("assessed.parquet")}) a
+    LEFT JOIN (SELECT sis_taxon_id, col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
+      ON l.sis_taxon_id = a.id`);
+  await loadSummaryFacts(conn, schema, dir);
+  for (const kind of ["groups", "nodes", "countries", "realms", "col_revisions"]) {
+    const [r] = (await conn.runAndReadAll(`SELECT count(*) AS n FROM ${schema}.${kind}`)).getRowObjects();
+    if (Number(r.n) === 0) await conn.run(`DROP TABLE ${schema}.${kind}`);
+  }
+}
+
 /** Load every fact table for `dir` into `schema` (created here). */
 export async function loadFacts(conn: DuckDBConnection, schema: string, dir: string): Promise<Layout> {
   const layout = detectLayout(dir);
   await conn.run(`CREATE SCHEMA ${schema}`);
   if (layout === "v1") await loadV1(conn, schema, dir);
+  else await loadV2(conn, schema, dir);
   return layout;
 }

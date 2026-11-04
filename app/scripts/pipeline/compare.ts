@@ -14,6 +14,7 @@
  *   --baseline     default: prod's sync (origin/main latest-sync.txt), downloaded once
  *   --candidate    default: app/data
  *   --out          default: ~/.cache/redlist-dashboard/compare/<baseline name>/
+ *   --core         the candidate's core tables, for the reason rules; default <candidate>/../core
  *   --report-only  write the report but exit 0 even with unexplained differences
  */
 
@@ -33,14 +34,39 @@ export interface CompareOptions {
   candidate: string;
   out: string;
   rules?: ReasonRule[];
+  /** The candidate's core tables, which reason rules may consult (ctx_* views). */
+  core?: string;
+}
+
+/** Context the reason rules can read: the candidate's core tables, where it has them. */
+async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>, core?: string): Promise<void> {
+  const views: Record<string, string> = {
+    ctx_link: "assessment_link.parquet", ctx_taxa: "taxa.parquet",
+    ctx_assessments: "assessments.parquet", ctx_components: "count_components.parquet",
+  };
+  for (const [name, file] of Object.entries(views)) {
+    const p = core ? path.join(core, file) : "";
+    await conn.run(core && fs.existsSync(p)
+      ? `CREATE TABLE ${name} AS SELECT * FROM read_parquet('${p.replace(/'/g, "''")}')`
+      : `CREATE TABLE ${name} AS SELECT NULL AS none WHERE false`);
+  }
+  // One row per assessed species with both sides' link, key and count, so rules
+  // can be plain semi-joins instead of correlated subqueries per difference.
+  await conn.run(`CREATE TABLE pair AS
+    SELECT b.key, b.link_col_id AS b_col, a.link_col_id AS a_col, b.gbif_species_key AS b_key, a.gbif_species_key AS a_key,
+           b.gbif_occurrence_count AS b_n, a.gbif_occurrence_count AS a_n
+    FROM b.assessed b JOIN a.assessed a USING (key)`);
 }
 
 export async function compare(opts: CompareOptions): Promise<CompareSummary> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "8" })).connect();
+  const tmp = path.join(CACHE_ROOT, "compare", "tmp");
+  fs.mkdirSync(tmp, { recursive: true });
+  const conn = await (await DuckDBInstance.create(":memory:", { threads: "8", temp_directory: tmp })).connect();
   const bLayout = await loadFacts(conn, "b", opts.baseline);
   const aLayout = await loadFacts(conn, "a", opts.candidate);
   const notes = await diffFacts(conn);
-  await applyReasons(conn, opts.rules ?? REASONS);
+  if (aLayout === "v2") await loadContext(conn, opts.core);
+  await applyReasons(conn, aLayout === "v2" ? (opts.rules ?? REASONS) : (opts.rules ?? []));
   const { markdown, summary } = await buildReport(conn, {
     baseline: `${opts.baseline} (${bLayout})`,
     candidate: `${opts.candidate} (${aLayout})`,
@@ -67,7 +93,8 @@ if (isDirectRun) {
     const candidate = path.resolve(arg("--candidate") ?? DATA_DIR);
     const out = path.resolve(arg("--out") ?? path.join(CACHE_ROOT, "compare", path.basename(baseline)));
     console.log(`baseline:  ${baseline}\ncandidate: ${candidate}`);
-    const s = await compare({ baseline, candidate, out });
+    const core = path.resolve(arg("--core") ?? path.join(candidate, "..", "core"));
+    const s = await compare({ baseline, candidate, out, core: fs.existsSync(core) ? core : undefined });
     for (const [kind, k] of Object.entries(s.byKind)) {
       console.log(`  ${kind.padEnd(14)} ${String(k.baseline).padStart(9)} → ${String(k.candidate).padStart(9)} rows, ` +
         `${k.diffs} differences, ${k.unexplained} unexplained`);
