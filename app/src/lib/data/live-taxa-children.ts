@@ -28,6 +28,7 @@ import { ensureVernacularNamesLoaded } from "./vernacular-names";
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
 import { filterToSql, canonicalOrderColumnSql, canonicalClassColumnSql } from "@/lib/taxonomy-sql";
 import { outdatedCutoffDate } from "@/lib/outdated";
+import { getDataSyncDate } from "@/lib/data-sync-date";
 import type { NodeSummary } from "./species-store";
 import {
   isDynamicNodeId,
@@ -94,7 +95,7 @@ export async function getLiveRankChildren(
 
   ensureVernacularNamesLoaded();
   const conn = await getConn();
-  const cutoff = outdatedCutoffDate().toISOString().slice(0, 10);
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
   const assessedUri = parquetUri("assessed.parquet");
   const parentWhere = filterToSql(parentFilter);
   const rankCol = RANK_COLUMN_SQL[nextRank];
