@@ -19,11 +19,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { loadEnvFiles, DATA_DIR, REDLIST_DIR, GBIF_DIR } from "./utils";
+import { loadEnvFiles, DATA_DIR } from "./utils";
 import { allTaxaUnchecked } from "./taxa";
-import { readRedlistCsv } from "./fetch-redlist-species";
-import { readGbifCsv } from "./fetch-gbif-species";
-import { readMappingCsv } from "./match-redlist-species-to-gbif";
 import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../src/lib/data/taxonomy-constants";
 import { NODE_INDEX, hasChildren, matchesFilter } from "../src/lib/taxonomy-utils";
 import type { TaxonomyNode } from "../src/config/taxonomy-tree";
@@ -266,7 +263,59 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   console.log(`  CoL node counts: attached to ${n} node summaries (${breakdownQueries} per-name breakdown queries).`);
 }
 
+
+/** An assessed species as the summaries need it. */
+interface AssessedRow {
+  sis_taxon_id: number; scientific_name: string; class_name: string | null; order_name: string | null; family: string | null;
+  category: string; assessment_date: string | null; countries: string[]; systems: string[];
+}
+/** A species GBIF has records for, as the summaries need it. */
+interface GbifRow { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; total_count: number }
+
+/**
+ * Per Table 1a group: its assessed species (by IUCN's group), and the species
+ * GBIF has records for (assessed ones in their IUCN group, NE ones in their CoL
+ * group, from ne.parquet). Replaces the per-group Red List and GBIF CSVs and
+ * mapping.csv; "linked" keys are the assessed species' GBIF keys.
+ */
+async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
+  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const assessed = (await conn.runAndReadAll(`
+    SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
+           countries, systems, gbif_species_key, gbif_occurrence_count
+    FROM read_parquet('${path.join(DATA_DIR, "assessed.parquet")}')`)).getRowObjects();
+  const ne = (await conn.runAndReadAll(`
+    SELECT taxon_group, scientific_name, class_name, order_name, family, gbif_species_key, gbif_occurrence_count
+    FROM read_parquet('${path.join(DATA_DIR, "ne.parquet")}') WHERE gbif_occurrence_count > 0`)).getRowObjects();
+  const redlist = new Map<string, AssessedRow[]>();
+  const gbif = new Map<string, Map<string, GbifRow>>();
+  const linked = new Set<string>();
+  const str = (v: unknown) => (v == null ? null : String(v));
+  const split = (v: unknown) => (v ? String(v).split(";").filter(Boolean) : []);
+  const addGbif = (g: string, key: string, r: Record<string, unknown>) => {
+    const m = gbif.get(g) ?? new Map<string, GbifRow>();
+    gbif.set(g, m);
+    m.set(key, { scientific_name: String(r.scientific_name), class_name: str(r.class_name), order_name: str(r.order_name),
+      family: str(r.family), total_count: Number(r.gbif_occurrence_count) });
+  };
+  for (const r of assessed) {
+    const g = String(r.taxon_group);
+    const list = redlist.get(g) ?? [];
+    redlist.set(g, list);
+    list.push({ sis_taxon_id: Number(r.id), scientific_name: String(r.scientific_name), class_name: str(r.class_name), order_name: str(r.order_name),
+      family: str(r.family), category: String(r.iucn_category ?? ""), assessment_date: str(r.assessment_date),
+      countries: split(r.countries), systems: split(r.systems) });
+    if (r.gbif_species_key != null) {
+      linked.add(String(r.gbif_species_key));
+      if (Number(r.gbif_occurrence_count) > 0) addGbif(g, String(r.gbif_species_key), r);
+    }
+  }
+  for (const r of ne) addGbif(String(r.taxon_group), String(r.gbif_species_key), r);
+  return { redlist, gbif, linked };
+}
+
 export async function run(): Promise<void> {
+  const groups = await loadGroups();
   const summaries: TaxonSummaryRow[] = [];
 
   // Per-country totals across ALL species (unfiltered by taxon) — feeds the
@@ -284,25 +333,15 @@ export async function run(): Promise<void> {
   const realmStats = new Map<string, { total_assessed: number; outdated: number }>();
   let realmTotalAssessed = 0;
 
-  // Load mapping to determine which GBIF species are linked to redlist entries
-  const mapping = readMappingCsv();
-  const linkedGbifKeys = new Set<string>();
-  for (const links of mapping.values()) {
-    for (const link of links) {
-      if (link.gbif_species_key != null) linkedGbifKeys.add(link.gbif_species_key);
-    }
-  }
+  const linkedGbifKeys = groups.linked;
 
   for (const taxon of allTaxaUnchecked()) {
-    const redlistPath = path.join(REDLIST_DIR, `${taxon.id}.csv`);
-    const gbifPath = path.join(GBIF_DIR, `${taxon.id}.csv`);
-
-    if (!fs.existsSync(redlistPath)) {
-      console.log(`  Skipping ${taxon.id} — no redlist CSV`);
+    if (!groups.redlist.has(taxon.id)) {
+      console.log(`  Skipping ${taxon.id} — no assessed species`);
       continue;
     }
 
-    const redlistSpecies = readRedlistCsv(taxon.id);
+    const redlistSpecies = groups.redlist.get(taxon.id)!;
 
     const totalAssessed = redlistSpecies.length;
     let outdated = 0;
@@ -344,8 +383,8 @@ export async function run(): Promise<void> {
     let totalGbifObservations = 0;
     const obsCounts: number[] = [];
 
-    if (fs.existsSync(gbifPath)) {
-      const gbifMap = readGbifCsv(taxon.id);
+    {
+      const gbifMap = groups.gbif.get(taxon.id) ?? new Map<string, GbifRow>();
       gbifSpeciesCount = gbifMap.size;
       for (const [key, g] of gbifMap) {
         totalGbifObservations += g.total_count;
@@ -416,17 +455,8 @@ export async function run(): Promise<void> {
   // ─── Second pass: precompute node children summaries ──────────────
   console.log("\nComputing node children summaries...");
 
-  // Build caches for CSV data (reusing what readRedlistCsv/readGbifCsv load)
-  const redlistByGroup = new Map<string, ReturnType<typeof readRedlistCsv>>();
-  const gbifByGroup = new Map<string, ReturnType<typeof readGbifCsv>>();
-  for (const taxon of allTaxaUnchecked()) {
-    if (fs.existsSync(path.join(REDLIST_DIR, `${taxon.id}.csv`))) {
-      redlistByGroup.set(taxon.id, readRedlistCsv(taxon.id));
-    }
-    if (fs.existsSync(path.join(GBIF_DIR, `${taxon.id}.csv`))) {
-      gbifByGroup.set(taxon.id, readGbifCsv(taxon.id));
-    }
-  }
+  const redlistByGroup = groups.redlist;
+  const gbifByGroup = groups.gbif;
 
   // Must match EXCLUDED_DOMESTICATED_GBIF_KEYS in species-store.ts
   // Was a hand-copied duplicate of the same list, carrying a comment asking that

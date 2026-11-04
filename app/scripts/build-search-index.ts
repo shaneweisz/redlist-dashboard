@@ -65,9 +65,9 @@ export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3, 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
   const assessed = path.join(dir, "assessed.parquet");
-  const unassessed = path.join(dir, "unassessed.parquet");
+  const ne = path.join(dir, "ne.parquet");
   const link = path.join(dir, "species_link.parquet");
-  for (const f of [assessed, unassessed, link]) {
+  for (const f of [assessed, ne, link]) {
     if (!fs.existsSync(f)) throw new Error(`build-search-index: ${f} not found (run build-parquet + build-matching first)`);
   }
   const out = path.join(dir, "name-index.parquet");
@@ -86,25 +86,19 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
              true AS assessed, CAST(NULL AS VARCHAR) AS col_id, ra.col_id AS name_col_id
       FROM read_parquet('${assessed}') a
       LEFT JOIN (
+        -- The primary link only: a covered row names another concept the species
+        -- is kept out of the NE list under, not the species itself.
         SELECT id, any_value(col_id) AS col_id FROM read_parquet('${link}')
-        WHERE src = 'redlist' AND col_id IS NOT NULL GROUP BY 1
+        WHERE src = 'redlist' AND col_id IS NOT NULL AND match_method <> 'iucn_synonym_covered' GROUP BY 1
       ) ra ON ra.id = a.id
       UNION ALL
-      SELECT u.id, u.scientific_name, u.common_name, u.taxon_group, u.iucn_category,
+      -- Not Evaluated species GBIF has records for, keyed by col_id (also their GBIF key).
+      SELECT NULL::BIGINT, u.scientific_name, u.common_name, u.taxon_group, u.iucn_category,
              u.gbif_species_key, u.gbif_occurrence_count,
              NULL, NULL,
              u.countries, u.class_name, u.order_name, u.family,
-             false, l.col_id, l.col_id
-      FROM read_parquet('${unassessed}') u
-      LEFT JOIN (
-        -- One col_id per GBIF key. 3,756 col_ids carry more than one key, but a key maps
-        -- to at most one col_id, so this side of the relation needs no collapsing — the
-        -- any_value guards against a duplicate row in the link table, not a real fan-out.
-        SELECT gbif_species_key, any_value(col_id) AS col_id
-        FROM read_parquet('${link}')
-        WHERE src = 'gbif' AND col_id IS NOT NULL
-        GROUP BY gbif_species_key
-      ) l ON l.gbif_species_key = u.gbif_species_key`);
+             false, u.col_id, u.col_id
+      FROM read_parquet('${ne}') u`);
 
   const payload = `id, scientific_name, common_name, taxon_group, category, gbif_species_key,
     gbif_occurrence_count, assessment_id, assessment_date, countries,
@@ -223,7 +217,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
              (min(s)).cls AS class_name, (min(s)).ord AS order_name, (min(s)).fam AS family
       FROM (
         SELECT name, {'rp': rp, 'tg': taxon_group, 'cls': class_name, 'ord': order_name, 'fam': family} AS s
-        FROM (${part("assessed.parquet")} UNION ALL ${part("unassessed.parquet")})
+        FROM (${part("assessed.parquet")} UNION ALL ${part("ne.parquet")})
       )
       WHERE name <> ''
       GROUP BY name`);

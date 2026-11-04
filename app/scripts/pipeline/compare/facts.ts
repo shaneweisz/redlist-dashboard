@@ -168,6 +168,24 @@ async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Prom
     FROM read_parquet(${f("assessed.parquet")}) a
     LEFT JOIN (SELECT sis_taxon_id, col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
       ON l.sis_taxon_id = a.id`);
+  // The NE list as the app builds it: the CoL universe minus assessed col_ids,
+  // fossils (unless IUCN says EX/EW) and excluded names, with ne.parquet's overlay.
+  await conn.run(`CREATE TABLE ${schema}.ne AS
+    WITH assessed_cols AS (
+      SELECT DISTINCT col_id FROM read_parquet(${f("species_link.parquet")}) WHERE src = 'redlist' AND col_id IS NOT NULL),
+    ex_ew AS (
+      SELECT DISTINCT l.col_id FROM read_parquet(${f("species_link.parquet")}) l
+      JOIN read_parquet(${f("assessed.parquet")}) a ON a.id = l.id
+      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW'))
+    SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
+           u.described_year, g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
+    FROM read_parquet(${q(path.join(dir, "species", "**", "*.parquet"))}, hive_partitioning=true) u
+    JOIN read_parquet(${f("taxa.parquet")}) t ON t.col_id = u.col_id
+    LEFT JOIN read_parquet(${f("ne.parquet")}) g ON g.col_id = u.col_id
+    WHERE u.in_base
+      AND (u.extinct IS NOT TRUE OR u.col_id IN (SELECT col_id FROM ex_ew))
+      AND u.col_id NOT IN (SELECT col_id FROM assessed_cols)
+      AND t.ne_excluded IS NULL`);
   await loadSummaryFacts(conn, schema, dir);
   for (const kind of ["groups", "nodes", "countries", "realms", "col_revisions"]) {
     const [r] = (await conn.runAndReadAll(`SELECT count(*) AS n FROM ${schema}.${kind}`)).getRowObjects();
