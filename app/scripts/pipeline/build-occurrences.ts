@@ -151,12 +151,16 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
   const workDir = path.join(CACHE_ROOT, "occurrences", snap.date);
   const marker = path.join(workDir, "complete.json");
   let sourceRows: number;
-  if (fs.existsSync(marker)) {
-    sourceRows = JSON.parse(fs.readFileSync(marker, "utf-8")).sourceRows;
+  // The aggregate bakes in which issues count as geospatial, so a change to that
+  // set (GBIF changes its own) has to rebuild it rather than reuse it.
+  const done = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf-8")) : null;
+  if (done && done.georef === GEOREF) {
+    sourceRows = done.sourceRows;
   } else {
+    fs.rmSync(path.join(workDir, "parts"), { recursive: true, force: true });
     sourceRows = await assertComplete(conn, snap);
     await aggregate(conn, snap, workDir);
-    fs.writeFileSync(marker, JSON.stringify({ date: snap.date, citation: snap.citation, files: snap.files.length, sourceRows }, null, 2) + "\n");
+    fs.writeFileSync(marker, JSON.stringify({ date: snap.date, citation: snap.citation, files: snap.files.length, sourceRows, georef: GEOREF }, null, 2) + "\n");
   }
 
   fs.mkdirSync(coreDir, { recursive: true });

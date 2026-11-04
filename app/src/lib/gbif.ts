@@ -99,10 +99,13 @@ export function includedBasisOfRecord(includePreservedSpecimens: boolean): reado
  * where they get painted as suspect and hidden by a check the assessor never
  * aimed at them.
  *
- * Two used to be in here that GBIF doesn't act on — see GBIF_COORDINATE_NOTES.
+ * Four used to be in here that GBIF doesn't act on — see GBIF_COORDINATE_NOTES.
  * Membership was checked against the API rather than read off the docs, per
  * code: `issue=<code>&hasGeospatialIssue=false` returns nothing for every code
- * below, and returns records for both of the two.
+ * below, and returns records for all four. It changes: on 2026-11-04 it
+ * returned 5.4M of the 6.2M records flagged CONTINENT_COORDINATE_MISMATCH and
+ * 217 of the 288 flagged COORDINATE_REPROJECTION_FAILED, both of which were in
+ * this set and kept 89,732 of the honey buzzard's records out of its counts.
  *
  * Occurrence records also carry issues with nothing to do with position (fuzzy
  * taxon matches, invalid dates); those are filtered out rather than shipped to
@@ -112,9 +115,7 @@ export const GBIF_GEOSPATIAL_ISSUES = new Set([
   "ZERO_COORDINATE",
   "COORDINATE_INVALID",
   "COORDINATE_OUT_OF_RANGE",
-  "COORDINATE_REPROJECTION_FAILED",
   "COUNTRY_COORDINATE_MISMATCH",
-  "CONTINENT_COORDINATE_MISMATCH",
   "PRESUMED_NEGATED_LATITUDE",
   "PRESUMED_NEGATED_LONGITUDE",
   "PRESUMED_SWAPPED_COORDINATE",
@@ -123,7 +124,8 @@ export const GBIF_GEOSPATIAL_ISSUES = new Set([
 /**
  * Position-related issues GBIF reports but does not exclude a record over: an
  * unparseable datum string (GBIF reads the coordinates as WGS84 and says so),
- * and a reprojection that moved the point further than expected.
+ * a reprojection that moved the point further than expected or failed, and a
+ * point outside the continent the record names.
  *
  * Shown in the record list's Flags column, because they are worth knowing when
  * you are reading a locality — but not treated as GBIF flagging the record,
@@ -133,6 +135,8 @@ export const GBIF_GEOSPATIAL_ISSUES = new Set([
 export const GBIF_COORDINATE_NOTES = new Set([
   "GEODETIC_DATUM_INVALID",
   "COORDINATE_REPROJECTION_SUSPICIOUS",
+  "COORDINATE_REPROJECTION_FAILED",
+  "CONTINENT_COORDINATE_MISMATCH",
 ]);
 
 /** Human-readable label for a GBIF issue code, e.g. "Country coordinate mismatch". */
