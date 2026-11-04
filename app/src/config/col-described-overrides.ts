@@ -71,5 +71,4 @@ export const COL_NODE_TOOLTIP_NOTES: Record<string, string> = {
 // auto-generated one from their SpeciesFilter fields.
 export const NODE_DESCRIPTION_OVERRIDES: Record<string, string> = {
   "ssc-other-mammals": "Mammal orders, families, and genera not claimed by any of the 35 named SSC pilot groups above.",
-  "ssc-snake-lizard-rla": "Reptile families and genera not claimed by any of the 11 named SSC pilot groups above, plus the tuatara (Sphenodon punctatus).",
 };

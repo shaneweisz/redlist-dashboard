@@ -7,9 +7,9 @@
 // can still silently miss or double-count species once evaluated against CoL's
 // classification, which is what actually powers the "# Described Species (CoL)" counts
 // and the Not Evaluated species list shown in the UI. Found and fixed two real bugs
-// this way (a missing genus in Sea Snake SG, a Dung Beetle SG double-count) that 3
+// this way (a missing genus in what was then Sea Snake SG, a Dung Beetle SG double-count) that 3
 // rounds of review checking only our own data never caught — see taxonomy-tree.ts's
-// ssc-sea-snake and ssc-dung-beetle comments.
+// ssc-dung-beetle comment.
 //
 // Local-only: data/species/**/*.parquet is gitignored (only present after `npm run
 // fetch-data-from-r2`) and CI never runs that sync, so this suite skips itself when

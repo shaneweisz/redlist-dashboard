@@ -118,8 +118,10 @@ export interface BreakdownEntry {
 //  - extinct_unconfirmed: CoL flags its linked col_id extinct, but IUCN hasn't
 //    confirmed EX/EW for it (so it falls outside the extant-or-EX/EW universe).
 //  - classified_elsewhere: none of the above — the linked col_id is real, in_base,
-//    and extant, but CoL's own class/order/family for it doesn't match this name
-//    (a CoL-side reclassification, e.g. the pre-fix Ziphiidae/Hyperoodontidae case).
+//    and extant, but CoL files it outside this group altogether (a CoL-side
+//    reclassification). A counterpart elsewhere within the same group, e.g. a
+//    Red List family CoL ranks as a subfamily of another family in the group,
+//    is a match, not this (see matchWhere).
 /** Ranks that are genuinely below species — the only ones a demotion can mean.
  *  ColDP's infraspecific set; anything else is not a demotion. */
 const INFRASPECIFIC_RANKS = new Set([
@@ -447,6 +449,10 @@ export async function computeNoMatchDetails(
   ctx: BreakdownQueryContext,
   speciesWhere: string,
   assessedWhere: string,
+  /** Where an assessed species' CoL counterpart may sit and still count as a
+   *  1:1 match — the whole group, when speciesWhere is one name within it.
+   *  Defaults to speciesWhere. */
+  matchWhere: string = speciesWhere,
 ): Promise<NoMatchDetail[]> {
   const { conn, speciesGlob, assessedPath, linkPath, universeSql: universe, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone } = ctx;
   // The synonym-rename claim needs both the backbone AND its checklist columns.
@@ -467,8 +473,12 @@ export async function computeNoMatchDetails(
   // making trueAssessed - noMatchIds.length exactly equal the "CoL Match" count.
   const diagRows = await (await conn.run(`
     WITH matched_species AS (
+      -- The group as a whole, not just this one name: a species the Red List
+      -- files under Calamariidae and CoL under Colubridae (as the subfamily
+      -- Calamariinae) has a perfectly good 1:1 match when both families are in
+      -- the same group. Only a counterpart outside the group is a mismatch.
       SELECT col_id FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-      WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${speciesWhere}
+      WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${matchWhere}
     ),
     matched_assessed AS (
       -- family/order come along so classified_elsewhere can say WHICH rank CoL
@@ -612,6 +622,9 @@ export async function computeBreakdownEntry(
   name: string,
   narrowed: NodeFilter,
   nodeId: string | undefined,
+  /** The whole node's filter, when `narrowed` is one name within it — see
+   *  computeNoMatchDetails' matchWhere. */
+  nodeFilter: NodeFilter = narrowed,
 ): Promise<BreakdownEntry> {
   const { conn, speciesGlob, assessedPath, universeSql: universe, assessedCidsTable, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone } = ctx;
 
@@ -629,7 +642,7 @@ export async function computeBreakdownEntry(
   // TaxaSummary.tsx).
   const trueRows = await (await conn.run(`
     SELECT count(*) AS n FROM read_parquet('${assessedPath}') WHERE ${filterToSql(narrowed)}`)).getRowObjects();
-  const noMatchDetails = await computeNoMatchDetails(ctx, filterToSql(narrowed, nodeId), filterToSql(narrowed));
+  const noMatchDetails = await computeNoMatchDetails(ctx, filterToSql(narrowed, nodeId), filterToSql(narrowed), filterToSql(nodeFilter, nodeId));
   // "Split from" candidates for this name's NE species — a lookup against the
   // once-per-caller-lifetime split_candidates table, not a fresh backbone.parquet
   // scan. Deliberately scoped to the SAME NE universe as bRows.ne (in_base,

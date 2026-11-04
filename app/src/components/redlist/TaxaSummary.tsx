@@ -10,7 +10,7 @@ import TaxaIcon from "@/components/TaxaIcon";
 import { CATEGORY_COLORS, CATEGORY_NAMES, CATEGORY_ORDER } from "@/config/taxa";
 import {
   hasChildren, findNode, getAncestors, stripNodePrefix, taxaUrlToken, collapseTaxaToTokens, OFFICIAL_IUCN_DESCRIBED_NODE_IDS,
-  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref,
+  describeFilter, COL_RELEASE_LABEL, COL_RELEASE_URL, primaryFilterRank, breakdownDisplayName, breakdownHref, colAliasLabel, graNameNote, graDisplayNames,
   matchesBreakdownName, speciesMatchesNode,
   type FilterRank, type DescribeFilterSegment,
 } from "@/lib/taxonomy-utils";
@@ -19,7 +19,7 @@ import { IUCN_SOURCE_URL } from "@/config/taxonomy-tree";
 import { isLiveDrilldownNode, nextDynamicRank, isDynamicNodeId, dynamicNodeDisplayName, dynamicNodeFilter, dynamicNodeRankInfo, parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import type { RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { prettifyQs } from "@/lib/query-string";
-import { buildBreakdownIssueUrl } from "@/lib/github-issue";
+import { buildBreakdownCorrectionMailto } from "@/lib/correction-email";
 import type { LayoutMode } from "@/hooks/useFilterParams";
 import { sisRowKey } from "@/lib/species-row-key";
 // Reason labels are shared with the main dashboard's taxonomic-revision flag —
@@ -74,17 +74,23 @@ interface Table1aSectionData {
   title: string;
   rows: Table1aRowData[];
   /** SSC mode only — the section's catch-all row id (e.g. "ssc-other-mammals"),
-   * so the collapse-to-5 UI can always keep it visible regardless of collapse
-   * state. Undefined in Table 1a mode, which has no catch-all concept. */
+   * so it can be pinned below the named groups. Undefined in Table 1a mode,
+   * which has no catch-all concept. */
   catchAllId?: string;
 }
+
+// SSC groups mode: how many groups each taxon shows before its "Show N more" row.
+const SSC_ROWS_COLLAPSED = 2;
 
 // SSC groups mode — one section per taxon that has an SSC pilot built out.
 // Add an entry here (nodeId, parentTaxon, title, catch-all id) when a new
 // taxon's SSC groups are added.
-const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchAllId: string }[] = [
+// catchAllId: the section's residual "everything else" group, pinned last.
+// Reptiles has none: every reptile group, the Lizard and Tuatara RLA included,
+// is defined by its own families or genera.
+const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchAllId?: string }[] = [
   { nodeId: "ssc-groups", parentTaxon: "mammals", title: "MAMMAL SPECIALIST GROUPS", catchAllId: "ssc-other-mammals" },
-  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS", catchAllId: "ssc-snake-lizard-rla" },
+  { nodeId: "ssc-reptile-groups", parentTaxon: "reptiles", title: "REPTILE SPECIALIST GROUPS" },
   { nodeId: "ssc-fish-groups", parentTaxon: "fishes", title: "FISH SPECIALIST GROUPS", catchAllId: "ssc-other-fish" },
   { nodeId: "ssc-invertebrate-groups", parentTaxon: "invertebrates", title: "INVERTEBRATE SPECIALIST GROUPS", catchAllId: "ssc-other-invertebrates" },
   { nodeId: "ssc-plant-groups", parentTaxon: "plantae", title: "PLANT SPECIALIST GROUPS", catchAllId: "ssc-other-plants" },
@@ -998,11 +1004,30 @@ function BreakdownList({
           {breakdown.map((b) => {
             const rowLabel = breakdownDisplayName(rank, b.name);
             const href = breakdownHref(rank, b.name, liveColIds);
+            const alias = colAliasLabel(rank, b.name);
             return (
               <tr key={b.name} className="border-t border-zinc-700/60">
                 <td className="pr-3 py-1 whitespace-nowrap">
                   {label}:{" "}
-                  {href ? (
+                  {href && alias && "colName" in alias ? (
+                    // CoL files this name differently: the link goes on CoL's name.
+                    <>
+                      {rowLabel}
+                      <span className="text-zinc-400">
+                        {" ("}
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-300 hover:text-blue-200 underline"
+                          title={`View ${alias.colName} on Catalogue of Life`}
+                        >
+                          {alias.colName}
+                        </a>
+                        {`${alias.suffix})`}
+                      </span>
+                    </>
+                  ) : href ? (
                     <a
                       href={href}
                       target="_blank"
@@ -1015,6 +1040,11 @@ function BreakdownList({
                   ) : (
                     rowLabel
                   )}
+                  {alias && "note" in alias && <span className="text-zinc-400"> ({alias.note})</span>}
+                  {(() => {
+                    const gra = graNameNote(rank, b.name);
+                    return gra ? <span className="text-zinc-400"> ({gra})</span> : null;
+                  })()}
                 </td>
                 <td className="px-2 py-1 text-right text-zinc-300">{b.count}</td>
                 <td className="px-2 py-1 text-right">
@@ -1423,29 +1453,24 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
                 .
               </p>
               {/* The reader most likely to spot a wrong breakdown is a specialist
-                  group member who knows the group's real circumscription — until
-                  now they had nowhere to say so from. Opens GitHub's new-issue
-                  form with the table above already written out and a blank "we
-                  believe it should be" section; nothing is submitted until they
-                  edit it and press the button there. */}
+                  group member who knows the group's real circumscription. Opens
+                  an email draft to the maintainer with the table above already
+                  written out and a blank "I believe it should be" section;
+                  nothing is sent until they edit it and press send. */}
               {effectiveBreakdown?.length && breakdownDim ? (
                 <p className="mt-1">
                   <a
-                    href={buildBreakdownIssueUrl({
+                    href={buildBreakdownCorrectionMailto({
                       groupLabel: breakdownGroupLabel,
                       rankLabel: breakdownDim.label,
-                      rows: effectiveBreakdown.map((b) => ({
-                        name: breakdownDisplayName(breakdownDim.rank, b.name),
-                        count: b.count,
-                        trueAssessed: b.trueAssessed,
-                        noMatch: b.noMatchIds.length,
-                        neCount: b.neCount,
-                      })),
-                      sourceLabel: COL_RELEASE_LABEL,
+                      // In the GRA list's own names, so the draft matches the reader's list.
+                      names: graDisplayNames(breakdownDim.rank, effectiveBreakdown.map((b) => b.name), (n) => breakdownDisplayName(breakdownDim.rank, n)),
+                      // A catch-all's only "row" is its own name, so say what it covers instead.
+                      scopeText: breakdownDim.rank === "remainder"
+                        ? describeFilter(filter, node ? nodeId : undefined).map((seg) => seg.text).join("")
+                        : undefined,
                       pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
                     })}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="text-blue-300 hover:text-blue-200 underline inline-flex items-center gap-1.5"
                   >
                     <FaFlag size={9} aria-hidden className="shrink-0" />
@@ -1888,6 +1913,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // isn't offered there — and the query is cleared on leaving SSC mode so coming
   // back doesn't land on a mysteriously short table.
   const [groupFilter, setGroupFilter] = useState("");
+  // SSC view: each taxon shows its first SSC_ROWS_COLLAPSED groups until its
+  // "Show N more" row is clicked. Keyed by section title.
+  const [sscExpandedSections, setSscExpandedSections] = useState<Set<string>>(new Set());
   useEffect(() => { if (!sscMode) setGroupFilter(""); }, [sscMode]);
 
   // Matching a SECTION title keeps that whole section (typing "invertebrates"
@@ -3187,14 +3215,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           <td className={flexTdClasses}>{renderBreakdownBar(subByCategory)}</td>
                         )}
                       </tr>
-                      {/* Section rows — all named groups always shown; the catch-all
-                          row is pulled out and rendered last, since it's usually the
-                          largest, most load-bearing row. Table 1a mode has no
-                          catch-all concept (section.catchAllId is undefined there),
-                          so it always renders every row too. */}
+                      {/* Section rows — a section's catch-all row, if it has one, is
+                          pulled out and rendered last. SSC sections collapse to their
+                          top groups; Table 1a mode always renders every row. */}
                       {(() => {
-                        const isSscSection = sscMode && section.catchAllId != null;
-                        const catchAllRow = isSscSection ? rows.find(r => r.group === section.catchAllId) : undefined;
+                        const isSscSection = sscMode;
+                        const catchAllRow = section.catchAllId != null ? rows.find(r => r.group === section.catchAllId) : undefined;
                         const namedRows = catchAllRow ? rows.filter(r => r.group !== section.catchAllId) : rows;
                         const renderGroupRow = (row: (typeof rows)[number]) => (
                         <tr
@@ -3328,10 +3354,33 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                           )}
                         </tr>
                         );
+                        const ordered = catchAllRow ? [...namedRows, catchAllRow] : namedRows;
+                        // A group-name search shows every match; otherwise an SSC section
+                        // starts at its top SSC_ROWS_COLLAPSED groups.
+                        const collapsible = isSscSection && !groupFilterActive && ordered.length > SSC_ROWS_COLLAPSED;
+                        const expanded = sscExpandedSections.has(section.title);
+                        const shownRows = collapsible && !expanded ? ordered.slice(0, SSC_ROWS_COLLAPSED) : ordered;
+                        const hiddenCount = ordered.length - SSC_ROWS_COLLAPSED;
                         return (
                           <>
-                            {namedRows.map(renderGroupRow)}
-                            {catchAllRow && renderGroupRow(catchAllRow)}
+                            {shownRows.map(renderGroupRow)}
+                            {collapsible && (
+                              <tr
+                                className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer"
+                                onClick={() => setSscExpandedSections((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(section.title)) next.delete(section.title); else next.add(section.title);
+                                  return next;
+                                })}
+                              >
+                                <td colSpan={visibleColCount} className={`${taxonCellPad} bg-white dark:bg-zinc-900`}>
+                                  <span className="inline-flex items-center gap-1.5 pl-4 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+                                    <FaChevronRight size={10} className={`transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden />
+                                    {expanded ? "Show fewer" : `Show ${hiddenCount} more`}
+                                  </span>
+                                </td>
+                              </tr>
+                            )}
                           </>
                         );
                       })()}

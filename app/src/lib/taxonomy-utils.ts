@@ -6,11 +6,12 @@
  * and taxon-groups (getTaxonGroups).
  */
 
-import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
+import { TAXONOMY_TREE, GRA_NAME_EQUIVALENTS, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
 import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
 import { NODE_DESCRIPTION_OVERRIDES, COL_NODE_TOOLTIP_NOTES, COL_EXCLUDE_ALL_NODES, COL_SPECIES_NAME_OVERRIDES } from "@/config/col-described-overrides";
 import COL_TAXON_IDS from "@/config/col-taxon-ids.json";
+import COL_TAXON_ALIASES from "@/config/col-taxon-aliases.json";
 import COL_RELEASE from "@/config/col-release.json";
 // dynamic-taxon.ts imports NODE_INDEX/getAncestors back from this file — a
 // circular import, but a safe one: both sides only reference the other inside
@@ -573,9 +574,14 @@ const COL_TAXON_ID_MAP: Record<string, string> = COL_TAXON_IDS;
 // count can undercount colDescribed by that node's EX/EW additions. A species-rank
 // name has no "species under it" to browse, so it links straight to its own taxon
 // page instead.
+//
+// "Not extinct" is two filter values, not one. Some CoL sources mark living
+// species extinct=false; others, the Reptile Database among them, leave the
+// field empty. extinct=0 alone matched none of the latter, so every reptile
+// link opened on an empty search; repeating the parameter ORs the two.
 function colHref(rank: FilterRank, colId: string): string {
   if (rank === "species") return `${COL_SOURCE_URL}data/taxon/${colId}`;
-  return `${COL_SOURCE_URL}data/search?TAXON_ID=${colId}&extinct=0&rank=species&status=accepted`;
+  return `${COL_SOURCE_URL}data/search?TAXON_ID=${colId}&extinct=0&extinct=_NULL&rank=species&status=accepted`;
 }
 
 // Which of a filter's include fields enumerates this node's species (its "primary
@@ -616,6 +622,69 @@ export function breakdownDisplayName(rank: FilterRank, name: string): string {
  *  resolveLiveColTaxonIds — since a genus like "Chaetodipus" reached purely via live
  *  drilldown is never referenced by any static SpeciesFilter and so never in the
  *  snapshot). */
+// Tree names CoL files under a different name or rank (a synonym, a spelling
+// variant, or a family CoL ranks as a subfamily), built alongside COL_TAXON_IDS.
+// Their link goes to the CoL taxon, so the label has to say which one.
+const COL_TAXON_ALIAS_MAP: Record<string, { name: string; rank: string }> = COL_TAXON_ALIASES;
+
+/**
+ * How to label a name CoL files differently, with its link on CoL's name:
+ * "Bolyeridae (Bolyeriidae on CoL)" splits into
+ * { colName: "Bolyeriidae", suffix: " on CoL" }, rendered as
+ * `${name} (${colName}${suffix})` with only colName linked. When CoL keeps the
+ * name but not the rank there is no second name, so the name itself stays the
+ * link and only a note follows: { note: "a parvphylum on CoL" }.
+ * Undefined for a name CoL accepts as written.
+ */
+export function colAliasLabel(rank: FilterRank, name: string): { colName: string; suffix: string } | { note: string } | undefined {
+  const alias = COL_TAXON_ALIAS_MAP[`${rank}:${name.toLowerCase()}`];
+  if (!alias) return undefined;
+  if (alias.name.toLowerCase() === name.toLowerCase()) return { note: `${/^[aeiou]/i.test(alias.rank) ? "an" : "a"} ${alias.rank} on CoL` };
+  return { colName: alias.name, suffix: " on CoL" };
+}
+
+/** The label as plain text, e.g. for an email or a title attribute. */
+export function colAliasNote(rank: FilterRank, name: string): string | undefined {
+  const label = colAliasLabel(rank, name);
+  if (!label) return undefined;
+  return "note" in label ? label.note : `${label.colName}${label.suffix}`;
+}
+
+/** For a filter name that isn't the GRA master list's own, what it is in the
+ *  GRA's terms: "Trogonophiidae in the GRA list", "part of Tropiduridae in the
+ *  GRA list". Undefined for any other name. */
+export function graNameNote(rank: FilterRank, name: string): string | undefined {
+  const eq = GRA_NAME_EQUIVALENTS[`${rank}:${name.toLowerCase()}`];
+  if (!eq) return undefined;
+  return eq.relation === "within" ? `part of ${eq.graName} in the GRA list` : `${eq.graName} in the GRA list`;
+}
+
+/** The names as the GRA list would give them, for text addressed to a GRA
+ *  reader: a variant spelling becomes the GRA's, and a family the GRA folds
+ *  into another (or a spelling of one already listed) drops out. */
+export function graDisplayNames(rank: FilterRank, names: string[], display: (n: string) => string): string[] {
+  const out: string[] = [];
+  for (const n of names) {
+    const eq = GRA_NAME_EQUIVALENTS[`${rank}:${n.toLowerCase()}`];
+    if (eq?.relation === "within") continue;
+    const shown = eq ? eq.graName : display(n);
+    if (!out.some((o) => o.toLowerCase() === shown.toLowerCase())) out.push(shown);
+  }
+  return out;
+}
+
+/** A name's segments: linked as is, or plain with its CoL name linked in
+ *  brackets; then, for a name the GRA list writes differently, its GRA name. */
+function nameSegments(rank: FilterRank, display: string, name: string, liveColIds?: Record<string, string>): DescribeFilterSegment[] {
+  const href = breakdownHref(rank, name, liveColIds);
+  const label = colAliasLabel(rank, name);
+  const gra = graNameNote(rank, name);
+  const graSeg: DescribeFilterSegment[] = gra ? [{ text: ` (${gra})` }] : [];
+  if (!label) return [{ text: display, href }, ...graSeg];
+  if ("note" in label) return [{ text: display, href }, { text: ` (${label.note})` }, ...graSeg];
+  return [{ text: display }, { text: " (" }, { text: label.colName, href }, { text: `${label.suffix})` }, ...graSeg];
+}
+
 export function breakdownHref(rank: FilterRank, name: string, liveColIds?: Record<string, string>): string | undefined {
   const key = `${rank}:${name.toLowerCase()}`;
   const colId = COL_TAXON_ID_MAP[key] ?? liveColIds?.[key];
@@ -686,7 +755,7 @@ function joinSegments(rank: FilterRank, names: string[], liveColIds?: Record<str
   const segs: DescribeFilterSegment[] = [];
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
-    segs.push({ text: capitalize(n), href: breakdownHref(rank, n, liveColIds) });
+    segs.push(...nameSegments(rank, capitalize(n), n, liveColIds));
   });
   return segs;
 }
@@ -695,7 +764,7 @@ function speciesSegments(names: string[], liveColIds?: Record<string, string>): 
   const segs: DescribeFilterSegment[] = [];
   names.forEach((n, i) => {
     if (i > 0) segs.push({ text: ", " });
-    segs.push({ text: capitalizeSpeciesName(n), href: breakdownHref("species", n, liveColIds) });
+    segs.push(...nameSegments("species", capitalizeSpeciesName(n), n, liveColIds));
   });
   return segs;
 }

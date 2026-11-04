@@ -83,6 +83,84 @@ const IUCN_SOURCE = "IUCN 2026-1";
 // citation, not this one, whenever the two differ.
 export const IUCN_SOURCE_URL = "https://nc.iucnredlist.org/redlist/content/attachment_files/2026-1_RL_Table1a.pdf";
 const SSC_GROUP_URL_BASE = "https://iucn.org/our-union/commissions/group/";
+
+// Reptile SSC remits follow the "Specialist Group" column of the IUCN Global
+// Reptile Assessment (GRA) master list, as revised by the GRA in Nov 2026:
+// the Boa and Python SG became the Snake SG (every snake not covered by the
+// Viper or Sea Snake SGs), the Sea Snake SG shrank to marine Elapidae only,
+// and the Snake and Lizard RLA became the Lizard and Tuatara RLA.
+// taxonomy-tree.reptile-remit.test.ts checks every node below against a
+// family/genus table derived from that list.
+
+/** Sea Snake SG genera — all Elapidae, exactly as the GRA defines the group:
+ *  its eight valid genera, then the six synonymised genera it still claims
+ *  (Enhydrina, Kerilia, Kolpophis, Lapemis, Pelamis, Thalassophis). No species
+ *  in our data or in CoL is filed under those six today (CoL has folded them
+ *  into Hydrophis), so their breakdown rows read 0, but they are listed so the
+ *  remit shown is the GRA's own, and so a name filed under an old genus lands
+ *  here rather than in the Snake SG. Every other Elapidae genus, including
+ *  CoL-only ones the GRA list doesn't name (Leptomicrurus, Parasuta), is a
+ *  land elapid and belongs to the Snake SG. */
+const SEA_SNAKE_GENERA = [
+  "hydrophis", "laticauda", "microcephalophis", "aipysurus", "emydocephalus",
+  "hydrelaps", "ephalophis", "parahydrophis",
+  "enhydrina", "kerilia", "kolpophis", "lapemis", "pelamis", "thalassophis",
+];
+
+/** Anolis plus the genera it was split into (Nicholson et al. 2012) that some
+ *  species in our data are still filed under — all Anoline Lizard SG. */
+const ANOLE_GENERA = ["anolis", "dactyloa", "norops", "ctenonotus", "deiroptyx"];
+
+/** Lizard and Tuatara RLA families: the GRA master list's, then the two names
+ *  our data uses instead of a GRA family. The GRA's Trogonophiidae appears
+ *  only as Trogonophidae, the spelling both the Red List and CoL use. */
+const LIZARD_RLA_FAMILIES = [
+  "agamidae", "alopoglossidae", "amphisbaenidae", "anguidae", "anniellidae",
+  "bipedidae", "blanidae", "cadeidae", "cordylidae", "corytophanidae",
+  "crotaphytidae", "dibamidae", "diploglossidae", "gerrhosauridae",
+  "gymnophthalmidae", "helodermatidae", "hoplocercidae", "lacertidae",
+  "leiosauridae", "liolaemidae", "opluridae", "phrynosomatidae",
+  "polychrotidae", "rhineuridae", "shinisauridae", "sphenodontidae", "teiidae",
+  "tropiduridae", "xantusiidae", "xenosauridae",
+  // Not the GRA's names: our data's for two of its families (see
+  // GRA_NAME_EQUIVALENTS). Last, so the breakdown lists the GRA's own first.
+  "trogonophidae", "leiocephalidae",
+];
+
+/**
+ * Family names in the reptile filters that aren't the GRA master list's own:
+ * the Red List's or CoL's name for a GRA family. The breakdown labels each with
+ * its GRA counterpart ("Trogonophidae (Trogonophiidae in the GRA list)"), and
+ * the correction email gives the GRA's name instead, so what a GRA reader sees
+ * matches their list. "within": a CoL family the GRA doesn't separate out.
+ */
+export const GRA_NAME_EQUIVALENTS: Record<string, { graName: string; relation: "spelling" | "within" }> = {
+  "family:atractaspididae": { graName: "Atractaspidae", relation: "spelling" },
+  "family:xenophidiidae": { graName: "Xenophiidae", relation: "spelling" },
+  "family:bolyeriidae": { graName: "Bolyeridae", relation: "spelling" },
+  "family:trogonophidae": { graName: "Trogonophiidae", relation: "spelling" },
+  "family:leiocephalidae": { graName: "Tropiduridae", relation: "within" },
+};
+
+/** Every snake family (bar Viperidae): the GRA master list's, then the names
+ *  our data uses for three of them. Our data carries no suborder, so this list
+ *  is the only thing that separates snakes from lizards inside Squamata — a
+ *  snake family missing here would land in no group. Includes Psammodynastidae,
+ *  which the GRA splits from Pseudaspididae but our data doesn't have yet. */
+const SNAKE_FAMILIES = [
+  "acrochordidae", "aniliidae", "anomalepididae", "anomochilidae", "boidae",
+  "bolyeridae", "calabariidae", "calamariidae", "candoiidae", "charinaidae",
+  "colubridae", "cyclocoridae", "cylindrophiidae", "dipsadidae", "elapidae",
+  "erycidae", "gerrhopilidae", "grayiidae", "homalopsidae", "lamprophiidae",
+  "leptotyphlopidae", "loxocemidae", "micrelapidae", "natricidae", "pareidae",
+  "prosymnidae", "psammodynastidae", "psammophiidae", "pseudaspididae",
+  "pseudoxenodontidae", "pseudoxyrhophiidae", "pythonidae", "sanziniidae",
+  "sibynophiidae", "tropidophiidae", "typhlopidae", "ungaliophiidae",
+  "uropeltidae", "xenodermidae", "xenopeltidae", "xenotyphlopidae",
+  // Our data's spellings of three GRA families (see GRA_NAME_EQUIVALENTS).
+  // Last, so the breakdown lists the GRA's own first.
+  "atractaspididae", "xenophidiidae", "bolyeriidae",
+];
 const COL_2025 = "Catalogue of Life 2025";
 const COL_2025_URL = "https://doi.org/10.48580/dgnfb";
 const CHRISTENHUSZ = "Christenhusz & Byng 2016, Phytotaxa 261(3)";
@@ -874,7 +952,10 @@ export const TAXONOMY_TREE: TaxonomyNode = {
         {
           id: "ssc-anoline-lizard",
           name: "Anoline Lizard Specialist Group",
-          filter: { taxonGroups: ["reptiles"], genera: ["anolis"] },
+          filter: { taxonGroups: ["reptiles"], genera: ANOLE_GENERA },
+          // ANOLE_GENERA (not just "anolis") so Dactyloa, and Anolis species
+          // filed under the genera Nicholson et al. 2012 split out, aren't
+          // dropped by both this node and the RLA. Original note:
           // Own site (iucn.org): mission covers "Anolis (anole) lizards...
           // across the entire distribution of Anolis" — genus-scoped, not
           // family-scoped, so filtering by genus (not family) is most
@@ -885,7 +966,7 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           // synonym used elsewhere in the literature). A separate family
           // label, "polychrotidae" (7 spp), is entirely genus Polychrus — a
           // related but distinct genus the group's own scope doesn't name —
-          // correctly NOT included (falls to the Snake and Lizard RLA
+          // correctly NOT included (falls to the Lizard and Tuatara RLA
           // catch-all below). The estimatedDescribed gap below (432 vs. 379)
           // reflects Reptile Database's larger global described-species count
           // vs. this file's assessed/candidate subset, not an in-file
@@ -910,42 +991,14 @@ export const TAXONOMY_TREE: TaxonomyNode = {
         {
           id: "ssc-sea-snake",
           name: "Sea Snake Specialist Group",
-          filter: {
-            taxonGroups: ["reptiles"],
-            genera: [
-              // "True sea snakes" and sea kraits (Elapidae subfamily
-              // Hydrophiinae, marine lineages only — NOT the many terrestrial
-              // Hydrophiinae genera like Naja, Bungarus, Dendroaspis, Micrurus,
-              // Oxyuranus, Notechis, etc., which stay in the catch-all below).
-              "hydrophis", "aipysurus", "emydocephalus", "laticauda", "microcephalophis",
-              "hydrelaps", "ephalophis", "parahydrophis", "enhydrina", "kerilia",
-              "kolpophis", "lapemis", "pelamis", "thalassophina",
-              // "Estuarine/marine mud snakes" — whole family Homalopsidae,
-              // expressed as its full genus list since SpeciesFilter's
-              // families+genera fields are ANDed, not OR'd, and this node
-              // already needs `genera` for the Elapidae subset above.
-              // Karnsophis (a monotypic genus described 2013, in the same
-              // fangless-homalopsid clade as Brachyorrhos/Calamophis) was
-              // missing from this list — found by diffing the real CoL
-              // taxonomic backbone against every reptile SSC node's match set
-              // and finding one Homalopsidae species (Karnsophis siantaris)
-              // that fell through all 13 nodes.
-              "enhydris", "homalopsis", "cerberus", "calamophis", "brachyorrhos",
-              "myron", "gyiophis", "myrrophis", "hypsiscopus", "homalophis",
-              "sumatranus", "subsessor", "raclitia", "pseudoferania", "phytolopsis",
-              "myanophis", "miralia", "mintonophis", "kualatahan", "heurnia",
-              "gerarda", "fordonia", "ferania", "erpeton", "djokoiskandarus",
-              "dieurostus", "cantoria", "bitia", "karnsophis",
-              // "File snakes" — whole family Acrochordidae (1 genus).
-              "acrochordus",
-            ],
-          },
-          // Own mission statement (2024-25 SSC Annual Report, iucn.org): "the
-          // conservation of the world's marine and aquatic snakes — true sea
-          // snakes, sea kraits, estuarine/marine mud and file snakes" — spans
-          // 3 families (a genus-level subset of Elapidae + all of Homalopsidae
-          // + all of Acrochordidae), confirmed by the neighboring Snake
-          // Specialist Group's own exclusion statement (see Viper SG above).
+          // By genus alone, the way the GRA defines this group, so the breakdown
+          // lists its genera rather than one "Elapidae" row. The names are unique
+          // within reptiles, so no family clause is needed to keep them to Elapidae.
+          filter: { taxonGroups: ["reptiles"], genera: SEA_SNAKE_GENERA },
+          // Marine Elapidae only: true sea snakes and sea kraits. Homalopsidae
+          // (mud snakes) and Acrochordidae (file snakes) were never in this
+          // group's remit; they were in its original assessment workshop only
+          // because the right experts were there, and now sit in the Snake SG.
           sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-sea-snake-specialist-group",
         },
         {
@@ -965,90 +1018,36 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-gekkota-lizard-specialist-group",
         },
         {
-          id: "ssc-boa-python",
-          name: "Boa and Python Specialist Group",
+          id: "ssc-snake",
+          name: "Snake Specialist Group",
           filter: {
             taxonGroups: ["reptiles"],
-            families: ["boidae", "pythonidae", "erycidae", "charinaidae", "candoiidae", "sanziniidae", "ungaliophiidae"],
+            families: SNAKE_FAMILIES,
+            excludeGenera: SEA_SNAKE_GENERA,
           },
-          // LOWER CONFIDENCE than the other reptile groups here — flagging
-          // explicitly rather than presenting this as settled. The group's
-          // current iucn.org page is an empty template and its only listed
-          // contact is a Facebook page; the only scope statement found is an
-          // undated, third-party-hosted brochure: "true boas and pythons,
-          // families Boidae and Pythonidae, represent about half of the
-          // overall remit" of "~186 species... distributed in 12 families."
-          // Boidae + Pythonidae plus the 5 genera IUCN's own Red List
-          // assessments still classify under "Boidae" (Erycidae, Charinaidae,
-          // Candoiidae, Sanziniidae, Ungaliophiidae — modern splits not yet
-          // reflected in IUCN's working taxonomy, confirmed via a real
-          // assessment PDF for Eryx johnii) are included with good confidence.
-          // The brochure's other ~10 relict families (Aniliidae, Anomochilidae,
-          // Bolyeriidae, Calabariidae, Cylindrophiidae, Loxocemidae,
-          // Tropidophiidae, Uropeltidae, Xenopeltidae, Xenophiidae) are
-          // DELIBERATELY left out of this filter and fall to the Snake and
-          // Lizard RLA catch-all instead: no source could confirm the brochure
-          // is current, no independent source corroborates it, and several of
-          // those families (e.g. Uropeltidae, shield-tailed snakes) aren't
-          // "boas or pythons" in any common or modern-phylogenetic sense. If a
-          // current, authoritative BPSG scope statement surfaces, revisit —
-          // this is the single lowest-confidence call in the reptile pilot.
-          // Also flagged: the iucn.org directory profile above now returns a
-          // dead "No results were found" search page (was merely a thin
-          // empty template before, now broken outright); pointed sourceUrl
-          // instead at a live iucn.org content page that's actually about
-          // this group. Its long-time Executive Office, Fundación
-          // Biodiversidad, reportedly stepped down from that role in
-          // December 2020 — an organizational change not otherwise
-          // documented here, though the group appears to still be active per
-          // SSC quadrennium reporting.
-          sourceUrl: "https://iucn.org/content/kering-and-iucn-boa-python-specialist-group-announce-first-report-captive-breeding",
+          // Replaced the Boa and Python SG. Every snake except Viperidae (Viper
+          // SG) and the marine Elapidae genera (Sea Snake SG) — boas, pythons,
+          // the blind snakes, colubroids, terrestrial elapids, and the mud and
+          // file snakes the Sea Snake SG used to hold.
+          sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-snake-specialist-group",
         },
-        // Catch-all: NOT a "no group" placeholder like ssc-other-mammals — this
-        // IS the real "IUCN SSC Snake and Lizard Red List Authority", confirmed
-        // via its own SSC annual report: "undertake and support IUCN Red List
-        // assessments for reptile groups not covered by other Specialist
-        // Groups, including most snakes and lizards and the New Zealand
-        // Tuatara (Sphenodon punctatus)" — a real, named, residual-by-design
-        // entity, not a gap in our coverage. The tuatara is a genuinely
-        // reported exception (Rhynchocephalia, not even Squamata) — added via
-        // extraSpeciesNames, the same escape hatch the mammal pilot's Antelope
-        // SG uses. Kept in sync manually — if a 14th reptile SSC group is
-        // added above, exclude its family/genus here too (this already
-        // happened once: Gekkota Lizard SG was a real group formed in 2025
-        // that got missed in the initial build, found in a later review).
+        // The IUCN SSC Lizard and Tuatara Red List Authority (formerly the Snake
+        // and Lizard RLA): every lizard and amphisbaenian family without its own
+        // group, plus the tuatara. Listed family by family from the GRA master
+        // list, the way the GRA defines it, rather than as "everything not
+        // claimed above", so its breakdown names its families. Sorts by
+        // assessed count in the SSC view like any named group.
         {
-          id: "ssc-snake-lizard-rla",
-          name: "Snake and Lizard Red List Authority",
+          id: "ssc-lizard-tuatara-rla",
+          name: "Lizard and Tuatara Red List Authority",
           filter: {
             taxonGroups: ["reptiles"],
-            excludeFamilies: [
-              "crocodylidae", "alligatoridae", "gavialidae",
-              "geoemydidae", "testudinidae", "chelidae", "emydidae", "kinosternidae",
-              "trionychidae", "pelomedusidae", "podocnemididae", "chelydridae",
-              "platysternidae", "dermatemydidae", "carettochelyidae",
-              "cheloniidae", "dermochelyidae",
-              "scincidae", "chamaeleonidae", "varanidae", "lanthanotidae", "iguanidae",
-              "anolidae", "dactyloidae",
-              "gekkonidae", "eublepharidae", "phyllodactylidae", "sphaerodactylidae", "diplodactylidae", "carphodactylidae", "pygopodidae",
-              "viperidae",
-              "homalopsidae", "acrochordidae",
-              "boidae", "pythonidae", "erycidae", "charinaidae", "candoiidae", "sanziniidae", "ungaliophiidae",
-              "sphenodontidae",
-            ],
-            excludeGenera: [
-              "hydrophis", "aipysurus", "emydocephalus", "laticauda", "microcephalophis",
-              "hydrelaps", "ephalophis", "parahydrophis", "enhydrina", "kerilia",
-              "kolpophis", "lapemis", "pelamis", "thalassophina",
-            ],
-            extraSpeciesNames: ["sphenodon punctatus"],
+            // The tuatara comes in through Sphenodontidae, its family in both the
+            // Red List and CoL. (It used to be added by name too, which the
+            // per-family breakdown then counted once in every row.)
+            families: LIZARD_RLA_FAMILIES,
           },
-          // estimatedDescribed recomputed — the prior figure (5,659) was a
-          // quick subtraction done when Gekkota SG was added that didn't
-          // account for other sibling groups' own estimates changing since.
-          // Recomputed as the actual sum of all 12 sibling nodes' current
-          // estimatedDescribed values.
-          sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-snake-and-lizard-red-list-authority",
+          sourceUrl: SSC_GROUP_URL_BASE + "iucn-ssc-lizard-and-tuatara-red-list-authority",
         },
       ],
     },
@@ -1388,8 +1387,7 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           // spiders, Liphistiidae, Hogna, Malawi scorpions, etc.) — no mite,
           // harvestman, Solifugae, or other minor-order activity found
           // anywhere. Encoded to the evidenced core (Araneae + Scorpiones)
-          // rather than the aspirational "all Arachnida" framing, the same
-          // judgment call as the reptile pilot's Boa and Python SG.
+          // rather than the aspirational "all Arachnida" framing.
           // estimatedDescribed corrected — the prior figure (16,053)
           // undercounted real diversity by ~3.5x; World Spider Catalog
           // reports ~53,000-53,700 described spider species alone, plus
@@ -1428,8 +1426,7 @@ export const TAXONOMY_TREE: TaxonomyNode = {
           // functionally-uncapped "all Lepidoptera" reading of its mission
           // statement. Those ~39 already-assessed non-Saturniidae moth
           // species currently fall to the catch-all rather than here — a
-          // known, small undercount, same class of judgment call as the
-          // reptile pilot's Boa and Python SG.
+          // known, small undercount.
           // estimatedDescribed corrected — the prior figure (14,269)
           // undercounted by ~1.5x against this app's own COL_2025 data for
           // the exact 8-family filter (~21,600-23,000 rows).

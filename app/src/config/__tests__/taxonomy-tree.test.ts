@@ -587,13 +587,13 @@ describe("SSC Specialist Groups tree", () => {
 describe("SSC Specialist Groups tree (reptiles)", () => {
   const sscReptileNode = findNode("ssc-reptile-groups");
 
-  it("ssc-reptile-groups exists, is not part of the default view, and has 13 children (12 pilot groups + Snake and Lizard RLA)", () => {
+  it("ssc-reptile-groups exists, is not part of the default view, and has 13 children (12 named groups + Lizard and Tuatara RLA)", () => {
     expect(sscReptileNode).toBeDefined();
     expect(sscReptileNode?.children?.length).toBe(13);
     expect(TAXONOMY_VIEWS.default.roots).not.toContain("ssc-reptile-groups");
   });
 
-  it("ssc-snake-lizard-rla (the residual RLA) doesn't overlap any of the 12 named groups", () => {
+  it("ssc-lizard-tuatara-rla (the residual RLA) doesn't overlap any of the 12 named groups", () => {
     const cases: Array<{ class_name: string; order_name: string; family: string; scientific_name: string }> = [
       { class_name: "Reptilia", order_name: "Crocodylia", family: "Crocodylidae", scientific_name: "Crocodylus niloticus" },
       { class_name: "Reptilia", order_name: "Testudines", family: "Testudinidae", scientific_name: "Chelonoidis nigra" },
@@ -610,38 +610,37 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
       { class_name: "Reptilia", order_name: "Squamata", family: "Acrochordidae", scientific_name: "Acrochordus javanicus" },
       { class_name: "Reptilia", order_name: "Squamata", family: "Boidae", scientific_name: "Boa constrictor" },
       { class_name: "Reptilia", order_name: "Squamata", family: "Pythonidae", scientific_name: "Python bivittatus" },
-      // The tuatara — claimed by the RLA itself via extraSpeciesNames, must not
-      // also match the RLA's own base (exclude-everything-else) filter twice.
+      // The tuatara — claimed by the RLA itself, through Sphenodontidae.
       { class_name: "Reptilia", order_name: "Rhynchocephalia", family: "Sphenodontidae", scientific_name: "Sphenodon punctatus" },
     ];
     for (const row of cases) {
       const isTuatara = row.scientific_name === "Sphenodon punctatus";
-      const named = ["ssc-crocodile", "ssc-tortoise-freshwater-turtle", "ssc-marine-turtle", "ssc-skink", "ssc-chameleon", "ssc-monitor-lizard", "ssc-iguana", "ssc-anoline-lizard", "ssc-gekkota", "ssc-viper", "ssc-sea-snake", "ssc-boa-python"];
+      const named = ["ssc-crocodile", "ssc-tortoise-freshwater-turtle", "ssc-marine-turtle", "ssc-skink", "ssc-chameleon", "ssc-monitor-lizard", "ssc-iguana", "ssc-anoline-lizard", "ssc-gekkota", "ssc-viper", "ssc-sea-snake", "ssc-snake"];
       const matchesNamed = named.some((id) => speciesMatchesNode({ ...row, taxon_group: "reptiles" }, id));
       expect(matchesNamed, row.scientific_name).toBe(!isTuatara);
-      // The RLA only claims the tuatara (via extraSpeciesNames) among these
+      // The RLA only claims the tuatara among these
       // cases — everything else here is already claimed by a named group, so
       // the RLA's exclude-everything-else base filter must not also match it.
-      expect(speciesMatchesNode({ ...row, taxon_group: "reptiles" }, "ssc-snake-lizard-rla")).toBe(isTuatara);
+      expect(speciesMatchesNode({ ...row, taxon_group: "reptiles" }, "ssc-lizard-tuatara-rla")).toBe(isTuatara);
     }
   });
 
-  it("ssc-snake-lizard-rla catches a genuinely uncovered species (whiptail lizard, no dedicated SSC group among the 12)", () => {
+  it("ssc-lizard-tuatara-rla catches a genuinely uncovered species (whiptail lizard, no dedicated SSC group among the 12)", () => {
     const whiptail = { class_name: "Reptilia", order_name: "Squamata", family: "Teiidae", scientific_name: "Ameiva ameiva", taxon_group: "reptiles" };
-    expect(speciesMatchesNode(whiptail, "ssc-snake-lizard-rla")).toBe(true);
+    expect(speciesMatchesNode(whiptail, "ssc-lizard-tuatara-rla")).toBe(true);
   });
 
-  it("Gekkota Lizard SG covers all 7 gecko families, not the Snake and Lizard RLA", () => {
+  it("Gekkota Lizard SG covers all 7 gecko families, not the Lizard and Tuatara RLA", () => {
     const gecko = { class_name: "Reptilia", order_name: "Squamata", family: "Gekkonidae", scientific_name: "Gekko gecko", taxon_group: "reptiles" };
     const legless = { class_name: "Reptilia", order_name: "Squamata", family: "Pygopodidae", scientific_name: "Lialis burtonis", taxon_group: "reptiles" };
     expect(speciesMatchesNode(gecko, "ssc-gekkota")).toBe(true);
     expect(speciesMatchesNode(legless, "ssc-gekkota")).toBe(true);
-    expect(speciesMatchesNode(gecko, "ssc-snake-lizard-rla")).toBe(false);
+    expect(speciesMatchesNode(gecko, "ssc-lizard-tuatara-rla")).toBe(false);
   });
 
-  it("ssc-snake-lizard-rla explicitly claims the tuatara via extraSpeciesNames despite it not being Squamata", () => {
+  it("ssc-lizard-tuatara-rla claims the tuatara through its family, Sphenodontidae, despite it not being Squamata", () => {
     const tuatara = { class_name: "Reptilia", order_name: "Rhynchocephalia", family: "Sphenodontidae", scientific_name: "Sphenodon punctatus", taxon_group: "reptiles" };
-    expect(speciesMatchesNode(tuatara, "ssc-snake-lizard-rla")).toBe(true);
+    expect(speciesMatchesNode(tuatara, "ssc-lizard-tuatara-rla")).toBe(true);
   });
 
   it("Anoline Lizard SG is genus-scoped to Anolis, correctly excluding the related genus Polychrus despite sharing a family-label lineage", () => {
@@ -651,7 +650,7 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
     expect(speciesMatchesNode(anole, "ssc-anoline-lizard")).toBe(true);
     expect(speciesMatchesNode(anole2, "ssc-anoline-lizard")).toBe(true);
     expect(speciesMatchesNode(bushAnole, "ssc-anoline-lizard")).toBe(false);
-    expect(speciesMatchesNode(bushAnole, "ssc-snake-lizard-rla")).toBe(true);
+    expect(speciesMatchesNode(bushAnole, "ssc-lizard-tuatara-rla")).toBe(true);
   });
 
   it("Sea Snake SG's genus-level Elapidae filter excludes terrestrial elapids (cobras, mambas, coral snakes)", () => {
@@ -662,22 +661,23 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
     expect(speciesMatchesNode(seaSnake, "ssc-sea-snake")).toBe(true);
     expect(speciesMatchesNode(seaKrait, "ssc-sea-snake")).toBe(true);
     expect(speciesMatchesNode(cobra, "ssc-sea-snake")).toBe(false);
-    expect(speciesMatchesNode(cobra, "ssc-snake-lizard-rla")).toBe(true);
+    expect(speciesMatchesNode(cobra, "ssc-snake")).toBe(true);
+    expect(speciesMatchesNode(cobra, "ssc-lizard-tuatara-rla")).toBe(false);
     expect(speciesMatchesNode(mamba, "ssc-sea-snake")).toBe(false);
-    expect(speciesMatchesNode(mamba, "ssc-snake-lizard-rla")).toBe(true);
+    expect(speciesMatchesNode(mamba, "ssc-snake")).toBe(true);
+    expect(speciesMatchesNode(seaSnake, "ssc-snake")).toBe(false);
+    expect(speciesMatchesNode(seaKrait, "ssc-snake")).toBe(false);
   });
 
-  it("Sea Snake SG also claims all of Homalopsidae (mud snakes) and Acrochordidae (file snakes), unrelated families to Elapidae", () => {
+  it("mud snakes (Homalopsidae, incl. Karnsophis) and file snakes (Acrochordidae) are Snake SG, not Sea Snake SG", () => {
     const mudSnake = { class_name: "Reptilia", order_name: "Squamata", family: "Homalopsidae", scientific_name: "Cerberus rynchops", taxon_group: "reptiles" };
-    const fileSnake = { class_name: "Reptilia", order_name: "Squamata", family: "Acrochordidae", scientific_name: "Acrochordus javanicus", taxon_group: "reptiles" };
-    expect(speciesMatchesNode(mudSnake, "ssc-sea-snake")).toBe(true);
-    expect(speciesMatchesNode(fileSnake, "ssc-sea-snake")).toBe(true);
-  });
-
-  it("Sea Snake SG's Homalopsidae genus list includes Karnsophis (a monotypic genus missing from an earlier draft, found via a live CoL cross-check)", () => {
     const karnsophis = { class_name: "Reptilia", order_name: "Squamata", family: "Homalopsidae", scientific_name: "Karnsophis siantaris", taxon_group: "reptiles" };
-    expect(speciesMatchesNode(karnsophis, "ssc-sea-snake")).toBe(true);
-    expect(speciesMatchesNode(karnsophis, "ssc-snake-lizard-rla")).toBe(false);
+    const fileSnake = { class_name: "Reptilia", order_name: "Squamata", family: "Acrochordidae", scientific_name: "Acrochordus javanicus", taxon_group: "reptiles" };
+    for (const row of [mudSnake, karnsophis, fileSnake]) {
+      expect(speciesMatchesNode(row, "ssc-sea-snake"), row.scientific_name).toBe(false);
+      expect(speciesMatchesNode(row, "ssc-snake"), row.scientific_name).toBe(true);
+      expect(speciesMatchesNode(row, "ssc-lizard-tuatara-rla"), row.scientific_name).toBe(false);
+    }
   });
 
   it("Monitor Lizard SG includes Lanthanotidae (earless monitor lizard) alongside Varanidae, per the group's own site", () => {
@@ -699,16 +699,16 @@ describe("SSC Specialist Groups tree (reptiles)", () => {
     expect(speciesMatchesNode(tortoise, "ssc-tortoise-freshwater-turtle")).toBe(true);
   });
 
-  it("Boa and Python SG covers modern Boidae splits (sand boas etc.) but not the ~10 more distant relict families left to the RLA", () => {
+  it("Snake SG covers boas, pythons and the relict snake families the old Boa and Python SG left out", () => {
     const boa = { class_name: "Reptilia", order_name: "Squamata", family: "Boidae", scientific_name: "Boa constrictor", taxon_group: "reptiles" };
     const python = { class_name: "Reptilia", order_name: "Squamata", family: "Pythonidae", scientific_name: "Python bivittatus", taxon_group: "reptiles" };
     const sandBoa = { class_name: "Reptilia", order_name: "Squamata", family: "Erycidae", scientific_name: "Eryx johnii", taxon_group: "reptiles" };
     const shieldTail = { class_name: "Reptilia", order_name: "Squamata", family: "Uropeltidae", scientific_name: "Uropeltis melanogaster", taxon_group: "reptiles" };
-    expect(speciesMatchesNode(boa, "ssc-boa-python")).toBe(true);
-    expect(speciesMatchesNode(python, "ssc-boa-python")).toBe(true);
-    expect(speciesMatchesNode(sandBoa, "ssc-boa-python")).toBe(true);
-    expect(speciesMatchesNode(shieldTail, "ssc-boa-python")).toBe(false);
-    expect(speciesMatchesNode(shieldTail, "ssc-snake-lizard-rla")).toBe(true);
+    const grassSnake = { class_name: "Reptilia", order_name: "Squamata", family: "Colubridae", scientific_name: "Natrix natrix", taxon_group: "reptiles" };
+    for (const row of [boa, python, sandBoa, shieldTail, grassSnake]) {
+      expect(speciesMatchesNode(row, "ssc-snake"), row.scientific_name).toBe(true);
+      expect(speciesMatchesNode(row, "ssc-lizard-tuatara-rla"), row.scientific_name).toBe(false);
+    }
   });
 
   it("all ssc-reptile-groups children use the reptiles taxonGroup and have a unique id", () => {

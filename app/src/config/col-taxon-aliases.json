@@ -1,0 +1,214 @@
+{
+  "class:chondrichthyes": {
+    "name": "Chondrichthyes",
+    "rank": "parvphylum"
+  },
+  "class:oomycetes": {
+    "name": "Oomycota",
+    "rank": "phylum"
+  },
+  "family:bolyeridae": {
+    "name": "Bolyeriidae",
+    "rank": "family"
+  },
+  "family:calamariidae": {
+    "name": "Calamariinae",
+    "rank": "subfamily"
+  },
+  "family:charinaidae": {
+    "name": "Charininae",
+    "rank": "subfamily"
+  },
+  "family:grayiidae": {
+    "name": "Grayiinae",
+    "rank": "subfamily"
+  },
+  "family:pseudoxenodontidae": {
+    "name": "Pseudoxenodontinae",
+    "rank": "subfamily"
+  },
+  "family:scaridae": {
+    "name": "Scarinae",
+    "rank": "subfamily"
+  },
+  "family:sibynophiidae": {
+    "name": "Sibynophiinae",
+    "rank": "subfamily"
+  },
+  "family:ungaliophiidae": {
+    "name": "Ungaliophiinae",
+    "rank": "subfamily"
+  },
+  "family:ziphiidae": {
+    "name": "Hyperoodontidae",
+    "rank": "family"
+  },
+  "genus:bison": {
+    "name": "Bos",
+    "rank": "genus"
+  },
+  "genus:byrrhidium": {
+    "name": "Elassocanthon",
+    "rank": "genus"
+  },
+  "genus:ctenonotus": {
+    "name": "Anolis",
+    "rank": "genus"
+  },
+  "genus:deiroptyx": {
+    "name": "Anolis",
+    "rank": "genus"
+  },
+  "genus:deltorrhinum": {
+    "name": "Deltorhinum",
+    "rank": "genus"
+  },
+  "genus:heterozostera": {
+    "name": "Zostera",
+    "rank": "genus"
+  },
+  "genus:nanozostera": {
+    "name": "Zostera",
+    "rank": "genus"
+  },
+  "species:arachnochium mirabile": {
+    "name": "Arachnochium mirabilis",
+    "rank": "species"
+  },
+  "species:coutierella tonkinensis": {
+    "name": "Palaemon tonkinensis",
+    "rank": "species"
+  },
+  "species:cryphiops brasiliensis": {
+    "name": "Macrobrachium candango",
+    "rank": "species"
+  },
+  "species:cryphiops caementarius": {
+    "name": "Macrobrachium caementarius",
+    "rank": "species"
+  },
+  "species:cryphiops luscus": {
+    "name": "Macrobrachium luscus",
+    "rank": "species"
+  },
+  "species:cryphiops perspicax": {
+    "name": "Macrobrachium perspicax",
+    "rank": "species"
+  },
+  "species:cryphiops sbordonii": {
+    "name": "Macrobrachium valdonii",
+    "rank": "species"
+  },
+  "species:cryphiops villalobosi": {
+    "name": "Macrobrachium alevillalobosi",
+    "rank": "species"
+  },
+  "species:exopalaemon annandalei": {
+    "name": "Palaemon annandalei",
+    "rank": "species"
+  },
+  "species:exopalaemon mani": {
+    "name": "Palaemon mani",
+    "rank": "species"
+  },
+  "species:exopalaemon modestus": {
+    "name": "Palaemon modestus",
+    "rank": "species"
+  },
+  "species:exopalaemon xinjiangensis": {
+    "name": "Palaemon xinjiangensis",
+    "rank": "species"
+  },
+  "species:isurus desori": {
+    "name": "Cosmopolitodus hastalis",
+    "rank": "species"
+  },
+  "species:macrobrachium bombayense": {
+    "name": "Macrobrachium bombajense",
+    "rank": "species"
+  },
+  "species:macrobrachium sankollii": {
+    "name": "Macrobrachium sankolli",
+    "rank": "species"
+  },
+  "species:macrobrachium vollenhoveni": {
+    "name": "Macrobrachium vollenhovenii",
+    "rank": "species"
+  },
+  "species:oxyrhina hastalis": {
+    "name": "Cosmopolitodus hastalis",
+    "rank": "species"
+  },
+  "species:palaemonetes antrorum": {
+    "name": "Palaemon antrorum",
+    "rank": "species"
+  },
+  "species:palaemonetes argentinus": {
+    "name": "Palaemon argentinus",
+    "rank": "species"
+  },
+  "species:palaemonetes australis": {
+    "name": "Palaemon australis",
+    "rank": "species"
+  },
+  "species:palaemonetes carteri": {
+    "name": "Palaemon carteri",
+    "rank": "species"
+  },
+  "species:palaemonetes cummingi": {
+    "name": "Palaemon cummingi",
+    "rank": "species"
+  },
+  "species:palaemonetes hobbsi": {
+    "name": "Palaemon hobbsi",
+    "rank": "species"
+  },
+  "species:palaemonetes ivonicus": {
+    "name": "Palaemon ivonicus",
+    "rank": "species"
+  },
+  "species:palaemonetes kadiakensis": {
+    "name": "Palaemon kadiakensis",
+    "rank": "species"
+  },
+  "species:palaemonetes lindsayi": {
+    "name": "Palaemon lindsayi",
+    "rank": "species"
+  },
+  "species:palaemonetes mercedae": {
+    "name": "Palaemon mercedae",
+    "rank": "species"
+  },
+  "species:palaemonetes mesogenitor": {
+    "name": "Palaemon mesogenitor",
+    "rank": "species"
+  },
+  "species:palaemonetes mesopotamicus": {
+    "name": "Palaemon mesopotamicus",
+    "rank": "species"
+  },
+  "species:palaemonetes mexicanus": {
+    "name": "Palaemon mexicanus",
+    "rank": "species"
+  },
+  "species:palaemonetes paludosus": {
+    "name": "Palaemon paludosus",
+    "rank": "species"
+  },
+  "species:palaemonetes sinensis": {
+    "name": "Palaemon sinensis",
+    "rank": "species"
+  },
+  "species:palaemonetes suttkusi": {
+    "name": "Palaemon suttkusi",
+    "rank": "species"
+  },
+  "species:palaemonetes texanus": {
+    "name": "Palaemon texanus",
+    "rank": "species"
+  },
+  "species:palaemonetes turcorum": {
+    "name": "Palaemon turcorum",
+    "rank": "species"
+  }
+}
