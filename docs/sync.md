@@ -218,7 +218,7 @@ Needs: the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the 
 - link changes (`link_col_id`), since each one moves a species' records
 - species leaving or joining the NE list in bulk
 
-**When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason.
+**When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes the XR GBIF indexes *now*, but a snapshot is keyed by the XR GBIF indexed when it was *made*: between GBIF moving and the next snapshot (COL26.10 XR went live just after the 1 November 2026 snapshot) the two disagree, and `build-occurrences` stops if more than 0.1% of the snapshot's records have keys the taxonomy doesn't hold. Wait for the next snapshot, or set `COL_XR_DATASET` to the snapshot's XR.
 
 **When IUCN publishes.** Point `DB_NAME` at the new database. Expect new species, new categories and count changes from moved assessment years.
 

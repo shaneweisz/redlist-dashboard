@@ -147,6 +147,31 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
   await conn.run(`DROP TABLE IF EXISTS batch`);
 }
 
+/**
+ * The snapshot's keys must be the taxonomy's ids. A snapshot is keyed by the
+ * XR GBIF indexed when it was made, but build-taxa takes the XR GBIF indexes
+ * now: run between GBIF moving to a new XR and the next snapshot (COL26.10 XR
+ * went live after the 1 November 2026 snapshot), the two disagree on ~2% of
+ * ids and their records silently count for nothing. A matching pair leaves a
+ * few hundred records out of billions (976 of 3.9 billion, 2026-11-01).
+ */
+export const MAX_UNKNOWN_KEY_SHARE = 0.001;
+
+async function assertKeysFitTaxonomy(conn: DuckDBConnection, coreDir: string): Promise<void> {
+  const taxa = path.join(coreDir, "taxa.parquet");
+  if (!fs.existsSync(taxa)) return;
+  const [r] = (await conn.runAndReadAll(`
+    WITH k AS (SELECT usage_key, sum(n) AS n FROM read_parquet(${lit(path.join(coreDir, "occurrence_counts.parquet"))}) GROUP BY 1)
+    SELECT sum(n) AS total, coalesce(sum(n) FILTER (t.col_id IS NULL), 0) AS unknown
+    FROM k LEFT JOIN read_parquet(${lit(taxa)}) t ON t.col_id = k.usage_key`)).getRowObjects();
+  const share = Number(r.unknown) / Math.max(1, Number(r.total));
+  if (share > MAX_UNKNOWN_KEY_SHARE) {
+    throw new Error(`build-occurrences: ${Number(r.unknown).toLocaleString()} records (${(share * 100).toFixed(2)}%) have keys the taxonomy ` +
+      `doesn't hold. The snapshot was indexed against another XR than taxa.parquet; set COL_XR_DATASET to the XR GBIF used ` +
+      `when the snapshot was made, or wait for the next snapshot.`);
+  }
+}
+
 export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, coreDir: string): Promise<{ sourceRows: number }> {
   const workDir = path.join(CACHE_ROOT, "occurrences", snap.date);
   const marker = path.join(workDir, "complete.json");
@@ -177,6 +202,7 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
   // Every record with a usage is in the aggregate, so its total can't fall short of the source.
   const [s] = (await conn.runAndReadAll(`SELECT sum(n) AS n FROM read_parquet(${lit(path.join(coreDir, "occurrence_counts.parquet"))})`)).getRowObjects();
   if (Number(s.n) > sourceRows) throw new Error(`build-occurrences: aggregated ${s.n} records from a ${sourceRows}-record snapshot`);
+  await assertKeysFitTaxonomy(conn, coreDir);
   return { sourceRows };
 }
 
