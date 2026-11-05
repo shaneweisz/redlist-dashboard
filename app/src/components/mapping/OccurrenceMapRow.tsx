@@ -1920,12 +1920,21 @@ export default function OccurrenceMapRow({
       params.set("country", countryCode);
     }
     fetch(`/api/species/${speciesKey}/breakdown?${params}`)
-      .then((res) => res.json())
+      .then((res) => {
+        // A failed breakdown is "unknown", not "zero of everything": an error
+        // body stored as the breakdown read as iNaturalist 0 and hid the iNat
+        // panel. Leaving it null keeps the panel (gated on !breakdown) visible.
+        if (!res.ok) throw new Error(`breakdown HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         setBreakdown(data);
         setInatTotalCount(data.inatTotalCount || data.iNaturalist || 0);
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        setBreakdown(null);
+      })
       .finally(() => setLoadingBreakdown(false));
   }, [speciesKey, countryCode]);
 
