@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncPath } from "@/lib/data/sync-layout";
 import { NAME_TO_ALPHA2, ALPHA2_TO_NAME, resolveCountryToAlpha2 } from "../countries";
 import { EMBEDDED_TERRITORIES } from "../map-territories";
 
@@ -53,7 +54,7 @@ describe("country lookup tables", () => {
   });
 
   // Checks a sync's output, so it needs the data (see taxonomy-tree.test.ts's summaries block).
-  const statsPath = path.join(process.env.PIPELINE_DATA_DIR ?? fileURLToPath(new URL("../../../data", import.meta.url)), "country-stats.json");
+  const statsPath = path.join(process.env.PIPELINE_DATA_DIR ?? fileURLToPath(new URL("../../../data/sync", import.meta.url)), syncPath("country-stats.json"));
   it.skipIf(!existsSync(statsPath))("can name every country that carries Red List data", () => {
     // The map's country search offers one entry per ALPHA2_TO_NAME code, so a
     // code with data and no display name is a country nobody can search for.

@@ -75,7 +75,7 @@ describe("treeChildrenFromFiles", () => {
     expect(await loader.treeChildrenFromFiles("mammals")).toEqual(FILE.children.mammals);
     await loader.treeChildrenFromFiles("mammals~order:rodentia"); // not in this fixture → null, same file
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(`/species-lists/${SYNC}/tree/mammals.json.br`);
+    expect(fetchMock.mock.calls[0][0]).toBe(`/prebuilt/${SYNC}/tree/mammals.json.br`);
   });
 
   it("returns null (route fallback) for ids the file lacks, non-drilldown nodes, and missing files", async () => {

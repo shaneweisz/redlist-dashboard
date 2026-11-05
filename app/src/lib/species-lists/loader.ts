@@ -34,7 +34,7 @@ import {
 
 
 const SYNC = process.env.NEXT_PUBLIC_SPECIES_LISTS_SYNC ?? "";
-const base = () => `/species-lists/${SYNC}`;
+const base = () => `/prebuilt/${SYNC}/species-lists`;
 
 // ─── Manifest ─────────────────────────────────────────────────────────────
 

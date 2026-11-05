@@ -84,11 +84,11 @@ export interface NarrativeSearchResult {
  *
  * The local check is its own rule too, not `USE_R2`: they are built on their
  * own (`scripts/narratives/build-narratives.ts`, against a restored release database) long
- * before a full sync is fetched, and a developer with them in `data/` means to
+ * before a full sync is fetched, and a developer with them in `data/narratives/` means to
  * search them.
  */
 function narrativeUri(name: string): string {
-  const local = path.join(process.cwd(), "data", name);
+  const local = path.join(process.cwd(), "data", "narratives", name);
   if (fs.existsSync(local)) return local;
   return `s3://${process.env.R2_DATA_BUCKET_NAME}/${narrativeKey(name)}`;
 }

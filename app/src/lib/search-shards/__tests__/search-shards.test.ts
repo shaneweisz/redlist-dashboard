@@ -92,7 +92,7 @@ beforeEach(async () => {
   fetched = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     fetched.push(url);
-    const name = url.replace(`/search-shards/${SYNC}/`, "");
+    const name = url.replace(`/prebuilt/${SYNC}/search-shards/`, "");
     if (url.startsWith("/api/search")) return new Response(JSON.stringify({ results: [{ species_key: "route" }], taxa: [] }));
     return name in files ? new Response(JSON.stringify(files[name])) : new Response("", { status: 404 });
   }));

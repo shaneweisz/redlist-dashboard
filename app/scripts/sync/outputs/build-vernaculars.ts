@@ -27,6 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 /**
  * @param usages a SQL relation with col_id, rank, scientific_name for every name usage
@@ -68,7 +69,9 @@ export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacula
   `)).getRowObjects();
   const vernacularMap: Record<string, string> = {};
   for (const r of rows) vernacularMap[String(r.name_lower)] = String(r.name);
-  fs.writeFileSync(path.join(outDir, "vernacular-names.json"), JSON.stringify(vernacularMap, null, 0));
+  const namesOut = path.join(outDir, syncPath("vernacular-names.json"));
+  fs.mkdirSync(path.dirname(namesOut), { recursive: true });
+  fs.writeFileSync(namesOut, JSON.stringify(vernacularMap, null, 0));
   console.log(`Wrote vernacular-names.json: ${rows.length.toLocaleString()} class/order/family/genus common names`);
 
   // Species: every English name, minus scientific-name echoes, first letter capitalized,
@@ -131,7 +134,7 @@ if (isDirectRun) {
     await buildVernaculars(conn, {
       vernacularTsv: tsv,
       outDir: dir,
-      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, "taxa.parquet")}')`,
+      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, syncPath("taxa.parquet"))}')`,
     });
     process.exit(0);
   })().catch((e) => { console.error(e); process.exit(1); });

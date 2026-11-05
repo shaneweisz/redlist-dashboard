@@ -43,6 +43,7 @@ import {
 } from "../../../src/lib/data/col-breakdown";
 import { SPLIT_REASON, UNFLAGGED_REASONS, GENUS_DIFFERS_REASON, RENAMED_REASON } from "../../../src/lib/col-revision";
 import { orthographicallySame, speciesNameParts, canonicalEpithet } from "../core/name-variants";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 /** The data directory this run reads and writes (the sync passes its build). */
 let dataDir = DATA_DIR;
@@ -77,13 +78,13 @@ export interface ColRevisionsFile {
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   dataDir = opts.dataDir ?? DATA_DIR;
-  const link = path.join(dataDir, "species_link.parquet");
-  const assessedPath = path.join(dataDir, "assessed.parquet");
-  const speciesGlob = path.join(dataDir, "species", "**", "*.parquet");
-  const taxaPath = path.join(dataDir, "taxa.parquet");
-  const outPath = path.join(dataDir, "col-revisions.json");
+  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
+  const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
+  const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
+  const outPath = path.join(dataDir, syncPath("col-revisions.json"));
 
-  if (!fs.existsSync(path.join(dataDir, "species")) || !fs.existsSync(link)) {
+  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
     console.log("  CoL revisions: species/ or species_link.parquet missing — skipping.");
     return;
   }

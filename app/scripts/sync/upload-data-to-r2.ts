@@ -35,45 +35,6 @@ import { loadEnvFiles, SyncLogger, DATA_DIR, mapConcurrent } from "../lib/utils"
 const UPLOAD_CONCURRENCY = 16;
 const LATEST_SYNC_FILE = path.join(__dirname, "..", "..", "latest-sync.txt");
 
-// Files to leave out of new syncs, relative-to-DATA_DIR and forward-slashed.
-//
-// search-index.json (~95MB) is a legacy artifact: it backed the old in-memory
-// search, live search now queries Parquet over R2 (searchSpecies in
-// species-duckdb.ts), and nothing reads the JSON. Excluding it stops it
-// propagating (fetch → data/ → re-upload) into future syncs.
-//
-// col-revisions.json is excluded for the opposite reason — it is current, and
-// the REPO owns it. Every other tracked data/ file is dual git-tracked and
-// R2-published, where R2 wins at build time because fetch-data-from-r2
-// overwrites the committed copy. That is right for the others: they are numbers,
-// and stale numbers are merely stale.
-//
-// This one carries the card's REASON CODES, which have to match the vocabulary
-// in src/lib/col-revision.ts that reads them. Publish it and the two can ship
-// apart: renaming genus_moved -> genus_differs in code would leave R2 serving
-// data that still says genus_moved, and the bar would silently empty until the
-// next sync. Coupled vocabulary has to travel with the code that reads it.
-//
-// It does not go stale: the weekly workflow runs Phase 13a and commits the
-// regenerated file alongside latest-sync.txt, so a sync still refreshes it —
-// through git, where the diff is reviewable, rather than around it.
-//
-// The two narrative parquets are excluded for a third reason: they are not sync
-// data at all. ~170 MB of assessment prose that changes when the Red List
-// publishes a release, not when a sync runs — so they live at
-// narratives/<release>/ in the same bucket, written once by
-// scripts/narratives/upload-narratives-to-r2.ts. Left in, every weekly sync would carry
-// another copy of a file nobody changed, and every serverless function would
-// bundle them against a 250 MB cap for a route that reads them from R2 anyway.
-const EXCLUDE_FROM_SYNC = new Set([
-  "search-index.json",
-  "col-revisions.json",
-  "narratives.parquet",
-  "narrative-index.parquet",
-  "narrative-terms.parquet",
-  "narrative-lengths.parquet",
-]);
-
 function getR2Client(): S3Client {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
@@ -135,9 +96,8 @@ async function main(): Promise<void> {
   const timestamp = makeTimestamp();
   const syncPrefix = `syncs/${timestamp}/`;
 
-  const localPaths = walkFiles(DATA_DIR).filter(
-    (p) => !EXCLUDE_FROM_SYNC.has(path.relative(DATA_DIR, p).split(path.sep).join("/"))
-  );
+  // app/data/sync is exactly one sync, so all of it goes up.
+  const localPaths = walkFiles(DATA_DIR);
 
   // Anything here is pulled down at build time and bundled into every serverless
   // function, where Vercel caps a function at 250MB uncompressed. A 92MB key

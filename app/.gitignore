@@ -43,9 +43,8 @@ yarn-error.log*
 # Build-time caches for the sync scripts; never published (see fetch-gbif-species).
 /.sync-cache/
 
-# Generated at build time by scripts/build-species-lists.ts (~40MB) — never commit.
-/public/species-lists/
-/public/search-shards/
+# Generated at build time by scripts/build/ (species lists, search shards, tree) — never commit.
+/public/prebuilt/
 /data/
 
 # DuckDB httpfs extension — vendored at build time by scripts/fetch-duckdb-ext.ts

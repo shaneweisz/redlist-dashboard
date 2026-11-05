@@ -48,6 +48,7 @@ import * as path from "path";
 import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 /** Ranks in the order suggestTaxa prefers them; the index is the priority it sorts on.
  *  Mirrors SUGGEST_RANKS in src/lib/data/species-duckdb.ts — keep the two in step. */
@@ -71,13 +72,13 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
   for (const f of [opts.coreDir && path.join(opts.coreDir, "species-vernacular-names.parquet"), opts.inatNames]) {
     if (f && !fs.existsSync(f)) throw new Error(`build-search-index: ${f} is missing; every alternative common name would silently stop matching`);
   }
-  const assessed = path.join(dir, "assessed.parquet");
-  const ne = path.join(dir, "ne.parquet");
-  const link = path.join(dir, "species_link.parquet");
+  const assessed = path.join(dir, syncPath("assessed.parquet"));
+  const ne = path.join(dir, syncPath("ne.parquet"));
+  const link = path.join(dir, syncPath("species_link.parquet"));
   for (const f of [assessed, ne, link]) {
     if (!fs.existsSync(f)) throw new Error(`build-search-index: ${f} not found (run build-parquet + build-matching first)`);
   }
-  const out = path.join(dir, "name-index.parquet");
+  const out = path.join(dir, syncPath("name-index.parquet"));
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
 
@@ -214,10 +215,10 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
  *     with the group that won (and saves resolveTaxonSuggestionNode its own lookup).
  */
 async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void> {
-  const out = path.join(dir, "rank-index.parquet");
+  const out = path.join(dir, syncPath("rank-index.parquet"));
   const part = (src: string) => SUGGEST_RANKS.map((rank, rp) => `
     SELECT ${RANK_TO_MATCH_SQL[rank]} AS name, ${rp} AS rp, taxon_group, class_name, order_name, family
-    FROM read_parquet('${path.join(dir, src)}')
+    FROM read_parquet('${path.join(dir, syncPath(src))}')
     WHERE ${rank === "genus" ? "scientific_name IS NOT NULL" : `${RANK_TO_MATCH_SQL[rank]} IS NOT NULL`}`
   ).join(" UNION ALL ");
 
@@ -238,7 +239,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
   // the common name for display. A common name that is itself some taxon's scientific
   // name is left out (the scientific row wins), and one shared by several taxa goes to
   // the coarsest rank, then the alphabetically first taxon — the same struct-min rule.
-  const vernFile = path.join(dir, "vernacular-names.json");
+  const vernFile = path.join(dir, syncPath("vernacular-names.json"));
   const vern: Record<string, string> = fs.existsSync(vernFile) ? JSON.parse(fs.readFileSync(vernFile, "utf-8")) : {};
   const tmp = path.join(dir, ".rank-vernaculars.ndjson");
   fs.writeFileSync(tmp, Object.entries(vern).map(([sci, common]) => JSON.stringify({ sci, common })).join("\n"));

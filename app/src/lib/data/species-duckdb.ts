@@ -12,6 +12,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { syncPath } from "./sync-layout";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { NODE_INDEX, getTaxonGroupsForNode, getAncestors, stripNodePrefix } from "@/lib/taxonomy-utils";
 import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
@@ -22,9 +23,9 @@ import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { sisRowKey, colRowKey, speciesRowKey, type SpeciesRowKey } from "@/lib/species-row-key";
 import { COL_DOMESTIC_EXCLUDE_NAMES } from "@/config/col-described-overrides";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = path.join(process.cwd(), "data", "sync");
 // Dev has the parquets on disk; on Vercel they aren't bundled → read from R2.
-const USE_R2 = !fs.existsSync(path.join(DATA_DIR, "assessed.parquet"));
+const USE_R2 = !fs.existsSync(path.join(DATA_DIR, syncPath("assessed.parquet")));
 // httpfs vendored at build time (scripts/build/fetch-duckdb-ext.ts) + traced into the
 // v2 function (next.config). LOAD by path avoids the cold-start network INSTALL.
 const HTTPFS_EXT = path.join(process.cwd(), "duckdb-ext", "httpfs.duckdb_extension");
@@ -33,9 +34,9 @@ const HTTPFS_EXT = path.join(process.cwd(), "duckdb-ext", "httpfs.duckdb_extensi
 // assessed.parquet over the same cached connection — a second independent connection
 // would double the httpfs/R2 setup cost per cold start.
 export function parquetUri(name: string): string {
-  if (!USE_R2) return path.join(DATA_DIR, name);
+  if (!USE_R2) return path.join(DATA_DIR, syncPath(name));
   const ts = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
-  return `s3://${process.env.R2_DATA_BUCKET_NAME}/syncs/${ts}/${name}`;
+  return `s3://${process.env.R2_DATA_BUCKET_NAME}/syncs/${ts}/${syncPath(name)}`;
 }
 
 let connPromise: Promise<DuckDBConnection> | null = null;

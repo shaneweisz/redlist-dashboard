@@ -22,7 +22,7 @@ export interface SearchResponse {
 }
 
 const SYNC = process.env.NEXT_PUBLIC_SPECIES_LISTS_SYNC ?? "";
-const base = () => `/search-shards/${SYNC}`;
+const base = () => `/prebuilt/${SYNC}/search-shards`;
 
 let manifestPromise: Promise<SearchShardManifest | null> | null = null;
 function loadManifest(): Promise<SearchShardManifest | null> {

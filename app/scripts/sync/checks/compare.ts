@@ -25,7 +25,7 @@ import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { ensureBaseline } from "./baseline";
 import { CACHE_ROOT } from "../paths";
 import { usageCountsSql } from "../core/counts";
-import { loadFacts } from "./compare/facts";
+import { loadFacts, inSync } from "./compare/facts";
 import { diffFacts, applyReasons } from "./compare/diff";
 import { REASONS, type ReasonRule } from "./compare/reasons";
 import { buildReport, type CompareSummary } from "./compare/report";
@@ -59,7 +59,7 @@ async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>,
        FROM (${usageCountsSql({ taxa: "ctx_taxa", counts: `read_parquet('${occ.replace(/'/g, "''")}')` })}) GROUP BY 1`
     : `CREATE TABLE ctx_usage (usage_key VARCHAR, georef BIGINT)`);
   // CoL species the baseline kept off the NE list with a covered link row.
-  const bLink = baseline ? path.join(baseline, "species_link.parquet") : "";
+  const bLink = baseline ? inSync(baseline, "species_link.parquet") : "";
   await conn.run(bLink && fs.existsSync(bLink)
     ? `CREATE TABLE ctx_b_covered AS SELECT DISTINCT col_id FROM read_parquet('${bLink.replace(/'/g, "''")}')
        WHERE match_method = 'iucn_synonym_covered' AND col_id IS NOT NULL`

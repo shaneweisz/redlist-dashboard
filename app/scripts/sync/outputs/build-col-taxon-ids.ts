@@ -24,6 +24,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "../../../src/config/taxonomy-tree";
 import { COL_DOMESTIC_EXCLUDE_NAMES, COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 type Rank = "class" | "order" | "family" | "genus" | "species";
 
@@ -119,7 +120,7 @@ function collectNames(): Map<string, Rank> {
 }
 
 export async function run(opts: { taxaPath?: string; outPath?: string; aliasesOutPath?: string } = {}): Promise<Record<string, string>> {
-  const taxaPath = opts.taxaPath ?? path.join(DATA_DIR, "taxa.parquet");
+  const taxaPath = opts.taxaPath ?? path.join(DATA_DIR, syncPath("taxa.parquet"));
   const outPath = opts.outPath ?? path.join(__dirname, "..", "..", "..", "src", "config", "col-taxon-ids.json");
   if (!fs.existsSync(taxaPath)) {
     throw new Error(`build-col-taxon-ids: taxa.parquet not found at ${taxaPath} — run the sync first.`);

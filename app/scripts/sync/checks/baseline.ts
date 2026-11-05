@@ -19,9 +19,13 @@ import { execFileSync } from "child_process";
 import { loadEnvFiles } from "../../lib/utils";
 import { downloadSync } from "../../lib/r2";
 import { CACHE_ROOT } from "../paths";
+import { inSync } from "./compare/facts";
 
-/** Data files tracked in git instead of uploaded (see upload-data-to-r2.ts). */
-const REPO_OWNED = ["col-revisions.json"];
+/**
+ * Syncs before 2026-11-05 left col-revisions.json out (git held it); for one of
+ * those, it is taken from main's history, if main still has it.
+ */
+const ONCE_IN_GIT = ["col-revisions.json"];
 
 export function prodSync(): string {
   return execFileSync("git", ["show", "origin/main:app/latest-sync.txt"], {
@@ -41,13 +45,14 @@ export async function ensureBaseline(sync = prodSync()): Promise<string> {
   console.log(`Downloading baseline sync ${sync} into ${dir}`);
   fs.rmSync(dir, { recursive: true, force: true });
   const n = await downloadSync(sync, dir);
-  // Files the repo owns are never uploaded to R2; prod builds them from main.
-  for (const name of REPO_OWNED) {
-    const body = execFileSync("git", ["show", `origin/main:app/data/${name}`], {
-      cwd: path.join(__dirname, "..", "..", ".."),
-      maxBuffer: 256 * 1024 * 1024,
-    });
-    fs.writeFileSync(path.join(dir, name), body);
+  for (const name of ONCE_IN_GIT) {
+    if (fs.existsSync(inSync(dir, name))) continue;
+    try {
+      const body = execFileSync("git", ["show", `origin/main:app/data/${name}`], {
+        cwd: path.join(__dirname, "..", "..", ".."), maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
+      });
+      fs.writeFileSync(path.join(dir, name), body);
+    } catch { /* not in git either: the comparison reads it as absent */ }
   }
   fs.writeFileSync(marker, JSON.stringify({ sync, files: n, at: new Date().toISOString() }) + "\n");
   return dir;

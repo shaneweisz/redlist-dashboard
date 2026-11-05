@@ -28,7 +28,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
-import { loadEnvFiles, DATA_DIR } from "../lib/utils";
+import { loadEnvFiles, NARRATIVES_DIR } from "../lib/utils";
 import { NARRATIVE_RELEASE, narrativeKey } from "../../src/lib/redlist/narrative-release";
 
 /** The files the search reads. Both, or neither — they index each other. */
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const local = NARRATIVE_FILES.map((name) => ({ name, file: path.join(DATA_DIR, name) }));
+  const local = NARRATIVE_FILES.map((name) => ({ name, file: path.join(NARRATIVES_DIR, name) }));
   const missing = local.filter((f) => !fs.existsSync(f.file));
   if (missing.length > 0) {
     throw new Error(

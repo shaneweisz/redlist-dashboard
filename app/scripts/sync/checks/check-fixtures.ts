@@ -25,7 +25,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
-import { loadFacts, type Layout } from "./compare/facts";
+import { loadFacts, inSync, type Layout } from "./compare/facts";
 import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
 
 export interface Observed {
@@ -42,7 +42,7 @@ const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** CoL names for ids, from whichever taxonomy file the layout has. */
 function taxonomySql(dir: string, layout: Layout): string {
-  return `read_parquet(${lit(path.join(dir, layout === "v1" ? "backbone.parquet" : "taxa.parquet"))})`;
+  return `read_parquet(${lit(layout === "v1" ? path.join(dir, "backbone.parquet") : inSync(dir, "taxa.parquet"))})`;
 }
 
 export async function observe(conn: DuckDBConnection, dir: string, cases: MatchCase[]): Promise<Map<string, Observed>> {
