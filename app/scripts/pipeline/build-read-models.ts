@@ -114,7 +114,8 @@ async function gbifCounts(conn: DuckDBConnection, currentYear: number): Promise<
     FROM row_counts rc LEFT JOIN excluded e ON e.sis = rc.sis GROUP BY rc.sis`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE species_gbif AS
     SELECT sis,
-           arg_min(usage_id, [CASE verdict WHEN 'own' THEN 0 ELSE 1 END, -georef, -all_records]) AS gbif_species_key,
+           -- usage_id last: two usages with the same counts would otherwise swap between runs.
+           arg_min(usage_id, (CASE verdict WHEN 'own' THEN 0 ELSE 1 END, -georef, -all_records, usage_id)) AS gbif_species_key,
            sum(georef)::BIGINT AS georef, sum(all_records)::BIGINT AS all_records,
            -- No window for a species assessed this year: nothing can postdate it yet.
            CASE WHEN any_value(y) + 1 > ${currentYear} THEN NULL ELSE sum(georef_since)::BIGINT END AS georef_since

@@ -23,7 +23,7 @@ The diagram's source is [`diagrams/sync.excalidraw`](diagrams/sync.excalidraw) (
 
 A sync is one immutable set of data files, named by the time it was uploaded (`syncs/2026-11-04T16-18-27Z/` in the `dashboard-data` R2 bucket). Production reads whichever sync `app/latest-sync.txt` names on `main`. Building and uploading a sync changes nothing anyone sees; merging the one-line `latest-sync.txt` change is what goes live, and reverting it goes back.
 
-A sync is built from three inputs and nothing else, monthly, on a local machine (it reads a 255 GiB GBIF mirror, which is why it doesn't run in CI). `npm run sync` takes about five minutes once the inputs are on disk.
+A sync is built from three inputs (and GBIF's matcher) and nothing else, monthly, on a local machine (it reads a 255 GiB GBIF mirror, which is why it doesn't run in CI). `npm run sync` takes about five minutes once the inputs are on disk; a new XR adds about 15 minutes, once, to index it for the matcher.
 
 The design has one idea: **every number comes from four tables, by one rule.** The old sync answered "how many GBIF records does this species have?" separately for each place the number appeared (per-species API counts, per-group facet files, lumped-species fetches, the Not Evaluated overlay), with two independent matching chains deciding which GBIF taxon a species was. They disagreed, and each disagreement was a bug. Now the question has one answer, computed once.
 
@@ -38,6 +38,7 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 | **IUCN Red List Postgres** | every global assessment, taxonomy, synonyms, credits | the database named by `DB_NAME` | `build-assessments.ts` |
 | **GBIF monthly snapshot** | every occurrence record, as parquet, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `build-occurrences.ts` |
 | iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat.ts` |
+| GBIF's name matcher | matching-ws, run locally in Docker against the XR | pinned release (v1.0.12), index built once per XR | `inputs/matcher.ts` |
 
 Two inputs are guarded:
 
@@ -55,7 +56,7 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 | `taxa` | CoL usage (8.0M) | `build-taxa.ts` |
 | `assessments` | global assessment of a current species (all years) | `build-assessments.ts` |
 | `occurrence_counts` | usage × year × georeferenced × record type, with a count | `build-occurrences.ts` |
-| `assessment_link` | assessed species × CoL species it is (primary, plus covered rows) | `build-link.ts` |
+| `assessment_link` | assessed species × CoL species it is (primary, plus covered rows) | `build-link.ts`, from the matcher's answers (`matches`, `build-matches.ts`) and `decisions.tsv` |
 
 **`taxa`** is the XR with three things worked out per usage:
 
@@ -102,43 +103,60 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 ## Matching: which CoL species an assessed species is
 
-`build-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
+`build-matches.ts`, `accept-match.ts`, `decisions.tsv` and `build-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-Each assessed species is matched once, by name. Passes run in priority order and the first hit wins; all of them skip species the curated checklist has demoted.
+Matching is two questions, answered separately so each can be explained on its own:
 
-| Pass | Matches when | Species |
-|---|---|---:|
-| `accepted` | its own name is an accepted CoL species (homonyms: the closest lineage, by family, class, phylum, kingdom, then lowest id) | 162,869 |
-| `synonym` | its own name is a CoL synonym | 11,389 |
-| `checklist_synonym` | its own name is an XR species the checklist demotes; follow the checklist to its accepted species | 255 |
-| `provisional` | its own name is provisionally accepted in CoL, exactly or as a variant. Exact ranks above an ambiguous synonym of the same name (*Cipangopaludina chinensis* is both) | 184 |
-| `ambiguous_synonym` | its own name is a CoL "ambiguous synonym" (CoL unsure which species it means); links, but only ever counts records filed under that name | 144 |
-| `accepted_variant`, `synonym_variant` | the same, on the name normalised for Latin endings: *Ochotona pallasii* / *pallasi*, *Sminthopsis fuliginosa* / *fuliginosus* | 592 |
-| `iucn_synonym` | one of IUCN's own synonyms for it is a CoL name | 109 |
-| `orthographic_variant` | a respelling inside the name (*Colostygia puengeleri* / *pungeleri*), accepted only when the author citations agree too (`sameAuthors`) | 128 |
-| unmatched | nothing | 239 |
+1. **Name: which CoL name is the Red List name?** Answered by GBIF's own matcher, and by people where the matcher's answer isn't certain.
+2. **Concept: what does that make the species?** Answered by a few rules, each a sentence long.
 
-Variants of a species' own name outrank IUCN's synonyms: *Sminthopsis fuliginosa* is CoL's *S. fuliginosus*, not the *S. aitkeni* that one of its IUCN synonyms points to. A normalised name that offers more than one CoL species is refused rather than guessed.
+### 1. The name
 
-**No match crosses a phylum.** Old genus names are homonyms across kingdoms (*Hepatus* was a fish genus and is a crab genus; *Limnophila* is a plant and a crane fly), so a shared name or epithet proves nothing on its own. Every pass, and every covered row, is checked against the assessed species' kingdom and phylum; the one place IUCN and CoL name a phylum differently (brown algae: Heterokontophyta / Ochrophyta) is mapped. Where either side has no lineage, there is nothing to check.
+Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/matching-ws)**, the service GBIF interprets occurrence records with, with its authority and IUCN's kingdom, phylum, class, order and family as hints. It runs locally in Docker (`inputs/matcher.ts`), pinned to the matching-ws release GBIF's hosted service reports (v1.0.12) and built from the exact XR the sync uses, so a name matched here lands where GBIF filed that name's records. The index takes about 15 minutes to build, once per XR; all 175,909 names take about a minute, and answers are cached by query, release and matcher version, so an unchanged month asks nothing.
 
-**Verdicts.** Reaching a CoL species isn't the same as being it. Each match gets a verdict from `decideKey` in `app/scripts/species-key.ts`:
+The answer is taken without review (`accept-match.ts`) when:
 
-- **own**: the target is this species, under this name or a rename. It counts the target's records (minus anything others own). That includes a CoL synonym CoL itself marks as a respelling of its accepted name, with the same author citation (*Meandrina danae* / *danai*): the Red List's own citation can be mistyped, CoL's pair can't disagree with itself.
-- **lumped**: CoL folds it into another species, but its own name led there, so its own usage (and anything under it) is its records. Where CoL files the synonym under an infraspecific (*Fringilla polatzeki* → *F. teydea polatzeki*), its records start at that infraspecific. Never at a nominate one (*Rosa villosa* subsp. *villosa*): that is the accepted species' core.
-- **refused**: reached only through another name, onto another species. It links (so the dashboard can show the CoL name) but counts nothing.
+> the name is found exactly, as a species, with full confidence (99 or more), it leads to an accepted CoL species, and no other CoL name spelled the same way leads to a different species, unless the author citation picks one.
+
+A same-spelled name with the match's own author citation isn't a rival: that is CoL holding the name twice, and the twin rule below counts both. Except when the match is a synonym and its twin an accepted species: CoL is then saying both that the name is a species and that it is another one (*Sipyloidea brevicerci*), so a person decides. Names the Red List itself marks as unsettled (aff., cf., sp., `[...]` in the name; ined., auct., non, sensu in the authority) always go to a person: the matcher read *Heliotropium* aff. *wagneri* "[non Vierh.]" as *H. wagneri* Vierh.
+
+Everything else is a case for **`decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart) the Red List name is, who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases: each sync re-applies a decision while its names still resolve, and asks again when they don't (or when the Red List renames the species). A decision always beats the matcher. Undecided species link to nothing and count no records until someone decides.
+
+The queue of species waiting for a person is written each sync to `build/match-queue.tsv`, with the reason and the matcher's suggestion. Statuses: *undecided* (counts nothing yet), *proposed* (a decision applies, but no person has checked it), *stale* (a decision no longer resolves).
+
+| COL26.6 XR, Red List 2026-1 | Species |
+|---|---:|
+| taken from the matcher | 173,627 |
+| from `decisions.tsv` (2,016 rows, none reviewed yet) | 2,016 |
+| undecided, so unlinked | 266 |
+
+The first `decisions.tsv` carries the answers of the hand-written matching passes it replaced (`by = heuristic`, `reviewed = no`), for the species the matcher's answer doesn't settle: spelling variants (*Ochotona pallasii* / *pallasi*), homonyms, provisional names, matches through IUCN's synonyms. So it moved almost nothing on the day it landed (against the old passes: 28 species that had no records now count the usage GBIF files their name under, *Piptadenia flava* 0 → 1,117; 54 refused links dropped, which counted nothing; no species lost records). Each row is a review item, and a reviewed row replaces it.
+
+The 266 undecided are mostly names the Red List marks as unsettled (145) and names CoL doesn't hold below genus (71); the old passes left them unmatched too.
+
+### 2. The concept
+
+What the chosen CoL usage makes the species. `assessment_link.method` says what kind of usage it is (`accepted`, `synonym`, `checklist_synonym`, `provisional`, `ambiguous_synonym`) and `basis` how it was chosen (`matcher`, `decision`).
+
+- **An accepted species is the species.** One the curated checklist demotes (an XR over-split) is followed to the checklist's accepted species.
+- **A synonym is the species renamed, or a lump.** Each gets a verdict from `decideKey` in `app/scripts/species-key.ts`:
+  - **own**: the target is this species, under this name or a rename. It counts the target's records (minus anything others own). That includes a CoL synonym CoL itself marks as a respelling of its accepted name, with the same author citation (*Meandrina danae* / *danai*).
+  - **lumped**: CoL folds it into another species, so its own usage (and anything under it) is its records. Where CoL files the synonym under an infraspecific (*Fringilla polatzeki* → *F. teydea polatzeki*), its records start at that infraspecific. Never at a nominate one (*Rosa villosa* subsp. *villosa*): that is the accepted species' core.
+  - **refused**: CoL folds it into a species the Red List assesses separately. It counts nothing.
+- **An ambiguous synonym** (CoL unsure which species the name means) only ever counts records filed under that name.
+- **No link crosses a phylum.** Old genus names are homonyms across kingdoms (*Hepatus* was a fish genus and is a crab genus), so every row, however made, is checked against the assessed species' kingdom and phylum; brown algae (Heterokontophyta / Ochrophyta) are mapped. Where either side has no lineage there is nothing to check.
 
 **Covered rows.** Some organisms sit under more than one accepted CoL species. Each extra one becomes a *covered* link row, which keeps it off the Not Evaluated list and, where the evidence is direct, counts its records too:
 
 - One of IUCN's synonyms *is* that accepted name and it is the same organism (*Hylatomus* / *Dryocopus pileatus*). Under another genus, the author citations must agree too: *Himantopus leucocephalus* Gould is the pied stilt, not the banded stilt *Cladorhynchus leucocephalus* (Vieillot) that names it. Reached only through a CoL synonym, it stays uncounted: that two-hop route once took *Chiococca alba* to the snowberry.
 - The identical name (a hybrid sign aside) held twice in one class or under one author citation (*Andoa berthelotiana*, *Utricularia* × *ochroleuca*): `same_name_twin`.
 - The same epithet stem and the same dated author citation in one family under another genus (*Charadrius nivosus* / *Anarhynchus nivosus*, both Cassin, 1858): `duplicate_concept`.
-- For a lumped species, every same-genus synonym usage carrying its exact name (*Rubus fruticosus*): `same_name_synonym`.
+- For a lumped species, every synonym usage carrying its exact name (*Rubus fruticosus*): `same_name_synonym`.
 - For a checklist demotion, the demoted XR species itself, since that is where GBIF files the records (*Cathormion umbellatum* → *Albizia umbellata*): `checklist_demoted`.
 
-**One owner per usage.** If two assessed species claim the same usage, it goes to one, by: primary row before covered, *own* before *lumped*, stronger pass, then lower SIS id. The loser's primary row becomes `duplicate` and counts nothing (21 species).
+**One owner per usage.** If two assessed species claim the same usage, it goes to one, by: primary row before covered, *own* before *lumped*, the matcher before a decision, the more direct kind of name, then lower SIS id. The loser's primary row becomes `duplicate` and counts nothing.
 
-`assessment_link` records the verdict, method and a sentence of reason on every row, so any species' link can be explained from the table alone.
+`assessment_link` records the verdict, method, basis, who decided and a sentence of reason on every row, so any species' link can be explained from the table alone.
 
 ## The Not Evaluated list
 
@@ -203,7 +221,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes once inputs are cached)
 cd app && npm run sync
 
-# 3. Read ~/.cache/redlist-dashboard/build/compare/report.md
+# 3. Read ~/.cache/redlist-dashboard/build/compare/report.md, and build/match-queue.tsv for species waiting on a decision
 
 # 4. Publish: copies the build into app/data, uploads to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
@@ -211,7 +229,7 @@ npm run sync:publish
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.
 ```
 
-Needs: the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the README), and R2 credentials (the comparison downloads production's sync once; publishing uploads).
+Needs: Docker (for the matcher), the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the README), and R2 credentials (the comparison downloads production's sync once; publishing uploads).
 
 **What to look for in the report.** The table at the top gives differences and unexplained per kind. The first sync's unexplained differences were mostly NE country lists, which move with each snapshot; per-group assessed totals don't change unless IUCN published. Look closely at:
 - unexplained count changes larger than a few percent on well-known species
@@ -226,7 +244,7 @@ Needs: the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the 
 
 ### Running parts
 
-Each builder runs on its own: `npx tsx scripts/pipeline/build-taxa.ts` (or `build-assessments`, `build-occurrences`, `build-link`, `build-read-models`, `check-fixtures`). `npm run sync -- --skip-compare` skips the comparison. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+Each builder runs on its own: `npx tsx scripts/pipeline/build-taxa.ts` (or `build-assessments`, `build-occurrences`, `build-matches`, `build-link`, `build-read-models`, `check-fixtures`). `npx tsx scripts/pipeline/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 
@@ -267,15 +285,18 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 
 Known limits:
 
-- 239 assessed species match no CoL name (`method = 'unmatched'` in `assessment_link`), so they have no GBIF counts.
+- 266 assessed species link to no CoL name yet (`method = 'unmatched'` in `assessment_link`, listed in `build/match-queue.tsv`), so they have no GBIF counts.
+- 2,016 decisions are the old passes' answers, unreviewed. The queue says why each needed a person (709 spelling variants, 635 homonyms, 251 with no species match, 218 provisional names, 149 lower confidence, ...).
 - Ownership walks three levels below a lumped species' root. The deepest case in the current release is three; a deeper one would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so they differ a little from gbif.org's live counts.
-- The `iucn_synonym` pass (109 species) and `decideKey`'s genus-transfer rule accept a shared epithet under another genus without comparing authors; the covered rows now do. Whether the primary pass should too is open.
-- The pipeline has no unit tests of its own. It is checked against real data instead (the invariants and fixtures above, on every run); a small synthetic CoL + GBIF fixture would let the counting and ownership SQL be tested in seconds.
+- `decideKey`'s genus-transfer rule accepts a shared epithet under another genus without comparing authors; the covered rows do. Whether it should too is open.
+- The acceptance rule and the decisions file have unit tests (`pipeline-accept-match.test.ts`, `pipeline-decisions.test.ts`); the counting and ownership SQL is checked against real data only (the invariants and fixtures above, on every run). A small synthetic CoL + GBIF fixture would let it be tested in seconds.
 - The XR lags the curated checklist (COL26.6 XR against COL26.10 in November 2026): GBIF re-indexes a few times a year, and the sync follows GBIF.
 
 Follow-ups:
+
+- Review `decisions.tsv`: agents to draft each queued species' decision with its evidence, people to accept or correct them in a PR.
 
 - IUCN families on CoL species, so the reptile GRA family counts (#587) can include CoL's splits.
 - Real list columns in `assessed.parquet`, which needs the app's filter SQL to change.

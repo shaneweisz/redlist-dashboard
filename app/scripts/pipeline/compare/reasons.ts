@@ -87,6 +87,61 @@ export const REASONS: ReasonRule[] = [
     where: `d.key IN (SELECT key FROM pair WHERE b_col IS NOT DISTINCT FROM a_col)`,
   },
 
+  // The matcher (build-matches.ts). Each bounded: none may explain a species losing records.
+  {
+    code: "refused_link_no_longer_kept",
+    description: "A link the old passes made and then refused (it counted nothing) is no longer made: a refused name now links to nothing.",
+    kinds: ["assessed"], fields: ["link_col_id", "link_method"],
+    where: `d.key IN (SELECT key FROM pair WHERE a_col IS NULL AND b_key IS NULL AND a_key IS NULL)`,
+  },
+  {
+    code: "matcher_found_its_own_records",
+    description: "A species that had no records now counts the usage GBIF files its own name under: the matcher picks it by authorship, where the old passes picked an empty same-name usage.",
+    kinds: ["assessed"], fields: [...GBIF, "gbif_all_records_count"],
+    where: `d.key IN (SELECT p.key FROM pair p JOIN ctx_taxa t ON t.col_id = p.a_key
+      JOIN ctx_assessments s ON s.sis_taxon_id = p.key::BIGINT AND s.is_latest
+      WHERE p.b_key IS NULL AND lower(t.scientific_name) = lower(s.scientific_name))`,
+  },
+  {
+    code: "checklist_demoted_species_counted",
+    description: "A species matched to an XR species the checklist demotes now also counts that XR species, where GBIF files its records (it was already the rule for the checklist_synonym pass).",
+    kinds: ["assessed"], fields: [...GBIF, "gbif_all_records_count"],
+    where: `d.key IN (SELECT p.key FROM pair p
+      JOIN (SELECT l.sis_taxon_id, sum(u.georef) AS moved FROM ctx_link l JOIN ctx_usage u ON u.usage_key = l.usage_id
+            WHERE l.method = 'checklist_demoted' AND l.counted GROUP BY 1) c ON c.sis_taxon_id = p.key::BIGINT
+      WHERE p.a_n::DOUBLE >= p.b_n::DOUBLE AND ${NOISE("(p.b_n + c.moved)::DOUBLE", "p.a_n::DOUBLE")})`,
+  },
+
+  {
+    code: "twin_named_as_listed_counted",
+    description: "CoL's other usage of this species under its own Red List name (Ixobrychus exilis, provisionally accepted beside Botaurus exilis) was refused as 'assessed separately'; it is this species, so it now counts.",
+    kinds: ["assessed"], fields: [...GBIF, "gbif_all_records_count"],
+    where: `d.key IN (SELECT p.key FROM pair p
+      JOIN (SELECT l.sis_taxon_id, sum(coalesce(u.georef, 0)) AS moved FROM ctx_link l
+            JOIN ctx_taxa t ON t.col_id = l.usage_id
+            JOIN ctx_assessments s ON s.sis_taxon_id = l.sis_taxon_id AND s.is_latest AND lower(t.scientific_name) = lower(s.scientific_name)
+            LEFT JOIN ctx_usage u ON u.usage_key = l.usage_id
+            WHERE l.role = 'covered' AND l.method IN ('same_name_twin', 'duplicate_concept') AND l.counted GROUP BY 1) c ON c.sis_taxon_id = p.key::BIGINT
+      WHERE coalesce(p.a_n, 0)::DOUBLE >= coalesce(p.b_n, 0)::DOUBLE AND ${NOISE("(coalesce(p.b_n, 0) + c.moved)::DOUBLE", "coalesce(p.a_n, 0)::DOUBLE")})`,
+  },
+  {
+    code: "twin_primary_swapped",
+    description: "The matcher picked the other half of a name CoL holds twice (Utricularia × ochroleuca / ochroleuca); the twin rule counts both, so the count is unchanged.",
+    kinds: ["assessed"], fields: ["link_col_id"],
+    where: `d.key IN (SELECT p.key FROM pair p JOIN ctx_taxa x ON x.col_id = p.a_col JOIN ctx_taxa y ON y.col_id = p.b_col
+      WHERE p.a_n IS NOT DISTINCT FROM p.b_n
+        AND regexp_replace(lower(x.scientific_name), '\\s*×\\s*', ' ', 'g') = regexp_replace(lower(y.scientific_name), '\\s*×\\s*', ' ', 'g'))`,
+  },
+  {
+    code: "gbif_key_tie_broken_by_id",
+    description: "Two counted usages with the same counts: the key used to be whichever DuckDB's arg_min met first, and is now the lower id.",
+    kinds: ["assessed"], fields: ["gbif_species_key"],
+    where: `d.key IN (SELECT p.key FROM pair p
+      LEFT JOIN ctx_usage x ON x.usage_key = p.a_key LEFT JOIN ctx_usage y ON y.usage_key = p.b_key
+      WHERE p.a_n IS NOT DISTINCT FROM p.b_n AND p.a_key IS NOT NULL AND p.b_key IS NOT NULL
+        AND p.b_key IN (SELECT usage_id FROM ctx_link l WHERE l.sis_taxon_id = p.key::BIGINT AND l.counted))`,
+  },
+
   // ── GBIF counts ────────────────────────────────────────────────────────────
   {
     code: "key_for_ungeoreferenced_records",
