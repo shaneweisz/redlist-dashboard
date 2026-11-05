@@ -11015,7 +11015,6 @@
             241133348,
             241133755,
             241133776,
-            241134131,
             241134229,
             241146993,
             241147122,
@@ -14309,14 +14308,6 @@
               "colName": "Callogobius maculipinnis"
             },
             {
-              "id": 241134131,
-              "name": "Centropogon australis",
-              "reason": "classified_elsewhere",
-              "colGroup": "Campanulaceae (Asterales)",
-              "colId": "5XHCQ",
-              "colName": "Centropogon australis"
-            },
-            {
               "id": 241134229,
               "name": "Insidiator meerdervoortii",
               "reason": "provisional",
@@ -15506,7 +15497,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 9957,
       "outdated": 5305,
-      "gbifNeSpeciesCount": 25903,
+      "gbifNeSpeciesCount": 25907,
       "byCategory": {
         "LC": 3825,
         "VU": 1118,
@@ -15520,7 +15511,7 @@
         "EW": 12
       },
       "colDescribed": 89046,
-      "colNe": 79494
+      "colNe": 79498
     },
     {
       "id": "ssc-spider-scorpion",
@@ -18072,7 +18063,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1643,
       "outdated": 1037,
-      "gbifNeSpeciesCount": 10140,
+      "gbifNeSpeciesCount": 10141,
       "byCategory": {
         "EN": 197,
         "DD": 242,
@@ -18085,12 +18076,12 @@
         "EW": 1
       },
       "colDescribed": 35922,
-      "colNe": 34256,
+      "colNe": 34258,
       "colBreakdown": [
         {
           "name": "orthoptera",
           "count": 29780,
-          "neCount": 28262,
+          "neCount": 28264,
           "trueAssessed": 1501,
           "noMatchIds": [
             13276,
@@ -18424,6 +18415,14 @@
               "parentId": 44710554,
               "parentName": "Bradyporus macrogaster",
               "parentCategory": "EN"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "7DBJB",
+              "assessedId": 194379,
+              "assessedName": "Aprion virescens",
+              "assessedCategory": "LC"
             }
           ]
         },
@@ -25015,7 +25014,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 303,
       "outdated": 0,
-      "gbifNeSpeciesCount": 2086,
+      "gbifNeSpeciesCount": 2088,
       "byCategory": {
         "EN": 125,
         "LC": 79,
@@ -25025,12 +25024,12 @@
         "VU": 32
       },
       "colDescribed": 6960,
-      "colNe": 6642,
+      "colNe": 6644,
       "colBreakdown": [
         {
           "name": "syrphidae",
           "count": 6960,
-          "neCount": 6642,
+          "neCount": 6644,
           "trueAssessed": 303,
           "noMatchIds": [
             149115163,
@@ -25149,6 +25148,14 @@
               "parentId": 149164391,
               "parentName": "Cheilosia caerulescens",
               "parentCategory": "LC"
+            }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "42VR5",
+              "assessedId": 218980943,
+              "assessedName": "Buchanania reticulata",
+              "assessedCategory": "LC"
             }
           ]
         }
@@ -28527,7 +28534,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 3946,
       "outdated": 1321,
-      "gbifNeSpeciesCount": 238555,
+      "gbifNeSpeciesCount": 238573,
       "byCategory": {
         "EN": 447,
         "CR": 373,
@@ -28542,12 +28549,12 @@
         "EW": 1
       },
       "colDescribed": 1026220,
-      "colNe": 1022600,
+      "colNe": 1022634,
       "colBreakdown": [
         {
           "name": "No / Other SSC Group",
           "count": 1026220,
-          "neCount": 1022600,
+          "neCount": 1022634,
           "trueAssessed": 3946,
           "noMatchIds": [
             862,
@@ -33512,6 +33519,104 @@
               "parentName": "Colophon eastmani",
               "parentCategory": "EN"
             }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "3NGFN",
+              "assessedId": 220757244,
+              "assessedName": "Itea riparia",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "42YK3",
+              "assessedId": 22695909,
+              "assessedName": "Buteo galapagoensis",
+              "assessedCategory": "VU"
+            },
+            {
+              "colId": "465FJ",
+              "assessedId": 35630,
+              "assessedName": "Micropholis cayennensis",
+              "assessedCategory": "LR/lc"
+            },
+            {
+              "colId": "499P4",
+              "assessedId": 143656567,
+              "assessedName": "Homalium africanum",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "4NZM2",
+              "assessedId": 199823,
+              "assessedName": "Limnophila glabra",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "5CZ6W",
+              "assessedId": 186002177,
+              "assessedName": "Melaleuca spectabilis",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "6TDYZ",
+              "assessedId": 155238855,
+              "assessedName": "Ortalis guttata",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "6W3NS",
+              "assessedId": 260896730,
+              "assessedName": "Sterculia peruviana",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "77W2C",
+              "assessedId": 36610,
+              "assessedName": "Aglaia meridionalis",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "783NQ",
+              "assessedId": 149242252,
+              "assessedName": "Sterculia amazonica",
+              "assessedCategory": "DD"
+            },
+            {
+              "colId": "8T76Q",
+              "assessedId": 22724191,
+              "assessedName": "Agelaius phoeniceus",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "8T76T",
+              "assessedId": 22724126,
+              "assessedName": "Icterus galbula",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "BZ8NT",
+              "assessedId": 69620636,
+              "assessedName": "Galba humilis",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "JX6H",
+              "assessedId": 199705,
+              "assessedName": "Limnophila diffusa",
+              "assessedCategory": "DD"
+            },
+            {
+              "colId": "PLQK",
+              "assessedId": 152120,
+              "assessedName": "Cereus bicolor",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "WD4F",
+              "assessedId": 136788605,
+              "assessedName": "Clusia flava",
+              "assessedCategory": "LC"
+            }
           ]
         }
       ]
@@ -33524,7 +33629,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 2443,
       "outdated": 1232,
-      "gbifNeSpeciesCount": 18652,
+      "gbifNeSpeciesCount": 18651,
       "byCategory": {
         "DD": 311,
         "EN": 614,
@@ -33536,12 +33641,12 @@
         "LR/nt": 2
       },
       "colDescribed": 31864,
-      "colNe": 29430,
+      "colNe": 29429,
       "colBreakdown": [
         {
           "name": "orchidaceae",
           "count": 31864,
-          "neCount": 29430,
+          "neCount": 29429,
           "trueAssessed": 2443,
           "noMatchIds": [
             39568,
@@ -34789,7 +34894,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 327,
       "outdated": 120,
-      "gbifNeSpeciesCount": 14164,
+      "gbifNeSpeciesCount": 14165,
       "byCategory": {
         "DD": 37,
         "EN": 72,
@@ -34801,7 +34906,7 @@
         "LR/lc": 3
       },
       "colDescribed": 19236,
-      "colNe": 18907
+      "colNe": 18908
     },
     {
       "id": "ssc-cactus-succulent",
@@ -37163,7 +37268,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 505,
       "outdated": 365,
-      "gbifNeSpeciesCount": 395,
+      "gbifNeSpeciesCount": 394,
       "byCategory": {
         "EN": 23,
         "VU": 48,
@@ -37176,7 +37281,7 @@
         "LR/nt": 1
       },
       "colDescribed": 980,
-      "colNe": 485,
+      "colNe": 484,
       "colBreakdown": [
         {
           "name": "droseraceae",
@@ -37412,7 +37517,7 @@
         {
           "name": "lentibulariaceae",
           "count": 429,
-          "neCount": 229,
+          "neCount": 228,
           "trueAssessed": 199,
           "noMatchIds": [
             167884,
@@ -37474,12 +37579,6 @@
               "colId": "7F4R8",
               "parentId": 164181,
               "parentName": "Utricularia vulgaris",
-              "parentCategory": "LC"
-            },
-            {
-              "colId": "7F4T6",
-              "parentId": 167883,
-              "parentName": "Utricularia intermedia",
               "parentCategory": "LC"
             },
             {
@@ -38049,7 +38148,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 71284,
       "outdated": 16371,
-      "gbifNeSpeciesCount": 216816,
+      "gbifNeSpeciesCount": 216827,
       "byCategory": {
         "LC": 33440,
         "DD": 5752,
@@ -38064,12 +38163,12 @@
         "LR/lc": 104
       },
       "colDescribed": 336360,
-      "colNe": 265734,
+      "colNe": 265745,
       "colBreakdown": [
         {
           "name": "No / Other SSC Group",
           "count": 336360,
-          "neCount": 265734,
+          "neCount": 265745,
           "trueAssessed": 71284,
           "noMatchIds": [
             30419,
@@ -45687,10 +45786,12 @@
             {
               "id": 199705,
               "name": "Limnophila diffusa",
-              "reason": "classified_elsewhere",
-              "colGroup": "Limoniidae (Diptera)",
-              "colId": "JX6H",
-              "colName": "Austrolimnophila diffusa"
+              "reason": "lumped",
+              "detail": "Limnophila pulcherrima",
+              "detailId": 199824,
+              "detailColId": "72D58",
+              "colId": "72D58",
+              "colName": "Limnophila pulcherrima"
             },
             {
               "id": 199866,
@@ -65991,6 +66092,12 @@
               "parentCategory": "LC"
             },
             {
+              "colId": "5XHCQ",
+              "parentId": 241134131,
+              "parentName": "Centropogon australis",
+              "parentCategory": "LC"
+            },
+            {
               "colId": "5XJ2T",
               "parentId": 244569968,
               "parentName": "Cephalophyllum herrei",
@@ -77834,6 +77941,20 @@
               "parentName": "Cryptocoryne cordata",
               "parentCategory": "LC"
             }
+          ],
+          "neSynonymDetails": [
+            {
+              "colId": "37JZ4",
+              "assessedId": 104658541,
+              "assessedName": "Draco timorensis",
+              "assessedCategory": "LC"
+            },
+            {
+              "colId": "48X9N",
+              "assessedId": 22710380,
+              "assessedName": "Oenanthe dubia",
+              "assessedCategory": "DD"
+            }
           ]
         }
       ]
@@ -78293,7 +78414,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 1149,
       "outdated": 47,
-      "gbifNeSpeciesCount": 25170,
+      "gbifNeSpeciesCount": 25171,
       "byCategory": {
         "EN": 91,
         "LC": 478,
@@ -78303,12 +78424,12 @@
         "NT": 101
       },
       "colDescribed": 40813,
-      "colNe": 39749,
+      "colNe": 39750,
       "colBreakdown": [
         {
           "name": "agaricomycetes",
           "count": 40813,
-          "neCount": 39749,
+          "neCount": 39750,
           "trueAssessed": 1149,
           "noMatchIds": [
             71568344,
@@ -80124,7 +80245,7 @@
       "estimatedDescribed": 0,
       "totalAssessed": 55,
       "outdated": 1,
-      "gbifNeSpeciesCount": 41388,
+      "gbifNeSpeciesCount": 41389,
       "byCategory": {
         "DD": 19,
         "EN": 7,
@@ -80134,12 +80255,12 @@
         "NT": 4
       },
       "colDescribed": 87825,
-      "colNe": 87778,
+      "colNe": 87779,
       "colBreakdown": [
         {
           "name": "No / Other SSC Group",
           "count": 87825,
-          "neCount": 87778,
+          "neCount": 87779,
           "trueAssessed": 55,
           "noMatchIds": [
             80702807,

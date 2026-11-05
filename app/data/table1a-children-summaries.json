@@ -6,7 +6,7 @@
       "estimatedDescribed": 1008355,
       "totalAssessed": 14531,
       "outdated": 6160,
-      "gbifNeSpeciesCount": 220831,
+      "gbifNeSpeciesCount": 220846,
       "byCategory": {
         "EN": 1185,
         "CR": 544,
@@ -21,7 +21,7 @@
         "EW": 1
       },
       "colDescribed": 923576,
-      "colNe": 909633
+      "colNe": 909660
     },
     {
       "id": "inv-arachnids",
@@ -29,7 +29,7 @@
       "estimatedDescribed": 98006,
       "totalAssessed": 1057,
       "outdated": 248,
-      "gbifNeSpeciesCount": 20884,
+      "gbifNeSpeciesCount": 20885,
       "byCategory": {
         "VU": 104,
         "DD": 114,
@@ -40,7 +40,7 @@
         "EX": 9
       },
       "colDescribed": 99657,
-      "colNe": 98586
+      "colNe": 98590
     },
     {
       "id": "inv-molluscs",
@@ -48,7 +48,7 @@
       "estimatedDescribed": 89129,
       "totalAssessed": 9957,
       "outdated": 5305,
-      "gbifNeSpeciesCount": 25903,
+      "gbifNeSpeciesCount": 25907,
       "byCategory": {
         "LC": 3825,
         "VU": 1118,
@@ -62,7 +62,7 @@
         "EW": 12
       },
       "colDescribed": 89046,
-      "colNe": 79494
+      "colNe": 79498
     },
     {
       "id": "inv-crustaceans",
@@ -70,7 +70,7 @@
       "estimatedDescribed": 83805,
       "totalAssessed": 3410,
       "outdated": 3097,
-      "gbifNeSpeciesCount": 24107,
+      "gbifNeSpeciesCount": 24110,
       "byCategory": {
         "LR/cd": 9,
         "CR": 182,
@@ -85,7 +85,7 @@
         "EW": 1
       },
       "colDescribed": 69219,
-      "colNe": 65860
+      "colNe": 65865
     },
     {
       "id": "inv-corals",
@@ -143,7 +143,7 @@
       "estimatedDescribed": 171981,
       "totalAssessed": 1153,
       "outdated": 632,
-      "gbifNeSpeciesCount": 37000,
+      "gbifNeSpeciesCount": 37002,
       "byCategory": {
         "DD": 553,
         "LC": 297,
@@ -155,7 +155,7 @@
         "EX": 6
       },
       "colDescribed": 142178,
-      "colNe": 141067
+      "colNe": 141069
     }
   ],
   "plantae": [
@@ -165,7 +165,7 @@
       "estimatedDescribed": 369000,
       "totalAssessed": 76102,
       "outdated": 19282,
-      "gbifNeSpeciesCount": 222491,
+      "gbifNeSpeciesCount": 222500,
       "byCategory": {
         "LC": 35560,
         "DD": 6162,
@@ -180,7 +180,7 @@
         "EX": 138
       },
       "colDescribed": 355817,
-      "colNe": 280432
+      "colNe": 280440
     },
     {
       "id": "pl-gymnosperms",
@@ -227,7 +227,7 @@
       "estimatedDescribed": 19539,
       "totalAssessed": 327,
       "outdated": 120,
-      "gbifNeSpeciesCount": 14164,
+      "gbifNeSpeciesCount": 14165,
       "byCategory": {
         "DD": 37,
         "EN": 72,
@@ -239,7 +239,7 @@
         "LR/lc": 3
       },
       "colDescribed": 19236,
-      "colNe": 18907
+      "colNe": 18908
     },
     {
       "id": "pl-green_algae",
@@ -271,7 +271,7 @@
         "EX": 1
       },
       "colDescribed": 1500,
-      "colNe": 1491
+      "colNe": 1492
     }
   ],
   "fungi": [
@@ -281,7 +281,7 @@
       "estimatedDescribed": 157648,
       "totalAssessed": 1351,
       "outdated": 56,
-      "gbifNeSpeciesCount": 85025,
+      "gbifNeSpeciesCount": 85027,
       "byCategory": {
         "EN": 130,
         "LC": 534,
@@ -291,7 +291,7 @@
         "NT": 112
       },
       "colDescribed": 156520,
-      "colNe": 155291
+      "colNe": 155293
     },
     {
       "id": "fu-brown_algae",
