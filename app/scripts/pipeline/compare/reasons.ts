@@ -96,9 +96,22 @@ export const REASONS: ReasonRule[] = [
   },
   {
     code: "lumped_counts_from_its_infraspecific",
-    description: "A lumped species' records start at the subspecies or variety CoL files its synonym under, not the synonym alone.",
-    kinds: ["assessed"], fields: GBIF,
+    // The key only. This once covered counts too, without checking their size,
+    // and so explained away Zosterops simplex's count doubling (1.14M for 572k).
+    // A count change has to answer to a rule that bounds it.
+    description: "A lumped species' key is the subspecies or variety CoL files its synonym under, not the synonym alone.",
+    kinds: ["assessed"], fields: ["gbif_species_key"],
     where: `d.key IN (SELECT p.key FROM pair p JOIN ctx_taxa t ON t.col_id = p.b_key WHERE t.parent_id = p.a_key)`,
+  },
+  {
+    code: "lumped_counts_from_its_infraspecific",
+    description: "A lumped species' count now covers the subspecies or variety CoL files it as; the baseline counted the records on its old key usage alone (Vanellus novaehollandiae: 153 under its synonym, 255,927 under V. miles novaehollandiae).",
+    kinds: ["assessed"], fields: COUNTS,
+    where: `d.key IN (SELECT p.key FROM pair p
+              JOIN ctx_link l ON l.sis_taxon_id = p.key::BIGINT AND l.role = 'primary' AND l.verdict = 'lumped' AND l.counted
+              JOIN ctx_usage u ON u.usage_key = p.b_key
+              WHERE ${NOISE("p.b_n::DOUBLE", "u.georef::DOUBLE")} AND p.a_n >= p.b_n)
+            AND (d.field = 'gbif_occurrence_count' OR d.delta > 0)`,
   },
   {
     code: "separately_assessed_split_not_double_counted",
@@ -115,7 +128,7 @@ export const REASONS: ReasonRule[] = [
     description: "CoL holds the organism twice (Hylatomus / Dryocopus pileatus); both halves now count.",
     kinds: ["assessed"], fields: COUNTS,
     where: `(d.field = 'gbif_occurrence_count' AND d.key IN (SELECT p.key FROM pair p JOIN ctx_components c ON c.sis = p.key::BIGINT
-              WHERE c.covered_georef > 0 AND ${NOISE("p.b_n::DOUBLE", "c.key_georef")}))
+              WHERE c.covered_georef > 0 AND (${NOISE("p.b_n::DOUBLE", "c.key_georef")} OR ${NOISE("p.b_n::DOUBLE", "c.own_georef")})))
             OR (d.field = 'gbif_observations_after_assessment_year' AND d.delta > 0
                 AND ${sis} IN (SELECT sis FROM ctx_components WHERE covered_georef > 0))`,
   },
@@ -170,10 +183,26 @@ export const REASONS: ReasonRule[] = [
     where: `d.key IN (SELECT col_id FROM ctx_link WHERE col_id IS NOT NULL)`,
   },
   {
+    code: "ambiguous_synonym_no_longer_hides",
+    description: "The baseline kept this species off the NE list because an assessed species' IUCN synonym is a CoL ambiguous synonym that CoL also files under it (Vicia kitaibeliana → Vicia cracca). Ambiguous means CoL doesn't know which species the name is, so it says nothing about this one.",
+    kinds: ["ne"], changes: ["added"],
+    where: `d.key IN (SELECT col_id FROM ctx_b_covered)
+            AND d.key NOT IN (SELECT col_id FROM ctx_link WHERE col_id IS NOT NULL)
+            AND d.key IN (
+              SELECT t.species_id FROM ctx_taxa t
+              JOIN (SELECT DISTINCT lower(regexp_replace(trim(s.name), '\\s+', ' ', 'g')) AS nm
+                    FROM ctx_assessments, unnest(synonyms) AS u(s) WHERE is_latest) syn
+                ON syn.nm = lower(t.scientific_name)
+              WHERE t.status = 'ambiguous synonym' AND t.rank = 'species')`,
+  },
+  {
     code: "no_longer_linked",
     description: "No assessed species links to this CoL species any more (see the link reasons), so it joins the NE list.",
     kinds: ["ne"], changes: ["added"],
-    where: `d.key NOT IN (SELECT col_id FROM ctx_link WHERE col_id IS NOT NULL)`,
+    // Only species the baseline linked and this sync doesn't: "not linked now"
+    // alone would explain every species that joins the list, for any reason.
+    where: `d.key IN (SELECT b_col FROM pair WHERE b_col IS DISTINCT FROM a_col)
+            AND d.key NOT IN (SELECT col_id FROM ctx_link WHERE col_id IS NOT NULL)`,
   },
 
   // ── Summaries ──────────────────────────────────────────────────────────────

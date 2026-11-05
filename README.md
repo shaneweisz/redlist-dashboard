@@ -157,7 +157,7 @@ CoL supplies the described-species universe behind the new-assessments view — 
 
 ## Data Sync Pipeline
 
-The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It reads three inputs and builds everything the dashboard shows from four tables. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
+The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
 
 ```bash
 # 1. Mirror the new GBIF snapshot (~255 GiB, public, no account)
@@ -172,24 +172,7 @@ npm run sync:publish        # copies the build into app/data, uploads to R2, bum
 
 `npm run sync:publish` prints the `git add` line for the data PR. Production only switches to the new sync once that PR merges to main and Vercel redeploys.
 
-**Inputs**, each cached under `~/.cache/redlist-dashboard/` and refetched only when its version moves:
-- **Catalogue of Life**: the XR release GBIF indexes (asked of GBIF, so keys always resolve), the curated checklist (to demote XR over-splits and to say what catalogueoflife.org shows), and the list of curated Base sources
-- **IUCN Red List Postgres**, opened read-only (the build refuses to run otherwise)
-- **GBIF's monthly snapshot**, from a local mirror. Refused unless complete: no gaps in the file numbering and every record of the download it was made from ([gbif/occurrence#609](https://github.com/gbif/occurrence/issues/609))
-- **iNaturalist**'s English names, monthly
-
-**Core tables** (`build/core/`), the only source of truth:
-
-| Table | One row per | Built by |
-|---|---|---|
-| `taxa` | CoL usage (8M): lineage, checklist status, the species each usage counts towards, Table 1a group | `pipeline/build-taxa.ts` |
-| `assessments` | global assessment of a current species, lists as lists | `pipeline/build-assessments.ts` |
-| `occurrence_counts` | usage × year × georeferenced × record type (plus countries) | `pipeline/build-occurrences.ts` |
-| `assessment_link` | assessed species: the CoL species it is, where its records start, verdict and reason | `pipeline/build-link.ts` |
-
-**What the app reads** (`build/data/`, the same layout as `app/data/`) is built from those by `pipeline/build-read-models.ts`: `assessed.parquet`, `assessments.parquet` (history), `ne.parquet` (Not Evaluated species with GBIF records), `species/` (the CoL universe), `backbone.parquet` (= `taxa`), `species_link.parquet`; then the existing builders run against it for `taxa-summary.json` and the other summaries, `col-revisions.json`, and the synonym and search indexes.
-
-**Checks.** The named matching cases in `pipeline/fixtures/matching.ts` (species that once showed the wrong number) must pass or the sync stops. Then every published number is compared, field by field, with the sync production serves (`pipeline/compare.ts`); each difference is assigned a reason from `pipeline/compare/reasons.ts` or reported as unexplained, and the report goes in the data PR. `sync.json` records every input version and check result.
+**How it works**: the inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).
 
 **Not part of the sync.** The assessment narratives change when the Red List publishes, twice a year, so `npm run build-narratives` and `npm run upload-narratives-to-r2` publish them separately under `narratives/<release>/`. Range maps and AOH layers (`upload-range-maps.ts`, `upload-aoh-maps.ts`) are run by hand when their inputs change.
 

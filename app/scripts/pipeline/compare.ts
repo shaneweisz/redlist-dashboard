@@ -24,6 +24,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../utils";
 import { ensureBaseline } from "./baseline";
 import { CACHE_ROOT } from "./paths";
+import { usageCountsSql } from "./counts";
 import { loadFacts } from "./compare/facts";
 import { diffFacts, applyReasons } from "./compare/diff";
 import { REASONS, type ReasonRule } from "./compare/reasons";
@@ -39,7 +40,7 @@ export interface CompareOptions {
 }
 
 /** Context the reason rules can read: the candidate's core tables, where it has them. */
-async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>, core?: string): Promise<void> {
+async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>, core?: string, baseline?: string): Promise<void> {
   const views: Record<string, string> = {
     ctx_link: "assessment_link.parquet", ctx_taxa: "taxa.parquet",
     ctx_assessments: "assessments.parquet", ctx_components: "count_components.parquet",
@@ -50,6 +51,19 @@ async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>,
       ? `CREATE TABLE ${name} AS SELECT * FROM read_parquet('${p.replace(/'/g, "''")}')`
       : `CREATE TABLE ${name} AS SELECT NULL AS none WHERE false`);
   }
+  // Counted georeferenced records per usage, so rules can bound a count by the
+  // usages it is made of.
+  const occ = core ? path.join(core, "occurrence_counts.parquet") : "";
+  await conn.run(core && fs.existsSync(occ)
+    ? `CREATE TABLE ctx_usage AS SELECT usage_key, coalesce(sum(n) FILTER (georef), 0)::BIGINT AS georef
+       FROM (${usageCountsSql({ taxa: "ctx_taxa", counts: `read_parquet('${occ.replace(/'/g, "''")}')` })}) GROUP BY 1`
+    : `CREATE TABLE ctx_usage (usage_key VARCHAR, georef BIGINT)`);
+  // CoL species the baseline kept off the NE list with a covered link row.
+  const bLink = baseline ? path.join(baseline, "species_link.parquet") : "";
+  await conn.run(bLink && fs.existsSync(bLink)
+    ? `CREATE TABLE ctx_b_covered AS SELECT DISTINCT col_id FROM read_parquet('${bLink.replace(/'/g, "''")}')
+       WHERE match_method = 'iucn_synonym_covered' AND col_id IS NOT NULL`
+    : `CREATE TABLE ctx_b_covered (col_id VARCHAR)`);
   // One row per assessed species with both sides' link, key and count, so rules
   // can be plain semi-joins instead of correlated subqueries per difference.
   await conn.run(`CREATE TABLE pair AS
@@ -65,7 +79,7 @@ export async function compare(opts: CompareOptions): Promise<CompareSummary> {
   const bLayout = await loadFacts(conn, "b", opts.baseline);
   const aLayout = await loadFacts(conn, "a", opts.candidate);
   const notes = await diffFacts(conn);
-  if (aLayout === "v2") await loadContext(conn, opts.core);
+  if (aLayout === "v2") await loadContext(conn, opts.core, opts.baseline);
   await applyReasons(conn, aLayout === "v2" ? (opts.rules ?? REASONS) : (opts.rules ?? []));
   const { markdown, summary } = await buildReport(conn, {
     baseline: `${opts.baseline} (${bLayout})`,
