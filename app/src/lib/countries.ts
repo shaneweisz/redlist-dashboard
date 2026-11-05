@@ -125,13 +125,13 @@ export const ALPHA2_TO_NAME: Record<string, string> = {
   "CK": "Cook Islands", "CV": "Cape Verde", "CW": "Curaçao", "CX": "Christmas Island",
   "DM": "Dominica", "FK": "Falkland Islands", "FM": "Micronesia", "FO": "Faroe Islands",
   "GD": "Grenada", "GF": "French Guiana", "GG": "Guernsey", "GI": "Gibraltar",
-  "GP": "Guadeloupe", "GS": "South Georgia", "GU": "Guam", "HK": "Hong Kong",
+  "GP": "Guadeloupe", "GS": "South Georgia", "GU": "Guam", "HK": "Hong Kong Special Administrative Region of China",
   "HM": "Heard Island", "IM": "Isle of Man", "IO": "British Indian Ocean Territory",
   "JE": "Jersey", "KI": "Kiribati", "KM": "Comoros", "KN": "Saint Kitts and Nevis",
   "KY": "Cayman Islands", "LC": "Saint Lucia", "LI": "Liechtenstein", "MC": "Monaco",
-  "MF": "Saint Martin", "MH": "Marshall Islands", "MK": "North Macedonia", "MO": "Macao", "MP": "Northern Mariana Islands",
+  "MF": "Saint Martin", "MH": "Marshall Islands", "MK": "North Macedonia", "MO": "Macao Special Administrative Region of China", "MP": "Northern Mariana Islands",
   "MQ": "Martinique", "MS": "Montserrat", "MT": "Malta", "MU": "Mauritius", "MV": "Maldives",
-  "NF": "Norfolk Island", "NR": "Nauru", "NU": "Niue", "PF": "French Polynesia",
+  "NF": "Norfolk Island", "NR": "Naoero", "NU": "Niue", "PF": "French Polynesia",
   "PM": "Saint Pierre and Miquelon", "PN": "Pitcairn", "PW": "Palau", "RE": "Réunion",
   "SC": "Seychelles", "SH": "Saint Helena", "SJ": "Svalbard and Jan Mayen", "SM": "San Marino",
   // Overrides for names the spread above would otherwise win with: each of
@@ -139,6 +139,10 @@ export const ALPHA2_TO_NAME: Record<string, string> = {
   // "N. Cyprus", "Kosovo", "Ashmore and Cartier Is."), and the spread takes
   // the LAST key that maps to a code.
   "SO": "Somalia", "CY": "Cyprus", "RS": "Serbia", "AU": "Australia",
+  // Current official names, where the shape still carries the older one
+  // ("Turkey"). The shape names stay as keys above, so the old spellings
+  // still resolve and still find the country in search.
+  "TR": "Türkiye",
   // The shapes carry abbreviated labels ("Dem. Rep. Congo", "Solomon Is."),
   // and this table is what the list view, tooltip and filter chips show — so
   // spell them out. Names follow IUCN's own location_lookup, except that CD
@@ -169,6 +173,7 @@ const ALIAS_TO_ALPHA2: Record<string, string> = {
   "uk": "GB", "u.k.": "GB", "britain": "GB", "great britain": "GB", "england": "GB",
   "drc": "CD", "dr congo": "CD", "democratic republic of the congo": "CD",
   "czech republic": "CZ", "swaziland": "SZ", "ivory coast": "CI",
+  "turkiye": "TR", "macau": "MO",
 };
 
 const NAME_LOOKUP: Record<string, string> = (() => {
