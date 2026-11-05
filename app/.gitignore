@@ -45,6 +45,9 @@ yarn-error.log*
 
 # Generated at build time by scripts/build/ (species lists, search shards, tree) — never commit.
 /public/prebuilt/
+# Where builds before 2026-11-05 wrote them: a machine with an old build still has these.
+/public/species-lists/
+/public/search-shards/
 /data/
 
 # DuckDB httpfs extension — vendored at build time by scripts/fetch-duckdb-ext.ts
