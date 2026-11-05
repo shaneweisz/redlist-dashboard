@@ -44,6 +44,9 @@ import {
 import { SPLIT_REASON, UNFLAGGED_REASONS, GENUS_DIFFERS_REASON, RENAMED_REASON } from "../../../src/lib/col-revision";
 import { orthographicallySame, speciesNameParts, canonicalEpithet } from "../core/name-variants";
 
+/** The data directory this run reads and writes (the sync passes its build). */
+let dataDir = DATA_DIR;
+
 // Keep in sync with build-taxa-summary.ts / species-duckdb.ts.
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
 
@@ -72,14 +75,15 @@ export interface ColRevisionsFile {
     an?: string; ac?: string; gd?: 1 }>;
 }
 
-export async function run(): Promise<void> {
-  const link = path.join(DATA_DIR, "species_link.parquet");
-  const assessedPath = path.join(DATA_DIR, "assessed.parquet");
-  const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  const taxaPath = path.join(DATA_DIR, "taxa.parquet");
-  const outPath = path.join(DATA_DIR, "col-revisions.json");
+export async function run(opts: { dataDir?: string } = {}): Promise<void> {
+  dataDir = opts.dataDir ?? DATA_DIR;
+  const link = path.join(dataDir, "species_link.parquet");
+  const assessedPath = path.join(dataDir, "assessed.parquet");
+  const speciesGlob = path.join(dataDir, "species", "**", "*.parquet");
+  const taxaPath = path.join(dataDir, "taxa.parquet");
+  const outPath = path.join(dataDir, "col-revisions.json");
 
-  if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(link)) {
+  if (!fs.existsSync(path.join(dataDir, "species")) || !fs.existsSync(link)) {
     console.log("  CoL revisions: species/ or species_link.parquet missing — skipping.");
     return;
   }

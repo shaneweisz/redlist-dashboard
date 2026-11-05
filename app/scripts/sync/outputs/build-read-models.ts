@@ -150,7 +150,7 @@ async function history(conn: DuckDBConnection, coreDir: string): Promise<void> {
  *                             (src = 'redlist'; covered rows as
  *                             iucn_synonym_covered), for the CoL-differences code
  */
-async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<void> {
+async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: string): Promise<void> {
   const speciesDir = path.join(outDir, "species");
   fs.rmSync(speciesDir, { recursive: true, force: true });
   await conn.run(`COPY (
@@ -185,7 +185,7 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<voi
     WHERE c.georef AND ${countedBasisSql("c.basis", "coalesce(sp.kingdom, u.kingdom)")}
       AND u.species_id IS NOT NULL AND c.usage_key NOT IN (SELECT usage_key FROM owned)
     GROUP BY 1`);
-  const vern = path.join(outDir, "species-vernaculars.parquet");
+  const vern = path.join(coreDir, "species-vernaculars.parquet");
   await conn.run(fs.existsSync(vern)
     ? `CREATE OR REPLACE TEMP TABLE col_names AS SELECT col_id, vernacular_name FROM read_parquet(${lit(vern)})`
     : `CREATE OR REPLACE TEMP TABLE col_names (col_id VARCHAR, vernacular_name VARCHAR)`);
@@ -274,12 +274,11 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
     LEFT JOIN row_counts k ON k.sis = c.sis AND k.usage_id = g.gbif_species_key
     ORDER BY c.sis) TO ${lit(path.join(o.coreDir, "count_components.parquet"))} (FORMAT parquet)`);
 
-  await notEvaluated(conn, o.outDir);
+  await notEvaluated(conn, o.outDir, o.coreDir);
   await checkEachUsageCountedOnce(conn, o.outDir);
 
   // The app reads the taxonomy directly, and the comparison reads the link.
   for (const f of ["assessment_link.parquet", "taxa.parquet"]) fs.copyFileSync(path.join(o.coreDir, f), path.join(o.outDir, f));
-  if (o.inatNames && fs.existsSync(o.inatNames)) fs.copyFileSync(o.inatNames, path.join(o.outDir, "inat-vernaculars.parquet"));
 }
 
 export async function run(): Promise<void> {
