@@ -29,7 +29,7 @@ jobs:
 
       - name: Publish coverage summary
         if: ${{ !cancelled() }}
-        run: node scripts/coverage-report.mjs
+        run: node scripts/ci/coverage-report.mjs
         working-directory: app
 
   lint:

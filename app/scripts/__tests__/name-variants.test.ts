@@ -1,10 +1,9 @@
 /**
- * name-variants test: the rule build-matching indexes Catalogue of Life by in
- * passes 4-6 of the matching ladder.
+ * name-variants test: when two spellings are one name (sync/core/name-variants.ts),
+ * which the CoL-revision flag and build-link's twin and duplicate rules rely on.
  *
  * Every positive case is a real Red List assessment whose name CoL spells
- * differently, drawn from the species reported as having no CoL match at all.
- * Every negative is a real case from the same set that must NOT be swept up: a
+ * differently. Every negative is a real case that must NOT be swept up: a
  * genus transfer, a doubled consonant, a patronymic gender change.
  *
  * The negatives matter more than the positives. A missed variant leaves one
@@ -12,7 +11,7 @@
  * one species' occurrence records and assessment to another.
  */
 import { describe, it, expect } from "vitest";
-import { sameSpeciesName, canonicalEpithet, speciesNameParts, normalisedKey, orthographicallySame, orthographicKey } from "../name-variants";
+import { canonicalEpithet, speciesNameParts, orthographicallySame, orthographicKey } from "../sync/core/name-variants";
 
 describe("speciesNameParts", () => {
   it("drops a parenthesised subgenus", () => {
@@ -47,85 +46,9 @@ describe("canonicalEpithet", () => {
   });
 });
 
-describe("sameSpeciesName — variants the codes deem identical", () => {
-  const same: [string, string, string][] = [
-    ["patronymic -ii/-i", "Ochotona pallasii", "Ochotona (Pika) pallasi"],
-    ["patronymic -ii/-i", "Anolis wattsi", "Anolis wattsii"],
-    ["patronymic -ii/-i", "Agave promontori", "Agave promontorii"],
-    ["gender -a/-us", "Sminthopsis fuliginosa", "Sminthopsis fuliginosus"],
-    ["gender -a/-us", "Alluroteuthis antarctica", "Alluroteuthis antarcticus"],
-    ["gender -a/-um", "Acacia verricula", "Acacia verriculum"],
-    ["gender -um/-a", "Angraecum muscicolum", "Angraecum muscicola"],
-    ["gender -is/-us", "Aloeides dentatis", "Aloeides dentatus"],
-    ["third declension -is/-e", "Allium lefkadensis", "Allium lefkadense"],
-    ["third declension -is/-e", "Allium apolloniensis", "Allium apolloniense"],
-    ["hybrid sign only", "Agave peacockii", "Agave × peacockii"],
-    ["identical", "Panthera leo", "Panthera leo"],
-  ];
-  for (const [why, iucn, col] of same) {
-    it(`${why}: ${iucn} = ${col}`, () => {
-      expect(sameSpeciesName(iucn, col)).toBe(true);
-      expect(sameSpeciesName(col, iucn)).toBe(true); // symmetric
-    });
-  }
-});
-
-describe("sameSpeciesName — differences that need evidence this check hasn't got", () => {
-  const different: [string, string, string][] = [
-    ["a genus transfer is a taxonomic act, not a spelling",
-      "Agrochola kindermannii", "Anchoscelis kindermanni"],
-    ["a doubled consonant is a corrected misspelling",
-      "Aframomum elliotii", "Aframomum elliottii"],
-    ["a doubled consonant is a corrected misspelling",
-      "Annesorhiza burttii", "Annesorhiza burtii"],
-    ["patronymic gender -i/-ae needs the original description",
-      "Acrogomphus walshi", "Acrogomphus walshae"],
-    ["an inserted syllable is not a termination",
-      "Annona xylopiifolia", "Annona xylopifolia"],
-    ["an inserted syllable is not a termination",
-      "Agathis labillardieri", "Agathis labillardierei"],
-    ["different species in the same genus stay different",
-      "Ochotona pallasii", "Ochotona curzoniae"],
-    ["a subspecies is a different rank",
-      "Ochotona pallasii", "Ochotona pallasi hamica"],
-  ];
-  for (const [why, a, b] of different) {
-    it(`${why}: ${a} ≠ ${b}`, () => {
-      expect(sameSpeciesName(a, b)).toBe(false);
-      expect(sameSpeciesName(b, a)).toBe(false);
-    });
-  }
-
-  it("does not let two real congeners collide through the stem", () => {
-    // The guard that matters: stripping a termination must not make distinct
-    // epithets equal. These pairs differ before the ending, so they must survive.
-    expect(sameSpeciesName("Acacia alba", "Acacia albida")).toBe(false);
-    expect(sameSpeciesName("Allium nigrum", "Allium nigricans")).toBe(false);
-  });
-});
-
-describe("normalisedKey — the form build-matching indexes on", () => {
-  it("gives one species' spellings a single key", () => {
-    expect(normalisedKey("Ochotona pallasii")).toBe(normalisedKey("Ochotona (Pika) pallasi"));
-    expect(normalisedKey("Sminthopsis fuliginosa")).toBe(normalisedKey("Sminthopsis fuliginosus"));
-    // The CoL duplicate that makes the ambiguity guard necessary.
-    expect(normalisedKey("Ascaltis lamarckii")).toBe(normalisedKey("Ascaltis lamarcki"));
-  });
-
-  it("keeps distinct species apart", () => {
-    expect(normalisedKey("Ochotona pallasii")).not.toBe(normalisedKey("Ochotona curzoniae"));
-    expect(normalisedKey("Agrochola kindermannii")).not.toBe(normalisedKey("Anchoscelis kindermanni"));
-  });
-
-  it("is null for anything that is not a binomial", () => {
-    expect(normalisedKey("Ochotona pallasi hamica")).toBeNull();
-    expect(normalisedKey("Ochotona")).toBeNull();
-  });
-});
-
 /**
- * orthographicallySame — the SECOND, looser rule, used only to corroborate a
- * candidate GBIF's index has already produced (build-matching pass 7).
+ * orthographicallySame — spellings of one name, used to corroborate a candidate
+ * some other source has already produced (the CoL-revision flag).
  *
  * Every positive below is a real Red List assessment that the dashboard reported
  * as having NO Catalogue of Life match while its own gbif_species_key pointed at
@@ -133,7 +56,7 @@ describe("normalisedKey — the form build-matching indexes on", () => {
  * in that state; 86 of them are these.
  *
  * The negatives are the reason this rule is never allowed to decide alone. They
- * are cases the strict rule (sameSpeciesName) also refuses, and they must keep
+ * are cases a names-only rule must refuse, and they must keep
  * failing here — a looser rule that swallowed them would launder GBIF's fuzzy
  * matching into an assertion about CoL.
  */
@@ -158,9 +81,7 @@ describe("orthographicallySame — spellings the codes call one name", () => {
     // Reclassified from a negative while writing this. #490 called it "an
     // inserted syllable", but there is no inserted syllable: La Billardiere's
     // name ends in a vowel, so -ei is the regular termination and -eri treats it
-    // as ending in -er. Same person, same name, wrong connecting vowel. The
-    // STRICT rule still refuses it (see sameSpeciesName above) — it takes GBIF
-    // naming the record before this is acted on.
+    // as ending in -er. Same person, same name, wrong connecting vowel.
     ["personal-name termination, -i / -ei", "Agathis labillardieri", "Agathis labillardierei"],
     ["hyphen carries no weight", "Solanum rudepannum", "Solanum rude-pannum"],
     ["hyphen carries no weight", "Xylopia le-testui", "Xylopia letestui"],
@@ -173,14 +94,11 @@ describe("orthographicallySame — spellings the codes call one name", () => {
     });
   }
 
-  it("accepts what the strict rule accepts, so pass 7 never contradicts passes 4-6", () => {
-    // A superset, not a different rule: anything the codes call one name by
-    // termination is also one name here.
+  it("folds Latin terminations too, which the codes deem one name", () => {
     for (const [a, b] of [["Ochotona pallasii", "Ochotona pallasi"],
                           ["Sminthopsis fuliginosa", "Sminthopsis fuliginosus"],
                           ["Allium lefkadensis", "Allium lefkadense"]]) {
-      expect(sameSpeciesName(a, b), `strict: ${a} / ${b}`).toBe(true);
-      expect(orthographicallySame(a, b), `loose: ${a} / ${b}`).toBe(true);
+      expect(orthographicallySame(a, b), `${a} / ${b}`).toBe(true);
     }
   });
 });
@@ -188,8 +106,7 @@ describe("orthographicallySame — spellings the codes call one name", () => {
 describe("orthographicallySame — differences no folding may erase", () => {
   const different: [string, string, string][] = [
     // GBIF's index put this Red List assessment on Agrotis sabura Mabille, 1888
-    // — a different name, and a synonym. It is why pass 7 tests the name instead
-    // of believing the key, and why those 21 occurrence records are suspect.
+    // — a different name, and a synonym.
     ["GBIF's fuzzy matcher reaching past the name", "Agrotis sabine", "Agrotis sabura"],
     ["a genus transfer is a taxonomic act", "Agrochola kindermannii", "Anchoscelis kindermanni"],
     ["different species in one genus", "Ochotona pallasii", "Ochotona curzoniae"],
@@ -224,8 +141,8 @@ describe("orthographicallySame — differences no folding may erase", () => {
   });
 
   it("keeps the genus, which no orthographic rule may cross", () => {
-    // Same epithet, different genus — a transfer, which passes 2/5 handle with
-    // actual synonymy evidence. This rule has none.
+    // Same epithet, different genus — a transfer, which needs synonymy evidence.
+    // This rule has none.
     expect(orthographicallySame("Aplexa elongata", "Sibirenauta elongata")).toBe(false);
   });
 });
@@ -243,11 +160,7 @@ describe("orthographicKey", () => {
     expect(orthographicKey("Yy yy")).toBe("i i");
   });
 
-  it("is looser than normalisedKey, which is why it is never used alone", () => {
-    // Stated as a property so the relationship is checked rather than assumed:
-    // the strict rule refuses this pair, the loose one accepts it, and only
-    // GBIF pointing at the record makes the difference safe to act on.
-    expect(sameSpeciesName("Iva xanthifolia", "Iva xanthiifolia")).toBe(false);
+  it("folds spelling, not only terminations, which is why it is never used alone", () => {
     expect(orthographicallySame("Iva xanthifolia", "Iva xanthiifolia")).toBe(true);
   });
 });

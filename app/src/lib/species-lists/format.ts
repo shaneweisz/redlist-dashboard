@@ -1,6 +1,6 @@
 /**
  * Column-oriented encoding for the pre-built per-group species-list files
- * (scripts/build-species-lists.ts writes them; lib/species-lists/loader.ts reads them).
+ * (scripts/build/build-species-lists.ts writes them; lib/species-lists/loader.ts reads them).
  *
  * A row-per-object JSON array repeats every key on every row — about half the bytes
  * before compression. Storing one array per field instead is ~2.4x smaller raw and

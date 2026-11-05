@@ -20,7 +20,7 @@ import { EFFORT_GROUPS, effortAsset } from "./sampling-effort";
 
 export const ECOREGIONS_ASSET = "ecoregions-2017-v2.json.gz";
 /**
- * Everything /api/overlays will serve, built by scripts/mapping/build-*-layer.ts.
+ * Everything /api/overlays will serve, built by scripts/maps/build-*-layer.ts.
  *
  * The effort layer is one asset per taxonomic group rather than a single
  * surface — see lib/mapping/sampling-effort.ts for why the taxon matters.

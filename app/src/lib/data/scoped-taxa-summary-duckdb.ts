@@ -10,7 +10,7 @@
  * shape of predicate and compose by AND (marine species in Indonesia).
  *
  * Precomputing one file per scope was rejected for countries (~150-200 of them): it
- * would multiply scripts/build-taxa-summary.ts's runtime ~200x, add a staleness
+ * would multiply scripts/sync/outputs/build-taxa-summary.ts's runtime ~200x, add a staleness
  * window, and can't compose with other simultaneous filters. Instead this queries the
  * same assessed.parquet species-duckdb.ts already serves /api/redlist/species from,
  * adding the scope predicate to filterToSql()'s taxonomy-node predicate — computed

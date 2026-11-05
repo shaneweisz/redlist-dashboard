@@ -21,7 +21,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { NODE_INDEX, speciesMatchesNode } from "@/lib/taxonomy-utils";
 import { COL_DOMESTIC_EXCLUDE_NAMES } from "../col-described-overrides";
-import { DATA_DIR } from "../../../scripts/utils";
+import { DATA_DIR } from "../../../scripts/lib/utils";
 
 // Domestic/feral forms (Bos taurus, Felis catus, etc.) are deliberately unmatched by
 // every node — speciesMatchesNode excludes them unconditionally (see
@@ -47,7 +47,7 @@ const SSC_WRAPPER_IDS = [...NODE_INDEX.keys()].filter(
 type ColRow = { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; taxon_group: string };
 
 // Same "extant, or CoL-extinct but IUCN-confirmed EX/EW" + Homo sapiens exclusion
-// scripts/build-taxa-summary.ts uses for every other CoL-derived count in this app —
+// scripts/sync/outputs/build-taxa-summary.ts uses for every other CoL-derived count in this app —
 // mirrored here (not imported) since that logic lives inside non-exported functions.
 async function fetchColUniverse(taxonGroups: string[]): Promise<ColRow[]> {
   const conn = await (await DuckDBInstance.create(":memory:")).connect();

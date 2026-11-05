@@ -1,11 +1,11 @@
 /**
- * The counting rule (scripts/pipeline/counts.ts): a species counts its own,
+ * The counting rule (scripts/sync/core/counts.ts): a species counts its own,
  * its synonyms' and its infraspecifics' records, not usages another assessed
  * species owns, and preserved specimens only outside Animalia.
  */
 import { describe, it, expect } from "vitest";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { speciesCountsSql } from "../pipeline/counts";
+import { speciesCountsSql } from "../sync/core/counts";
 
 async function counts(owned: string[] = []) {
   const c = await (await DuckDBInstance.create(":memory:")).connect();

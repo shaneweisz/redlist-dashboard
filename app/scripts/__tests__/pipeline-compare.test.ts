@@ -1,5 +1,5 @@
 /**
- * The sync comparison harness (scripts/pipeline/compare): the diff engine finds
+ * The sync comparison harness (scripts/sync/checks/compare): the diff engine finds
  * every field-level difference and nothing else, reasons claim only what their
  * predicate covers (first rule wins), and the old-layout facts reproduce the
  * app's NE universe rules.
@@ -9,8 +9,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { diffFacts, applyReasons } from "../pipeline/compare/diff";
-import { compare } from "../pipeline/compare";
+import { diffFacts, applyReasons } from "../sync/checks/compare/diff";
+import { compare } from "../sync/checks/compare";
 
 async function conn(): Promise<DuckDBConnection> {
   return (await DuckDBInstance.create(":memory:")).connect();

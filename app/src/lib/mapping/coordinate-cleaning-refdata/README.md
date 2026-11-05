@@ -17,7 +17,7 @@ Country geographic centroids. Extracted from [mledoze/countries](https://github.
 Biodiversity institutions (museums, herbaria, zoos, universities, etc.) with known coordinates. Sourced live from GBIF's own [GRSciColl](https://www.gbif.org/grscicoll) registry (`api.gbif.org/v1/grscicoll/institution`), not CoordinateCleaner's bundled table — keeps this pipeline entirely GBIF-sourced and sidesteps the licensing question. Unlike capitals/centroids, GRSciColl actively grows, so regenerate periodically with:
 
 ```
-npx tsx scripts/mapping/fetch-coordinate-cleaning-refdata.ts
+npx tsx scripts/maps/fetch-coordinate-cleaning-refdata.ts
 ```
 
 ## `land-polygons.json` (1,420 polygons)

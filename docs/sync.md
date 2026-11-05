@@ -1,6 +1,6 @@
 # The data sync
 
-How the dashboard's data is built, why it works the way it does, and how to run it. The code is the reference for the details; this explains the design and points to it. Everything named here lives in `app/scripts/pipeline/` unless a path says otherwise.
+How the dashboard's data is built, why it works the way it does, and how to run it. The code is the reference for the details; this explains the design and points to it. What happens after a sync, on every deploy, is in [build.md](build.md).
 
 ![The sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-588-sync-rewrite/01-sync-after.png)
 
@@ -9,15 +9,16 @@ The diagram's source is [`diagrams/sync.excalidraw`](diagrams/sync.excalidraw) (
 ## Contents
 
 1. [What a sync is](#what-a-sync-is)
-2. [Inputs](#inputs)
-3. [The four core tables](#the-four-core-tables)
-4. [The counting rule](#the-counting-rule)
-5. [Matching: which CoL species an assessed species is](#matching-which-col-species-an-assessed-species-is)
-6. [The Not Evaluated list](#the-not-evaluated-list)
-7. [What the app reads](#what-the-app-reads)
-8. [Checks](#checks)
-9. [Running it each month](#running-it-each-month)
-10. [Decisions and known limits](#decisions-and-known-limits)
+2. [Where the code is](#where-the-code-is)
+3. [Inputs](#inputs)
+4. [The four core tables](#the-four-core-tables)
+5. [The counting rule](#the-counting-rule)
+6. [Matching: which CoL species an assessed species is](#matching-which-col-species-an-assessed-species-is)
+7. [The Not Evaluated list](#the-not-evaluated-list)
+8. [What the app reads](#what-the-app-reads)
+9. [Checks](#checks)
+10. [Running it each month](#running-it-each-month)
+11. [Decisions and known limits](#decisions-and-known-limits)
 
 ## What a sync is
 
@@ -26,6 +27,19 @@ A sync is one immutable set of data files, named by the time it was uploaded (`s
 A sync is built from three inputs (and GBIF's matcher) and nothing else, monthly, on a local machine (it reads a 255 GiB GBIF mirror, which is why it doesn't run in CI). `npm run sync` takes about five minutes once the inputs are on disk; a new XR adds about 15 minutes, once, to index it for the matcher.
 
 The design has one idea: **every number comes from four tables, by one rule.** The old sync answered "how many GBIF records does this species have?" separately for each place the number appeared (per-species API counts, per-group facet files, lumped-species fetches, the Not Evaluated overlay), with two independent matching chains deciding which GBIF taxon a species was. They disagreed, and each disagreement was a bug. Now the question has one answer, computed once.
+
+## Where the code is
+
+`app/scripts/sync/`, one folder per stage ([app/scripts/README.md](../app/scripts/README.md) lists every file):
+
+| Folder | Stage |
+|---|---|
+| `inputs/` | fetch and cache the inputs, and run GBIF's matcher |
+| `core/` | the four core tables, the counting rule, the matching and concept rules, `decisions.tsv` |
+| `outputs/` | what the app reads, built from the core tables |
+| `checks/` | the fixtures and the comparison with production |
+
+`sync.ts` runs them in order; `publish.ts` uploads the result.
 
 ## Inputs
 
@@ -139,7 +153,7 @@ The 266 undecided are mostly names the Red List marks as unsettled (145) and nam
 What the chosen CoL usage makes the species. `assessment_link.method` says what kind of usage it is (`accepted`, `synonym`, `checklist_synonym`, `provisional`, `ambiguous_synonym`) and `basis` how it was chosen (`matcher`, `decision`).
 
 - **An accepted species is the species.** One the curated checklist demotes (an XR over-split) is followed to the checklist's accepted species.
-- **A synonym is the species renamed, or a lump.** Each gets a verdict from `decideKey` in `app/scripts/species-key.ts`:
+- **A synonym is the species renamed, or a lump.** Each gets a verdict from `decideKey` in `app/scripts/sync/core/species-key.ts`:
   - **own**: the target is this species, under this name or a rename. It counts the target's records (minus anything others own). That includes a CoL synonym CoL itself marks as a respelling of its accepted name, with the same author citation (*Meandrina danae* / *danai*).
   - **lumped**: CoL folds it into another species, so its own usage (and anything under it) is its records. Where CoL files the synonym under an infraspecific (*Fringilla polatzeki* → *F. teydea polatzeki*), its records start at that infraspecific. Never at a nominate one (*Rosa villosa* subsp. *villosa*): that is the accepted species' core.
   - **refused**: CoL folds it into a species the Red List assesses separately. It counts nothing.
@@ -244,7 +258,7 @@ Needs: Docker (for the matcher), the Red List Postgres reachable (see `DB_*` in 
 
 ### Running parts
 
-Each builder runs on its own: `npx tsx scripts/pipeline/build-taxa.ts` (or `build-assessments`, `build-occurrences`, `build-matches`, `build-link`, `build-read-models`, `check-fixtures`). `npx tsx scripts/pipeline/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+Each step runs on its own: `npx tsx scripts/sync/core/build-taxa.ts` (likewise `core/build-assessments`, `core/build-occurrences`, `core/build-matches`, `core/build-link`, `outputs/build-read-models`, `checks/check-fixtures`). `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 

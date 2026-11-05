@@ -11,7 +11,7 @@ import {
   GBIF_COORDINATE_NOTES,
 } from "../gbif";
 import { TAXA } from "@/config/taxa";
-import { TAXA_DEFINITIONS } from "../../../scripts/taxa";
+import { TAXA_DEFINITIONS } from "../../../scripts/lib/taxa";
 import DERIVED_TAXON_KEYS from "@/config/gbif-taxon-keys.json";
 
 describe("gbifTaxonKeysForGroup", () => {

@@ -9,7 +9,7 @@
  *
  * The split_candidates/col_to_assessed temp tables are fully determined by the
  * data sync (never by which taxon/bucket a user is viewing), so
- * scripts/build-taxa-summary.ts precomputes them once at sync time into
+ * scripts/sync/outputs/build-taxa-summary.ts precomputes them once at sync time into
  * data/col-split-candidates.parquet / data/col-synonym-assessed.parquet /
  * data/col-to-assessed.parquet — tiny
  * files (~6K / ~173K rows) loaded here directly. This used to instead rebuild
@@ -22,7 +22,7 @@
  * existed), falls back to rebuilding from backbone.parquet directly, same as
  * before. If backbone.parquet itself is unavailable for any reason, degrades
  * gracefully to a breakdown with no noMatchDetails/splitDetails (same
- * fallback scripts/build-taxa-summary.ts's hasBackbone flag already provides)
+ * fallback scripts/sync/outputs/build-taxa-summary.ts's hasBackbone flag already provides)
  * rather than failing the request.
  */
 import { getConn, parquetUri, ensureNeHelpers } from "./species-duckdb";
@@ -40,7 +40,7 @@ import { dynamicNodeFilter, isDynamicNodeId, dynamicNodeMatchValue, parseDynamic
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
 import type { NodeFilter } from "@/lib/taxonomy-sql";
 
-// Keep in sync with the same constant in scripts/build-taxa-summary.ts and
+// Keep in sync with the same constant in scripts/sync/outputs/build-taxa-summary.ts and
 // species-duckdb.ts — Homo sapiens, which IUCN omits from its Red List export.
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
 
@@ -93,7 +93,7 @@ async function ensureBackboneHelpers(conn: Awaited<ReturnType<typeof getConn>>):
 
 /**
  * Resolves each (rank, name) pair to its Catalogue of Life accepted taxon id via
- * backbone.parquet — the same match rule scripts/build-col-taxon-ids.ts uses to
+ * backbone.parquet — the same match rule scripts/sync/outputs/build-col-taxon-ids.ts uses to
  * build the precomputed static-tree snapshot (COL_TAXON_IDS in
  * col-taxon-ids.json), just run live for names that snapshot can't cover: a
  * dynamic node's own ancestor chain (e.g. "Genus: Chaetodipus") is reached

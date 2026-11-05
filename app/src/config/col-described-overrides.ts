@@ -1,7 +1,7 @@
 /**
  * Overrides layered on top of a node's own SpeciesFilter when computing its
  * Catalogue-of-Life-derived "described species" count (colDescribed) — used by
- * scripts/build-taxa-summary.ts (which needs the raw name lists to build SQL) and by
+ * scripts/sync/outputs/build-taxa-summary.ts (which needs the raw name lists to build SQL) and by
  * the frontend (which needs human-readable notes to explain a number that would
  * otherwise look unexplained, e.g. "why does Bison SG show a number at all when its
  * filter is genus: bison and Catalogue of Life has no genus Bison?").

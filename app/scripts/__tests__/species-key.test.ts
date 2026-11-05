@@ -8,7 +8,7 @@
  * tried and has failed.
  */
 import { describe, it, expect } from "vitest";
-import { sameOrganism, isSeparatelyAssessed, decideKey, chooseRepresentative, epithetOf } from "../species-key";
+import { sameOrganism, isSeparatelyAssessed, decideKey, epithetOf } from "../sync/core/species-key";
 
 const CASES: Array<{ a: [string, string?]; b: [string, string?]; same: boolean; why: string }> = [
   // --- the same organism, renamed -------------------------------------------
@@ -179,36 +179,5 @@ describe("decideKey", () => {
       assessedNames: new Set(["fringilla polatzeki", "fringilla teydea"]),
     });
     expect(d.key).not.toBe("PARENT");
-  });
-});
-
-describe("chooseRepresentative", () => {
-  it("prefers the fuller key when CoL holds one organism twice", () => {
-    const r = chooseRepresentative([
-      { key: "VLCNP", count: 156, verdict: "own" as const },
-      { key: "37VD2", count: 5_371_684, verdict: "own" as const },
-    ]);
-    expect(r?.key).toBe("37VD2");
-  });
-
-  it("prefers an own match over a lumped one regardless of size", () => {
-    const r = chooseRepresentative([
-      { key: "LUMP", count: 999_999, verdict: "lumped" as const },
-      { key: "OWN", count: 1, verdict: "own" as const },
-    ]);
-    expect(r?.key).toBe("OWN");
-  });
-
-  it("returns nothing when every candidate was refused", () => {
-    expect(chooseRepresentative([{ key: "X", count: 5, verdict: "refused" as const }])).toBeUndefined();
-  });
-
-  it("is deterministic when counts tie", () => {
-    const cands = [
-      { key: "BBB", count: 10, verdict: "own" as const },
-      { key: "AAA", count: 10, verdict: "own" as const },
-    ];
-    expect(chooseRepresentative(cands)?.key).toBe("AAA");
-    expect(chooseRepresentative([...cands].reverse())?.key).toBe("AAA");
   });
 });

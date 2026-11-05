@@ -5,7 +5,7 @@
  * which would otherwise drop such rows from both an include and its
  * complementary exclude).
  *
- * Originally lived inline in scripts/build-taxa-summary.ts (used only against
+ * Originally lived inline in scripts/sync/outputs/build-taxa-summary.ts (used only against
  * the CoL species/ parquet, for colDescribed/colNe counts). Extracted so it can
  * also run against assessed.parquet at request time (src/lib/data/
  * scoped-taxa-summary-duckdb.ts) — the column names it references
