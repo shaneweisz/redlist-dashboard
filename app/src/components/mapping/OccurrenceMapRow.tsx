@@ -1495,8 +1495,10 @@ export default function OccurrenceMapRow({
   const [inatPhotos, setInatPhotos] = useState<InatObservation[]>([]);
   const [inatTotalCount, setInatTotalCount] = useState(0);
   const [loadingInatPhotos, setLoadingInatPhotos] = useState(false);
-  // The last photo fetch failed (GBIF error even after the server's retries).
-  // Shown as a retry prompt — an empty column reads as "no photos exist".
+  // The last photo fetch failed (GBIF error even after the server's retries —
+  // the list comes from GBIF's copy of the iNaturalist dataset, though the
+  // images are iNat's, so the prompt names iNaturalist, which is what the user
+  // sees). Shown as a retry prompt — an empty column reads as "no photos exist".
   const [inatPhotosFailed, setInatPhotosFailed] = useState(false);
 
   // Close filters popover on outside click
@@ -7509,7 +7511,7 @@ export default function OccurrenceMapRow({
                     </>
                   ) : inatPhotosFailed && !loadingInatPhotos ? (
                     <div className="flex flex-col items-center gap-1.5 px-2 py-4 text-center text-xs sm:text-[10px] text-zinc-500 dark:text-zinc-400">
-                      <span>Couldn&apos;t load photos from GBIF.</span>
+                      <span>Couldn&apos;t load iNaturalist observations.</span>
                       <button
                         type="button"
                         className="text-blue-600 dark:text-blue-400 hover:underline"
