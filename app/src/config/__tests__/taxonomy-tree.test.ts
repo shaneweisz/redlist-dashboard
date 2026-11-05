@@ -1408,24 +1408,22 @@ describe("Table 1a → default view mapping", () => {
 
 // ─── Precomputed summaries structure ──────────────────────────────────
 
-describe("table1a-children-summaries.json + ssc-group-children-summaries.json", () => {
+// Checks a sync's output against this code, so it needs the data: npm test with
+// app/data fetched, or the sync's own checks (PIPELINE_DATA_DIR = its build).
+// CI has no data and skips it.
+const SUMMARIES_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(process.cwd(), "data");
+const HAS_SUMMARIES = ["table1a-children-summaries.json", "ssc-group-children-summaries.json"]
+  .every((f) => fs.existsSync(path.join(SUMMARIES_DIR, f)));
+
+describe.skipIf(!HAS_SUMMARIES)("table1a-children-summaries.json + ssc-group-children-summaries.json", () => {
   // Merged the same way species-store.ts's getPrecomputedChildrenSummaries
   // does — the two files are a plain split (by "ssc-" id prefix) of what used
   // to be one node-children-summaries.json, so every check below still
   // applies to their union.
+  const read = (f: string) => (HAS_SUMMARIES ? JSON.parse(fs.readFileSync(path.join(SUMMARIES_DIR, f), "utf-8")) : {});
   const data = {
-    ...JSON.parse(
-      fs.readFileSync(
-        path.join(process.cwd(), "data/table1a-children-summaries.json"),
-        "utf-8"
-      )
-    ),
-    ...JSON.parse(
-      fs.readFileSync(
-        path.join(process.cwd(), "data/ssc-group-children-summaries.json"),
-        "utf-8"
-      )
-    ),
+    ...read("table1a-children-summaries.json"),
+    ...read("ssc-group-children-summaries.json"),
   };
 
   it("has entries for all parent nodes in the tree, except 'all' (deliberately excluded — see build-taxa-summary.ts)", () => {

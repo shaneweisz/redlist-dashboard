@@ -37,26 +37,16 @@ yarn-error.log*
 # sync script logs
 /logs
 
-# Red List data — fetched from private R2 by scripts/fetch-data-from-r2.ts.
-# Run `npm run fetch-data-from-r2` after cloning to populate locally.
-# Exceptions: small derived aggregates that tests/CI depend on are kept
-# in-repo so CI doesn't need R2 credentials.
+# A sync's data, fetched from private R2 by scripts/build/fetch-data-from-r2.ts
+# (and by prebuild). Run `npm run fetch-data-from-r2` after cloning. None of it
+# is committed: app/latest-sync.txt is the only pointer to it in git.
 # Build-time caches for the sync scripts; never published (see fetch-gbif-species).
 /.sync-cache/
 
 # Generated at build time by scripts/build-species-lists.ts (~40MB) — never commit.
 /public/species-lists/
 /public/search-shards/
-/data/*
-!/data/taxa-summary.json
-!/data/table1a-children-summaries.json
-!/data/ssc-group-children-summaries.json
-!/data/country-stats.json
-!/data/vernacular-names.json
-!/data/col-split-candidates.parquet
-!/data/col-synonym-assessed.parquet
-!/data/col-to-assessed.parquet
-!/data/col-revisions.json
+/data/
 
 # DuckDB httpfs extension — vendored at build time by scripts/fetch-duckdb-ext.ts
 # (downloaded, not committed; traced into the v2 function via next.config).

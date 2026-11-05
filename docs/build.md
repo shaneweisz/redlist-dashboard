@@ -45,6 +45,6 @@ Run them after changing the route, the row format, or the taxonomy code.
 
 API routes query the sync's parquets with DuckDB: the local `app/data/` copy when it's there (development), otherwise R2 over `httpfs`, since the deployed functions leave the large parquets out of their bundle (`next.config.ts`; `species-duckdb.ts` picks the source). Smaller files, the JSON summaries among them, are read from the deployment's own `app/data/`. Everything else on a page comes from live APIs (GBIF, Species+, OpenAlex and the others in the README).
 
-## Known wart
+## What git holds
 
-Nine files in `app/data/` are both committed to git and published with each sync (`taxa-summary.json`, `col-revisions.json`, the CoL match helpers and others), so every data PR carries their diff and the repo copy can drift from the sync's. They should come from R2 only; that change is planned with the move of the app onto the sync's core tables.
+None of a sync's data. `app/latest-sync.txt` is the only pointer to it, so a data PR is that one line, plus `app/src/config/` when the sync moves to a new CoL release (the release label and taxon ids, which the code imports). Tests that need real data skip in CI and run in the sync's checks ([sync.md](sync.md#checks)).

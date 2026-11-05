@@ -186,7 +186,7 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 
 ## What the app reads
 
-`build/data/`, the same layout as `app/data/`. Built from the core tables by `build-read-models.ts`, then the existing builders run against it (`PIPELINE_DATA_DIR`): the taxa summaries, CoL revisions, synonym index and search index.
+`build/data/`, the same layout as `app/data/`, and nothing else: it is exactly what gets uploaded. Built from the core tables by `outputs/build-read-models.ts`, then the other `outputs/` builders run against it in the same process: the taxa summaries, CoL revisions, synonym and search indexes, and CoL taxon ids. Intermediates only those builders read (the CoL and iNaturalist common-name tables) stay in `build/core/`.
 
 | File | What |
 |---|---|
@@ -194,15 +194,17 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 | `assessments.parquet` | published history, one per year, latest first; unpublished drafts left out |
 | `ne.parquet` | the Not Evaluated list (replaces `unassessed.parquet` and its synthetic ids) |
 | `species/` | the CoL universe, partitioned by group |
-| `taxa.parquet` / `backbone.parquet`, `assessment_link.parquet`, `species_link.parquet` | the core tables, and the link in the old shape for the CoL-differences code |
-| `taxa-summary.json` and friends, `col-revisions.json`, `synonym-index.parquet`, `name-index.parquet` | from the existing builders |
+| `taxa.parquet` | the taxonomy core table, which the CoL-differences, synonym and species-listing code queries |
+| `species_link.parquet` | the links as the app reads them: one row per assessed species and covered row, with its GBIF key |
+| `assessment_link.parquet` | the link core table, published for the comparison and for tracing |
+| `taxa-summary.json` and friends, `col-revisions.json`, the three `col-*` helper parquets, `synonym-index.parquet`, `name-index.parquet`, `rank-index.parquet` | from the other `outputs/` builders |
 | `sync.json` | every input version and check result |
 
 An assessed species' GBIF key is its counted usage with the most records, an *own* row before a *lumped* one. That is how *Hylatomus pileatus* links to *Dryocopus pileatus*'s page rather than its own 156 records. "Outdated" (assessed more than ten years ago) is measured from the sync date, not today's, so a page's numbers don't drift between syncs.
 
 ## Checks
 
-Three layers, from strict to advisory.
+Four layers, from strict to advisory.
 
 **1. Invariants, which stop the build.** Things that are true of any correct sync:
 - the Red List session is read-only; the snapshot is complete
@@ -212,7 +214,9 @@ Three layers, from strict to advisory.
 
 **2. Matching fixtures, which stop the build.** `fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `build-link.ts` is the quickest way to see what each matching rule is for.
 
-**3. The comparison, which is for review.** `compare.ts` reduces the new sync and the one production serves to the same fact tables, diffs every field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. The report lands in `build/compare/report.md`; unexplained differences don't stop the sync, they are what you read before publishing.
+**3. The data tests, which stop the build.** A few tests check a sync's output against the code: the assessed totals per group against IUCN's Table 1a, the taxonomy tree's precomputed summaries against its config, every country with data against the country names. CI has no data, so they skip there; the sync runs them against its own build (`DATA_TESTS` in `sync.ts`), and `sync:publish` refuses a build they failed. `npm test` runs them too wherever `app/data/` has been fetched. When the Red List publishes, `validate-table1a.test.ts` fails until its expected totals are updated to the new Table 1a: that is its job.
+
+**4. The comparison, which is for review.** `compare.ts` reduces the new sync and the one production serves to the same fact tables, diffs every field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. The report lands in `build/compare/report.md`; unexplained differences don't stop the sync, they are what you read before publishing.
 
 A reason is only as good as its bound. The rules come in three strengths:
 
@@ -252,13 +256,22 @@ Needs: Docker (for the matcher), the Red List Postgres reachable (see `DB_*` in 
 
 **When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes the XR GBIF indexes *now*, but a snapshot is keyed by the XR GBIF indexed when it was *made*: between GBIF moving and the next snapshot (COL26.10 XR went live just after the 1 November 2026 snapshot) the two disagree, and `build-occurrences` stops if more than 0.1% of the snapshot's records have keys the taxonomy doesn't hold. Wait for the next snapshot, or set `COL_XR_DATASET` to the snapshot's XR.
 
-**When IUCN publishes.** Point `DB_NAME` at the new database. Expect new species, new categories and count changes from moved assessment years.
+**When IUCN publishes.** Point `DB_NAME` at the new database, and update `validate-table1a.test.ts` to the new Table 1a. Expect new species, new categories and count changes from moved assessment years, and a longer matching queue: new species go through the matcher, and a renamed species' decision is asked again.
+
+**When both move in one month,** see one change at a time: build the new snapshot and XR on the old Red List into its own folder, then the new Red List against it.
+
+```bash
+PIPELINE_BUILD_DIR=~/.cache/redlist-dashboard/build-col npm run sync                        # snapshot + XR, against production
+DB_NAME=<new> npm run sync -- --baseline ~/.cache/redlist-dashboard/build-col/data           # + Red List, against that
+```
+
+Each comparison then explains one source's changes. Publish the second (or both, in order).
 
 **Rolling back.** Revert the data PR's `latest-sync.txt` change; the previous sync is still in R2 (the bucket is object-locked, nothing is ever deleted). One exception: syncs from before the rewrite lack `ne.parquet`, so going back past it means reverting the code too.
 
 ### Running parts
 
-Each step runs on its own: `npx tsx scripts/sync/core/build-taxa.ts` (likewise `core/build-assessments`, `core/build-occurrences`, `core/build-matches`, `core/build-link`, `outputs/build-read-models`, `checks/check-fixtures`). `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+Each step runs on its own: `npx tsx scripts/sync/core/build-taxa.ts` (likewise `core/build-assessments`, `core/build-occurrences`, `core/build-matches`, `core/build-link`, `outputs/build-read-models`, `checks/check-fixtures`). `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 

@@ -1,4 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// nodeIdForSpecies only needs each group's Not Evaluated count, which it reads
+// from the sync's taxa-summary.json. A fixed one keeps these tests off the data
+// (CI has none): insects far over NE_CAP, the rest well under it.
+vi.mock("@/lib/data/species-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/data/species-store")>()),
+  getTaxaSummary: () => [
+    { table1a_taxon_group: "beetles", col_ne: 900_000 },
+    { table1a_taxon_group: "velvet_worms", col_ne: 200 },
+    { table1a_taxon_group: "molluscs", col_ne: 60_000 },
+  ],
+}));
+
 import { resolveWhere, toSpeciesRow, nodeIdForSpecies } from "@/lib/data/species-duckdb";
 import { speciesRowKey, parseSpeciesRowKey, parseSpeciesParam, migratePinnedSpecies } from "@/lib/species-row-key";
 

@@ -25,6 +25,7 @@ export function publish(opts: { upload?: boolean } = {}): void {
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(OUT_DIR, "sync.json"), "utf-8"));
   if (manifest.fixtures?.failed?.length) throw new Error(`publish: the build's fixtures failed: ${manifest.fixtures.failed.join(", ")}`);
+  if (manifest.data_tests?.passed !== true) throw new Error("publish: the build's data tests didn't pass (see npm run sync's checks)");
 
   const appData = path.join(__dirname, "..", "..", "data");
   if (path.resolve(DATA_DIR) !== path.resolve(appData)) throw new Error("publish: unset PIPELINE_DATA_DIR; publish writes app/data");
@@ -33,17 +34,9 @@ export function publish(opts: { upload?: boolean } = {}): void {
   if (opts.upload !== false) {
     execFileSync("npx", ["tsx", "scripts/sync/upload-data-to-r2.ts"], { cwd: path.join(__dirname, "..", ".."), stdio: "inherit" });
   }
-  console.log(`\nStage the data PR with:\n  git add ${[...trackedDataFiles(), "app/latest-sync.txt", "app/src/config/"].join(" ")}`);
-}
-
-/**
- * The data/ files git tracks: exactly the ones .gitignore un-ignores by name,
- * read from it rather than kept as a second list that could drift.
- */
-export function trackedDataFiles(): string[] {
-  return fs.readFileSync(path.join(__dirname, "..", "..", ".gitignore"), "utf-8").split("\n")
-    .map((l) => l.trim()).filter((l) => l.startsWith("!/data/") && !l.endsWith("/"))
-    .map((l) => `app/${l.slice(2)}`);
+  // The sync's data lives in R2 only; git holds the pointer, and the CoL
+  // release and taxon-id configs the sync writes into src/config/.
+  console.log(`\nStage the data PR with:\n  git add app/latest-sync.txt app/src/config/`);
 }
 
 const isDirectRun = process.argv[1]?.endsWith("sync/publish.ts") || process.argv[1]?.endsWith("sync/publish.js");

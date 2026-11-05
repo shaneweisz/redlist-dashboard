@@ -16,6 +16,8 @@ Start a new git worktree (a dedicated branch checked out to its own directory) f
 
 ## Data resyncs: uploading to R2 is safe, merging `latest-sync.txt` is what goes live
 
+No sync data is committed: `app/data/` is fetched from R2, and a data PR is the one-line `app/latest-sync.txt` change (plus `app/src/config/` after a CoL release move).
+
 `npm run upload-data-to-r2` (`scripts/sync/upload-data-to-r2.ts`) pushes `app/data/` to a timestamped `syncs/<timestamp>/` prefix in the `dashboard-data` R2 bucket and updates the repo-tracked `app/latest-sync.txt` pointer file locally — but production only starts reading the new sync once that `latest-sync.txt` change is committed, pushed, and merged to main (prod's build/deploy pipeline is what actually fetches from R2 via `fetch-data-from-r2.ts`, keyed off whatever `latest-sync.txt` says on main). So it's safe to run the upload from a feature branch/worktree at any point once local data looks right — the upload itself is inert for prod until the `latest-sync.txt` bump lands on main via a normal PR merge. No need to hold off on uploading just because a PR is still in review.
 
 ## PR screenshots: Backblaze B2, not the repo

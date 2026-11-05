@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
-const DATA_DIR = path.join(__dirname, "../../data");
+const DATA_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(__dirname, "../../data");
 
 // Assessed-species counts per taxon group, from the official 2026-1 Table 1a
 // (https://nc.iucnredlist.org/redlist/content/attachment_files/2026-1_RL_Table1a.pdf,
@@ -55,10 +55,12 @@ const TABLE_1A_2026_1: Record<string, number> = {
 
 const TOTAL_EXPECTED = 175909;
 
-describe("taxa_summary vs Table 1a (2026-1)", () => {
+// Checks a sync's output, so it needs the data: npm test with app/data fetched,
+// or the sync's own checks (PIPELINE_DATA_DIR = its build). CI skips it.
+const summaryPath = path.join(DATA_DIR, "taxa-summary.json");
+
+describe.skipIf(!fs.existsSync(summaryPath))("taxa_summary vs Table 1a (2026-1)", () => {
   it("total_assessed per table1a_taxon_group matches Table 1a expected values", () => {
-    const summaryPath = path.join(DATA_DIR, "taxa-summary.json");
-    expect(fs.existsSync(summaryPath), "taxa-summary.json must exist").toBe(true);
 
     const data = JSON.parse(fs.readFileSync(summaryPath, "utf-8")) as Array<{
       table1a_taxon_group: string;
