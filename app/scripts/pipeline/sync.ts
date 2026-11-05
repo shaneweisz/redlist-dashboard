@@ -8,7 +8,11 @@
  *
  *   inputs     CoL XR + curated checklist (cached by dataset key), the Red List
  *              database (read-only), the GBIF snapshot mirror, iNaturalist names
- *   core       taxa → assessments → occurrence_counts → assessment_link
+ *   core       taxa → assessments → occurrence_counts → matches → assessment_link
+ *   matching   GBIF's matcher (matching-ws, run locally in Docker, pinned to the
+ *              XR) answers every Red List name; build-link takes the certain
+ *              answers and decisions.tsv for the rest, and writes the species
+ *              still waiting for a person to build/match-queue.tsv
  *   data       the read models, then the summary, CoL-revision, synonym and
  *              search builders run against them (PIPELINE_DATA_DIR)
  *   checks     matching fixtures (any failure stops the sync), and the
@@ -30,7 +34,9 @@ import { ensureInatNames } from "./inputs/inat";
 import { run as buildTaxa } from "./build-taxa";
 import { run as buildAssessments } from "./build-assessments";
 import { run as buildOccurrences } from "./build-occurrences";
-import { buildLink } from "./build-link";
+import { buildLink, summariseQueue } from "./build-link";
+import { buildMatches } from "./build-matches";
+import { ensureMatcher } from "./inputs/matcher";
 import { buildReadModels } from "./build-read-models";
 import { observe, mismatches } from "./check-fixtures";
 import { MATCHING_CASES } from "./fixtures/matching";
@@ -80,9 +86,23 @@ export async function sync(opts: { skipCompare?: boolean } = {}): Promise<void> 
   manifest.gbif = JSON.parse(fs.readFileSync(path.join(CORE_DIR, "occurrences.json"), "utf-8"));
   done();
 
-  done = step("link + read models");
+  done = step("match names");
   const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB" })).connect();
-  await buildLink(conn, CORE_DIR);
+  const matcher = await ensureMatcher(col.xr, col.nameUsage);
+  const m = await buildMatches(conn, CORE_DIR, matcher);
+  console.log(`   ${m.asked.toLocaleString()} names asked, ${m.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
+  done();
+
+  done = step("link + read models");
+  const { queue } = await buildLink(conn, CORE_DIR);
+  await conn.run(`COPY (SELECT * FROM read_parquet('${path.join(CORE_DIR, "match_queue.parquet")}'))
+    TO '${path.join(BUILD_DIR, "match-queue.tsv")}' (DELIMITER '\t', HEADER)`);
+  const [basis] = (await conn.runAndReadAll(`SELECT count(*) FILTER (basis = 'matcher') AS matcher, count(*) FILTER (basis = 'decision') AS decision,
+      count(*) FILTER (basis IS NULL) AS unlinked FROM read_parquet('${path.join(CORE_DIR, "assessment_link.parquet")}') WHERE role = 'primary'`)).getRowObjects();
+  manifest.matching = { matcher: matcher.version, xr: matcher.datasetKey, by_matcher: Number(basis.matcher), by_decision: Number(basis.decision),
+    unlinked: Number(basis.unlinked), queue: summariseQueue(queue) };
+  console.log(`   ${Number(basis.matcher).toLocaleString()} by the matcher, ${Number(basis.decision).toLocaleString()} by decisions.tsv, ` +
+    `${queue.length.toLocaleString()} queued for review (${path.join(BUILD_DIR, "match-queue.tsv")})`);
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames: inat });
   const [rl] = (await conn.runAndReadAll(`SELECT count(*) FILTER (is_latest) AS species, max(year_published) AS newest
     FROM read_parquet('${path.join(CORE_DIR, "assessments.parquet")}')`)).getRowObjects();

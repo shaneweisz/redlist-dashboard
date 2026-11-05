@@ -147,7 +147,7 @@ Live external APIs:
 ### GBIF integration
 The key innovation — linking assessment data to real-world observations:
 
-1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), and its GBIF records follow from that.
+1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/pipeline/decisions.tsv`) where it isn't, and its GBIF records follow from that.
 2. **Observation counts**: from GBIF's monthly snapshot, not the API. A species counts every record filed under its own name, its synonyms, its subspecies and their DNA-barcode BINs, minus any usage another assessed species owns (a split IUCN assesses that CoL files as a subspecies, for instance). **Total GBIF** (georeferenced records), **New GBIF** (records after the assessment year), and the all-records count behind the toggle. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only georeferenced record a species has.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
 4. **Quality filters**: georeferenced means coordinates without a GBIF geospatial issue (the codes GBIF's own `hasGeospatialIssue` acts on, checked against the API).
@@ -157,7 +157,7 @@ CoL supplies the described-species universe behind the new-assessments view — 
 
 ## Data Sync Pipeline
 
-The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
+The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally), reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
 
 ```bash
 # 1. Mirror the new GBIF snapshot (~255 GiB, public, no account)
@@ -166,7 +166,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes from cached inputs)
 cd app && npm run sync
 
-# 3. Read build/compare/report.md, then publish
+# 3. Read build/compare/report.md (and build/match-queue.tsv, the species waiting on a decision), then publish
 npm run sync:publish        # copies the build into app/data, uploads to R2, bumps app/latest-sync.txt
 ```
 
