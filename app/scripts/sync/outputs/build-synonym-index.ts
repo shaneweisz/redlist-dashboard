@@ -20,19 +20,20 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens (matches the rest of the pipeline)
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
-  const bb = path.join(dir, "taxa.parquet");
-  const link = path.join(dir, "species_link.parquet");
-  const asd = path.join(dir, "assessed.parquet");
-  const speciesGlob = path.join(dir, "species", "**", "*.parquet");
-  if (!fs.existsSync(bb) || !fs.existsSync(path.join(dir, "species"))) {
+  const bb = path.join(dir, syncPath("taxa.parquet"));
+  const link = path.join(dir, syncPath("species_link.parquet"));
+  const asd = path.join(dir, syncPath("assessed.parquet"));
+  const speciesGlob = path.join(dir, syncPath("species"), "**", "*.parquet");
+  if (!fs.existsSync(bb) || !fs.existsSync(path.join(dir, syncPath("species")))) {
     throw new Error(`build-synonym-index: backbone/species not found in ${dir} (run the sync first)`);
   }
-  const out = path.join(dir, "synonym-index.parquet");
+  const out = path.join(dir, syncPath("synonym-index.parquet"));
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await conn.run(`

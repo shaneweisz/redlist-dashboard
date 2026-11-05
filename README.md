@@ -180,7 +180,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 cd app && npm run sync
 
 # 3. Read build/compare/report.md (and build/match-queue.tsv, the species waiting on a decision), then publish
-npm run sync:publish        # copies the build into app/data, uploads to R2, bumps app/latest-sync.txt
+npm run sync:publish        # copies the build into app/data/sync, uploads to R2, bumps app/latest-sync.txt
 ```
 
 `npm run sync:publish` prints the `git add` line for the data PR. The inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).
@@ -190,7 +190,7 @@ npm run sync:publish        # copies the build into app/data, uploads to R2, bum
 ```bash
 cd app
 npm install
-npm run fetch-data-from-r2   # populates app/data/ from private R2 (requires R2 creds in .env.local)
+npm run fetch-data-from-r2   # populates app/data/sync/ from private R2 (requires R2 creds in .env.local)
 npm run dev
 ```
 
@@ -207,13 +207,13 @@ The data lives in a private R2 bucket rather than in the repo, so the first step
 | `npm run start` | app | Start the production server |
 | `npm run lint` / `npm test` / `npm run test:watch` | app | ESLint; Vitest, once or watching |
 | `npm run test:coverage` | app | Tests with a coverage report (scoped to the `src` logic layer; HTML in `coverage/`) |
-| `npm run fetch-data-from-r2` | build | Download the sync pinned in `app/latest-sync.txt` into `app/data/` |
+| `npm run fetch-data-from-r2` | build | Download the sync pinned in `app/latest-sync.txt` into `app/data/sync/` |
 | `npm run fetch-duckdb-ext` | build | Pre-fetch DuckDB's `httpfs` extension for Vercel's runtime |
 | `npm run build-species-lists` / `build-search-shards` / `build-tree-children` | build | The pre-built static files (each runs in `prebuild`) |
 | `npm run sync` | sync | Build and check a data release from the inputs |
-| `npm run sync:publish` | sync | Copy the build into `app/data/`, upload it, bump `app/latest-sync.txt` |
+| `npm run sync:publish` | sync | Copy the build into `app/data/sync/`, upload it, bump `app/latest-sync.txt` |
 | `npm run sync:compare` | sync | Compare a data directory with the sync production serves |
-| `npm run upload-data-to-r2` | sync | Upload `app/data/` as a new timestamped sync (`sync:publish` runs it) |
+| `npm run upload-data-to-r2` | sync | Upload `app/data/sync/` as a new timestamped sync (`sync:publish` runs it) |
 | `npm run build-narratives` / `upload-narratives-to-r2` | publish | The narrative-search parquets, once per Red List release |
 
 Everything else runs with `npx tsx scripts/<folder>/<script>.ts`; [`app/scripts/README.md`](app/scripts/README.md) lists every script by folder.

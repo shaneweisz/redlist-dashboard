@@ -186,19 +186,26 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 
 ## What the app reads
 
-`build/data/`, the same layout as `app/data/`, and nothing else: it is exactly what gets uploaded. Built from the core tables by `outputs/build-read-models.ts`, then the other `outputs/` builders run against it in the same process: the taxa summaries, CoL revisions, synonym and search indexes, and CoL taxon ids. Intermediates only those builders read (the CoL and iNaturalist common-name tables) stay in `build/core/`.
+`build/data/`, which is exactly what gets uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch: the same tree in all three places. Each run starts it empty, so no file outlives the code that wrote it. Built from the core tables by `outputs/build-read-models.ts`, then the other `outputs/` builders run against it in the same process. Intermediates only those builders read (the CoL and iNaturalist common-name tables) stay in `build/core/`.
 
-| File | What |
-|---|---|
-| `assessed.parquet` | one row per assessed species: latest assessment, GBIF key and counts, latest credits. Lists stay `;`-joined so the app's filter SQL is unchanged. |
-| `assessments.parquet` | published history, one per year, latest first; unpublished drafts left out |
-| `ne.parquet` | the Not Evaluated list (replaces `unassessed.parquet` and its synthetic ids) |
-| `species/` | the CoL universe, partitioned by group |
-| `taxa.parquet` | the taxonomy core table, which the CoL-differences, synonym and species-listing code queries |
-| `species_link.parquet` | the links as the app reads them: one row per assessed species and covered row, with its GBIF key |
-| `assessment_link.parquet` | the link core table, published for the comparison and for tracing |
-| `taxa-summary.json` and friends, `col-revisions.json`, the three `col-*` helper parquets, `synonym-index.parquet`, `name-index.parquet`, `rank-index.parquet` | from the other `outputs/` builders |
-| `sync.json` | every input version and check result |
+Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of them: everything reads a file by its name (`syncPath("assessed.parquet")` is `lists/assessed.parquet`), so a file moves by moving its line there.
+
+| Folder | Files | What |
+|---|---|---|
+| `lists/` | `assessed.parquet` | one row per assessed species: latest assessment, GBIF key and counts, latest credits. Lists stay `;`-joined so the app's filter SQL is unchanged |
+| | `assessments.parquet` | published history, one per year, latest first; unpublished drafts left out |
+| | `ne.parquet` | the Not Evaluated list |
+| | `species/` | the CoL universe, partitioned by group |
+| `taxonomy/` | `taxa.parquet` | the taxonomy core table, which the CoL-differences, synonym and species-listing code queries |
+| | `species_link.parquet` | the links as the app reads them: one row per assessed species and covered row, with its GBIF key |
+| | `assessment_link.parquet` | the link core table, published for the comparison and for tracing |
+| | `col-revisions.json`, the three `col-*` parquets | the CoL-differences card: each species' flag, and the precomputed tables its breakdowns join |
+| | `vernacular-names.json` | common names for the tree's class, order, family and genus labels |
+| `search/` | `name-index.parquet`, `rank-index.parquet`, `synonym-index.parquet` | the search bar |
+| `summaries/` | `taxa-summary.json`, the two children summaries, `country-stats.json`, `realm-stats.json` | per-group and per-place totals |
+| | `sync.json` | every input version and check result |
+
+Not sync data, and siblings of `app/data/sync/`: `app/data/narratives/` (per Red List release, from `narratives/<release>/` in R2 or built locally) and `app/data/overlays/` (map layers, from the maps bucket or built locally).
 
 An assessed species' GBIF key is its counted usage with the most records, an *own* row before a *lumped* one. That is how *Hylatomus pileatus* links to *Dryocopus pileatus*'s page rather than its own 156 records. "Outdated" (assessed more than ten years ago) is measured from the sync date, not today's, so a page's numbers don't drift between syncs.
 
@@ -241,7 +248,7 @@ cd app && npm run sync
 
 # 3. Read ~/.cache/redlist-dashboard/build/compare/report.md, and build/match-queue.tsv for species waiting on a decision
 
-# 4. Publish: copies the build into app/data, uploads to a new syncs/<timestamp>/, bumps latest-sync.txt
+# 4. Publish: copies the build into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
 
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.

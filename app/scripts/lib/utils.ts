@@ -124,8 +124,13 @@ export function toTitleCase(s: string): string {
 // CSV UTILITIES
 // =============================================================================
 
-/** app/data, unless the pipeline points a builder at its own output (PIPELINE_DATA_DIR). */
-export const DATA_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(__dirname, "..", "..", "data");
+/**
+ * One sync's files: app/data/sync, unless the pipeline points a builder at its
+ * own output (PIPELINE_DATA_DIR). Laid out as src/lib/data/sync-layout.ts says.
+ */
+export const DATA_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(__dirname, "..", "..", "data", "sync");
+/** The searchable narratives, built per Red List release (scripts/narratives/). */
+export const NARRATIVES_DIR = path.join(__dirname, "..", "..", "data", "narratives");
 export const REDLIST_DIR = path.join(DATA_DIR, "redlist");
 export const GBIF_DIR = path.join(DATA_DIR, "gbif");
 

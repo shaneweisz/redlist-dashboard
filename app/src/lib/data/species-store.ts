@@ -7,6 +7,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { syncPath } from "./sync-layout";
 import { countryToRegion } from "../regions";
 import type { ColRevision } from "../col-revision";
 import type { NoMatchReason, NoMatchDetail } from "./col-breakdown";
@@ -20,13 +21,13 @@ import {
 // PATHS
 // =============================================================================
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const TAXA_SUMMARY_PATH = path.join(DATA_DIR, "taxa-summary.json");
-const TABLE1A_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, "table1a-children-summaries.json");
-const SSC_GROUP_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, "ssc-group-children-summaries.json");
-const COUNTRY_STATS_PATH = path.join(DATA_DIR, "country-stats.json");
-const REALM_STATS_PATH = path.join(DATA_DIR, "realm-stats.json");
-const COL_REVISIONS_PATH = path.join(DATA_DIR, "col-revisions.json");
+const DATA_DIR = path.join(process.cwd(), "data", "sync");
+const TAXA_SUMMARY_PATH = path.join(DATA_DIR, syncPath("taxa-summary.json"));
+const TABLE1A_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, syncPath("table1a-children-summaries.json"));
+const SSC_GROUP_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, syncPath("ssc-group-children-summaries.json"));
+const COUNTRY_STATS_PATH = path.join(DATA_DIR, syncPath("country-stats.json"));
+const REALM_STATS_PATH = path.join(DATA_DIR, syncPath("realm-stats.json"));
+const COL_REVISIONS_PATH = path.join(DATA_DIR, syncPath("col-revisions.json"));
 
 // =============================================================================
 // TYPES

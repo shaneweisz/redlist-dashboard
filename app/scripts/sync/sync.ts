@@ -48,6 +48,7 @@ import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
 import { BUILD_DIR, CORE_DIR, OUT_DIR } from "./paths";
+import { syncPath } from "../../src/lib/data/sync-layout";
 
 const APP = path.join(__dirname, "..", "..");
 
@@ -62,8 +63,9 @@ function git(...args: string[]): string {
 }
 
 /** Tests that read a sync's output (see the checks step), and the files they read. */
-const DATA_TESTS = ["scripts/__tests__/validate-table1a.test.ts", "src/config/__tests__/taxonomy-tree.test.ts", "src/lib/__tests__/countries.test.ts"];
-const DATA_TEST_FILES = ["taxa-summary.json", "table1a-children-summaries.json", "ssc-group-children-summaries.json", "country-stats.json"];
+const DATA_TESTS = ["scripts/__tests__/validate-table1a.test.ts", "src/config/__tests__/taxonomy-tree.test.ts", "src/lib/__tests__/countries.test.ts",
+  "src/lib/__tests__/col-revisions-data.test.ts"];
+const DATA_TEST_FILES = ["taxa-summary.json", "table1a-children-summaries.json", "ssc-group-children-summaries.json", "country-stats.json", "col-revisions.json"];
 
 /**
  * @param baseline a data directory to compare against instead of the sync
@@ -74,6 +76,11 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   fs.mkdirSync(BUILD_DIR, { recursive: true });
   const manifest: Record<string, unknown> = { built_at: new Date().toISOString(), commit: git("rev-parse", "HEAD"),
     dirty: git("status", "--porcelain", "--", "scripts", "src").length > 0 };
+
+  // data/ is exactly what gets uploaded, so it starts empty: a file only an
+  // older version wrote would otherwise be published with every sync after it.
+  fs.rmSync(OUT_DIR, { recursive: true, force: true });
+  fs.mkdirSync(OUT_DIR, { recursive: true });
 
   let done = step("inputs");
   const col = await ensureColInputs();
@@ -121,7 +128,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   await buildColRevisions({ dataDir: OUT_DIR });
   await buildSynonymIndex({ dataDir: OUT_DIR });
   await buildSearchIndex({ dataDir: OUT_DIR, coreDir: CORE_DIR, inatNames: inat });
-  await buildColTaxonIds({ taxaPath: path.join(OUT_DIR, "taxa.parquet") });
+  await buildColTaxonIds({ taxaPath: path.join(OUT_DIR, syncPath("taxa.parquet")) });
   writeReleaseMetadata(col.xr, col.checklist);
   done();
 
@@ -131,7 +138,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   const failed = MATCHING_CASES.filter((c) => !c.knownBug && mismatches(c, obs.get(c.name)!).length > 0);
   manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };
   if (failed.length > 0) {
-    fs.writeFileSync(path.join(OUT_DIR, "sync.json"), JSON.stringify(manifest, null, 2) + "\n");
+    fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
     throw new Error(`sync: ${failed.length} matching fixtures fail: ${failed.map((c) => `${c.name} (${mismatches(c, obs.get(c.name)!).join("; ")})`).join(", ")}`);
   }
   // The tests that check a sync's output against the code (Table 1a totals, the
@@ -139,14 +146,14 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   // this is where they run. The files they read are checked first: a missing one
   // would skip its test, not fail it.
   for (const f of DATA_TEST_FILES) {
-    if (!fs.existsSync(path.join(OUT_DIR, f))) throw new Error(`sync: ${f} was not built`);
+    if (!fs.existsSync(path.join(OUT_DIR, syncPath(f)))) throw new Error(`sync: ${f} was not built`);
   }
   try {
     execFileSync("npx", ["vitest", "run", ...DATA_TESTS], { cwd: APP, stdio: "inherit", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR } });
     manifest.data_tests = { files: DATA_TESTS, passed: true };
   } catch {
     manifest.data_tests = { files: DATA_TESTS, passed: false };
-    fs.writeFileSync(path.join(OUT_DIR, "sync.json"), JSON.stringify(manifest, null, 2) + "\n");
+    fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
     throw new Error("sync: the data tests fail against this build (output above)");
   }
   if (!opts.skipCompare) {
@@ -159,7 +166,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   }
   done();
 
-  fs.writeFileSync(path.join(OUT_DIR, "sync.json"), JSON.stringify(manifest, null, 2) + "\n");
+  fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
   console.log(`\nBuilt ${OUT_DIR}. Review the report, then: npm run sync:publish`);
 }
 

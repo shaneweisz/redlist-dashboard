@@ -22,6 +22,7 @@ import * as os from "os";
 import * as path from "path";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { COL_DOMESTIC_EXCLUDE_NAMES } from "../../../../src/config/col-described-overrides";
+import { syncPath } from "../../../../src/lib/data/sync-layout";
 
 export const FACT_KINDS = ["assessed", "ne", "groups", "nodes", "countries", "realms", "col_revisions"] as const;
 export type FactKind = (typeof FACT_KINDS)[number];
@@ -31,8 +32,20 @@ export type Layout = "v1" | "v2";
 /** Red List categories as they appear in summary maps; missing ones read as 0. */
 const CATEGORIES = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD", "LR/cd", "LR/nt", "LR/lc"];
 
+/**
+ * A sync file in a data directory of either shape: grouped into folders
+ * (src/lib/data/sync-layout.ts), or flat, as every sync before 2026-11-05 was.
+ * Names that only old layouts had resolve flat.
+ */
+export function inSync(dir: string, name: string): string {
+  let nested: string | null = null;
+  try { nested = path.join(dir, syncPath(name)); } catch { /* not in the current layout */ }
+  if (nested && fs.existsSync(nested)) return nested;
+  return path.join(dir, name);
+}
+
 export function detectLayout(dir: string): Layout {
-  if (fs.existsSync(path.join(dir, "assessment_link.parquet"))) return "v2";
+  if (fs.existsSync(inSync(dir, "assessment_link.parquet"))) return "v2";
   if (fs.existsSync(path.join(dir, "unassessed.parquet")) && fs.existsSync(path.join(dir, "species_link.parquet"))) {
     return "v1";
   }
@@ -67,7 +80,7 @@ async function loadRows(conn: DuckDBConnection, table: string, rows: Record<stri
 }
 
 function readJson<T>(dir: string, name: string): T | null {
-  const p = path.join(dir, name);
+  const p = inSync(dir, name);
   return fs.existsSync(p) ? (JSON.parse(fs.readFileSync(p, "utf-8")) as T) : null;
 }
 
@@ -121,7 +134,7 @@ async function loadSummaryFacts(conn: DuckDBConnection, schema: string, dir: str
  * so the facts are what the app shows, not what the files happen to contain.
  */
 async function loadV1(conn: DuckDBConnection, schema: string, dir: string): Promise<void> {
-  const f = (name: string) => q(path.join(dir, name));
+  const f = (name: string) => q(inSync(dir, name));
   const link = f("species_link.parquet");
 
   await conn.run(`CREATE TABLE ${schema}.assessed AS
@@ -146,7 +159,7 @@ async function loadV1(conn: DuckDBConnection, schema: string, dir: string): Prom
       WHERE sl.src = 'gbif' AND sl.col_id IS NOT NULL GROUP BY sl.col_id)
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
-    FROM read_parquet(${q(path.join(dir, "species", "**", "*.parquet"))}, hive_partitioning=true) u
+    FROM read_parquet(${q(path.join(inSync(dir, "species"), "**", "*.parquet"))}, hive_partitioning=true) u
     LEFT JOIN gbif g ON g.col_id = u.col_id
     WHERE u.in_base
       AND (u.extinct IS NOT TRUE OR u.col_id IN (SELECT col_id FROM ex_ew))
@@ -162,7 +175,7 @@ async function loadV1(conn: DuckDBConnection, schema: string, dir: string): Prom
  * so the report lists them as baseline-only rather than as every row removed.
  */
 async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Promise<void> {
-  const f = (name: string) => q(path.join(dir, name));
+  const f = (name: string) => q(inSync(dir, name));
   await conn.run(`CREATE TABLE ${schema}.assessed AS
     SELECT CAST(a.id AS VARCHAR) AS key, a.* EXCLUDE (id), l.col_id AS link_col_id, l.method AS link_method
     FROM read_parquet(${f("assessed.parquet")}) a
@@ -179,7 +192,7 @@ async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Prom
       WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW'))
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
-    FROM read_parquet(${q(path.join(dir, "species", "**", "*.parquet"))}, hive_partitioning=true) u
+    FROM read_parquet(${q(path.join(inSync(dir, "species"), "**", "*.parquet"))}, hive_partitioning=true) u
     JOIN read_parquet(${f("taxa.parquet")}) t ON t.col_id = u.col_id
     LEFT JOIN read_parquet(${f("ne.parquet")}) g ON g.col_id = u.col_id
     WHERE u.in_base

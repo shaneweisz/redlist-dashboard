@@ -34,7 +34,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Client } from "pg";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { loadEnvFiles, DATA_DIR } from "../lib/utils";
+import { loadEnvFiles, NARRATIVES_DIR } from "../lib/utils";
 import { indexPostings } from "../../src/lib/redlist/narrative-terms";
 
 /** The narrative fields, in the order the Red List website reads them. */
@@ -76,11 +76,12 @@ export function plainText(html: string): string {
 
 export async function run(): Promise<void> {
   loadEnvFiles();
-  const narrativesOut = path.join(DATA_DIR, "narratives.parquet");
-  const indexOut = path.join(DATA_DIR, "narrative-index.parquet");
-  const dictOut = path.join(DATA_DIR, "narrative-terms.parquet");
-  const lengthsOut = path.join(DATA_DIR, "narrative-lengths.parquet");
-  const scratch = path.join(DATA_DIR, "narrative-scratch");
+  fs.mkdirSync(NARRATIVES_DIR, { recursive: true });
+  const narrativesOut = path.join(NARRATIVES_DIR, "narratives.parquet");
+  const indexOut = path.join(NARRATIVES_DIR, "narrative-index.parquet");
+  const dictOut = path.join(NARRATIVES_DIR, "narrative-terms.parquet");
+  const lengthsOut = path.join(NARRATIVES_DIR, "narrative-lengths.parquet");
+  const scratch = path.join(NARRATIVES_DIR, "narrative-scratch");
   fs.mkdirSync(scratch, { recursive: true });
 
   const pg = new Client({

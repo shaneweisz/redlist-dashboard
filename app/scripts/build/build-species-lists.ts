@@ -3,7 +3,7 @@
  *
  * Writes, for every taxon_group partition, the exact rows /api/redlist/species would
  * return for it — `<group>.assessed.json.br` and `<group>.ne.json.br` — plus a small
- * `manifest.json`, into public/species-lists/<sync>/. The browser (lib/species-lists)
+ * `manifest.json`, into public/prebuilt/<sync>/species-lists/. The browser (lib/species-lists)
  * fetches the groups a view needs and filters every deeper drilldown locally, so no
  * species-list request waits on a DuckDB query over R2 (4-23s cold in production).
  *
@@ -26,10 +26,12 @@ import zlib from "node:zlib";
 import { promisify } from "node:util";
 import { getConn, parquetUri, querySpecies } from "../../src/lib/data/species-duckdb";
 import { encodeColumns, speciesListFileName, type SpeciesListKind, type SpeciesListManifest } from "../../src/lib/species-lists/format";
+import { syncPath } from "../../src/lib/data/sync-layout";
 
 const brotli = promisify(zlib.brotliCompress);
 const APP_DIR = path.join(__dirname, "..", "..");
-const OUT_ROOT = path.join(APP_DIR, "public", "species-lists");
+/** Everything the build pre-builds, by sync: public/prebuilt/<sync>/{species-lists,search-shards,tree}/. */
+const PREBUILT = path.join(APP_DIR, "public", "prebuilt");
 
 async function compress(json: string): Promise<Buffer> {
   return brotli(json, {
@@ -44,11 +46,12 @@ async function compress(json: string): Promise<Buffer> {
 async function main() {
   const t0 = Date.now();
   const sync = fs.readFileSync(path.join(APP_DIR, "latest-sync.txt"), "utf-8").trim();
-  if (!fs.existsSync(path.join(APP_DIR, "data", "assessed.parquet"))) {
-    throw new Error("data/assessed.parquet missing — run fetch-data-from-r2 first (this builds from local data, never from R2)");
+  if (!fs.existsSync(path.join(APP_DIR, "data", "sync", syncPath("assessed.parquet")))) {
+    throw new Error("data/sync/" + syncPath("assessed.parquet") + " missing — run fetch-data-from-r2 first (this builds from local data, never from R2)");
   }
-  const outDir = path.join(OUT_ROOT, sync);
-  fs.rmSync(OUT_ROOT, { recursive: true, force: true }); // drop any previous sync's files
+  const outDir = path.join(PREBUILT, sync, "species-lists");
+  // The first prebuild step after the fetch: drop every previous sync's pre-built files.
+  fs.rmSync(PREBUILT, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
 
   // Every partition of species/ (the NE universe) plus every group that has an assessed
@@ -57,7 +60,7 @@ async function main() {
   const assessedGroups = (await conn.runAndReadAll(
     `SELECT DISTINCT taxon_group FROM '${parquetUri("assessed.parquet")}' WHERE taxon_group IS NOT NULL`,
   )).getRowObjects().map((r) => String(r.taxon_group));
-  const partitionGroups = fs.readdirSync(path.join(APP_DIR, "data", "species"))
+  const partitionGroups = fs.readdirSync(path.join(APP_DIR, "data", "sync", syncPath("species")))
     .filter((d) => d.startsWith("taxon_group=")).map((d) => d.slice("taxon_group=".length));
   const groups = [...new Set([...assessedGroups, ...partitionGroups])].sort();
 
@@ -94,7 +97,7 @@ async function main() {
   const total = Object.values(manifest.groups).reduce((s, g) => s + g.assessed.bytes + g.ne.bytes, 0);
   const rows = Object.values(manifest.groups).reduce((s, g) => s + g.assessed.rows + g.ne.rows, 0);
   console.log(`species-lists: ${groups.length} groups, ${rows.toLocaleString()} rows, ` +
-    `${(rawBytes / 1e6).toFixed(0)}MB → ${(total / 1e6).toFixed(1)}MB brotli in ${((Date.now() - t0) / 1000).toFixed(1)}s → public/species-lists/${sync}/`);
+    `${(rawBytes / 1e6).toFixed(0)}MB → ${(total / 1e6).toFixed(1)}MB brotli in ${((Date.now() - t0) / 1000).toFixed(1)}s → public/prebuilt/${sync}/species-lists/`);
   process.exit(0); // DuckDB keeps the event loop alive
 }
 
