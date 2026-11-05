@@ -35,10 +35,19 @@ const BACKOFF_MS = 400;
  */
 export async function gbifJson(url: string): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": GBIF_USER_AGENT },
-      cache: "no-store",
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": GBIF_USER_AGENT },
+        cache: "no-store",
+      });
+    } catch (err) {
+      // A connection that drops before any status ("fetch failed", reset) is
+      // as transient as a 503, and used to escape the backoff entirely.
+      if (attempt === MAX_RETRIES) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * BACKOFF_MS));
+      continue;
+    }
     if (response.ok) return response.json();
 
     const retryable = response.status === 429 || response.status >= 500;

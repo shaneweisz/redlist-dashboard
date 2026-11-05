@@ -1495,6 +1495,9 @@ export default function OccurrenceMapRow({
   const [inatPhotos, setInatPhotos] = useState<InatObservation[]>([]);
   const [inatTotalCount, setInatTotalCount] = useState(0);
   const [loadingInatPhotos, setLoadingInatPhotos] = useState(false);
+  // The last photo fetch failed (GBIF error even after the server's retries).
+  // Shown as a retry prompt — an empty column reads as "no photos exist".
+  const [inatPhotosFailed, setInatPhotosFailed] = useState(false);
 
   // Close filters popover on outside click
   useEffect(() => {
@@ -1976,15 +1979,22 @@ export default function OccurrenceMapRow({
     if (countryCode) {
       params.set("country", countryCode);
     }
+    setInatPhotosFailed(false);
     fetch(`/api/species/${speciesKey}/inat-photos?${params}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`inat-photos HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         if (data.observations) {
           setInatPhotos(data.observations);
           if (data.totalCount) setInatTotalCount(data.totalCount);
         }
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        setInatPhotosFailed(true);
+      })
       .finally(() => setLoadingInatPhotos(false));
   }, [speciesKey, countryCode]);
 
@@ -7438,7 +7448,7 @@ export default function OccurrenceMapRow({
             {!fullscreen && (!breakdown || breakdown.iNaturalist > 0) && (
             <div className="order-2 sm:order-none sm:w-44 shrink-0 flex flex-col gap-2">
               {/* iNat photo grid — only shown when photos exist or loading */}
-              {(inatPhotos.length > 0 || loadingInatPhotos) && (
+              {(inatPhotos.length > 0 || loadingInatPhotos || inatPhotosFailed) && (
                 <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden relative z-10">
                   {/* Header */}
                   <div className="px-2 py-1.5 text-xs sm:text-[10px] font-medium text-zinc-500 dark:text-zinc-400 text-center border-b border-zinc-100 dark:border-zinc-800">
@@ -7497,6 +7507,17 @@ export default function OccurrenceMapRow({
                         </div>
                       )}
                     </>
+                  ) : inatPhotosFailed && !loadingInatPhotos ? (
+                    <div className="flex flex-col items-center gap-1.5 px-2 py-4 text-center text-xs sm:text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span>Couldn&apos;t load photos from GBIF.</span>
+                      <button
+                        type="button"
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                        onClick={() => fetchInatPhotos(inatPage, pageSize)}
+                      >
+                        Try again
+                      </button>
+                    </div>
                   ) : (
                     <div className="flex items-center justify-center py-6">
                       <svg className="w-4 h-4 animate-spin text-zinc-400" fill="none" viewBox="0 0 24 24">

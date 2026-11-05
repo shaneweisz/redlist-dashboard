@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_CHECKLIST_KEY } from "@/lib/gbif";
+import { gbifJson } from "@/lib/gbif-fetch";
 
 interface InatObservation {
   url: string;
@@ -41,16 +42,22 @@ export async function GET(
       ...(country ? { country: country.toUpperCase() } : {}),
     });
 
-    const resp = await fetch(
+    // Through gbifJson (User-Agent, 429/5xx/network backoff), and a failure is
+    // an error, not an empty page: this used to answer any non-OK GBIF response
+    // with { observations: [] } at 200, which the panel rendered as an empty
+    // iNaturalist column for a species with 22 photographed records.
+    const data = (await gbifJson(
       `https://api.gbif.org/v1/occurrence/search?${queryParams}`
-    );
-
-    if (!resp.ok) {
-      return NextResponse.json({ observations: [], totalCount: 0 });
+    )) as {
+      count?: number;
+      // Narrowed by the filter/map annotations below, as before.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      results?: any[];
+    };
+    if (typeof data?.count !== "number") {
+      throw new Error("GBIF search response had no count");
     }
-
-    const data = await resp.json();
-    const totalCount = data.count || 0;
+    const totalCount = data.count;
 
     const observations: InatObservation[] = (data.results || [])
       .filter(
@@ -106,10 +113,10 @@ export async function GET(
 
     return NextResponse.json({ observations, totalCount }, { headers: CACHE_5M });
   } catch (error) {
-    console.error("Error fetching iNat photos:", error);
+    console.error(`Error fetching iNat photos for ${speciesKey}:`, error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 502 }
     );
   }
 }
