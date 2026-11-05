@@ -171,7 +171,7 @@ describe("computeNoMatchDetails — the query, not just the classifier", () => {
     expect(byId.get(10)?.detail).toBe("Lump winnerus");
   });
 
-  // A backbone built before build-backbone stamped the checklist columns is a
+  // A backbone built before build-taxa stamped the checklist columns is a
   // perfectly usable backbone that simply lacks three columns. Referencing one
   // anyway is a Binder Error that fails the whole query — which is how every
   // live-drilldown breakdown started returning a 500 while the data sync,

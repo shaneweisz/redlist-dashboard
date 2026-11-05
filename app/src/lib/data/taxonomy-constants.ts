@@ -1,5 +1,5 @@
 /**
- * Shared constants used by species-store.ts (runtime) and build-parquet.ts
+ * Shared constants used by species-store.ts (runtime) and build-read-models.ts
  * (build time).
  */
 

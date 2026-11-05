@@ -4,8 +4,7 @@ name: Deploy Supabase migrations
 # project on merge to main, per Supabase's own recommended CI/CD workflow:
 # https://supabase.com/docs/guides/deployment/managing-environments
 #
-# Safety notes (this repo is public, mirrors the data-sync workflow's
-# reasoning — see weekly-sync.yml):
+# Safety notes (this repo is public):
 #   - Only triggers on push to main (a merge) or a manual workflow_dispatch —
 #     never pull_request/pull_request_target, so a fork PR can't run this
 #     with access to the secrets below or tamper with this file.

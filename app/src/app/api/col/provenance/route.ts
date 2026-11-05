@@ -26,7 +26,7 @@
  * record is 5/5 trustworthy in the same breath as "CoL may not have caught up
  * here" is a contradiction, and the score is the half that is not ours to make.
  *
- * None of this is in our own backbone: build-backbone reads NameUsage.tsv, which
+ * None of this is in our own backbone: build-taxa reads NameUsage.tsv, which
  * carries names and ranks, not sectors. It takes three ChecklistBank calls to
  * assemble — taxon → sector → source dataset — which is why it lives behind one
  * route rather than being fetched from the browser.

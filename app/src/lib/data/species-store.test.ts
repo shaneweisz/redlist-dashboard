@@ -6,13 +6,8 @@ vi.mock("fs", () => ({
   readFileSync: vi.fn(() => "{}"),
 }));
 
-vi.mock("./csv", () => ({
-  readCsv: vi.fn(() => []),
-}));
-
 import * as fs from "fs";
-import { readCsv } from "./csv";
-import { getCreditCandidates, getColRevisions, _resetCaches } from "./species-store";
+import { getCreditCandidates, getColRevisions, _resetCaches, type CreditSource } from "./species-store";
 import type { CandidateRank } from "@/lib/credit-candidates";
 
 // ---------------------------------------------------------------------------
@@ -74,10 +69,9 @@ function uniqueGroup(): string {
   return `test_group_${groupCounter++}`;
 }
 
+let source: CreditSource = { rows: [], history: {} };
 function setup(rows: TestRedlistRow[], history: HistoryMap = {}) {
-  vi.mocked(readCsv).mockReturnValue(rows as ReturnType<typeof readCsv>);
-  vi.mocked(fs.existsSync).mockReturnValue(true);
-  vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(history));
+  source = { rows, history };
 }
 
 beforeEach(() => {
@@ -109,7 +103,7 @@ describe("getCreditCandidates", () => {
   it("returns no candidates when nothing has been assessed", () => {
     const group = uniqueGroup();
     setup([]);
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).candidates).toEqual([]);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).candidates).toEqual([]);
   });
 
   it("returns no candidates when assessed species share no country with the target", () => {
@@ -120,7 +114,7 @@ describe("getCreditCandidates", () => {
         { id: 1, year: "2020", category: "LC", date: "2020-01-01", assessors: "Dr. Brazil", reviewers: null },
       ],
     });
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).candidates).toEqual([]);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).candidates).toEqual([]);
   });
 
   // ── rank tiering ──────────────────────────────────────────────────────────
@@ -136,7 +130,7 @@ describe("getCreditCandidates", () => {
       { id: i, year: "2020", category: "LC", date: "2020-01-01", assessors: "Dr. Everywhere", reviewers: null },
     ]])));
 
-    const result = getCreditCandidates("assessors", target(group), ["ZA"]);
+    const result = getCreditCandidates("assessors", target(group), ["ZA"], source);
     const [candidate] = result.candidates;
     // Each rank counts everything at or below it: genus 1, family 2, order 3, group 4.
     expect(candidate.tiers.genus?.total).toBe(1);
@@ -156,7 +150,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tiers = getCreditCandidates("assessors", target(group), ["ZA"]).candidates[0].tiers;
+    const tiers = getCreditCandidates("assessors", target(group), ["ZA"], source).candidates[0].tiers;
     expect(tiers.genus?.total).toBe(1);
     expect(tiers.family?.total).toBe(1);
     expect(tiers.order?.total).toBe(1);
@@ -172,7 +166,7 @@ describe("getCreditCandidates", () => {
         { id: 2, year: "2016", category: "VU", date: "2016-01-01", assessors: "Dr. Cat", reviewers: null },
       ],
     });
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).candidates[0].tiers.genus?.total).toBe(1);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).candidates[0].tiers.genus?.total).toBe(1);
   });
 
   it("matches lineage case-insensitively", () => {
@@ -184,7 +178,7 @@ describe("getCreditCandidates", () => {
       ],
     });
     const t = target(group, { family: "felidae" });
-    expect(getCreditCandidates("assessors", t, ["ZA"]).candidates[0].tiers.family?.total).toBe(1);
+    expect(getCreditCandidates("assessors", t, ["ZA"], source).candidates[0].tiers.family?.total).toBe(1);
   });
 
   // ── countries and regions ─────────────────────────────────────────────────
@@ -202,7 +196,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tiers = getCreditCandidates("assessors", target(group), ["ZA"]).candidates[0].tiers;
+    const tiers = getCreditCandidates("assessors", target(group), ["ZA"], source).candidates[0].tiers;
     expect(tiers.genus?.total).toBe(2);
     expect(tiers.genus?.inRegion).toBe(1);
   });
@@ -216,7 +210,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tier = getCreditCandidates("assessors", target(group), ["ZA", "KE"]).candidates[0].tiers.genus!;
+    const tier = getCreditCandidates("assessors", target(group), ["ZA", "KE"], source).candidates[0].tiers.genus!;
     expect(tier.countryCounts).toEqual({ ZA: 1, KE: 1 });
     // Only the target's own countries are aggregated — BR isn't one of them.
     expect(Object.values(tier.regionCounts).reduce((a, b) => a + b, 0)).toBe(2);
@@ -234,7 +228,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tiers = tiersAt(getCreditCandidates("assessors", target(group), ["ZA"]), "genus");
+    const tiers = tiersAt(getCreditCandidates("assessors", target(group), ["ZA"], source), "genus");
     expect(tiers["Dr. Old"]?.latestDate).toBe("2009-01-01");
     expect(tiers["Dr. New"]?.latestDate).toBe("2023-01-01");
   });
@@ -252,7 +246,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tiers = getCreditCandidates("assessors", target(group), ["ZA"]).candidates[0].tiers;
+    const tiers = getCreditCandidates("assessors", target(group), ["ZA"], source).candidates[0].tiers;
     expect(tiers.genus?.latestDate).toBe("2020-01-01");
     expect(tiers.order?.latestDate).toBe("2020-01-01");
   });
@@ -267,7 +261,7 @@ describe("getCreditCandidates", () => {
         { id: 1, year: "2020", category: "LC", date: "2020-01-01", assessors: "Bauer, H., Packer, C. & Durant, S.", reviewers: null },
       ],
     });
-    const names = getCreditCandidates("assessors", target(group), ["ZA"]).candidates.map((c) => c.name).sort();
+    const names = getCreditCandidates("assessors", target(group), ["ZA"], source).candidates.map((c) => c.name).sort();
     expect(names).toEqual(["Bauer, H.", "Durant, S.", "Packer, C."]);
   });
 
@@ -279,7 +273,7 @@ describe("getCreditCandidates", () => {
         { id: 1, year: "2020", category: "LC", date: "2020-01-01", assessors: "Ab", reviewers: null },
       ],
     });
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).candidates).toEqual([]);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).candidates).toEqual([]);
   });
 
   it("strips parenthetical affiliations and merges them under one candidate", () => {
@@ -295,7 +289,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const result = getCreditCandidates("assessors", target(group), ["ZA"]);
+    const result = getCreditCandidates("assessors", target(group), ["ZA"], source);
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].name).toBe("Amori, G.");
     expect(result.candidates[0].tiers.genus?.total).toBe(2);
@@ -312,9 +306,9 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).candidates.map((c) => c.name)).toEqual(["Dr. Assessor"]);
-    expect(getCreditCandidates("reviewers", target(group), ["ZA"]).candidates.map((c) => c.name)).toEqual(["Dr. Reviewer"]);
-    expect(getCreditCandidates("facilitators", target(group), ["ZA"]).candidates.map((c) => c.name)).toEqual(["Dr. Facilitator"]);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).candidates.map((c) => c.name)).toEqual(["Dr. Assessor"]);
+    expect(getCreditCandidates("reviewers", target(group), ["ZA"], source).candidates.map((c) => c.name)).toEqual(["Dr. Reviewer"]);
+    expect(getCreditCandidates("facilitators", target(group), ["ZA"], source).candidates.map((c) => c.name)).toEqual(["Dr. Facilitator"]);
   });
 
   // The facilitator line is the whole point for organisationally-assessed groups:
@@ -333,7 +327,7 @@ describe("getCreditCandidates", () => {
       ],
     });
 
-    const tiers = getCreditCandidates("facilitators", target(group), ["ZA"]).candidates[0].tiers;
+    const tiers = getCreditCandidates("facilitators", target(group), ["ZA"], source).candidates[0].tiers;
     expect(tiers.family?.total).toBe(1);
     expect(tiers.order?.total).toBe(2);
   });
@@ -341,14 +335,14 @@ describe("getCreditCandidates", () => {
   it("returns no facilitators when the history predates the field", () => {
     const group = uniqueGroup();
     const row = makeRow({ countries: ["ZA"], scientific_name: "Panthera pardus" });
-    // History JSON written before fetch-redlist-species emitted facilitators has
+    // History JSON written before build-assessments emitted facilitators has
     // no such key at all — that must read as "nobody", never throw.
     setup([row], {
       [String(row.sis_taxon_id)]: [
         { id: 1, year: "2020", category: "LC", date: "2020-01-01", assessors: "Dr. Assessor", reviewers: null },
       ],
     });
-    expect(getCreditCandidates("facilitators", target(group), ["ZA"]).candidates).toEqual([]);
+    expect(getCreditCandidates("facilitators", target(group), ["ZA"], source).candidates).toEqual([]);
   });
 
   it("returns no reviewers when species carry assessors only", () => {
@@ -359,7 +353,7 @@ describe("getCreditCandidates", () => {
         { id: 1, year: "2020", category: "LC", date: "2020-01-01", assessors: "Dr. Assessor", reviewers: null },
       ],
     });
-    expect(getCreditCandidates("reviewers", target(group), ["ZA"]).candidates).toEqual([]);
+    expect(getCreditCandidates("reviewers", target(group), ["ZA"], source).candidates).toEqual([]);
   });
 
   // ── which ranks are offered ───────────────────────────────────────────────
@@ -370,7 +364,7 @@ describe("getCreditCandidates", () => {
     setup([rodent, makeRow({ countries: ["ZA"], scientific_name: "Panthera leo" })]);
     // class_name is Mammalia on both rows, so the class rank would just restate
     // the group and is left out; the rest of the lineage is present.
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).ranks).toEqual(["group", "order", "family", "genus"]);
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).ranks).toEqual(["group", "order", "family", "genus"]);
   });
 
   it("offers a class rank only when the class is narrower than the group", () => {
@@ -378,14 +372,14 @@ describe("getCreditCandidates", () => {
     const mammal = makeRow({ countries: ["ZA"], scientific_name: "Panthera leo", class_name: "Mammalia" });
     const bird = makeRow({ countries: ["ZA"], scientific_name: "Struthio camelus", class_name: "Aves", order_name: "Struthioniformes", family: "Struthionidae" });
     setup([mammal, bird]);
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).ranks).toContain("class");
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).ranks).toContain("class");
   });
 
   it("omits ranks the target has no lineage value for", () => {
     const group = uniqueGroup();
     setup([makeRow({ countries: ["ZA"] })]);
     const t = { taxonGroup: group, scientificName: "Incertae sedis", className: null, orderName: null, family: null };
-    expect(getCreditCandidates("assessors", t, ["ZA"]).ranks).toEqual(["group", "genus"]);
+    expect(getCreditCandidates("assessors", t, ["ZA"], source).ranks).toEqual(["group", "genus"]);
   });
 
   // ── which rank the tab opens on ───────────────────────────────────────────
@@ -405,7 +399,7 @@ describe("getCreditCandidates", () => {
       ]])),
     });
 
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).defaultRank).toBe("family");
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).defaultRank).toBe("family");
   });
 
   it("falls back to the taxon group when no finer rank has candidates", () => {
@@ -415,7 +409,7 @@ describe("getCreditCandidates", () => {
       { id: i, year: "2020", category: "LC", date: "2020-01-01", assessors: `Dr. Number${i}`, reviewers: null },
     ]])));
     // Nobody has worked on a cat, so only the group-wide ranking has anyone in it.
-    expect(getCreditCandidates("assessors", target(group), ["ZA"]).defaultRank).toBe("group");
+    expect(getCreditCandidates("assessors", target(group), ["ZA"], source).defaultRank).toBe("group");
   });
 });
 

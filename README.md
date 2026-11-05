@@ -79,7 +79,7 @@ From a record, a right-click anywhere on the occurrence map, or the locate contr
 **`/mapping`** (formerly `/near-me`, which redirects; `/mapping/<species key>` is the species map) asks the same question of a place rather than a species, reached from the View selector. It carries the occurrence map's overlays, toolbar and callouts — the two share `useMapOverlays` and `components/mapping/overlays/` — and a click anywhere opens a callout with what the overlays say about the spot and **Show nearby threatened species**; a protected area named there offers to search **inside its boundary** instead, sending GBIF the real outline. The point can also come from a place search or the browser's location; the radius runs 1–100 km or is dragged on the ground; and three scopes (Threatened, Assessed, All species) ride in the URL alongside `?lat=&lng=&r=`.
 
 ### Narrative search
-A view of its own that searches what the assessors actually wrote — all 175,910 current global assessments, ~470 MB of prose — over a purpose-built term index. Published once per Red List release under `narratives/<release>/` in the `dashboard-data` bucket rather than once per weekly sync, since the prose only changes when the Red List publishes.
+A view of its own that searches what the assessors actually wrote — all 175,910 current global assessments, ~470 MB of prose — over a purpose-built term index. Published once per Red List release under `narratives/<release>/` in the `dashboard-data` bucket rather than once per monthly sync, since the prose only changes when the Red List publishes.
 
 ### Realm view
 A three-bar Terrestrial / Freshwater / Marine chart over the same taxa table Country view scopes, so a realm narrows the tree in place. It writes the ordinary `systems` filter, so the narrowing survives leaving the view and composes with a country (`?country=ID&realm=Marine` is marine species *in* Indonesia). Realm is recorded on the assessment, so species not yet assessed have no realm even in principle — the described-species and observation columns are hidden here for that reason.
@@ -117,9 +117,9 @@ Telemetry: Sentry, PostHog (proxied via /ingest), Vercel Analytics
 Hosting:   Vercel
 
 Data Flow:
-┌────────────────────┐  scripts/sync.ts    ┌──────────────────┐  httpfs / prebuild  ┌────────────────┐
-│  IUCN Red List DB  │────────────────────▶│  CSVs + parquets │────────────────────▶│  app/data/     │──▶ API Routes ──▶ UI
-│  GBIF API          │  (offline pipeline) │  in private R2   │  (DuckDB at runtime │  (local copy)  │
+┌────────────────────┐  npm run sync       ┌──────────────────┐  httpfs / prebuild  ┌────────────────┐
+│  IUCN Red List DB  │────────────────────▶│  parquets + JSON │────────────────────▶│  app/data/     │──▶ API Routes ──▶ UI
+│  GBIF snapshot     │  (monthly, local)   │  in private R2   │  (DuckDB at runtime │  (local copy)  │
 │  Catalogue of Life │                     │                  │   / build-time)     │                │
 └────────────────────┘                     └──────────────────┘                     └────────────────┘
                           version pinned by app/latest-sync.txt (git-tracked)
@@ -139,7 +139,7 @@ Live external APIs:
 ## How the Data Works
 
 ### Red List data
-- **Source**: the IUCN Red List Postgres database, pulled into per-taxon CSV files by the sync pipeline
+- **Source**: the IUCN Red List Postgres database, read (read-only) straight into `assessments.parquet` by the sync
 - **Coverage**: 28 taxonomic groups across vertebrates, invertebrates, plants, fungi, and algae
 - **Version**: Red List 2026-1
 - **Fields**: species name, IUCN category (CR/EN/VU/etc.), assessment date, historical assessments, population trend, range countries, criteria, habitats, threats
@@ -147,87 +147,34 @@ Live external APIs:
 ### GBIF integration
 The key innovation — linking assessment data to real-world observations:
 
-1. **Species matching**: each IUCN species is matched to GBIF via their species-matching API (exact, fuzzy, and variant matches). Results stored in `data/mapping.csv`.
-2. **Observation counts**: **Total GBIF** (all geo-referenced records), **New GBIF** (records added after the assessment year), and **% New GBIF**. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only georeferenced record a species has.
+1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), and its GBIF records follow from that.
+2. **Observation counts**: from GBIF's monthly snapshot, not the API. A species counts every record filed under its own name, its synonyms, its subspecies and their DNA-barcode BINs, minus any usage another assessed species owns (a split IUCN assesses that CoL files as a subspecies, for instance). **Total GBIF** (georeferenced records), **New GBIF** (records after the assessment year), and the all-records count behind the toggle. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only georeferenced record a species has.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
-4. **Quality filters**: only geo-referenced records without coordinate issues.
-
-Match quality is surfaced in the UI, since it affects how far to trust a count:
-- **EXACT** — reliable match
-- **FUZZY/VARIANT** — name variations matched
-- **HIGHERRANK** — matched to genus/family only (counts may include other species)
-- **NONE** — species not found in GBIF
+4. **Quality filters**: georeferenced means coordinates without a GBIF geospatial issue (the codes GBIF's own `hasGeospatialIssue` acts on, checked against the API).
 
 ### Catalogue of Life
 CoL supplies the described-species universe behind the new-assessments view — the species CoL knows about that haven't been assessed for the Red List yet — plus the synonym index that makes searching an outdated name work.
 
 ## Data Sync Pipeline
 
-The `scripts/` directory contains a pipeline for refreshing all static data files:
+The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
 
 ```bash
-npx tsx scripts/sync.ts                  # Full sync, all taxa
-npx tsx scripts/sync.ts mammalia aves    # Specific taxa only
-npx tsx scripts/sync.ts --skip-redlist   # Skip every DB-dependent phase (no IUCN DB access needed)
+# 1. Mirror the new GBIF snapshot (~255 GiB, public, no account)
+uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>/ ~/Data/gbif/<date>/ --no-sign-request
+
+# 2. Build and check (about five minutes from cached inputs)
+cd app && npm run sync
+
+# 3. Read build/compare/report.md, then publish
+npm run sync:publish        # copies the build into app/data, uploads to R2, bumps app/latest-sync.txt
 ```
 
-**Pipeline phases.** The Catalogue of Life backbone is built **first**, because the GBIF phases below it resolve taxa against CoL keys — GBIF's own backbone was retired in favour of the CoL Extended Release in June 2026.
+`npm run sync:publish` prints the `git add` line for the data PR. Production only switches to the new sync once that PR merges to main and Vercel redeploys.
 
-1. `fetch-redlist-species` — Red List database → per-taxon CSVs in `data/redlist/`. The only phase needing IUCN Postgres access; skipped by `--skip-redlist`
+**How it works**: the inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).
 
-Phases 2–4 build the **Catalogue of Life backbone** (full sync only) — the described-species universe behind the new-assessments view, which surfaces species CoL knows about that haven't been assessed for the Red List yet:
-
-2. `fetch-col-xr` — CoL eXtended Release ColDP archive → `NameUsage.tsv` + `Reference.tsv` (downloaded to a temp dir, not `data/`)
-3. `fetch-col-checklist` — curated CoL Checklist ColDP archive → a demotion overlay (col_ids the checklist's editorial reconciliation demotes to synonym/infraspecific, correcting XR's over-splitting). CoL names a new release days before its ColDP archive is built, so this steps back a release on a 404 rather than failing the run
-4. `build-backbone` — `NameUsage.tsv` (minus the checklist's demotions) → `backbone.parquet` (tree + synonyms) + `species/` (accepted-species universe, partitioned; tagged `extinct`/`in_base`) + vernaculars
-
-4b. `derive-gbif-taxon-keys` — Red List groups + `backbone.parquet` → `src/config/gbif-taxon-keys.json`. Pins each group to the GBIF *index* of the CoL release being built against, rather than whatever GBIF currently considers newest. **Committed to git**
-
-Phases 5–8 pull from GBIF, keyed on what phases 2–4 produced:
-
-5. `fetch-gbif-species` — GBIF facets + backbone → per-taxon CSVs in `data/gbif/`
-6. `match-redlist-species-to-gbif` — GBIF Match API → `data/mapping.csv`. Retries a name GBIF can't place below genus with IUCN's authorship as its own parameter, and refuses to let one assessed species claim another's key
-7. `fetch-gbif-country-data` — GBIF API → per-species country occurrence counts
-8. `fetch-gbif-new-counts` — GBIF API → updates GBIF CSVs with temporal splits
-
-8b. `fetch-lumped-own-counts` — GBIF API → counts for keys the facets can't emit
-
-Phases 9–12 build the read layer:
-
-9. `build-parquet` — CSVs → `assessed.parquet` / `unassessed.parquet` (the DuckDB read layer)
-10. `build-matching` — reconciles IUCN/GBIF species to CoL → `species_link.parquet` (`{sis_taxon_id, gbif_species_key} → col_id`, via accepted-name + CoL/IUCN synonym matching, including the orthographic and gender-agreement variants CoL spells differently)
-11. `build-synonym-index` — CoL synonyms → their accepted species, so search for an old/synonym name still finds the current one
-
-11b. `build-search-index` — the two name-sorted indexes the search bar reads. `name-index.parquet`: every name the fast path can match (scientific name, common name, epithet, and each word of a multi-word common name), so a typeahead prefix prunes to a row group instead of scanning `assessed`/`unassessed` whole. `rank-index.parquet`: the class/order/family/genus names behind "Browse Felidae →", one row per name. Needs `species_link.parquet` (phase 10) for the `col_id`s it bakes in, which is why it runs here rather than beside `build-parquet`
-
-12. `build-col-taxon-ids` — resolves every taxon name referenced in `taxonomy-tree.ts`'s filters against `backbone.parquet` → `src/config/col-taxon-ids.json` (each name's CoL taxon id, so the dashboard can link a name straight to its CoL page). Small and derived from committed source, so — unlike the other outputs here — it's **committed to git**, not published to R2. Re-run standalone (`npx tsx scripts/build-col-taxon-ids.ts`) whenever a node's filter changes, without needing a full sync
-
-Phase 13 and its siblings run **last**, since they aggregate everything above:
-
-13. `build-taxa-summary` — aggregates per-taxon CSVs + the CoL backbone (`species/`, `species_link.parquet`) → `data/taxa-summary.json`, `data/table1a-children-summaries.json`/`data/ssc-group-children-summaries.json` (split from a single `node-children-summaries.json` — the old combined name, kept here as a pointer for anyone searching it), and the precomputed `data/country-stats.json` / `data/realm-stats.json` the Country and Realm views read, including per-group `col_described`/`col_ne` counts
-
-13a. `build-col-revisions` — the "possible taxonomic revision" flag, unscoped over every assessed species → `data/col-revisions.json` (`sis_taxon_id → flag`). Several signals share the file: the same "why does this species have no clean 1:1 CoL match" diagnostic Phase 13 computes per SSC group, the species CoL has likely split *out* of an assessed one (`split_candidates`, inverted), and the species CoL accepts under a different name. Feeds the dashboard's **Taxonomic differences from Catalogue of Life** filter chart and the per-row ⚑ flag. Small (~580 KB) and CI-relevant, so it's **committed to git** alongside `taxa-summary.json`, and published to R2 with the rest of the sync
-
-13b. `check-sync-regressions` — diffs per-group numbers against the live sync, so a bad refresh is caught before it's uploaded
-
-14. `upload-range-maps` — IUCN DB → `dashboard-maps` R2, skipping what's already there; skipped by `--skip-redlist`
-15. `upload-aoh-maps` — STAR GeoTIFFs → `dashboard-maps` R2, same; skipped by `--skip-redlist`, since it depends on local STAR pipeline output
-
-**The assessment narratives are not sync data.** They change when the Red List publishes, twice a year, where a sync runs weekly — so `npm run build-narratives` and `npm run upload-narratives-to-r2` publish them separately, under `narratives/<release>/`, pointed at by the `NARRATIVE_RELEASE` constant the way `latest-sync.txt` points at a sync.
-
-**Publishing a refresh.** `app/data/` lives in a private R2 bucket; the active version is pinned via `app/latest-sync.txt`. To publish a fresh sync:
-
-```bash
-npx tsx scripts/sync.ts                # regenerate app/data/ locally
-npm run diff-data-vs-r2                # spot-check what changed vs the live pinned sync
-npm run upload-data-to-r2              # upload to R2, bump app/latest-sync.txt
-git add app/latest-sync.txt && git commit -m "Bump data sync to <ts>"
-git push                               # open PR; merging flips production
-```
-
-Production only switches to the new sync once the pointer-bump PR merges to main and Vercel redeploys.
-
-**Most of this is automated.** The `weekly-sync` workflow runs the whole pipeline under `--skip-redlist` every Sunday at 20:00 UTC and opens the pointer-bump PR itself, so the manual flow above is mainly for local work and one-off resyncs. Phases 1, 14 and 15 are skipped there — phase 1 is the only one needing IUCN Postgres access, and the Red List data stays on its own manual ~6-month cadence, while 14 and 15 need raster inputs that exist on one machine.
+**Not part of the sync.** The assessment narratives change when the Red List publishes, twice a year, so `npm run build-narratives` and `npm run upload-narratives-to-r2` publish them separately under `narratives/<release>/`. Range maps and AOH layers (`upload-range-maps.ts`, `upload-aoh-maps.ts`) are run by hand when their inputs change.
 
 ## Getting Started
 
@@ -240,7 +187,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-The Red List CSVs live in a private R2 bucket rather than in the repo, so the first step downloads them locally (~240MB). `npm run build` runs the same fetch automatically as `prebuild`.
+The data lives in a private R2 bucket rather than in the repo, so the first step downloads it locally. `npm run build` runs the same fetch automatically as `prebuild`.
 
 ## Scripts
 
@@ -255,8 +202,10 @@ The Red List CSVs live in a private R2 bucket rather than in the repo, so the fi
 | `npm run test:coverage` | Run tests with a coverage report (scoped to the `src` logic layer; HTML report in `coverage/`) |
 | `npm run fetch-data-from-r2` | Download the sync pinned in `app/latest-sync.txt` from R2 into `app/data/` |
 | `npm run upload-data-to-r2` | Upload current `app/data/` to R2 as a new timestamped sync and bump `app/latest-sync.txt` |
-| `npm run diff-data-vs-r2` | Diff local `app/data/` against the currently-pinned R2 sync |
-| `npm run build-narratives` | Build the four narrative-search parquets from the IUCN database (needs phase-1 DB access) |
+| `npm run sync` | Build and check a data release from the inputs (see Data Sync Pipeline) |
+| `npm run sync:publish` | Copy the build into `app/data/`, upload it, bump `app/latest-sync.txt` |
+| `npm run sync:compare` | Compare a data directory with the sync production serves |
+| `npm run build-narratives` | Build the four narrative-search parquets from the IUCN database |
 | `npm run upload-narratives-to-r2` | Publish those parquets under `narratives/<NARRATIVE_RELEASE>/` in R2 |
 | `npm run fetch-duckdb-ext` | Pre-fetch the DuckDB `httpfs` extension, for environments that can't download it at runtime |
 
@@ -291,7 +240,7 @@ SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 # Analytics (optional, public). Events are reverse-proxied through /ingest.
 NEXT_PUBLIC_POSTHOG_KEY=your_posthog_key
 
-# IUCN Red List Postgres — needed only to run phase 1 of the sync pipeline
+# IUCN Red List Postgres — read by the sync (read-only) and build-narratives
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=your_db_name
@@ -306,7 +255,6 @@ DB_PASSWORD=your_db_password
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | `test` | Pull requests and pushes to `main` | Tests with coverage, lint, and typecheck |
-| `weekly-sync` | Sundays 20:00 UTC | Runs the sync under `--skip-redlist`, uploads to R2, opens the pointer-bump PR |
 | `supabase-migrations` | Push to `main` touching `app/supabase/migrations/` | Applies new migrations to the Supabase project |
 | `claude` | `@claude` mention | Runs Claude Code on an issue or PR comment |
 

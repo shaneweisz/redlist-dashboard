@@ -42,6 +42,8 @@ const CASES: Array<{ a: [string, string?]; b: [string, string?]; same: boolean; 
   { a: ["Catapodium borgesii"], b: ["Catapodium marinum"],
     same: false, why: "an Azores endemic is not a widespread European grass" },
   { a: ["Copella arnoldi"], b: ["Copella carsevennensis"], same: false, why: "different fish" },
+  { a: ["Meiostemon tetrandrus"], b: ["Combretum tetrandrum"], same: true, why: "genus transfer, epithet agreeing with the new gender" },
+  { a: ["Sminthopsis fuliginosa"], b: ["Sminthopsis fuliginosus"], same: false, why: "same genus: a termination alone is the variant passes' call, not this one" },
 ];
 
 describe("sameOrganism", () => {

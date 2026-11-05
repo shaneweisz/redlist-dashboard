@@ -151,6 +151,8 @@ const nextConfig: NextConfig = {
     // ?country=, since the throw happens before GET() ever runs).
     "/api/redlist/taxa-summary": DUCKDB_TRACE,
     "/api/redlist/taxa-subgroups": DUCKDB_TRACE,
+    // Reads assessed.parquet + assessments.parquet over R2 (getCreditSource).
+    "/api/redlist/credit-candidates": DUCKDB_TRACE,
     // Realm view's landing cards — one live GROUP BY over assessed.parquet
     // (getRealmStats), so the same native addon and the same two entries as the
     // pair above. Unlike /api/redlist/country-stats next to it, this is NOT a
@@ -208,29 +210,11 @@ const nextConfig: NextConfig = {
     "/api/redlist/species/history": ["**/data/**"],
     // Queries backbone.parquet + species_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
-    // Reads the Red List / GBIF CSVs (+ mapping) but never the search index or
-    // the R2-only CoL artifacts. These keys are ROUTE PATHS, so renaming a route
-    // silently drops its pruning and the function balloons to the whole dataset:
-    // this one was /api/redlist/{assessor,reviewer}-candidates-by-country before
-    // the three credit lines merged behind one endpoint, and the rename alone took
-    // the function from ~80MB to 494MB — over Vercel's 250MB cap — with no local
-    // signal, since app/data/ is only fully populated at build time on Vercel.
-    // It reads exactly two things — data/redlist/<group>.csv and
-    // data/redlist/history/<group>.json (loadRedlistForGroup +
-    // loadHistoryForGroup) — and never opens a parquet or touches DuckDB, so
-    // everything else in data/ was dead weight. It had been pruned only of the
-    // search index and the CoL artifacts, which left it ~236MB: close enough to
-    // the 250MB cap that adding two credit fields to the history files (+23MB)
-    // tipped it to 258.86MB and failed the deploy. Pruning to what it actually
-    // opens drops it well clear, so the next sync's growth has somewhere to go.
-    "/api/redlist/credit-candidates": [
-      "**/data/search-index.json",
-      "**/data/*.parquet",
-      "**/data/gbif/**",
-      "**/data/overlays/**",
-      "**/data/mapping.csv",
-      ...COL_ARTIFACTS,
-    ],
+    // These keys are ROUTE PATHS, so renaming a route silently drops its pruning
+    // and the function balloons to the whole dataset (the credit lines' merge
+    // behind one endpoint once took this one from ~80MB to 494MB).
+    // Reads its rows over R2 since the sync rewrite; it bundles no data at all.
+    "/api/redlist/credit-candidates": ["**/data/**"],
     // Read the small precomputed summary JSONs by default, or query
     // assessed.parquet in R2 (httpfs) when ?country= is set — same CRITICAL
     // note as /api/redlist/species: keep ALL parquets out, since USE_R2 is

@@ -562,7 +562,7 @@ const COL_TAXON_ID_MAP: Record<string, string> = COL_TAXON_IDS;
 
 // A container rank (class/order/family/genus) links to a species-level search scoped
 // to that taxon, with the same extant + accepted-only definition colDescribed itself
-// uses (SPECIES_STATUS in scripts/build-backbone.ts) — so clicking through shows
+// uses (SPECIES_STATUS in scripts/pipeline/build-taxa.ts) — so clicking through shows
 // exactly the species being counted, not just a static profile page. Deliberately
 // omits status=provisionally%20accepted: colDescribed excludes those names (they
 // overshoot IUCN's own described-species totals — see the SPECIES_STATUS comment),

@@ -124,7 +124,8 @@ export function toTitleCase(s: string): string {
 // CSV UTILITIES
 // =============================================================================
 
-export const DATA_DIR = path.join(__dirname, "../data");
+/** app/data, unless the pipeline points a builder at its own output (PIPELINE_DATA_DIR). */
+export const DATA_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(__dirname, "../data");
 export const REDLIST_DIR = path.join(DATA_DIR, "redlist");
 export const GBIF_DIR = path.join(DATA_DIR, "gbif");
 

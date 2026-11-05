@@ -38,7 +38,9 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   await conn.run(`
     COPY (
       WITH assessed_link AS (
-        SELECT col_id, any_value(id) AS sis_id
+        -- The species whose own link this is, not one merely covering it; the lowest
+        -- SIS id if two share it, so a rebuild picks the same one.
+        SELECT col_id, arg_min(id, [CASE WHEN match_method = 'iucn_synonym_covered' THEN 1 ELSE 0 END, id]) AS sis_id
         FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL GROUP BY col_id
       )
       SELECT

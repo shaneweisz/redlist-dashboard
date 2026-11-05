@@ -17,6 +17,10 @@
  * fact: whether the other name is itself separately assessed.
  */
 
+import { canonicalEpithet } from "../src/lib/name-parts";
+
+const genusOf = (scientificName: string) => scientificName.trim().toLowerCase().split(/\s+/)[0] ?? "";
+
 /** A name as the taxonomies give it: the binomial, and its author citation if known. */
 export interface TaxonName {
   scientificName: string;
@@ -80,7 +84,9 @@ const MAX_RESPELLING_EDITS = 3;
  *
  *   2. The same epithet under a different genus — a genus transfer, which is a
  *      rename and nothing more. Hylatomus pileatus -> Dryocopus pileatus,
- *      Drepanis coccinea -> Vestiaria coccinea.
+ *      Drepanis coccinea -> Vestiaria coccinea. The epithet may have changed
+ *      gender to agree with the new genus (Meiostemon tetrandrus -> Combretum
+ *      tetrandrum); that is still the same name.
  *
  *   3. The same author, and an epithet within a couple of letters — a respelling
  *      or a gender agreement. Pica nutalli -> nuttallii, Sminthopsis fuliginosa
@@ -109,11 +115,41 @@ export function sameOrganism(a: TaxonName, b: TaxonName): boolean {
   const epB = epithetOf(b.scientificName);
   if (!epA || !epB) return false;
   if (epA === epB) return true;
+  // A genus transfer whose epithet changed gender to agree with its new genus
+  // (Meiostemon tetrandrus -> Combretum tetrandrum). Both codes require the
+  // change (ICZN Art. 34.2, ICN Art. 23.5), so it is the same name, and only
+  // across genera: within one genus a termination is the variant passes' call.
+  if (genusOf(a.scientificName) !== genusOf(b.scientificName) && canonicalEpithet(epA) === canonicalEpithet(epB)) return true;
 
   const authA = normaliseAuthorship(a.authorship);
   const authB = normaliseAuthorship(b.authorship);
   if (!authA || !authB || authA !== authB) return false;
   return editDistance(epA, epB) <= MAX_RESPELLING_EDITS;
+}
+
+/**
+ * Is a CoL synonym just a respelling of the accepted name CoL files it under?
+ *
+ * CoL marks an orthographic variant as a synonym carrying the accepted name's
+ * own author citation: Meandrina danae of M. danai, Clithon oualaniensis of
+ * C. oualaniense, both cited to the same authors and year. That is CoL saying
+ * the two are one name, so a species matched to the synonym by its own name is
+ * the accepted species, not lumped into it. sameOrganism can't see this when
+ * the Red List's own citation is mistyped ("Milen-Edwards & Haime, 1948").
+ *
+ * Asked only of two CoL usages: one genus, the same citation (an abbreviated
+ * "f." and "fil." count as one), and an epithet that differs by a Latin ending
+ * or a letter or two.
+ */
+export function isCoLRespelling(synonym: TaxonName, accepted: TaxonName): boolean {
+  if (genusOf(synonym.scientificName) !== genusOf(accepted.scientificName)) return false;
+  const cite = (a?: string) => normaliseAuthorship(a).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\bfil\b/g, "f");
+  const ca = cite(synonym.authorship);
+  if (!ca || ca !== cite(accepted.authorship)) return false;
+  const a = epithetOf(synonym.scientificName);
+  const b = epithetOf(accepted.scientificName);
+  if (!a || !b || a === b) return false;
+  return canonicalEpithet(a) === canonicalEpithet(b) || editDistance(a, b) <= MAX_RESPELLING_EDITS;
 }
 
 /**

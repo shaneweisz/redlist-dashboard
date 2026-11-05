@@ -1,5 +1,5 @@
 /**
- * DuckDB-backed read layer (#261). Queries assessed.parquet / unassessed.parquet
+ * DuckDB-backed read layer (#261). Queries assessed.parquet / ne.parquet
  * — local in dev, R2 (httpfs) in prod — replacing the load-whole-CSV-into-memory
  * path in species-store. Filters translate the taxonomy SpeciesFilter to SQL,
  * faithfully mirroring matchesFilter (incl. the order_name→class_name fallback).
@@ -16,7 +16,7 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { NODE_INDEX, getTaxonGroupsForNode, getAncestors, stripNodePrefix } from "@/lib/taxonomy-utils";
 import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
 import { dedupeByRowKey, pickTaxa } from "@/lib/search-shards/rank";
-import { getTaxaSummary, getColRevisions } from "@/lib/data/species-store";
+import { getTaxaSummary, getColRevisions, type CreditSource, type HistoryMap } from "@/lib/data/species-store";
 import { isDynamicNodeId, dynamicNodeFilter, buildDynamicNodeId, rankOrderFor, isLiveDrilldownNode, type DynamicRank, type DynamicSegment } from "@/lib/dynamic-taxon";
 import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { sisRowKey, colRowKey, speciesRowKey, type SpeciesRowKey } from "@/lib/species-row-key";
@@ -75,7 +75,7 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
   if (!neHelpersPromise) {
     neHelpersPromise = (async () => {
       const linkUri = parquetUri("species_link.parquet");
-      const unassessedUri = parquetUri("unassessed.parquet");
+      const neUri = parquetUri("ne.parquet");
       const assessedUri = parquetUri("assessed.parquet");
       await conn.run(`CREATE TEMP TABLE ne_assessed_col_ids AS
         SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE src = 'redlist' AND col_id IS NOT NULL`);
@@ -89,10 +89,10 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
         FROM read_parquet('${linkUri}') l
         JOIN read_parquet('${assessedUri}') a ON a.id = l.id
         WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
+      // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
-        SELECT sl.col_id AS col_id, any_value(un.gbif_species_key) AS gbif_species_key, max(un.gbif_occurrence_count) AS gbif_occurrence_count, any_value(un.countries) AS countries, any_value(un.common_name) AS common_name
-        FROM read_parquet('${linkUri}') sl JOIN read_parquet('${unassessedUri}') un ON un.id = sl.id
-        WHERE sl.src = 'gbif' AND sl.col_id IS NOT NULL GROUP BY sl.col_id`);
+        SELECT col_id, gbif_species_key, gbif_occurrence_count, countries, common_name
+        FROM read_parquet('${neUri}')`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
   }
   return neHelpersPromise;
@@ -140,7 +140,7 @@ export function resolveWhere(taxonId: string): WhereParts {
 }
 
 // species/ is Hive-partitioned by `taxon_group` (the IUCN Table 1a group, assigned at
-// build time from the lineage — see build-backbone's TAXON_GROUP_CASE). So the NE
+// build time from the lineage — see build-taxa's TAXON_GROUP_CASE). So the NE
 // universe is filtered with the SAME `whereSql` resolveWhere() builds for the
 // assessed/unassessed parquets, and the partition prunes to the queried group(s). No
 // separate node→CoL lineage mapping or per-query partition logic is needed.
@@ -200,7 +200,7 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     taxon_id: mapTaxonId(taxonGroup),
     // Species description year from CoL (NE rows only; null for assessed species,
     // whose parquet has no such column). Coalesced upstream from the author-year
-    // columns with a cited-reference-year fallback — see build-backbone.
+    // columns with a cited-reference-year fallback — see build-taxa.
     described_year: num(r.described_year),
     gbif_species_key: str(r.gbif_species_key),
     gbif_occurrence_count: num(r.gbif_occurrence_count),
@@ -517,37 +517,13 @@ export function nodeIdForSpecies(taxonGroup: string, lineage: Lineage): string |
   return deepest === -1 ? leafRoot : idFor(deepest + 1);
 }
 
-/**
- * CoL ids for GBIF species keys, via species_link — the bridge build-matching writes.
- *
- * The search fast path reads unassessed.parquet, which is one row per GBIF species
- * key and carries no col_id; the NE list it has to agree with is one row per col_id.
- * The two grains genuinely differ (3,756 col_ids have more than one GBIF key), so a
- * search hit's row key has to come from the link table rather than from its GBIF key.
- * Assuming key == col_id would be wrong for ~4.3k species even though it holds for
- * 99.4% of them.
- *
- * Batched by the keys actually matched (a handful per search), so this reads two
- * columns of species_link filtered to those keys rather than scanning it whole.
- */
-async function colIdsForGbifKeys(conn: DuckDBConnection, keys: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  if (!keys.length) return out;
-  const list = keys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",");
-  const rows = (await conn.runAndReadAll(
-    `SELECT gbif_species_key, col_id FROM read_parquet('${parquetUri("species_link.parquet")}')
-     WHERE src = 'gbif' AND col_id IS NOT NULL AND gbif_species_key IN (${list})`, {})).getRowObjects();
-  for (const r of rows) out.set(String(r.gbif_species_key), String(r.col_id));
-  return out;
-}
-
 // ─── The search hot path's in-memory index ──────────────────────────────────
 //
 // Every keystroke past the debounce is a fresh serverless request, and each one used
 // to re-scan the name columns of assessed+unassessed straight off R2 — ~25MB pulled
 // and decompressed per request, with no pruning possible (a substring ILIKE can't use
 // row-group statistics, and both parquets are written ORDER BY class_name, order_name,
-// family, so names are scattered across every row group anyway — see build-parquet).
+// family, so names are scattered across every row group anyway — see build-read-models).
 // Measured against production: ~2.2s per uncached query, essentially all of it this
 // scan, with searchSpecies and suggestTaxa serialized behind one another on the shared
 // connection. A cold no-match, which falls through to species/** and synonym-index,
@@ -568,7 +544,7 @@ async function colIdsForGbifKeys(conn: DuckDBConnection, keys: string[]): Promis
 // The projections are shared with the fallback path, so the temp table and the parquets
 // present an identical schema and one query text works against either.
 const searchProj = (src: string, assessed: boolean) => `
-  SELECT id, scientific_name, common_name,
+  SELECT CAST(id AS VARCHAR) AS id, ${assessed ? "NULL::VARCHAR" : "col_id"} AS col_id, scientific_name, common_name,
          lower(scientific_name) AS sn_lo, lower(common_name) AS cn_lo,
          taxon_group, iucn_category AS category, gbif_species_key, gbif_occurrence_count,
          ${assessed ? "assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date" : "NULL AS assessment_id, NULL AS assessment_date"},
@@ -590,9 +566,9 @@ export function ensureSearchTables(conn: DuckDBConnection): Promise<void> {
   if (!searchTablesPromise) {
     searchTablesPromise = (async () => {
       await conn.run(`CREATE TEMP TABLE search_idx AS
-        ${searchProj("assessed.parquet", true)} UNION ALL ${searchProj("unassessed.parquet", false)}`);
+        ${searchProj("assessed.parquet", true)} UNION ALL ${searchProj("ne.parquet", false)}`);
       await conn.run(`CREATE TEMP TABLE rank_idx AS
-        SELECT DISTINCT * FROM (${rankProj("assessed.parquet")} UNION ALL ${rankProj("unassessed.parquet")})`);
+        SELECT DISTINCT * FROM (${rankProj("assessed.parquet")} UNION ALL ${rankProj("ne.parquet")})`);
     })().catch((e) => { searchTablesPromise = null; throw e; });
   }
   return searchTablesPromise;
@@ -605,7 +581,7 @@ async function searchSource(conn: DuckDBConnection): Promise<string> {
     return "search_idx";
   } catch (e) {
     console.error("search_idx unavailable, falling back to parquet scan:", e);
-    return `(${searchProj("assessed.parquet", true)} UNION ALL ${searchProj("unassessed.parquet", false)})`;
+    return `(${searchProj("assessed.parquet", true)} UNION ALL ${searchProj("ne.parquet", false)})`;
   }
 }
 
@@ -615,7 +591,7 @@ async function rankSource(conn: DuckDBConnection): Promise<string> {
     await ensureSearchTables(conn);
     return "rank_idx";
   } catch {
-    return `(${rankProj("assessed.parquet")} UNION ALL ${rankProj("unassessed.parquet")})`;
+    return `(${rankProj("assessed.parquet")} UNION ALL ${rankProj("ne.parquet")})`;
   }
 }
 
@@ -623,10 +599,9 @@ async function rankSource(conn: DuckDBConnection): Promise<string> {
 export function toSearchResult(r: Record<string, unknown>, colIdOverride: string | null): SearchResult {
   const tg = String(r.taxon_group);
   const lineage = { class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family) };
-  // assessed.parquet's id column IS the SIS taxon id; unassessed.parquet's is an
-  // internal build-time key that never leaves the pipeline (see build-parquet).
+  // assessed.parquet's id column IS the SIS taxon id; an NE row's is its col_id.
   const sisTaxonId = r.assessed ? Number(r.id) : null;
-  const colId = r.assessed ? null : colIdOverride;
+  const colId = r.assessed ? null : (colIdOverride ?? str(r.col_id));
   // Both views browse via the top-level taxon, plus the sub-group node the species
   // itself sits in — see nodeIdForSpecies.
   return {
@@ -738,12 +713,8 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
              sn_lo
     LIMIT ${lim}`;
   const rows = (await conn.runAndReadAll(sql, { q: query.toLowerCase() })).getRowObjects();
-  // An unassessed hit is keyed by the col_id its GBIF key links to, which is what the
-  // NE list keys its rows on — resolved for the whole page of hits in one lookup.
-  const neKeys = rows.filter((r) => !r.assessed).map((r) => str(r.gbif_species_key)).filter((k): k is string => !!k);
-  const colIdByGbifKey = await colIdsForGbifKeys(conn, neKeys);
-  const fast = dedupeByRowKey(rows.map((r) =>
-    toSearchResult(r, colIdByGbifKey.get(str(r.gbif_species_key) ?? "") ?? null)));
+  // An NE hit carries the col_id the NE list keys its rows on.
+  const fast = dedupeByRowKey(rows.map((r) => toSearchResult(r, str(r.col_id))));
 
   // Return as soon as the direct search finds anything. The CoL-only and synonym tiers
   // below each full-scan a large parquet over R2 (species/ ~36MB, synonym-index ~82MB)
@@ -924,10 +895,10 @@ export async function getSpeciesByGbifKey(gbifSpeciesKey: string): Promise<{
   dashboard_row_key: SpeciesRowKey | null;
 } | null> {
   const conn = await getConn();
-  // sis_taxon_id isn't a column: assessed rows carry it as their positive `id`,
-  // while unassessed rows get a synthetic negative one (see toSpeciesRow).
+  // sis_taxon_id isn't a column: assessed rows carry it as their `id`; an NE row's
+  // id is its col_id.
   const proj = (src: string, assessed: boolean) => `
-    SELECT id, scientific_name, common_name, taxon_group, iucn_category AS category, gbif_species_key,
+    SELECT CAST(id AS VARCHAR) AS id, ${assessed ? "NULL::VARCHAR" : "col_id"} AS col_id, scientific_name, common_name, taxon_group, iucn_category AS category, gbif_species_key,
            class_name, order_name, family,
            ${assessed
              ? "assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date, criteria"
@@ -935,16 +906,12 @@ export async function getSpeciesByGbifKey(gbifSpeciesKey: string): Promise<{
            countries, ${assessed} AS assessed
     FROM '${parquetUri(src)}'
     WHERE gbif_species_key = $key`;
-  const sql = `${proj("assessed.parquet", true)} UNION ALL ${proj("unassessed.parquet", false)} LIMIT 1`;
+  const sql = `${proj("assessed.parquet", true)} UNION ALL ${proj("ne.parquet", false)} LIMIT 1`;
   const rows = (await conn.runAndReadAll(sql, { key: gbifSpeciesKey })).getRowObjects();
   const r = rows[0];
   if (!r) return null;
-  const sisTaxonId = Number(r.id) > 0 ? Number(r.id) : null;
-  const colId = sisTaxonId
-    ? null
-    : (await colIdsForGbifKeys(conn, [str(r.gbif_species_key) ?? gbifSpeciesKey])).get(
-        str(r.gbif_species_key) ?? gbifSpeciesKey
-      ) ?? null;
+  const sisTaxonId = r.assessed ? Number(r.id) : null;
+  const colId = r.assessed ? null : str(r.col_id);
   return {
     scientific_name: String(r.scientific_name ?? ""),
     common_name: (r.common_name as string) ?? null,
@@ -958,10 +925,7 @@ export async function getSpeciesByGbifKey(gbifSpeciesKey: string): Promise<{
     countries: splitList(r.countries),
     assessed: !!r.assessed,
     // Built by the one helper that decides what a row key is, rather than
-    // derived here. The CoL id comes from species_link rather than from the
-    // GBIF key: unassessed.parquet is one row per GBIF key and the NE list is
-    // one row per col_id, and 3,756 col_ids carry more than one GBIF key, so
-    // assuming they're the same value is wrong for ~4.3k species.
+    // derived here.
     dashboard_row_key: speciesRowKey({ sis_taxon_id: sisTaxonId, col_id: colId }),
     node_id: nodeIdForSpecies(String(r.taxon_group ?? ""), {
       class_name: str(r.class_name),
@@ -1012,7 +976,7 @@ export async function getUnassessedByGbifKeys(keys: readonly string[]): Promise<
   const rows = (
     await conn.runAndReadAll(`
       SELECT gbif_species_key, scientific_name, common_name, taxon_group, class_name
-      FROM '${parquetUri("unassessed.parquet")}'
+      FROM '${parquetUri("ne.parquet")}'
       WHERE gbif_species_key IN (${list})`)
   ).getRowObjects();
   return rows.map((r) => ({
@@ -1064,7 +1028,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
       class_name: str(r.class_name),
       category: String(r.category ?? ""),
       criteria: (r.criteria as string) ?? null,
-      // ";"-separated in the parquet, written by fetch-redlist-species.
+      // ";"-separated in the parquet, written by build-assessments.
       threat_codes: String(r.threat_codes ?? "").split(";").filter(Boolean),
       // Free to carry: the row is already being read, so this is two more
       // columns off the same scan rather than another query.
@@ -1158,7 +1122,7 @@ export async function warmConnection(): Promise<void> {
 export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
   const conn = await getConn();
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
-  // rebuilt by a separate scheduled sync (scripts/build-parquet.ts), not by this
+  // rebuilt by a separate scheduled sync (scripts/pipeline/build-read-models.ts), not by this
   // deploy, so there's a window where the deployed code expects a column the
   // currently-synced parquet doesn't have yet. Naming it would throw a DuckDB
   // Binder Error for every request in that window — this deploy's whole history
@@ -1509,4 +1473,49 @@ export async function suggestTaxa(query: string, limit = 3): Promise<TaxonSugges
     };
   }));
   return pickTaxa(withNodes, q, lim);
+}
+
+// ─── Credit candidates ──────────────────────────────────────────────────────
+
+const creditSources = new Map<string, Promise<CreditSource>>();
+
+/**
+ * One group's assessed species and their published histories, for the credit
+ * candidates panel. Two reads per group per warm container: assessed.parquet's
+ * rows in the group, and their assessments.parquet history.
+ */
+export function getCreditSource(group: string): Promise<CreditSource> {
+  let p = creditSources.get(group);
+  if (!p) {
+    p = (async () => {
+      const conn = await getConn();
+      const rows = (await conn.runAndReadAll(`
+        SELECT id, assessment_id, scientific_name, class_name, order_name, family, iucn_category,
+               CAST(assessment_date AS VARCHAR) AS assessment_date, year_published, countries
+        FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE taxon_group = $g`, { g: group })).getRowObjects();
+      const hist = (await conn.runAndReadAll(`
+        SELECT h.sis_taxon_id, h.id, h."year", h.category, h."date", h.assessors, h.reviewers, h.facilitators
+        FROM read_parquet('${parquetUri("assessments.parquet")}') h
+        WHERE h.sis_taxon_id IN (SELECT id FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE taxon_group = $g)
+        ORDER BY h.sis_taxon_id, h.seq`, { g: group })).getRowObjects();
+      const history: HistoryMap = {};
+      for (const h of hist) {
+        (history[String(h.sis_taxon_id)] ??= []).push({
+          id: Number(h.id), year: String(h.year ?? ""), category: String(h.category ?? ""), date: str(h.date),
+          assessors: str(h.assessors), reviewers: str(h.reviewers), facilitators: str(h.facilitators),
+        });
+      }
+      return {
+        rows: rows.map((r) => ({
+          sis_taxon_id: Number(r.id), assessment_id: Number(r.assessment_id), scientific_name: String(r.scientific_name),
+          class_name: str(r.class_name), order_name: str(r.order_name), family: str(r.family),
+          category: String(r.iucn_category ?? ""), assessment_date: str(r.assessment_date),
+          year_published: String(r.year_published ?? ""), countries: splitList(r.countries),
+        })),
+        history,
+      };
+    })().catch((e) => { creditSources.delete(group); throw e; });
+    creditSources.set(group, p);
+  }
+  return p;
 }

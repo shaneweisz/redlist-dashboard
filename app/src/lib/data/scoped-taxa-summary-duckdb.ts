@@ -33,6 +33,7 @@ import { getTaxaSummary, type TaxaSummaryRow, type NodeSummary } from "./species
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
 import { filterToSql } from "@/lib/taxonomy-sql";
 import { outdatedCutoffDate } from "@/lib/outdated";
+import { getDataSyncDate } from "@/lib/data-sync-date";
 import type { TaxonomyNode } from "@/config/taxonomy-tree";
 
 // list_contains needs an exact-case match; countries are stored upper-case 2-letter
@@ -128,7 +129,7 @@ export interface RealmStatsResponse {
  * The country equivalent (getCountryStats) reads a precomputed JSON because there
  * are ~200 countries and the landing map needs every one of them; realm has three
  * values and one GROUP BY answers all of them at once, so this stays live rather
- * than adding a fourth build artifact to the weekly sync that could drift.
+ * than adding a fourth build artifact to the monthly sync that could drift.
  *
  * A species assessed as e.g. "Freshwater;Marine" counts once toward BOTH realms
  * here — that's what the unnest does, and it's the honest reading of a bar that
@@ -140,7 +141,7 @@ export interface RealmStatsResponse {
  */
 export async function getRealmStats(): Promise<RealmStatsResponse> {
   const conn = await getConn();
-  const cutoff = outdatedCutoffDate().toISOString().slice(0, 10);
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
   const assessedUri = parquetUri("assessed.parquet");
   // The unnest has to happen in a subquery: DuckDB can't GROUP BY an UNNEST
   // directly ("Binder Error: Cannot group on an UNNEST or UNLIST clause").
@@ -192,7 +193,7 @@ export async function getRealmStats(): Promise<RealmStatsResponse> {
  */
 export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRow[]> {
   const conn = await getConn();
-  const cutoff = outdatedCutoffDate().toISOString().slice(0, 10);
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
   const assessedUri = parquetUri("assessed.parquet");
   const rows = (await conn.runAndReadAll(
     `SELECT taxon_group, iucn_category AS category, count(*) AS n,
@@ -254,7 +255,7 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
   const parent = NODE_INDEX.get(parentNodeId);
   if (!parent?.children?.length) return [];
   const conn = await getConn();
-  const cutoff = outdatedCutoffDate().toISOString().slice(0, 10);
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
   const assessedUri = parquetUri("assessed.parquet");
   const children = parent.children;
 

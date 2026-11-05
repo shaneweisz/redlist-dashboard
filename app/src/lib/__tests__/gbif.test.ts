@@ -130,8 +130,10 @@ describe("GBIF_GEOSPATIAL_ISSUES", () => {
     }
   });
 
-  it("names the two that GBIF reports but does not act on", () => {
+  it("names the four that GBIF reports but does not act on", () => {
     expect([...GBIF_COORDINATE_NOTES].sort()).toEqual([
+      "CONTINENT_COORDINATE_MISMATCH",
+      "COORDINATE_REPROJECTION_FAILED",
       "COORDINATE_REPROJECTION_SUSPICIOUS",
       "GEODETIC_DATUM_INVALID",
     ]);
@@ -142,7 +144,6 @@ describe("GBIF_GEOSPATIAL_ISSUES", () => {
       "ZERO_COORDINATE",
       "COORDINATE_INVALID",
       "COUNTRY_COORDINATE_MISMATCH",
-      "CONTINENT_COORDINATE_MISMATCH",
       "PRESUMED_SWAPPED_COORDINATE",
     ]) {
       expect(GBIF_GEOSPATIAL_ISSUES.has(code), `${code} should be a flag`).toBe(true);

@@ -4,7 +4,7 @@
  * directly instead of only through the component.
  *
  * habitat_codes tuples are "code:season:suitability:importance", written by
- * fetch-redlist-species.ts — see that file's SEASON_CODES/SUITABILITY_CODES/
+ * build-assessments.ts — see that file's SEASON_CODES/SUITABILITY_CODES/
  * MAJOR_IMPORTANCE_CODES for the single-letter encoding this decodes.
  */
 

@@ -34,6 +34,7 @@ import { EXCLUDED_COL_IDS_SQL, RANK_COLUMN_SQL, isEmptyLiveBucket } from "./live
 import type { NodeSummary } from "./species-store";
 import { filterToSql, expandClasses, expandOrders, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { outdatedCutoffDate } from "@/lib/outdated";
+import { getDataSyncDate } from "@/lib/data-sync-date";
 import { buildDynamicNodeId, dynamicNodeDisplayName, parseDynamicNodeId, rankOrderFor, type DynamicRank } from "@/lib/dynamic-taxon";
 
 /** One grouped row: the filter-side columns, the bucket per rank, and its counts. */
@@ -128,7 +129,7 @@ export async function buildRootChildren(rootId: string): Promise<Record<string, 
   const conn = await getConn();
   await ensureNeHelpers(conn);
   const where = filterToSql(root.filter);
-  const cutoff = outdatedCutoffDate().toISOString().slice(0, 10);
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
   const universe = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ne_ex_ew_col_ids))`;
   const counted = `in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}`;
 

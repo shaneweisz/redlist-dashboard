@@ -11,6 +11,7 @@
  */
 import { querySpecies, searchSpecies, type SearchResult } from "@/lib/data/species-duckdb";
 import { isOutdated } from "@/lib/data/species-store";
+import { getDataSyncDate } from "@/lib/data-sync-date";
 import { findNode, speciesMatchesNode } from "@/lib/taxonomy-utils";
 import { matchesSpeciesFilter, type SpeciesFilterCriteria, type FilterableSpecies } from "@/lib/species-filter";
 import { applySharedFilters, type SharedFilterInput } from "@/lib/shared-filters";
@@ -164,7 +165,7 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
         if (matchesSpeciesFilter(r, criteria)) matched.push(r);
       }
     });
-    if (outdated) matched = matched.filter((r) => isOutdated(r.assessment_date ?? null) === (outdated === "yes"));
+    if (outdated) matched = matched.filter((r) => isOutdated(r.assessment_date ?? null, getDataSyncDate()) === (outdated === "yes"));
     if (assessors.length) {
       const q = assessors.map((a) => a.toLowerCase());
       matched = matched.filter((r) => parseAssessors(r.latest_assessors).some((a) => q.some((x) => a.toLowerCase().includes(x))));
@@ -206,7 +207,7 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
   const breakdown: Record<string, number> = {};
   for (const r of matched) breakdown[r.category] = (breakdown[r.category] ?? 0) + 1;
   const assessed = matched.filter((r) => r.category !== "NE");
-  const outdatedCount = assessed.filter((r) => isOutdated(r.assessment_date ?? null)).length;
+  const outdatedCount = assessed.filter((r) => isOutdated(r.assessment_date ?? null, getDataSyncDate())).length;
   const outdated_pct = assessed.length ? Math.round((outdatedCount / assessed.length) * 100) : null;
 
   // Human-readable active-filter summary (drives the HTML/JSON "interpreted").
@@ -245,7 +246,7 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
       systems: s.systems ?? null,
       population_trend: s.population_trend,
       assessment_date: s.assessment_date ?? null,
-      outdated: isOutdated(s.assessment_date ?? null),
+      outdated: isOutdated(s.assessment_date ?? null, getDataSyncDate()),
       gbif_occurrence_count: s.gbif_occurrence_count ?? null,
     })),
   };
