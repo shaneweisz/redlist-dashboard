@@ -5,7 +5,7 @@ import { CACHE_1H } from "@/lib/cache-headers";
 // Fast, standalone CoL-taxon-id lookup for a dynamic node's ancestor chain —
 // see live-breakdown.ts's getLiveColTaxonIds doc comment for why this is a
 // separate endpoint from taxa-breakdown-live rather than bundled into that
-// response: it resolves far faster (no ensureBackboneHelpers setup, no
+// response: it resolves far faster (no ensureColMatchHelpers setup, no
 // no-match diagnostic joins), so TaxaSummary.tsx fires this in parallel and
 // can light up the rank/name header's links well before the slower breakdown
 // table finishes loading.

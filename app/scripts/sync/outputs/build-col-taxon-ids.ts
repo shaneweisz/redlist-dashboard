@@ -4,7 +4,7 @@
  * Species" tooltip can link each name straight to its CoL page
  * (catalogueoflife.org/data/taxon/<id>) instead of leaving it as plain text.
  *
- * backbone.parquet (built by build-backbone) already carries a col_id for every rank
+ * taxa.parquet (built by build-backbone) already carries a col_id for every rank
  * (order/family/genus/species/…), not just species — so this is a lookup against data
  * we already sync locally, no extra network fetch. Output is small (~180 names) and
  * checked into git as src/config/col-taxon-ids.json, since it's derived from committed
@@ -24,6 +24,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "../../../src/config/taxonomy-tree";
 import { COL_DOMESTIC_EXCLUDE_NAMES, COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 type Rank = "class" | "order" | "family" | "genus" | "species";
 
@@ -118,11 +119,11 @@ function collectNames(): Map<string, Rank> {
   return names;
 }
 
-export async function run(opts: { backbonePath?: string; outPath?: string; aliasesOutPath?: string } = {}): Promise<Record<string, string>> {
-  const backbonePath = opts.backbonePath ?? path.join(DATA_DIR, "backbone.parquet");
+export async function run(opts: { taxaPath?: string; outPath?: string; aliasesOutPath?: string } = {}): Promise<Record<string, string>> {
+  const taxaPath = opts.taxaPath ?? path.join(DATA_DIR, syncPath("taxa.parquet"));
   const outPath = opts.outPath ?? path.join(__dirname, "..", "..", "..", "src", "config", "col-taxon-ids.json");
-  if (!fs.existsSync(backbonePath)) {
-    throw new Error(`build-col-taxon-ids: backbone.parquet not found at ${backbonePath} — run build-backbone first.`);
+  if (!fs.existsSync(taxaPath)) {
+    throw new Error(`build-col-taxon-ids: taxa.parquet not found at ${taxaPath} — run the sync first.`);
   }
 
   const names = collectNames();
@@ -148,7 +149,7 @@ export async function run(opts: { backbonePath?: string; outPath?: string; alias
   // on the parent alone found nothing and fell through to a fungus.
   const rows = await (await conn.run(`
     WITH RECURSIVE b AS (SELECT col_id, parent_id, rank, scientific_name, authorship, status
-               FROM read_parquet('${backbonePath}')),
+               FROM read_parquet('${taxaPath}')),
     lineage AS (
       SELECT col_id AS root, parent_id, 0 AS depth FROM b
       UNION ALL
@@ -237,7 +238,7 @@ export async function run(opts: { backbonePath?: string; outPath?: string; alias
     }).join(",")};`);
     const aliasRows = await (await conn.run(`
       WITH RECURSIVE b AS (SELECT col_id, parent_id, rank, scientific_name, authorship, status
-                 FROM read_parquet('${backbonePath}')),
+                 FROM read_parquet('${taxaPath}')),
       cand AS (
         SELECT p.k, t.col_id FROM pending p
         JOIN b t ON p.target IS NOT NULL AND lower(t.scientific_name) = p.target

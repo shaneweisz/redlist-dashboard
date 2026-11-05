@@ -1,7 +1,7 @@
 /**
  * build-search-shards: pre-build the search dropdown as static, prefix-sharded files.
  *
- * Writes public/search-shards/<sync>/ (see lib/search-shards/format.ts for the layout):
+ * Writes public/prebuilt/<sync>/search-shards/ (see lib/search-shards/format.ts for the layout):
  * every name-index.parquet row as a finished SearchResult (toSearchResult — the exact
  * function the live route uses) plus its sort keys, and every rank-index.parquet row as a
  * finished taxon suggestion (resolveTaxonSuggestionNode, ditto). The browser fetches the
@@ -21,20 +21,21 @@ import { getConn, parquetUri, resolveTaxonSuggestionNode, SUGGEST_RANKS, toSearc
 import { encodeColumns } from "../../src/lib/species-lists/format";
 import { COMPLETE_MAX, hexKey, prefixKey, type SearchShard, type SearchShardManifest } from "../../src/lib/search-shards/format";
 import { rankSpeciesRows, rankTaxonRows, SPECIES_TOP_K, TAXA_TOP_K, type ShardSpeciesRow, type ShardTaxonRow } from "../../src/lib/search-shards/rank";
+import { syncPath } from "../../src/lib/data/sync-layout";
 
 const brotli = promisify(zlib.brotliCompress);
 const APP_DIR = path.join(__dirname, "..", "..");
-const OUT_ROOT = path.join(APP_DIR, "public", "search-shards");
+
 const str = (v: unknown) => (v == null ? null : String(v));
 
 async function main() {
   const t0 = Date.now();
   const sync = fs.readFileSync(path.join(APP_DIR, "latest-sync.txt"), "utf-8").trim();
-  if (!fs.existsSync(path.join(APP_DIR, "data", "name-index.parquet"))) {
-    throw new Error("data/name-index.parquet missing — run fetch-data-from-r2 first");
+  if (!fs.existsSync(path.join(APP_DIR, "data", "sync", syncPath("name-index.parquet")))) {
+    throw new Error("data/sync/" + syncPath("name-index.parquet") + " missing — run fetch-data-from-r2 first");
   }
-  const outDir = path.join(OUT_ROOT, sync);
-  fs.rmSync(OUT_ROOT, { recursive: true, force: true });
+  const outDir = path.join(APP_DIR, "public", "prebuilt", sync, "search-shards");
+  fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(outDir, "p2"), { recursive: true });
   fs.mkdirSync(path.join(outDir, "p3"), { recursive: true });
   const conn = await getConn();
@@ -126,7 +127,7 @@ async function main() {
   fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest));
 
   console.log(`search-shards: ${files} files, ${(bytes / 1e6).toFixed(1)}MB brotli (largest "${maxBytes.key}" ${(maxBytes.bytes / 1e3).toFixed(0)}KB), ` +
-    `${keys.length} two-letter keys (${Object.values(manifest.p2).filter((c) => !c).length} split) in ${((Date.now() - t0) / 1000).toFixed(1)}s → public/search-shards/${sync}/`);
+    `${keys.length} two-letter keys (${Object.values(manifest.p2).filter((c) => !c).length} split) in ${((Date.now() - t0) / 1000).toFixed(1)}s → public/prebuilt/${sync}/search-shards/`);
   process.exit(0);
 }
 

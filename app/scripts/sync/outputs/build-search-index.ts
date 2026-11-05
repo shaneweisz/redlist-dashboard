@@ -48,6 +48,7 @@ import * as path from "path";
 import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 /** Ranks in the order suggestTaxa prefers them; the index is the priority it sorts on.
  *  Mirrors SUGGEST_RANKS in src/lib/data/species-duckdb.ts — keep the two in step. */
@@ -62,15 +63,22 @@ const RANK_TO_MATCH_SQL: Record<(typeof SUGGEST_RANKS)[number], string> = {
 /** Ranking tiers, mirrored by searchSpecies' ORDER BY. Keep the two in step. */
 export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3, altCommon: 4, altCommonWord: 5 } as const;
 
-export async function run(opts: { dataDir?: string } = {}): Promise<void> {
+/**
+ * @param coreDir where the vernacular parquets are (the sync's core/); given, they are required
+ * @param inatNames iNaturalist's names (inputs/inat.ts); given, required
+ */
+export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
-  const assessed = path.join(dir, "assessed.parquet");
-  const ne = path.join(dir, "ne.parquet");
-  const link = path.join(dir, "species_link.parquet");
+  for (const f of [opts.coreDir && path.join(opts.coreDir, "species-vernacular-names.parquet"), opts.inatNames]) {
+    if (f && !fs.existsSync(f)) throw new Error(`build-search-index: ${f} is missing; every alternative common name would silently stop matching`);
+  }
+  const assessed = path.join(dir, syncPath("assessed.parquet"));
+  const ne = path.join(dir, syncPath("ne.parquet"));
+  const link = path.join(dir, syncPath("species_link.parquet"));
   for (const f of [assessed, ne, link]) {
     if (!fs.existsSync(f)) throw new Error(`build-search-index: ${f} not found (run build-parquet + build-matching first)`);
   }
-  const out = path.join(dir, "name-index.parquet");
+  const out = path.join(dir, syncPath("name-index.parquet"));
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
 
@@ -108,10 +116,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // "baobab" finds Adansonia digitata through "African baobab" even though its display
   // name is a different one — and an assessed species with no IUCN common name is still
   // findable by its CoL names. Absent on syncs built before that file existed.
-  const altNames = path.join(dir, "species-vernacular-names.parquet");
+  const altNames = path.join(opts.coreDir ?? dir, "species-vernacular-names.parquet");
   // …and every English name iNaturalist gives it (fetch-inat-vernaculars), matched by
   // scientific name within a kingdom. One row per (species, name, case-insensitive).
-  const inatNames = path.join(dir, "inat-vernaculars.parquet");
+  const inatNames = opts.inatNames ?? path.join(dir, "inat-vernaculars.parquet");
   const sources = [
     fs.existsSync(altNames)
       ? `SELECT s.*, v.name AS alt_name FROM species s JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id`
@@ -125,7 +133,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   await conn.run(sources.length
     ? `CREATE TEMP TABLE alt_names AS
          SELECT * EXCLUDE (k) FROM (
-           SELECT *, row_number() OVER (PARTITION BY id, assessed, lower(alt_name) ORDER BY alt_name) AS k
+           -- One row per species and name. A species is its SIS id when assessed, its
+           -- col_id when not: id alone is NULL for every NE row, which once put all NE
+           -- species sharing a name ("A bird flea") in one partition, and kept one.
+           SELECT *, row_number() OVER (PARTITION BY assessed, coalesce(CAST(id AS VARCHAR), col_id), lower(alt_name) ORDER BY alt_name) AS k
            FROM (${sources.join(" UNION ALL ")})
            WHERE lower(alt_name) <> lower(coalesce(common_name, ''))
          ) WHERE k = 1`
@@ -204,10 +215,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
  *     with the group that won (and saves resolveTaxonSuggestionNode its own lookup).
  */
 async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void> {
-  const out = path.join(dir, "rank-index.parquet");
+  const out = path.join(dir, syncPath("rank-index.parquet"));
   const part = (src: string) => SUGGEST_RANKS.map((rank, rp) => `
     SELECT ${RANK_TO_MATCH_SQL[rank]} AS name, ${rp} AS rp, taxon_group, class_name, order_name, family
-    FROM read_parquet('${path.join(dir, src)}')
+    FROM read_parquet('${path.join(dir, syncPath(src))}')
     WHERE ${rank === "genus" ? "scientific_name IS NOT NULL" : `${RANK_TO_MATCH_SQL[rank]} IS NOT NULL`}`
   ).join(" UNION ALL ");
 
@@ -228,7 +239,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
   // the common name for display. A common name that is itself some taxon's scientific
   // name is left out (the scientific row wins), and one shared by several taxa goes to
   // the coarsest rank, then the alphabetically first taxon — the same struct-min rule.
-  const vernFile = path.join(dir, "vernacular-names.json");
+  const vernFile = path.join(dir, syncPath("vernacular-names.json"));
   const vern: Record<string, string> = fs.existsSync(vernFile) ? JSON.parse(fs.readFileSync(vernFile, "utf-8")) : {};
   const tmp = path.join(dir, ".rank-vernaculars.ndjson");
   fs.writeFileSync(tmp, Object.entries(vern).map(([sci, common]) => JSON.stringify({ sci, common })).join("\n"));

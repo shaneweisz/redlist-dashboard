@@ -167,7 +167,7 @@ describe("parseInstitutions", () => {
   // line, or the piece after the final " & ") while containing ", ". If a sync
   // introduces a seventh such name, splitting it would invent institutions —
   // this fails rather than letting that ship silently.
-  const ASSESSED = path.join(process.cwd(), "data", "assessed.parquet");
+  const ASSESSED = path.join(process.cwd(), "data", "sync", "lists", "assessed.parquet");
   const dataIt = fs.existsSync(ASSESSED) ? it : it.skip;
   dataIt("COMMA_BEARING_INSTITUTIONS still matches what the data contains", async () => {
     const { DuckDBInstance } = await import("@duckdb/node-api");

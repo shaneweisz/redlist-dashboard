@@ -22,7 +22,7 @@
  *
  * Keys come from GBIF, never from a local copy of the checklist. The reason is NOT
  * that GBIF holds usages our export lacks — every one of the 140,482 GBIF keys our
- * assessed data carries is present in backbone.parquet. It is that GBIF's matcher
+ * assessed data carries is present in taxa.parquet. It is that GBIF's matcher
  * answers a different question: it returns the key for the NAME as the Red List
  * wrote it, where a CoL join returns the accepted CONCEPT that name folds into.
  * Those differ for 3,215 assessed species, and counting the concept attributes a

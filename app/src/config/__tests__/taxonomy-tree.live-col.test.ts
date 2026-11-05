@@ -22,6 +22,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { NODE_INDEX, speciesMatchesNode } from "@/lib/taxonomy-utils";
 import { COL_DOMESTIC_EXCLUDE_NAMES } from "../col-described-overrides";
 import { DATA_DIR } from "../../../scripts/lib/utils";
+import { syncPath } from "@/lib/data/sync-layout";
 
 // Domestic/feral forms (Bos taurus, Felis catus, etc.) are deliberately unmatched by
 // every node — speciesMatchesNode excludes them unconditionally (see
@@ -31,12 +32,12 @@ import { DATA_DIR } from "../../../scripts/lib/utils";
 // real double-count) doesn't get lost in 10 permanently-expected "failures".
 const EXPECTED_UNMATCHED = new Set(COL_DOMESTIC_EXCLUDE_NAMES.map((n) => n.toLowerCase()));
 
-const SPECIES_GLOB = path.join(DATA_DIR, "species", "**", "*.parquet");
-const LINK = path.join(DATA_DIR, "species_link.parquet");
-const ASSESSED = path.join(DATA_DIR, "assessed.parquet");
+const SPECIES_GLOB = path.join(DATA_DIR, syncPath("species"), "**", "*.parquet");
+const LINK = path.join(DATA_DIR, syncPath("species_link.parquet"));
+const ASSESSED = path.join(DATA_DIR, syncPath("assessed.parquet"));
 
 const DATA_AVAILABLE =
-  fs.existsSync(path.join(DATA_DIR, "species")) && fs.existsSync(LINK) && fs.existsSync(ASSESSED);
+  fs.existsSync(path.join(DATA_DIR, syncPath("species"))) && fs.existsSync(LINK) && fs.existsSync(ASSESSED);
 
 // All 6 "ssc-*-groups" wrapper nodes, found generically rather than hardcoded — stays
 // in sync automatically if a taxon's SSC pilot is ever added or removed.

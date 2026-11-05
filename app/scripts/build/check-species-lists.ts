@@ -25,7 +25,7 @@ import { groupsForTaxon } from "../../src/lib/species-lists/loader";
 
 const APP_DIR = path.join(__dirname, "..", "..");
 const sync = fs.readFileSync(path.join(APP_DIR, "latest-sync.txt"), "utf-8").trim();
-const dir = path.join(APP_DIR, "public", "species-lists", sync);
+const dir = path.join(APP_DIR, "public", "prebuilt", sync, "species-lists");
 const manifest: SpeciesListManifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf-8"));
 
 type Row = Record<string, unknown>;

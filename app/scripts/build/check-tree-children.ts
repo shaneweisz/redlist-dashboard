@@ -2,7 +2,7 @@
  * check-tree-children: prove the pre-built tree files answer every unscoped expand the
  * way /api/redlist/taxa-subgroups does.
  *
- * Decodes public/species-lists/<sync>/tree/<root>.json.br (after build-tree-children)
+ * Decodes public/prebuilt/<sync>/tree/<root>.json.br (after build-tree-children)
  * and, for every node in it (or a sample with --quick), compares the stored children
  * against getLiveRankChildren(node, nextDynamicRank(node)) — the function the route
  * calls — field by field. Also checks completeness: every stored child that can itself
@@ -19,7 +19,7 @@ import { treeChildrenFileName, type TreeChildrenFile } from "../../src/lib/tree-
 
 const APP_DIR = path.join(__dirname, "..", "..");
 const sync = fs.readFileSync(path.join(APP_DIR, "latest-sync.txt"), "utf-8").trim();
-const dir = path.join(APP_DIR, "public", "species-lists", sync, "tree");
+const dir = path.join(APP_DIR, "public", "prebuilt", sync, "tree");
 
 // Key-order-insensitive (byCategory's insertion order depends on row order), and
 // JSON-shaped (undefined colDescribed/colNe drop out, as they do in the route's response).

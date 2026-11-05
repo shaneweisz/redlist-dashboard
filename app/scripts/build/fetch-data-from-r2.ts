@@ -105,7 +105,9 @@ async function main(): Promise<void> {
     throw new Error(`No objects under s3://${bucket}/${syncPrefix}`);
   }
 
+  // Exactly this sync: clear what a previous one left, so no stale file is read.
   console.log(`Downloading ${keys.length} files into ${DATA_DIR}`);
+  fs.rmSync(DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(DATA_DIR, { recursive: true });
 
   // 3. Download in parallel.

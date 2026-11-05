@@ -9,7 +9,7 @@
  *                                     (build-search-index makes each one searchable).
  *
  * Called by build-backbone in a sync (with its NameUsage table), and runnable on its own
- * against a sync's backbone.parquet — so the names can be rebuilt from the same CoL
+ * against a sync's taxa.parquet — so the names can be rebuilt from the same CoL
  * release without re-running the whole backbone:
  *
  *   npx tsx scripts/sync/outputs/build-vernaculars.ts <VernacularName.tsv> [dataDir]
@@ -27,13 +27,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { syncPath } from "../../../src/lib/data/sync-layout";
 
 /**
  * @param usages a SQL relation with col_id, rank, scientific_name for every name usage
- *   (build-backbone's NameUsage table, or a sync's backbone.parquet).
+ *   (build-backbone's NameUsage table, or a sync's taxa.parquet).
  */
-export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacularTsv: string; outDir: string; usages: string }): Promise<void> {
+/** @param workDir where the two parquets go (the sync's core/: they feed other builders, not the app); defaults to outDir */
+export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacularTsv: string; outDir: string; usages: string; workDir?: string }): Promise<void> {
   const { vernacularTsv, outDir, usages } = opts;
+  const workDir = opts.workDir ?? outDir;
 
   // English names straight from the file, as the old single-pick code read them.
   await conn.run(`
@@ -66,7 +69,9 @@ export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacula
   `)).getRowObjects();
   const vernacularMap: Record<string, string> = {};
   for (const r of rows) vernacularMap[String(r.name_lower)] = String(r.name);
-  fs.writeFileSync(path.join(outDir, "vernacular-names.json"), JSON.stringify(vernacularMap, null, 0));
+  const namesOut = path.join(outDir, syncPath("vernacular-names.json"));
+  fs.mkdirSync(path.dirname(namesOut), { recursive: true });
+  fs.writeFileSync(namesOut, JSON.stringify(vernacularMap, null, 0));
   console.log(`Wrote vernacular-names.json: ${rows.length.toLocaleString()} class/order/family/genus common names`);
 
   // Species: every English name, minus scientific-name echoes, first letter capitalized,
@@ -106,11 +111,11 @@ export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacula
           PARTITION BY col_id ORDER BY preferred DESC, shared DESC, length(name), name) AS rn
         FROM vern_scored
       ) WHERE rn = 1 ORDER BY col_id
-    ) TO '${path.join(outDir, "species-vernaculars.parquet")}' (FORMAT PARQUET, COMPRESSION ZSTD);
+    ) TO '${path.join(workDir, "species-vernaculars.parquet")}' (FORMAT PARQUET, COMPRESSION ZSTD);
   `);
   await conn.run(`
     COPY (SELECT col_id, name FROM vern_species ORDER BY col_id, name)
-    TO '${path.join(outDir, "species-vernacular-names.parquet")}' (FORMAT PARQUET, COMPRESSION ZSTD);
+    TO '${path.join(workDir, "species-vernacular-names.parquet")}' (FORMAT PARQUET, COMPRESSION ZSTD);
   `);
   const n = (await (await conn.run(`SELECT count(DISTINCT col_id) AS sp, count(*) AS names FROM vern_species`)).getRowObjects())[0];
   console.log(`Wrote species-vernaculars.parquet (${Number(n.sp).toLocaleString()} display names) + ` +
@@ -129,7 +134,7 @@ if (isDirectRun) {
     await buildVernaculars(conn, {
       vernacularTsv: tsv,
       outDir: dir,
-      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, "backbone.parquet")}')`,
+      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, syncPath("taxa.parquet"))}')`,
     });
     process.exit(0);
   })().catch((e) => { console.error(e); process.exit(1); });

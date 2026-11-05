@@ -13,5 +13,5 @@ export interface TreeChildrenFile {
   children: Record<string, NodeSummary[]>;
 }
 
-/** Inside public/species-lists/<sync>/: `tree/<root>.json.br` (served brotli via next.config). */
+/** Inside public/prebuilt/<sync>/: `tree/<root>.json.br` (served brotli via next.config). */
 export const treeChildrenFileName = (root: string) => `${root}.json.br`;

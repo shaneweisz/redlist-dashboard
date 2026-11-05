@@ -13,14 +13,14 @@
  *              XR) answers every Red List name; build-link takes the certain
  *              answers and decisions.tsv for the rest, and writes the species
  *              still waiting for a person to build/match-queue.tsv
- *   data       the read models, then the summary, CoL-revision, synonym and
- *              search builders run against them (PIPELINE_DATA_DIR)
+ *   outputs    the read models, then the summaries, CoL revisions, synonym
+ *              and search indexes and CoL taxon ids built from them
  *   checks     matching fixtures (any failure stops the sync), and the
  *              comparison against the sync production serves, written to
  *              build/compare/ for the PR
  *   sync.json  every input version and check result, published with the data
  *
- * Usage:  npm run sync [-- --skip-compare]
+ * Usage:  npm run sync [-- --skip-compare] [-- --baseline <data dir>]
  */
 
 import * as fs from "fs";
@@ -28,7 +28,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../lib/utils";
-import { currentReleaseOnDisk, writeReleaseMetadata } from "./inputs/fetch-col-xr";
+import { writeReleaseMetadata } from "./inputs/fetch-col-xr";
 import { ensureColInputs } from "./inputs/col";
 import { ensureInatNames } from "./inputs/inat";
 import { run as buildTaxa } from "./core/build-taxa";
@@ -38,11 +38,17 @@ import { buildLink, summariseQueue } from "./core/build-link";
 import { buildMatches } from "./core/build-matches";
 import { ensureMatcher } from "./inputs/matcher";
 import { buildReadModels } from "./outputs/build-read-models";
+import { run as buildTaxaSummary } from "./outputs/build-taxa-summary";
+import { run as buildColRevisions } from "./outputs/build-col-revisions";
+import { run as buildSynonymIndex } from "./outputs/build-synonym-index";
+import { run as buildSearchIndex } from "./outputs/build-search-index";
+import { run as buildColTaxonIds } from "./outputs/build-col-taxon-ids";
 import { observe, mismatches } from "./checks/check-fixtures";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
 import { BUILD_DIR, CORE_DIR, OUT_DIR } from "./paths";
+import { syncPath } from "../../src/lib/data/sync-layout";
 
 const APP = path.join(__dirname, "..", "..");
 
@@ -52,26 +58,33 @@ function step(name: string): () => void {
   return () => console.log(`   ${name}: ${((Date.now() - start) / 1000).toFixed(0)} s`);
 }
 
-/** A builder that reads DATA_DIR, run against the pipeline's output. */
-function runBuilder(script: string): void {
-  execFileSync("npx", ["tsx", path.join("scripts", "sync", "outputs", script)], {
-    cwd: APP, stdio: "inherit", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR },
-  });
-}
-
 function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: APP, encoding: "utf-8" }).trim();
 }
 
-export async function sync(opts: { skipCompare?: boolean } = {}): Promise<void> {
+/** Tests that read a sync's output (see the checks step), and the files they read. */
+const DATA_TESTS = ["scripts/__tests__/validate-table1a.test.ts", "src/config/__tests__/taxonomy-tree.test.ts", "src/lib/__tests__/countries.test.ts",
+  "src/lib/__tests__/col-revisions-data.test.ts"];
+const DATA_TEST_FILES = ["taxa-summary.json", "table1a-children-summaries.json", "ssc-group-children-summaries.json", "country-stats.json", "col-revisions.json"];
+
+/**
+ * @param baseline a data directory to compare against instead of the sync
+ *   production serves: a previous build's data/, to see one change at a time
+ *   (a new CoL release, then a new Red List release, each against the last)
+ */
+export async function sync(opts: { skipCompare?: boolean; baseline?: string } = {}): Promise<void> {
   fs.mkdirSync(BUILD_DIR, { recursive: true });
   const manifest: Record<string, unknown> = { built_at: new Date().toISOString(), commit: git("rev-parse", "HEAD"),
     dirty: git("status", "--porcelain", "--", "scripts", "src").length > 0 };
 
+  // data/ is exactly what gets uploaded, so it starts empty: a file only an
+  // older version wrote would otherwise be published with every sync after it.
+  fs.rmSync(OUT_DIR, { recursive: true, force: true });
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+
   let done = step("inputs");
   const col = await ensureColInputs();
   const inat = await ensureInatNames();
-  const releaseMoved = currentReleaseOnDisk() !== col.xr.key;
   manifest.col = { xr: col.xr, checklist: col.checklist };
   done();
 
@@ -111,10 +124,11 @@ export async function sync(opts: { skipCompare?: boolean } = {}): Promise<void> 
   done();
 
   done = step("summaries, CoL revisions, synonym and search indexes");
-  for (const s of ["build-taxa-summary.ts", "build-col-revisions.ts", "build-synonym-index.ts", "build-search-index.ts", "build-col-taxon-ids.ts"]) runBuilder(s);
-  // The group root keys the live country-stats route queries GBIF with, re-derived
-  // only when the CoL release moves (they are CoL ids, and GBIF resolves them).
-  if (releaseMoved) runBuilder("derive-gbif-taxon-keys.ts");
+  await buildTaxaSummary({ dataDir: OUT_DIR });
+  await buildColRevisions({ dataDir: OUT_DIR });
+  await buildSynonymIndex({ dataDir: OUT_DIR });
+  await buildSearchIndex({ dataDir: OUT_DIR, coreDir: CORE_DIR, inatNames: inat });
+  await buildColTaxonIds({ taxaPath: path.join(OUT_DIR, syncPath("taxa.parquet")) });
   writeReleaseMetadata(col.xr, col.checklist);
   done();
 
@@ -124,11 +138,26 @@ export async function sync(opts: { skipCompare?: boolean } = {}): Promise<void> 
   const failed = MATCHING_CASES.filter((c) => !c.knownBug && mismatches(c, obs.get(c.name)!).length > 0);
   manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };
   if (failed.length > 0) {
-    fs.writeFileSync(path.join(OUT_DIR, "sync.json"), JSON.stringify(manifest, null, 2) + "\n");
+    fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
     throw new Error(`sync: ${failed.length} matching fixtures fail: ${failed.map((c) => `${c.name} (${mismatches(c, obs.get(c.name)!).join("; ")})`).join(", ")}`);
   }
+  // The tests that check a sync's output against the code (Table 1a totals, the
+  // taxonomy tree's summaries, country names). CI has no data and skips them, so
+  // this is where they run. The files they read are checked first: a missing one
+  // would skip its test, not fail it.
+  for (const f of DATA_TEST_FILES) {
+    if (!fs.existsSync(path.join(OUT_DIR, syncPath(f)))) throw new Error(`sync: ${f} was not built`);
+  }
+  try {
+    execFileSync("npx", ["vitest", "run", ...DATA_TESTS], { cwd: APP, stdio: "inherit", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR } });
+    manifest.data_tests = { files: DATA_TESTS, passed: true };
+  } catch {
+    manifest.data_tests = { files: DATA_TESTS, passed: false };
+    fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
+    throw new Error("sync: the data tests fail against this build (output above)");
+  }
   if (!opts.skipCompare) {
-    const baseline = await ensureBaseline(prodSync());
+    const baseline = opts.baseline ? path.resolve(opts.baseline) : await ensureBaseline(prodSync());
     const out = path.join(BUILD_DIR, "compare");
     const summary = await compare({ baseline, candidate: OUT_DIR, out, core: CORE_DIR });
     manifest.compare = { baseline: path.basename(baseline), report: path.join(out, "report.md"), ...summary };
@@ -137,12 +166,14 @@ export async function sync(opts: { skipCompare?: boolean } = {}): Promise<void> 
   }
   done();
 
-  fs.writeFileSync(path.join(OUT_DIR, "sync.json"), JSON.stringify(manifest, null, 2) + "\n");
+  fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
   console.log(`\nBuilt ${OUT_DIR}. Review the report, then: npm run sync:publish`);
 }
 
 const isDirectRun = process.argv[1]?.endsWith("sync/sync.ts") || process.argv[1]?.endsWith("sync/sync.js");
 if (isDirectRun) {
   loadEnvFiles();
-  sync({ skipCompare: process.argv.includes("--skip-compare") }).catch((e) => { console.error(e); process.exit(1); });
+  const i = process.argv.indexOf("--baseline");
+  sync({ skipCompare: process.argv.includes("--skip-compare"), baseline: i >= 0 ? process.argv[i + 1] : undefined })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

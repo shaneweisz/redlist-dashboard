@@ -1,6 +1,6 @@
 /**
  * Browser loader for the pre-built tree files (scripts/build/build-tree-children.ts →
- * public/species-lists/<sync>/tree/<root>.json.br).
+ * public/prebuilt/<sync>/tree/<root>.json.br).
  *
  * Answers an UNSCOPED expand of a live-drilldown node (what
  * /api/redlist/taxa-subgroups?nodeId=… returns as `subgroups`) from one file per
@@ -24,7 +24,7 @@ const rootFiles = new Map<string, Promise<TreeChildrenFile | null>>();
 function loadRoot(root: string): Promise<TreeChildrenFile | null> {
   let load = rootFiles.get(root);
   if (!load) {
-    load = fetch(`/species-lists/${SYNC}/tree/${treeChildrenFileName(root)}`)
+    load = fetch(`/prebuilt/${SYNC}/tree/${treeChildrenFileName(root)}`)
       .then((res) => (res.ok ? (res.json() as Promise<TreeChildrenFile>) : null))
       .then((f) => (f && f.v === 1 && f.sync === SYNC && f.root === root ? f : null))
       .catch(() => null);

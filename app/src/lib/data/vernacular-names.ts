@@ -12,9 +12,10 @@
  */
 import fs from "fs";
 import path from "path";
+import { syncPath } from "./sync-layout";
 import { setVernacularNames } from "@/lib/dynamic-taxon";
 
-const VERNACULAR_NAMES_PATH = path.join(process.cwd(), "data", "vernacular-names.json");
+const VERNACULAR_NAMES_PATH = path.join(process.cwd(), "data", "sync", syncPath("vernacular-names.json"));
 
 let loaded = false;
 

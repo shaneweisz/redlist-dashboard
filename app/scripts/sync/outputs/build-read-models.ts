@@ -9,7 +9,7 @@
  *                        its GBIF counts under the counting rule (counts.ts),
  *                        its latest credits and assessment count
  *   assessments.parquet  published assessment history, one row per year
- *   species/, ne.parquet, species_link.parquet, backbone.parquet  see notEvaluated
+ *   species/, ne.parquet, species_link.parquet  see notEvaluated
  *
  * GBIF counts per assessed species, from its link rows:
  *   own / covered   its species' records, minus usages another species owns
@@ -31,6 +31,7 @@ import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
 import { usageCountsSql, countedBasisSql } from "../core/counts";
 import { ensureInatNames } from "../inputs/inat";
 import { CORE_DIR, OUT_DIR } from "../paths";
+import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
 
 let CORE_DIR_FOR_COUNTRIES = CORE_DIR;
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -150,8 +151,8 @@ async function history(conn: DuckDBConnection, coreDir: string): Promise<void> {
  *                             (src = 'redlist'; covered rows as
  *                             iucn_synonym_covered), for the CoL-differences code
  */
-async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<void> {
-  const speciesDir = path.join(outDir, "species");
+async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: string): Promise<void> {
+  const speciesDir = path.join(outDir, syncPath("species"));
   fs.rmSync(speciesDir, { recursive: true, force: true });
   await conn.run(`COPY (
     SELECT col_id, scientific_name, authorship, described_year, kingdom, phylum, class_name, order_name, family, genus,
@@ -170,7 +171,7 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<voi
       WHERE l.role = 'primary' OR l.col_id IS NOT NULL
       QUALIFY row_number() OVER (PARTITION BY l.sis_taxon_id, l.col_id, l.role ORDER BY l.usage_id NULLS LAST) = 1)
     ORDER BY sis_taxon_id
-  ) TO ${lit(path.join(outDir, "species_link.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  ) TO ${lit(path.join(outDir, syncPath("species_link.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 
   // Counted records and GBIF countries per NE species, under the counting rule:
   // its species' usages, minus any an assessed species owns.
@@ -185,7 +186,7 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<voi
     WHERE c.georef AND ${countedBasisSql("c.basis", "coalesce(sp.kingdom, u.kingdom)")}
       AND u.species_id IS NOT NULL AND c.usage_key NOT IN (SELECT usage_key FROM owned)
     GROUP BY 1`);
-  const vern = path.join(outDir, "species-vernaculars.parquet");
+  const vern = path.join(coreDir, "species-vernaculars.parquet");
   await conn.run(fs.existsSync(vern)
     ? `CREATE OR REPLACE TEMP TABLE col_names AS SELECT col_id, vernacular_name FROM read_parquet(${lit(vern)})`
     : `CREATE OR REPLACE TEMP TABLE col_names (col_id VARCHAR, vernacular_name VARCHAR)`);
@@ -205,7 +206,7 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<voi
       AND t.in_base AND t.extinct IS NOT TRUE AND t.ne_excluded IS NULL
       AND t.col_id NOT IN (SELECT col_id FROM link WHERE col_id IS NOT NULL)
     ORDER BY t.taxon_group, t.class_name, t.order_name, t.family, t.scientific_name
-  ) TO ${lit(path.join(outDir, "ne.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  ) TO ${lit(path.join(outDir, syncPath("ne.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 }
 
 /**
@@ -219,7 +220,7 @@ async function checkEachUsageCountedOnce(conn: DuckDBConnection, outDir: string)
       SELECT DISTINCT usage_key, 'sis ' || sis || ' via ' || usage_id AS claim FROM hits
       UNION ALL
       SELECT DISTINCT u.usage_key, 'NE ' || u.species_id FROM uc u
-      JOIN read_parquet(${lit(path.join(outDir, "ne.parquet"))}) ne ON ne.col_id = u.species_id
+      JOIN read_parquet(${lit(path.join(outDir, syncPath("ne.parquet")))}) ne ON ne.col_id = u.species_id
       WHERE u.usage_key NOT IN (SELECT usage_key FROM owned))
     SELECT usage_key, string_agg(claim, ', ' ORDER BY claim) AS claims
     FROM claims GROUP BY usage_key HAVING count(*) > 1 ORDER BY usage_key LIMIT 10`)).getRowObjects();
@@ -229,6 +230,7 @@ async function checkEachUsageCountedOnce(conn: DuckDBConnection, outDir: string)
 }
 
 export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs): Promise<void> {
+  for (const f of SYNC_FOLDERS) fs.mkdirSync(path.join(o.outDir, f), { recursive: true });
   fs.mkdirSync(o.outDir, { recursive: true });
   CORE_DIR_FOR_COUNTRIES = o.coreDir;
   const currentYear = o.currentYear ?? new Date().getUTCFullYear();
@@ -242,7 +244,7 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
     : `CREATE OR REPLACE TEMP TABLE inat (scientific_name VARCHAR, kingdom VARCHAR, preferred_name VARCHAR)`);
 
   await conn.run(`COPY (SELECT * FROM hist ORDER BY sis_taxon_id, seq)
-    TO ${lit(path.join(o.outDir, "assessments.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+    TO ${lit(path.join(o.outDir, syncPath("assessments.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 
   await conn.run(`COPY (
     SELECT la.sis_taxon_id AS id, la.scientific_name,
@@ -265,7 +267,7 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
     LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM hist GROUP BY 1) hc ON hc.sis_taxon_id = la.sis_taxon_id
     LEFT JOIN inat i ON i.scientific_name = la.scientific_name AND i.kingdom = ${inatKingdomSql("la.taxon_group")}
     ORDER BY la.class_name, la.order_name, la.family, la.scientific_name
-  ) TO ${lit(path.join(o.outDir, "assessed.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  ) TO ${lit(path.join(o.outDir, syncPath("assessed.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 
   await conn.run(`COPY (
     SELECT c.*, k.georef AS key_georef, k.role = 'primary' AND k.verdict = 'own' AS key_is_own_species
@@ -274,14 +276,11 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
     LEFT JOIN row_counts k ON k.sis = c.sis AND k.usage_id = g.gbif_species_key
     ORDER BY c.sis) TO ${lit(path.join(o.coreDir, "count_components.parquet"))} (FORMAT parquet)`);
 
-  await notEvaluated(conn, o.outDir);
+  await notEvaluated(conn, o.outDir, o.coreDir);
   await checkEachUsageCountedOnce(conn, o.outDir);
 
-  // The app reads the link and the taxonomy directly too. backbone.parquet is the
-  // taxa table under the name the CoL-differences code reads.
-  for (const f of ["assessment_link.parquet", "taxa.parquet"]) fs.copyFileSync(path.join(o.coreDir, f), path.join(o.outDir, f));
-  fs.copyFileSync(path.join(o.coreDir, "taxa.parquet"), path.join(o.outDir, "backbone.parquet"));
-  if (o.inatNames && fs.existsSync(o.inatNames)) fs.copyFileSync(o.inatNames, path.join(o.outDir, "inat-vernaculars.parquet"));
+  // The app reads the taxonomy directly, and the comparison reads the link.
+  for (const f of ["assessment_link.parquet", "taxa.parquet"]) fs.copyFileSync(path.join(o.coreDir, f), path.join(o.outDir, syncPath(f)));
 }
 
 export async function run(): Promise<void> {
@@ -289,7 +288,7 @@ export async function run(): Promise<void> {
   const inatNames = await ensureInatNames();
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames });
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(gbif_species_key) AS keyed, sum(gbif_occurrence_count) AS georef
-    FROM read_parquet(${lit(path.join(OUT_DIR, "assessed.parquet"))})`)).getRowObjects();
+    FROM read_parquet(${lit(path.join(OUT_DIR, syncPath("assessed.parquet")))})`)).getRowObjects();
   console.log(`Wrote ${OUT_DIR}/assessed.parquet: ${Number(s.n).toLocaleString()} species, ${Number(s.keyed).toLocaleString()} with GBIF records ` +
     `(${Number(s.georef).toLocaleString()} georeferenced)`);
 }

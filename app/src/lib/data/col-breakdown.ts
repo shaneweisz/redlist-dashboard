@@ -8,11 +8,11 @@
  * mirroring how taxonomy-sql.ts's filterToSql was pulled out for the same
  * reason (see that file's doc comment).
  *
- * The diagnostic query needs three backbone.parquet-dependent temp tables
+ * The diagnostic query needs three taxa.parquet-dependent temp tables
  * (split_candidates, synonym_assessed, col_to_assessed) built ONCE per caller — full
  * backbone scans/joins, not cheap to repeat per name. build-taxa-summary.ts
  * builds them once per whole script run; live-taxa-children.ts memoizes them
- * once per warm server connection (see ensureBackboneHelpers there). This
+ * once per warm server connection (see ensureColMatchHelpers there). This
  * module only *uses* them by name — building them is the caller's job, since
  * "once per run" vs. "once per warm process" are genuinely different lifetimes.
  */
@@ -103,7 +103,7 @@ export interface BreakdownEntry {
 //  - missing_from_backbone: its linked col_id has no row in the backbone at all —
 //    a genuine dangling reference (rare/never in practice; kept as a fallback for
 //    the infraspecific/provisional checks above when they can't resolve a parent,
-//    and for whenever backbone.parquet isn't available at build time).
+//    and for whenever taxa.parquet isn't available at build time).
 //  - lumped: its linked col_id IS in the universe, but a DIFFERENT assessed species
 //    won the accepted-name tie-break for it (a genuine CoL synonymy/lump).
 //  - synonym_of: same as not_in_base (its linked col_id is XR-only), BUT IUCN's own
@@ -235,7 +235,7 @@ export function classifyNoMatch(row: Record<string, unknown>): NoMatchDetail {
 }
 
 // Precomputes a col_id -> likely-former-parent lookup, once per caller lifetime
-// (not once per breakdown name — backbone.parquet is ~3.8M rows, so re-scanning
+// (not once per breakdown name — taxa.parquet is ~3.8M rows, so re-scanning
 // it per name would be wasteful). The heuristic: CoL keeps a subspecies/
 // infraspecific synonym record when a subspecies is promoted to full species
 // status (e.g. "Gazella gazella acaciae" survives as a synonym once "Gazella
@@ -397,40 +397,9 @@ export interface BreakdownQueryContext {
   assessedCidsTable: string;
   excludedColIdsSql: string;
   /** Whether split_candidates/col_to_assessed (backbone-dependent) have been built. */
-  hasBackbone: boolean;
-  /**
-   * Whether backbone.parquet actually carries build-taxa's checklist-derived
-   * columns (in_checklist / checklist_parent_id / checklist_name). Separate from
-   * hasBackbone because those three were added to the backbone AFTER the queries
-   * that read them: the sync only rebuilds the backbone when a CoL release moves,
-   * so a data sync built before that change has a perfectly usable backbone that
-   * simply lacks these columns — and referencing one anyway is a DuckDB Binder
-   * Error that fails the whole request, which is exactly how every live-drilldown
-   * breakdown started returning a 500. False just drops the rename claim (the one
-   * thing those columns feed), same graceful degradation hasBackbone already gives.
-   * Callers derive it with backboneHasChecklistColumns below.
-   */
-  hasChecklistColumns: boolean;
-  /** Only read when hasBackbone is true. */
-  backbonePath?: string;
-}
-
-/** The build-taxa columns syn_in_checklist needs; see hasChecklistColumns. */
-const CHECKLIST_COLUMNS = ["in_checklist", "checklist_parent_id", "checklist_name"];
-
-/**
- * Does the backbone on disk carry the checklist-derived columns? A parquet
- * DESCRIBE reads footer metadata only — no scan — so this is cheap enough to run
- * once per server/build rather than being cached in the data sync itself.
- */
-export async function backboneHasChecklistColumns(conn: DuckDBConnection, backbonePath: string): Promise<boolean> {
-  try {
-    const rows = await (await conn.run(`DESCRIBE SELECT * FROM read_parquet('${backbonePath}') LIMIT 0`)).getRowObjects();
-    const cols = new Set(rows.map((r) => String(r.column_name)));
-    return CHECKLIST_COLUMNS.every((c) => cols.has(c));
-  } catch {
-    return false;
-  }
+  hasTaxa: boolean;
+  /** Only read when hasTaxa is true. */
+  taxaPath?: string;
 }
 
 /**
@@ -454,9 +423,9 @@ export async function computeNoMatchDetails(
    *  Defaults to speciesWhere. */
   matchWhere: string = speciesWhere,
 ): Promise<NoMatchDetail[]> {
-  const { conn, speciesGlob, assessedPath, linkPath, universeSql: universe, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone } = ctx;
+  const { conn, speciesGlob, assessedPath, linkPath, universeSql: universe, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa } = ctx;
   // The synonym-rename claim needs both the backbone AND its checklist columns.
-  const hasSynClaim = hasBackbone && ctx.hasChecklistColumns;
+  const hasSynClaim = hasTaxa;
   // The specific assessed species (sis_taxon_id) behind that gap, plus enough
   // context (its own primary CoL link, and who "won" that link if it lost a tie)
   // to classify WHY each one doesn't have a clean match — see classifyNoMatch.
@@ -509,14 +478,14 @@ export async function computeNoMatchDetails(
     ),
     winners AS (
       SELECT col_id, id AS winner_id, name AS winner_name FROM candidate_links WHERE rn = 1
-    )${hasBackbone ? `,
+    )${hasTaxa ? `,
     -- Names CoL holds ONLY as a provisionally-accepted species. Semi-joined to the
-    -- assessed names in scope, so this reads backbone.parquet against a small
+    -- assessed names in scope, so this reads taxa.parquet against a small
     -- build side rather than scanning it whole, and pre-aggregated so it can't
     -- multiply rows in the SELECT below.
     prov_by_name AS (
       SELECT lower(scientific_name) AS lname, min(col_id) AS col_id
-      FROM read_parquet('${ctx.backbonePath}')
+      FROM read_parquet('${ctx.taxaPath}')
       WHERE rank = 'species' AND status = 'provisionally accepted'
         AND lower(scientific_name) IN (SELECT lower(scientific_name) FROM matched_assessed)
       GROUP BY 1
@@ -545,8 +514,8 @@ export async function computeNoMatchDetails(
         -- a link to the release's page, so it must match what is on that page.
         SELECT lower(syn.scientific_name) AS lname, acc.col_id AS col_id,
                coalesce(acc.checklist_name, acc.scientific_name) AS name
-        FROM read_parquet('${ctx.backbonePath}') syn
-        JOIN read_parquet('${ctx.backbonePath}') acc
+        FROM read_parquet('${ctx.taxaPath}') syn
+        JOIN read_parquet('${ctx.taxaPath}') acc
           ON acc.col_id = syn.checklist_parent_id AND acc.in_checklist
         -- checklist_parent_id is set only for usages the release itself files as
         -- a synonym, so it already implies in_checklist; testing both would read
@@ -571,7 +540,7 @@ export async function computeNoMatchDetails(
       sp.family AS col_family, sp.order_name AS col_order, sp.class_name AS col_class,
       ma.assessed_family AS assessed_family, ma.assessed_order AS assessed_order,
       w.winner_name AS winner_name, w.winner_id AS winner_id
-      ${hasBackbone ? `,
+      ${hasTaxa ? `,
       pbn.col_id AS prov_col_id,${hasSynClaim ? `
       sib.name AS syn_name, sib.col_id AS syn_col_id,` : ""}
       bk.parent_id AS parent_col_id,
@@ -583,12 +552,12 @@ export async function computeNoMatchDetails(
     LEFT JOIN read_parquet('${speciesGlob}', hive_partitioning=true) sp ON sp.col_id = pl.col_id
     LEFT JOIN winners w ON w.col_id = pl.col_id
     LEFT JOIN candidate_links cl ON cl.id = ma.id AND cl.rn = 1
-    ${hasBackbone ? `
+    ${hasTaxa ? `
     -- Only needed to explain species/-misses (sp.scientific_name IS NULL) more
     -- precisely than a blanket "missing from backbone" — see classifyNoMatch's
     -- infraspecific/provisional reasons.
-    LEFT JOIN read_parquet('${ctx.backbonePath}') bk ON bk.col_id = pl.col_id
-    LEFT JOIN read_parquet('${ctx.backbonePath}') bkparent ON bkparent.col_id = bk.parent_id
+    LEFT JOIN read_parquet('${ctx.taxaPath}') bk ON bk.col_id = pl.col_id
+    LEFT JOIN read_parquet('${ctx.taxaPath}') bkparent ON bkparent.col_id = bk.parent_id
     LEFT JOIN col_to_assessed ca ON ca.col_id = bk.parent_id
     LEFT JOIN prov_by_name pbn ON pl.col_id IS NULL AND pbn.lname = lower(ma.scientific_name)` : ""}${hasSynClaim ? `
     LEFT JOIN syn_in_checklist sib ON sib.lname = lower(ma.scientific_name)` : ""}
@@ -613,7 +582,7 @@ export async function computeNoMatchDetails(
 /**
  * One breakdown entry (colDescribed/colNe split by name, plus the no-match
  * diagnostic) for a single narrowed filter. Callers must have already built
- * ctx.assessedCidsTable and, if ctx.hasBackbone, the split_candidates/
+ * ctx.assessedCidsTable and, if ctx.hasTaxa, the split_candidates/
  * synonym_assessed/col_to_assessed temp tables (see the file doc comment for why
  * building them is the caller's responsibility, not this function's).
  */
@@ -626,7 +595,7 @@ export async function computeBreakdownEntry(
    *  computeNoMatchDetails' matchWhere. */
   nodeFilter: NodeFilter = narrowed,
 ): Promise<BreakdownEntry> {
-  const { conn, speciesGlob, assessedPath, universeSql: universe, assessedCidsTable, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone } = ctx;
+  const { conn, speciesGlob, assessedPath, universeSql: universe, assessedCidsTable, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa } = ctx;
 
   const bRows = await (await conn.run(`
     SELECT count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}) AS n,
@@ -644,11 +613,11 @@ export async function computeBreakdownEntry(
     SELECT count(*) AS n FROM read_parquet('${assessedPath}') WHERE ${filterToSql(narrowed)}`)).getRowObjects();
   const noMatchDetails = await computeNoMatchDetails(ctx, filterToSql(narrowed, nodeId), filterToSql(narrowed), filterToSql(nodeFilter, nodeId));
   // "Split from" candidates for this name's NE species — a lookup against the
-  // once-per-caller-lifetime split_candidates table, not a fresh backbone.parquet
+  // once-per-caller-lifetime split_candidates table, not a fresh taxa.parquet
   // scan. Deliberately scoped to the SAME NE universe as bRows.ne (in_base,
   // extant/EX-EW, narrowed filter), so an entry here is guaranteed to be one of
   // this name's neCount species.
-  const splitDetails: SplitDetail[] = hasBackbone
+  const splitDetails: SplitDetail[] = hasTaxa
     ? (await (await conn.run(`
         SELECT ns.col_id AS ne_col_id, sc.parent_id, sc.parent_name, sc.parent_category
         FROM (
@@ -668,7 +637,7 @@ export async function computeBreakdownEntry(
     : [];
   // The same lookup shape as splitDetails, against synonym_assessed — scoped to
   // the identical NE universe, so every row here is one of this name's neCount.
-  const neSynonymDetails: NeSynonymDetail[] = hasBackbone
+  const neSynonymDetails: NeSynonymDetail[] = hasTaxa
     ? (await (await conn.run(`
         SELECT ns.col_id AS ne_col_id, sa.assessed_id, sa.assessed_name, sa.assessed_category
         FROM (

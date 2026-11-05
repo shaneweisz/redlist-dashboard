@@ -17,7 +17,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { computeNoMatchDetails, COL_TO_ASSESSED_SQL, SYNONYM_ASSESSED_SQL, backboneHasChecklistColumns, type BreakdownQueryContext } from "../col-breakdown";
+import { computeNoMatchDetails, COL_TO_ASSESSED_SQL, SYNONYM_ASSESSED_SQL, type BreakdownQueryContext } from "../col-breakdown";
 
 let tmp: string;
 let conn: DuckDBConnection;
@@ -72,7 +72,7 @@ beforeAll(async () => {
       ('NEAMB', NULL, 'accepted', 'species', 'Ne ambigua', true, NULL, NULL),
       ('NEAMB1', 'NEAMB', 'synonym', 'species', 'Lump winner', true, NULL, NULL),
       ('NEAMB2', 'NEAMB', 'synonym', 'species', 'Demoted one', true, NULL, NULL)
-    ) v(col_id, parent_id, status, rank, scientific_name, in_checklist, checklist_parent_id, checklist_name)`, "backbone.parquet");
+    ) v(col_id, parent_id, status, rank, scientific_name, in_checklist, checklist_parent_id, checklist_name)`, "taxa.parquet");
 
   // family/order_name are the assessment's own placement, which the
   // classified_elsewhere wording compares CoL's against — naming a family the
@@ -114,9 +114,8 @@ beforeAll(async () => {
     speciesGlob: path.join(tmp, "species", "**", "*.parquet"),
     assessedPath: path.join(tmp, "assessed.parquet"),
     linkPath: path.join(tmp, "species_link.parquet"),
-    backbonePath: path.join(tmp, "backbone.parquet"),
-    hasBackbone: true,
-    hasChecklistColumns: true,
+    taxaPath: path.join(tmp, "taxa.parquet"),
+    hasTaxa: true,
     universeSql: "extinct IS NOT TRUE",
     assessedCidsTable: "assessed_cids",
     excludedColIdsSql: "('__none__')",
@@ -191,39 +190,11 @@ describe("computeNoMatchDetails — the query, not just the classifier", () => {
     expect(outsideGroup.map((d) => d.reason)).toEqual(["classified_elsewhere"]);
   });
 
-  it("degrades instead of throwing when the backbone predates the checklist columns", async () => {
-    const legacyBackbone = path.join(tmp, "backbone-legacy.parquet");
-    await conn.run(`COPY (
-      SELECT col_id, parent_id, status, rank, scientific_name
-      FROM read_parquet('${path.join(tmp, "backbone.parquet")}')
-    ) TO '${legacyBackbone}' (FORMAT PARQUET);`);
-
-    expect(await backboneHasChecklistColumns(conn, legacyBackbone)).toBe(false);
-    expect(await backboneHasChecklistColumns(conn, path.join(tmp, "backbone.parquet"))).toBe(true);
-
-    const details = await computeNoMatchDetails(
-      { ...ctx, backbonePath: legacyBackbone, hasChecklistColumns: false },
-      "true",
-      "true",
-    );
-    const byId = new Map(details.map((d) => [d.id, d]));
-
-    // Every reason that doesn't come from those columns is unaffected.
-    expect(byId.has(1)).toBe(false);
-    expect(byId.get(4)?.reason).toBe("infraspecific");
-    expect(byId.get(6)?.reason).toBe("lumped");
-    expect(byId.get(7)?.reason).toBe("unmatched");
-
-    // The rename claim is the one thing lost: species 3 falls back to what the
-    // rest of the row still supports rather than disappearing or erroring.
-    expect(byId.get(3)?.reason).toBe("not_in_base");
-    expect(byId.get(3)?.detail).toBeUndefined();
-  });
 });
 
 describe("SYNONYM_ASSESSED_SQL — why a Not Evaluated species may already be assessed", () => {
   it("names the assessed species CoL files as a synonym, and refuses when there are two", async () => {
-    await conn.run(SYNONYM_ASSESSED_SQL(path.join(tmp, "backbone.parquet"), path.join(tmp, "assessed.parquet"), "assessed_cids"));
+    await conn.run(SYNONYM_ASSESSED_SQL(path.join(tmp, "taxa.parquet"), path.join(tmp, "assessed.parquet"), "assessed_cids"));
     const rows = await (await conn.run("SELECT * FROM synonym_assessed ORDER BY ne_col_id")).getRowObjects();
     const by = new Map(rows.map((r) => [String(r.ne_col_id), r]));
 

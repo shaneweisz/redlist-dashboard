@@ -12,19 +12,17 @@ const DUCKDB_TRACE = [
   "./duckdb-ext/**",
 ];
 
-// The CoL backbone artifacts (#271) are read ONLY from R2 via httpfs at runtime —
-// no serverless function bundles them. But fetch-data-from-r2 pulls the whole
-// sync into app/data/ at build time, so any function that traces data/ would bundle
-// backbone.parquet (~170MB) and blow Vercel's 250MB function cap. Exclude them from
-// the species-store routes (the DuckDB routes already exclude all of data/).
-const COL_ARTIFACTS = [
-  "**/data/backbone.parquet",
-  "**/data/species/**",
-  "**/data/species_link.parquet",
-  "**/data/synonym-index.parquet",
-];
+// What a route that reads only the sync's small JSON summaries leaves out of its
+// bundle: every sync parquet (read from R2 over httpfs; and bundling one flips
+// USE_R2 off, since species-duckdb keys it on assessed.parquet NOT existing
+// locally), the species/ partitions, the narratives and the map overlays.
+// taxa.parquet alone is ~160MB against Vercel's 250MB function cap.
+const ONLY_SUMMARIES = ["**/data/sync/**/*.parquet", "**/data/sync/lists/species/**", "**/data/narratives/**", "**/data/overlays/**"];
+// …and, for routes that never open them, the two children summaries (~2.5MB).
+const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
+  "**/data/sync/summaries/table1a-children-summaries.json", "**/data/sync/summaries/ssc-group-children-summaries.json"];
 
-// The sync the pre-built species-list files belong to (public/species-lists/<sync>/,
+// The sync the pre-built files belong to (public/prebuilt/<sync>/,
 // written by scripts/build/build-species-lists.ts). Baked into the client bundle so a page
 // asks for exactly the files its own deployment was built with.
 const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
@@ -40,16 +38,9 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/species-lists/:path*.json.br",
-        headers: [
-          { key: "Content-Encoding", value: "br" },
-          { key: "Content-Type", value: "application/json" },
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
-        ],
-      },
-      {
-        // Search prefix shards (scripts/build/build-search-shards.ts) — same storage, same reason.
-        source: "/search-shards/:path*.json.br",
+        // Everything the build pre-builds: species lists, search shards, tree
+        // (public/prebuilt/<sync>/, written by scripts/build/).
+        source: "/prebuilt/:path*.json.br",
         headers: [
           { key: "Content-Encoding", value: "br" },
           { key: "Content-Type", value: "application/json" },
@@ -174,7 +165,7 @@ const nextConfig: NextConfig = {
     // parquets in R2 via the same DuckDB connection, needs the same trace.
     "/api/redlist/taxa-breakdown-live": DUCKDB_TRACE,
     // Live CoL-taxon-id lookup for a dynamic node's ancestor chain
-    // (live-breakdown.ts's getLiveColTaxonIds) — same backbone.parquet-via-R2
+    // (live-breakdown.ts's getLiveColTaxonIds) — same taxa.parquet-via-R2
     // DuckDB query as taxa-breakdown-live above, needs the same trace.
     "/api/redlist/col-taxon-ids-live": DUCKDB_TRACE,
     // Queries the committed (not R2) wcvp-native-countries.parquet directly via
@@ -186,29 +177,20 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // The API routes import a shared species-store module that references every
-  // file under data/ (search-index.json ~95MB, redlist/ ~82MB, gbif/ ~62MB),
-  // so Next traces the whole dataset into every serverless function — ~248MB,
-  // over Vercel's 250MB uncompressed limit. Prune per route to what each
-  // actually reads at runtime. Globs use **/ so they match whether the tracing
-  // root is app/ (local) or the repo root (Vercel, where paths are app/data/…).
-  // NOTE: search-index.json is now legacy (no code reads it; live search queries
-  // Parquet over R2) and is excluded from new syncs (upload-data-to-r2.ts). The
-  // search-index.json entries below are retained only because the active sync still
-  // ships the file into data/ at build time; drop them once a sync without it reaches
-  // production.
+  // The API routes import a shared species-store module that references the
+  // sync's files under data/, so Next would trace the whole sync into every
+  // serverless function, past Vercel's 250MB uncompressed limit. Prune per route
+  // to what each actually reads at runtime. Globs use **/ so they match whether
+  // the tracing root is app/ (local) or the repo root (Vercel, app/data/…).
   outputFileTracingExcludes: {
     // Search now queries the parquets in R2 (httpfs) — no local data bundled.
     "/api/search": ["**/data/**"],
     "/api/search/warm": ["**/data/**"],
     // Species list queries the parquets in R2 (httpfs); it also reads the small
-    // taxa-summary.json for the instant tooLarge check, so exclude the heavy data but
-    // keep that one file. CRITICAL: keep ALL parquets out — USE_R2 is gated on
-    // assessed.parquet NOT existing locally, so bundling any parquet flips the route to
-    // local mode and the R2-only files (species_link) then 404.
-    "/api/redlist/species": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    // taxa-summary.json for the instant tooLarge check.
+    "/api/redlist/species": ONLY_SMALL_SUMMARIES,
     "/api/redlist/species/history": ["**/data/**"],
-    // Queries backbone.parquet + species_link in R2 (httpfs) — no local data.
+    // Queries taxa.parquet + species_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning
     // and the function balloons to the whole dataset (the credit lines' merge
@@ -219,24 +201,24 @@ const nextConfig: NextConfig = {
     // assessed.parquet in R2 (httpfs) when ?country= is set — same CRITICAL
     // note as /api/redlist/species: keep ALL parquets out, since USE_R2 is
     // gated on assessed.parquet NOT existing locally.
-    "/api/redlist/taxa-summary": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
-    "/api/redlist/taxa-subgroups": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/taxa-summary": ONLY_SUMMARIES,
+    "/api/redlist/taxa-subgroups": ONLY_SUMMARIES,
     // Reads the small precomputed realm-stats.json, falling back to a live DuckDB
     // query over assessed.parquet in R2 when a sync predates that file — so it
     // keeps the DuckDB trace above, and the same CRITICAL parquet exclusion as
     // /api/redlist/species (USE_R2 is gated on assessed.parquet NOT existing
     // locally). The two children-summaries files it never opens are pruned, same
     // as /api/redlist/country-stats.
-    "/api/redlist/realm-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/api/redlist/realm-stats": ONLY_SMALL_SUMMARIES,
     // Reads only the small precomputed country-stats.json (no DuckDB — this is
     // a static aggregate, not a live query, see species-store.ts's getCountryStats).
-    "/api/redlist/country-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
-    // Backbone tree navigation queries backbone.parquet in R2 (httpfs) — no local data.
+    "/api/redlist/country-stats": ONLY_SMALL_SUMMARIES,
+    // Backbone tree navigation queries taxa.parquet in R2 (httpfs) — no local data.
     "/api/taxa/species": ["**/data/**"],
     // Reads assessed/species_link/species/backbone entirely from R2 (httpfs) — no
     // local data, same as /api/redlist/synonyms and /api/taxa/species above.
     "/api/redlist/taxa-breakdown-live": ["**/data/**"],
-    // Reads only backbone.parquet, entirely from R2 (httpfs) — no local data,
+    // Reads only taxa.parquet, entirely from R2 (httpfs) — no local data,
     // same as taxa-breakdown-live above (without this, Next traces the whole
     // dataset into the function via the shared live-breakdown.ts import,
     // blowing well past Vercel's 250MB uncompressed function-size limit).
@@ -257,13 +239,13 @@ const nextConfig: NextConfig = {
     // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
     // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
     // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.
-    "/browse": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
-    "/api/mcp": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
+    "/browse": ONLY_SMALL_SUMMARIES,
+    "/api/mcp": ONLY_SMALL_SUMMARIES,
     "/llms.txt": ["**/data/**"],
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.
     // Without this the shared species-store import drags the whole sync —
-    // backbone.parquet alone is ~170MB — into the page's function and the
+    // taxa.parquet alone is ~170MB — into the page's function and the
     // deployment fails the 250MB uncompressed limit. It builds fine locally,
     // where no such limit applies, so the only symptom is a failed deploy.
     // Wildcard, not "[key]" — see the note on the include above.

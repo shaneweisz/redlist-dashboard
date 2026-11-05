@@ -1,7 +1,7 @@
 /**
  * build-taxa: the taxonomy core table, one row per CoL XR usage.
  *
- * Replaces backbone.parquet and species/. The species universe the app lists
+ * Replaces taxa.parquet and species/. The species universe the app lists
  * is a filter over this table, not a second copy of it.
  *
  * Columns:
@@ -28,7 +28,8 @@
  * Also writes the CoL vernacular files (vernacular-names.json and the two
  * species-vernacular parquets) via build-vernaculars.
  *
- * Writes core/taxa.parquet; the vernacular files go to data/.
+ * Writes core/taxa.parquet and the two species-vernacular parquets to core/;
+ * vernacular-names.json, which the app reads, to data/.
  *
  * Usage:  npx tsx scripts/sync/core/build-taxa.ts [--out DIR]   (DIR holds both)
  */
@@ -185,7 +186,7 @@ export async function buildTaxa(
   }
 
   if (inputs.vernacularNames && fs.existsSync(inputs.vernacularNames)) {
-    await buildVernaculars(conn, { vernacularTsv: inputs.vernacularNames, outDir: dataDir, usages: "SELECT col_id, rank, scientific_name FROM nu" });
+    await buildVernaculars(conn, { vernacularTsv: inputs.vernacularNames, outDir: dataDir, workDir: coreDir, usages: "SELECT col_id, rank, scientific_name FROM nu" });
   }
   return out;
 }

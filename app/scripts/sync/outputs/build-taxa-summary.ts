@@ -38,9 +38,12 @@ import {
   SPLIT_CANDIDATES_SQL,
   SYNONYM_ASSESSED_SQL,
   COL_TO_ASSESSED_SQL,
-  backboneHasChecklistColumns,
   type BreakdownQueryContext,
 } from "../../../src/lib/data/col-breakdown";
+import { syncPath } from "../../../src/lib/data/sync-layout";
+
+/** The data directory this run reads and writes (the sync passes its build). */
+let dataDir = DATA_DIR;
 
 // CoL species kept out of the universe (like the domesticated-GBIF exclusion). Homo sapiens
 // — IUCN omits humans from its Red List export. Keep in sync with species-duckdb.ts.
@@ -106,10 +109,10 @@ function extantUniverseSql(exEwTable: string): string {
 // when the CoL artifacts aren't present (e.g. a sync that hasn't built them yet).
 async function colCountsByGroup(): Promise<Map<string, { col_described: number; col_ne: number }>> {
   const out = new Map<string, { col_described: number; col_ne: number }>();
-  const link = path.join(DATA_DIR, "species_link.parquet");
-  const assessedPath = path.join(DATA_DIR, "assessed.parquet");
-  const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(link)) {
+  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
+  const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
+  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
     console.log("  CoL counts: species/ or species_link.parquet missing — skipping (col_described/col_ne = 0)");
     return out;
   }
@@ -169,11 +172,11 @@ function primaryDimension(filter: NodeFilter): PrimaryDim | null {
 // domestic-form exclusion or an overlapping node's excludeGenera still applies),
 // which is why the entries sum to exactly colDescribed.
 async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promise<void> {
-  const link = path.join(DATA_DIR, "species_link.parquet");
-  const assessedPath = path.join(DATA_DIR, "assessed.parquet");
-  const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  const backbonePath = path.join(DATA_DIR, "backbone.parquet");
-  if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(link)) {
+  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
+  const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
+  const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
+  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
     console.log("  CoL node counts: species/ or species_link.parquet missing — skipping.");
     return;
   }
@@ -183,21 +186,21 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   );
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
-  const hasBackbone = fs.existsSync(backbonePath);
-  if (hasBackbone) {
-    await conn.run(SPLIT_CANDIDATES_SQL(backbonePath, assessedPath, "assessed_cids"));
-    await conn.run(SYNONYM_ASSESSED_SQL(backbonePath, assessedPath, "assessed_cids"));
+  const hasTaxa = fs.existsSync(taxaPath);
+  if (hasTaxa) {
+    await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
+    await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
     await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
     // Dump both to small precomputed parquet files — they're fully determined by
     // this data sync (never by which taxon/bucket a user is viewing), but building
-    // them requires a full scan + self-join over backbone.parquet (8M rows,
-    // ~125MB). live-breakdown.ts's ensureBackboneHelpers used to redo that same
+    // them requires a full scan + self-join over taxa.parquet (8M rows,
+    // ~125MB). live-breakdown.ts's ensureColMatchHelpers used to redo that same
     // scan+join from scratch on the first breakdown request after every cold
     // server start; loading these tiny files instead (~6K / ~173K rows) is
     // effectively instant. See that file's fallback if these are ever missing.
-    const splitCandidatesOut = path.join(DATA_DIR, "col-split-candidates.parquet");
-    const synonymAssessedOut = path.join(DATA_DIR, "col-synonym-assessed.parquet");
-    const colToAssessedOut = path.join(DATA_DIR, "col-to-assessed.parquet");
+    const splitCandidatesOut = path.join(dataDir, syncPath("col-split-candidates.parquet"));
+    const synonymAssessedOut = path.join(dataDir, syncPath("col-synonym-assessed.parquet"));
+    const colToAssessedOut = path.join(dataDir, syncPath("col-to-assessed.parquet"));
     await conn.run(`COPY split_candidates TO '${splitCandidatesOut}' (FORMAT PARQUET)`);
     await conn.run(`COPY synonym_assessed TO '${synonymAssessedOut}' (FORMAT PARQUET)`);
     await conn.run(`COPY col_to_assessed TO '${colToAssessedOut}' (FORMAT PARQUET)`);
@@ -206,11 +209,7 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   const breakdownCtx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql: universe, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone, backbonePath,
-    // See BreakdownQueryContext.hasChecklistColumns: the sync rebuilds a backbone
-    // that lacks these, so this is true for every real build — probed anyway so a
-    // hand-run against an older data dir degrades instead of throwing.
-    hasChecklistColumns: hasBackbone && (await backboneHasChecklistColumns(conn, backbonePath)),
+    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa, taxaPath,
   };
   let n = 0;
   let breakdownQueries = 0;
@@ -283,10 +282,10 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
   const assessed = (await conn.runAndReadAll(`
     SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
            countries, systems, gbif_species_key, gbif_occurrence_count
-    FROM read_parquet('${path.join(DATA_DIR, "assessed.parquet")}')`)).getRowObjects();
+    FROM read_parquet('${path.join(dataDir, syncPath("assessed.parquet"))}')`)).getRowObjects();
   const ne = (await conn.runAndReadAll(`
     SELECT taxon_group, scientific_name, class_name, order_name, family, gbif_species_key, gbif_occurrence_count
-    FROM read_parquet('${path.join(DATA_DIR, "ne.parquet")}') WHERE gbif_occurrence_count > 0`)).getRowObjects();
+    FROM read_parquet('${path.join(dataDir, syncPath("ne.parquet"))}') WHERE gbif_occurrence_count > 0`)).getRowObjects();
   const redlist = new Map<string, AssessedRow[]>();
   const gbif = new Map<string, Map<string, GbifRow>>();
   const linked = new Set<string>();
@@ -314,7 +313,8 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
   return { redlist, gbif, linked };
 }
 
-export async function run(): Promise<void> {
+export async function run(opts: { dataDir?: string } = {}): Promise<void> {
+  dataDir = opts.dataDir ?? DATA_DIR;
   const groups = await loadGroups();
   const summaries: TaxonSummaryRow[] = [];
 
@@ -423,7 +423,7 @@ export async function run(): Promise<void> {
     s.col_ne = c?.col_ne ?? 0;
   }
 
-  const outputPath = path.join(DATA_DIR, "taxa-summary.json");
+  const outputPath = path.join(dataDir, syncPath("taxa-summary.json"));
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(summaries, null, 2) + "\n");
   console.log(`\nWrote ${summaries.length} taxa → ${outputPath}`);
@@ -432,7 +432,7 @@ export async function run(): Promise<void> {
   for (const [cc, stats] of countryStats) {
     countryStatsObj[cc] = { species: stats.total_assessed, outdated: stats.outdated };
   }
-  const countryStatsOutputPath = path.join(DATA_DIR, "country-stats.json");
+  const countryStatsOutputPath = path.join(dataDir, syncPath("country-stats.json"));
   fs.writeFileSync(countryStatsOutputPath, JSON.stringify(countryStatsObj, null, 2) + "\n");
   console.log(`Wrote ${countryStats.size} countries → ${countryStatsOutputPath}`);
 
@@ -448,7 +448,7 @@ export async function run(): Promise<void> {
     })),
     totalAssessed: realmTotalAssessed,
   };
-  const realmStatsOutputPath = path.join(DATA_DIR, "realm-stats.json");
+  const realmStatsOutputPath = path.join(dataDir, syncPath("realm-stats.json"));
   fs.writeFileSync(realmStatsOutputPath, JSON.stringify(realmStatsObj, null, 2) + "\n");
   console.log(`Wrote ${realmStatsObj.realms.length} realms → ${realmStatsOutputPath}`);
 
@@ -629,11 +629,11 @@ export async function run(): Promise<void> {
     (nodeId.startsWith("ssc-") ? sscGroupChildrenSummaries : table1aChildrenSummaries)[nodeId] = summaries;
   }
 
-  const table1aOutputPath = path.join(DATA_DIR, "table1a-children-summaries.json");
+  const table1aOutputPath = path.join(dataDir, syncPath("table1a-children-summaries.json"));
   fs.writeFileSync(table1aOutputPath, JSON.stringify(table1aChildrenSummaries, null, 2) + "\n");
   console.log(`\nWrote ${Object.keys(table1aChildrenSummaries).length} Table 1a parents → ${table1aOutputPath}`);
 
-  const sscOutputPath = path.join(DATA_DIR, "ssc-group-children-summaries.json");
+  const sscOutputPath = path.join(dataDir, syncPath("ssc-group-children-summaries.json"));
   fs.writeFileSync(sscOutputPath, JSON.stringify(sscGroupChildrenSummaries, null, 2) + "\n");
   console.log(`Wrote ${Object.keys(sscGroupChildrenSummaries).length} SSC group parents (${childCount} total children across both files) → ${sscOutputPath}`);
 
@@ -664,9 +664,9 @@ export async function run(): Promise<void> {
 // which nothing ever groups by) was tried first and buried the few real,
 // actionable mismatches under ~50 lines of noise nobody would keep reading.
 async function checkTaxonomyAliasDrift(): Promise<void> {
-  const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  const assessedPath = path.join(DATA_DIR, "assessed.parquet");
-  if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(assessedPath)) {
+  const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
+  const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
+  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(assessedPath)) {
     console.log("  Skipping — species/ or assessed.parquet missing.");
     return;
   }
