@@ -1,5 +1,7 @@
 # Migrating the GBIF pipeline to Catalogue of Life
 
+> **Archived.** Design notes from the move onto CoL (#449, July 2026), kept for the reasoning behind it. The pipeline they describe was replaced by the first-principles sync (#588); how it works now is in [docs/sync.md](../sync.md).
+
 Design notes for moving off the frozen GBIF Backbone.
 
 Two earlier attempts (#441, #444) were closed unmerged. Both shipped silently
@@ -154,7 +156,7 @@ followed, neither of which raised anything:
   double-counted: 43 species ended up with more records since assessment than in
   total, which is impossible.
 
-`scripts/derive-gbif-taxon-keys.ts` derives the keys from the Red List group
+`scripts/sync/outputs/derive-gbif-taxon-keys.ts` derives the keys from the Red List group
 definitions instead, and asserts at build time that every class/order the Red List
 assigns to a group is reachable from that group's keys (catches the coral gap),
 and that no key in a group is an ancestor of another (catches the Gnetidae

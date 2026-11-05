@@ -8,7 +8,7 @@ Treat the PR body as a living summary, not a one-time snapshot. Every time a com
 
 ## Always verify UI changes in a real browser
 
-For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done. Playwright is already an `app/` devDependency. If a view comes up empty or full of zeros, first check whether the precomputed `app/data/*.json` behind it is stale and needs regenerating (see the README's data sync pipeline, e.g. `npx tsx scripts/build-taxa-summary.ts`) before assuming the UI is broken.
+For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done. Playwright is already an `app/` devDependency. If a view comes up empty or full of zeros, first check whether the precomputed `app/data/*.json` behind it is stale and needs regenerating (see the README's "How data reaches the dashboard" and docs/sync.md, e.g. `npx tsx scripts/sync/outputs/build-taxa-summary.ts`) before assuming the UI is broken.
 
 ## Use a git worktree for each new piece of work
 
@@ -16,7 +16,7 @@ Start a new git worktree (a dedicated branch checked out to its own directory) f
 
 ## Data resyncs: uploading to R2 is safe, merging `latest-sync.txt` is what goes live
 
-`npm run upload-data-to-r2` (`scripts/upload-data-to-r2.ts`) pushes `app/data/` to a timestamped `syncs/<timestamp>/` prefix in the `dashboard-data` R2 bucket and updates the repo-tracked `app/latest-sync.txt` pointer file locally — but production only starts reading the new sync once that `latest-sync.txt` change is committed, pushed, and merged to main (prod's build/deploy pipeline is what actually fetches from R2 via `fetch-data-from-r2.ts`, keyed off whatever `latest-sync.txt` says on main). So it's safe to run the upload from a feature branch/worktree at any point once local data looks right — the upload itself is inert for prod until the `latest-sync.txt` bump lands on main via a normal PR merge. No need to hold off on uploading just because a PR is still in review.
+`npm run upload-data-to-r2` (`scripts/sync/upload-data-to-r2.ts`) pushes `app/data/` to a timestamped `syncs/<timestamp>/` prefix in the `dashboard-data` R2 bucket and updates the repo-tracked `app/latest-sync.txt` pointer file locally — but production only starts reading the new sync once that `latest-sync.txt` change is committed, pushed, and merged to main (prod's build/deploy pipeline is what actually fetches from R2 via `fetch-data-from-r2.ts`, keyed off whatever `latest-sync.txt` says on main). So it's safe to run the upload from a feature branch/worktree at any point once local data looks right — the upload itself is inert for prod until the `latest-sync.txt` bump lands on main via a normal PR merge. No need to hold off on uploading just because a PR is still in review.
 
 ## PR screenshots: Backblaze B2, not the repo
 

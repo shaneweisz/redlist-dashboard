@@ -85,7 +85,7 @@ A view of its own that searches what the assessors actually wrote — all 175,91
 A three-bar Terrestrial / Freshwater / Marine chart over the same taxa table Country view scopes, so a realm narrows the tree in place. It writes the ordinary `systems` filter, so the narrowing survives leaving the view and composes with a country (`?country=ID&realm=Marine` is marine species *in* Indonesia). Realm is recorded on the assessment, so species not yet assessed have no realm even in principle — the described-species and observation columns are hidden here for that reason.
 
 ### Range maps and Area of Habitat
-IUCN range maps and Area of Habitat (AOH) rasters can be overlaid on the species occurrence map, served from the `dashboard-maps` R2 bucket via `/api/species/[key]/range-map` and `/api/species/[key]/aoh`. Both are **gated to `admin` accounts** — the routes return 403 otherwise. Rasters are uploaded out of band with `scripts/upload-range-maps.ts` and `scripts/upload-aoh-maps.ts`.
+IUCN range maps and Area of Habitat (AOH) rasters can be overlaid on the species occurrence map, served from the `dashboard-maps` R2 bucket via `/api/species/[key]/range-map` and `/api/species/[key]/aoh`. Both are **gated to `admin` accounts** — the routes return 403 otherwise. Rasters are uploaded out of band with `scripts/maps/upload-range-maps.ts` and `scripts/maps/upload-aoh-maps.ts`.
 
 ### Country view
 A per-country landing page and country list, combining live DuckDB queries with a precomputed all-species country aggregate — assessment coverage, endemics, and occurrence totals for a single country.
@@ -147,7 +147,7 @@ Live external APIs:
 ### GBIF integration
 The key innovation — linking assessment data to real-world observations:
 
-1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/pipeline/decisions.tsv`) where it isn't, and its GBIF records follow from that.
+1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/sync/core/decisions.tsv`) where it isn't, and its GBIF records follow from that.
 2. **Observation counts**: from GBIF's monthly snapshot, not the API. A species counts every record filed under its own name, its synonyms, its subspecies and their DNA-barcode BINs, minus any usage another assessed species owns (a split IUCN assesses that CoL files as a subspecies, for instance). **Total GBIF** (georeferenced records), **New GBIF** (records after the assessment year), and the all-records count behind the toggle. Which record types count depends on the kingdom: animals count observations in the wild, while plants and fungi also count preserved specimens, since a herbarium or fungarium sheet is often the only georeferenced record a species has.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
 4. **Quality filters**: georeferenced means coordinates without a GBIF geospatial issue (the codes GBIF's own `hasGeospatialIssue` acts on, checked against the API).
@@ -155,7 +155,20 @@ The key innovation — linking assessment data to real-world observations:
 ### Catalogue of Life
 CoL supplies the described-species universe behind the new-assessments view — the species CoL knows about that haven't been assessed for the Red List yet — plus the synonym index that makes searching an outdated name work.
 
-## Data Sync Pipeline
+## How data reaches the dashboard
+
+Four ways, and each has its own folder in [`app/scripts/`](app/scripts/README.md):
+
+| | When | Where | What it does | Docs |
+|---|---|---|---|---|
+| **Sync** | monthly, by hand | your machine | builds every number (counts, links, the Not Evaluated list) from the Red List database, a GBIF snapshot and Catalogue of Life, and uploads it to R2 as a new `syncs/<timestamp>/` | [docs/sync.md](docs/sync.md) |
+| **Build** | every deploy | Vercel | downloads the sync `app/latest-sync.txt` names and packages it for the deployed code: species lists, search and tree as static files. Never changes a number | [docs/build.md](docs/build.md) |
+| **Occasional publishes** | when their source changes | your machine | narratives (each Red List release), range maps and AOH rasters, map overlays, reference data | [app/scripts/README.md](app/scripts/README.md) |
+| **Live** | each request | Vercel | GBIF occurrence points, CITES, literature, the Red List API (see Architecture) | |
+
+A sync goes live only when its one-line `app/latest-sync.txt` change merges to `main`; uploading one changes nothing anyone sees. Reverting that line goes back.
+
+### Running a sync
 
 The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally), reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
 
@@ -170,11 +183,7 @@ cd app && npm run sync
 npm run sync:publish        # copies the build into app/data, uploads to R2, bumps app/latest-sync.txt
 ```
 
-`npm run sync:publish` prints the `git add` line for the data PR. Production only switches to the new sync once that PR merges to main and Vercel redeploys.
-
-**How it works**: the inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).
-
-**Not part of the sync.** The assessment narratives change when the Red List publishes, twice a year, so `npm run build-narratives` and `npm run upload-narratives-to-r2` publish them separately under `narratives/<release>/`. Range maps and AOH layers (`upload-range-maps.ts`, `upload-aoh-maps.ts`) are run by hand when their inputs change.
+`npm run sync:publish` prints the `git add` line for the data PR. The inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).
 
 ## Getting Started
 
@@ -191,25 +200,23 @@ The data lives in a private R2 bucket rather than in the repo, so the first step
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Production build (auto-runs `fetch-data-from-r2` first) |
-| `npm run start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm test` | Run tests (Vitest) |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run test:coverage` | Run tests with a coverage report (scoped to the `src` logic layer; HTML report in `coverage/`) |
-| `npm run fetch-data-from-r2` | Download the sync pinned in `app/latest-sync.txt` from R2 into `app/data/` |
-| `npm run upload-data-to-r2` | Upload current `app/data/` to R2 as a new timestamped sync and bump `app/latest-sync.txt` |
-| `npm run sync` | Build and check a data release from the inputs (see Data Sync Pipeline) |
-| `npm run sync:publish` | Copy the build into `app/data/`, upload it, bump `app/latest-sync.txt` |
-| `npm run sync:compare` | Compare a data directory with the sync production serves |
-| `npm run build-narratives` | Build the four narrative-search parquets from the IUCN database |
-| `npm run upload-narratives-to-r2` | Publish those parquets under `narratives/<NARRATIVE_RELEASE>/` in R2 |
-| `npm run fetch-duckdb-ext` | Pre-fetch the DuckDB `httpfs` extension, for environments that can't download it at runtime |
+| Command | Kind | Description |
+|---------|------|-------------|
+| `npm run dev` | app | Start the development server |
+| `npm run build` | build | Production build: runs `prebuild` (fetch the sync, pre-build static files), then `next build` |
+| `npm run start` | app | Start the production server |
+| `npm run lint` / `npm test` / `npm run test:watch` | app | ESLint; Vitest, once or watching |
+| `npm run test:coverage` | app | Tests with a coverage report (scoped to the `src` logic layer; HTML in `coverage/`) |
+| `npm run fetch-data-from-r2` | build | Download the sync pinned in `app/latest-sync.txt` into `app/data/` |
+| `npm run fetch-duckdb-ext` | build | Pre-fetch DuckDB's `httpfs` extension for Vercel's runtime |
+| `npm run build-species-lists` / `build-search-shards` / `build-tree-children` | build | The pre-built static files (each runs in `prebuild`) |
+| `npm run sync` | sync | Build and check a data release from the inputs |
+| `npm run sync:publish` | sync | Copy the build into `app/data/`, upload it, bump `app/latest-sync.txt` |
+| `npm run sync:compare` | sync | Compare a data directory with the sync production serves |
+| `npm run upload-data-to-r2` | sync | Upload `app/data/` as a new timestamped sync (`sync:publish` runs it) |
+| `npm run build-narratives` / `upload-narratives-to-r2` | publish | The narrative-search parquets, once per Red List release |
 
-Other pipeline scripts are run directly with `npx tsx` — see `app/scripts/`, including `fetch-wcvp-native-range.ts` (POWO native ranges), `fetch-coordinate-cleaning-refdata.ts` (CoordinateCleaner reference data), and `upload-range-maps.ts` / `upload-aoh-maps.ts` (raster uploads).
+Everything else runs with `npx tsx scripts/<folder>/<script>.ts`; [`app/scripts/README.md`](app/scripts/README.md) lists every script by folder.
 
 ## Environment Variables
 
