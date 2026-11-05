@@ -52,35 +52,45 @@ async function loadCore(conn: DuckDBConnection, coreDir: string): Promise<void> 
   await conn.run(`CREATE OR REPLACE TEMP TABLE latest AS SELECT * FROM read_parquet(${f("assessments.parquet")}) WHERE is_latest`);
 }
 
-/** Usages each lumped species owns: its root and anything under it. */
+/**
+ * Usages each lumped species owns: its roots and anything under them, each
+ * usage once. Roots can nest: Zosterops simplex owns both the subspecies
+ * Z. japonicus simplex and the synonym Z. simplex filed under it, and walking
+ * down from both reached the synonym twice (its 571k records counted twice).
+ * A usage goes to the nearest root claiming it, which also settles a usage
+ * two lumped species reach: the one whose own name it is wins.
+ */
 async function ownedUsages(conn: DuckDBConnection): Promise<void> {
   await conn.run(`CREATE OR REPLACE TEMP TABLE owned AS
     WITH RECURSIVE down(sis, root, usage_key, depth) AS (
       SELECT sis_taxon_id, usage_id, usage_id, 0 FROM link WHERE verdict = 'lumped' AND counted
       UNION ALL
       SELECT d.sis, d.root, t.col_id, d.depth + 1 FROM down d JOIN taxa t ON t.parent_id = d.usage_key WHERE d.depth < 3)
-    SELECT DISTINCT sis, root, usage_key FROM down`);
+    SELECT sis, root, usage_key FROM down
+    QUALIFY row_number() OVER (PARTITION BY usage_key ORDER BY depth, sis, root) = 1`);
 }
 
 async function gbifCounts(conn: DuckDBConnection, currentYear: number): Promise<void> {
   await conn.run(`CREATE OR REPLACE TEMP TABLE uc AS ${usageCountsSql({ taxa: "taxa", counts: "occ" })}`);
-  await conn.run(`CREATE OR REPLACE TEMP TABLE row_counts AS
+  // Every counted usage-year, with the species and link row it counts for.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE hits AS
     WITH rows AS (
       SELECT l.sis_taxon_id AS sis, l.usage_id, l.verdict, l.role,
              year(la.assessment_date) AS y
       FROM link l JOIN latest la USING (sis_taxon_id) WHERE l.counted),
     hits AS (
       -- own / covered: the species' records, minus usages someone else owns
-      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.year, u.georef, u.n
+      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.usage_key, u.year, u.georef, u.n
       FROM rows r JOIN uc u ON u.species_id = r.usage_id
       WHERE r.verdict = 'own'
-        AND NOT EXISTS (SELECT 1 FROM owned o WHERE o.usage_key = u.usage_key AND o.sis <> r.sis)
-        AND NOT EXISTS (SELECT 1 FROM owned o WHERE o.usage_key = u.usage_key AND o.sis = r.sis)
+        AND NOT EXISTS (SELECT 1 FROM owned o WHERE o.usage_key = u.usage_key)
       UNION ALL
       -- lumped: its own usage and what is under it
-      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.year, u.georef, u.n
+      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.usage_key, u.year, u.georef, u.n
       FROM rows r JOIN owned o ON o.sis = r.sis AND o.root = r.usage_id JOIN uc u ON u.usage_key = o.usage_key
       WHERE r.verdict = 'lumped')
+    SELECT * FROM hits`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE row_counts AS
     SELECT sis, usage_id, any_value(verdict) AS verdict, any_value(role) AS role,
            coalesce(sum(n) FILTER (georef), 0)::BIGINT AS georef,
            coalesce(sum(n), 0)::BIGINT AS all_records,
@@ -197,6 +207,26 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string): Promise<voi
   ) TO ${lit(path.join(outDir, "ne.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
 }
 
+/**
+ * The counting rule's invariant: a usage's records count towards one species
+ * on the dashboard at most, assessed or Not Evaluated, and only once. A
+ * violation means a number somewhere is inflated, so the sync stops.
+ */
+async function checkEachUsageCountedOnce(conn: DuckDBConnection, outDir: string): Promise<void> {
+  const bad = (await conn.runAndReadAll(`
+    WITH claims AS (
+      SELECT DISTINCT usage_key, 'sis ' || sis || ' via ' || usage_id AS claim FROM hits
+      UNION ALL
+      SELECT DISTINCT u.usage_key, 'NE ' || u.species_id FROM uc u
+      JOIN read_parquet(${lit(path.join(outDir, "ne.parquet"))}) ne ON ne.col_id = u.species_id
+      WHERE u.usage_key NOT IN (SELECT usage_key FROM owned))
+    SELECT usage_key, string_agg(claim, ', ' ORDER BY claim) AS claims
+    FROM claims GROUP BY usage_key HAVING count(*) > 1 ORDER BY usage_key LIMIT 10`)).getRowObjects();
+  if (bad.length > 0) {
+    throw new Error(`build-read-models: usages counted more than once:\n${bad.map((b) => `  ${b.usage_key}: ${b.claims}`).join("\n")}`);
+  }
+}
+
 export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs): Promise<void> {
   fs.mkdirSync(o.outDir, { recursive: true });
   CORE_DIR_FOR_COUNTRIES = o.coreDir;
@@ -244,6 +274,7 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
     ORDER BY c.sis) TO ${lit(path.join(o.coreDir, "count_components.parquet"))} (FORMAT parquet)`);
 
   await notEvaluated(conn, o.outDir);
+  await checkEachUsageCountedOnce(conn, o.outDir);
 
   // The app reads the link and the taxonomy directly too. backbone.parquet is the
   // taxa table under the name the CoL-differences code reads.
