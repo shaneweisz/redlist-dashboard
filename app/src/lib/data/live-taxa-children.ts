@@ -15,7 +15,7 @@
  * Deliberately omits the no-match diagnostic breakdown (colBreakdown /
  * noMatchDetails / splitDetails) that scripts/sync/outputs/build-taxa-summary.ts's
  * attachColCounts computes for the static tree — that machinery depends on
- * backbone.parquet-joined temp tables built once per whole build run, not cheap
+ * taxa.parquet-joined temp tables built once per whole build run, not cheap
  * per (rank,value) on demand. A later phase adds it back as a separate, lazy,
  * per-bucket-click endpoint. estimatedDescribed/gbifNeSpeciesCount are 0 here,
  * mirroring the existing country-scoped live path's precedent of zeroing fields

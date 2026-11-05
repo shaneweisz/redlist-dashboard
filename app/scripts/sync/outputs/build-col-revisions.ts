@@ -38,7 +38,6 @@ import {
   computeNoMatchDetails,
   SPLIT_CANDIDATES_SQL,
   COL_TO_ASSESSED_SQL,
-  backboneHasChecklistColumns,
   type BreakdownQueryContext,
   type NoMatchDetail,
 } from "../../../src/lib/data/col-breakdown";
@@ -77,7 +76,7 @@ export async function run(): Promise<void> {
   const link = path.join(DATA_DIR, "species_link.parquet");
   const assessedPath = path.join(DATA_DIR, "assessed.parquet");
   const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  const backbonePath = path.join(DATA_DIR, "backbone.parquet");
+  const taxaPath = path.join(DATA_DIR, "taxa.parquet");
   const outPath = path.join(DATA_DIR, "col-revisions.json");
 
   if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(link)) {
@@ -99,24 +98,20 @@ export async function run(): Promise<void> {
       WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
   const universeSql = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_assessed))`;
 
-  const hasBackbone = fs.existsSync(backbonePath);
-  if (hasBackbone) {
-    // The infraspecific/provisional reasons need these; without backbone.parquet
+  const hasTaxa = fs.existsSync(taxaPath);
+  if (hasTaxa) {
+    // The infraspecific/provisional reasons need these; without taxa.parquet
     // they collapse into the blanket "missing_from_backbone".
-    await conn.run(SPLIT_CANDIDATES_SQL(backbonePath, assessedPath, "assessed_cids"));
+    await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
     await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
   } else {
-    console.log("  CoL revisions: backbone.parquet missing — infraspecific/provisional reasons unavailable.");
+    console.log("  CoL revisions: taxa.parquet missing — infraspecific/provisional reasons unavailable.");
   }
 
   const ctx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone, backbonePath,
-    // Always true in the real pipeline (the sync rebuilds the backbone whenever it
-    // lacks these columns — see sync.ts) — probed rather than assumed so a
-    // hand-run against an older data dir degrades instead of throwing a Binder Error.
-    hasChecklistColumns: hasBackbone && (await backboneHasChecklistColumns(conn, backbonePath)),
+    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa, taxaPath,
   };
 
   const started = Date.now();
@@ -154,7 +149,7 @@ export async function run(): Promise<void> {
   // NoMatchDetail and no col_id from the diagnostic above — the join to
   // species_link supplies its own CoL record for the flag to link to.
   let splitParents = 0;
-  if (hasBackbone) {
+  if (hasTaxa) {
     // The evidence behind every split: CoL keeps the old infraspecific name as a
     // synonym when one is promoted, so "which accepted species does the name
     // 'Vallonia costata var. montana' resolve to today" IS the signal. Same
@@ -171,8 +166,8 @@ export async function run(): Promise<void> {
                   WHEN p.rank IN ('subspecies', 'infraspecific name', 'variety')
                        AND p.status IN ('accepted', 'provisionally accepted') THEN p.parent_id
              END AS target_col_id
-      FROM read_parquet('${backbonePath}') b
-      JOIN read_parquet('${backbonePath}') p ON p.col_id = b.parent_id
+      FROM read_parquet('${taxaPath}') b
+      JOIN read_parquet('${taxaPath}') p ON p.col_id = b.parent_id
       WHERE b.status = 'synonym' AND b.rank IN ('subspecies', 'infraspecific name', 'variety')`);
 
     const splitRows = await (await conn.run(`
@@ -239,7 +234,7 @@ export async function run(): Promise<void> {
     }
     counts[SPLIT_REASON] = splitParents;
   } else {
-    console.log("  CoL revisions: backbone.parquet missing — split signal unavailable.");
+    console.log("  CoL revisions: taxa.parquet missing — split signal unavailable.");
   }
 
   // The other side of a lump: IUCN assesses several species that CoL files as
@@ -267,7 +262,7 @@ export async function run(): Promise<void> {
         FROM members me
         JOIN groups g ON g.col_id = me.col_id
         JOIN members other ON other.col_id = me.col_id AND other.id != me.id
-        LEFT JOIN read_parquet('${backbonePath}') syn
+        LEFT JOIN read_parquet('${taxaPath}') syn
           ON lower(syn.scientific_name) = lower(other.name) AND syn.status = 'synonym' AND syn.parent_id = me.col_id
       )
       SELECT p.id AS id,
@@ -328,7 +323,7 @@ export async function run(): Promise<void> {
   //  - names differing only in spelling: one name under ICZN 58 / ICN 53.3
   //    (terminations) and ICZN 32.5.2 / ICN 60 (orthography), so reporting it as
   //    a different name is simply wrong.
-  if (hasBackbone) {
+  if (hasTaxa) {
     const renameRows = (await conn.runAndReadAll(`
       WITH linked AS (
         SELECT a.id, a.scientific_name AS iucn, b.col_id, b.in_checklist,
@@ -336,7 +331,7 @@ export async function run(): Promise<void> {
                coalesce(b.checklist_name, b.scientific_name) AS self_name
         FROM read_parquet('${assessedPath}') a
         JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.src = 'redlist'
-        JOIN read_parquet('${backbonePath}') b ON b.col_id = l.col_id
+        JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
         WHERE b.rank = 'species'
       ),
       resolved AS (
@@ -346,7 +341,7 @@ export async function run(): Promise<void> {
                     THEN coalesce(p.checklist_name, p.scientific_name) ELSE k.self_name END AS acc_name,
                CASE WHEN k.checklist_parent_id IS NOT NULL THEN p.in_checklist ELSE k.in_checklist END AS acc_in_checklist
         FROM linked k
-        LEFT JOIN read_parquet('${backbonePath}') p ON p.col_id = k.checklist_parent_id
+        LEFT JOIN read_parquet('${taxaPath}') p ON p.col_id = k.checklist_parent_id
       )
       SELECT id, any_value(iucn) AS name, any_value(acc_name) AS acc_name, any_value(acc_id) AS acc_id
       FROM resolved

@@ -9,7 +9,7 @@
  *                        its GBIF counts under the counting rule (counts.ts),
  *                        its latest credits and assessment count
  *   assessments.parquet  published assessment history, one row per year
- *   species/, ne.parquet, species_link.parquet, backbone.parquet  see notEvaluated
+ *   species/, ne.parquet, species_link.parquet  see notEvaluated
  *
  * GBIF counts per assessed species, from its link rows:
  *   own / covered   its species' records, minus usages another species owns
@@ -277,10 +277,8 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
   await notEvaluated(conn, o.outDir);
   await checkEachUsageCountedOnce(conn, o.outDir);
 
-  // The app reads the link and the taxonomy directly too. backbone.parquet is the
-  // taxa table under the name the CoL-differences code reads.
+  // The app reads the taxonomy directly, and the comparison reads the link.
   for (const f of ["assessment_link.parquet", "taxa.parquet"]) fs.copyFileSync(path.join(o.coreDir, f), path.join(o.outDir, f));
-  fs.copyFileSync(path.join(o.coreDir, "taxa.parquet"), path.join(o.outDir, "backbone.parquet"));
   if (o.inatNames && fs.existsSync(o.inatNames)) fs.copyFileSync(o.inatNames, path.join(o.outDir, "inat-vernaculars.parquet"));
 }
 

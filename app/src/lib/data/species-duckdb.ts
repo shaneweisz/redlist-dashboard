@@ -1060,7 +1060,7 @@ export async function getSynonyms(opts: { col?: string | null; sis?: number | nu
   }
   if (!colId) return { col_id: null, accepted_name: null, accepted_authorship: null, synonyms: [] };
 
-  const bbUri = parquetUri("backbone.parquet");
+  const bbUri = parquetUri("taxa.parquet");
   const rows = (await conn.runAndReadAll(
     `SELECT col_id, scientific_name, authorship, status FROM read_parquet('${bbUri}')
      WHERE col_id=$c OR parent_id=$c`, { c: colId })).getRowObjects();

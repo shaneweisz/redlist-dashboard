@@ -175,7 +175,7 @@ export async function run(opts: { destDir?: string } = {}): Promise<ColXrPaths> 
   const XR_DATASET = xr.key;
   // The pin is NOT written here. It is the id the sync compares to decide whether
   // to rebuild, so writing it before the 1.4GB download meant any failure after
-  // this point left it naming the new release while backbone.parquet was still
+  // this point left it naming the new release while taxa.parquet was still
   // the old one — and the next run then saw "release unchanged, backbone present"
   // and skipped the rebuild permanently. sync.ts writes it once the backbone is
   // actually built from this release.

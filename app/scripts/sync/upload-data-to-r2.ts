@@ -13,7 +13,7 @@
  *       2026-05-20T10-30-00Z/
  *         gbif/amphibia.csv
  *         redlist/...
- *         backbone.parquet
+ *         taxa.parquet
  *         ...
  *
  * Active sync pointer lives in app/latest-sync.txt (version-controlled).
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
   // function, where Vercel caps a function at 250MB uncompressed. A 92MB key
   // cache that had no business being published is what taught us that, by failing
   // a deploy after the build had already succeeded. Large files are legitimate
-  // (backbone.parquet is one), so this reports rather than blocks — but it
+  // (taxa.parquet is one), so this reports rather than blocks — but it
   // reports, so a new one is noticed here instead of three steps later.
   const LARGE_FILE_MB = 50;
   const large = localPaths

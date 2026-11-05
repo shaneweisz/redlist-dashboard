@@ -12,13 +12,13 @@ const DUCKDB_TRACE = [
   "./duckdb-ext/**",
 ];
 
-// The CoL backbone artifacts (#271) are read ONLY from R2 via httpfs at runtime —
-// no serverless function bundles them. But fetch-data-from-r2 pulls the whole
-// sync into app/data/ at build time, so any function that traces data/ would bundle
-// backbone.parquet (~170MB) and blow Vercel's 250MB function cap. Exclude them from
+// The CoL taxonomy artifacts are read ONLY from R2 via httpfs at runtime — no
+// serverless function bundles them. But fetch-data-from-r2 pulls the whole sync
+// into app/data/ at build time, so any function that traces data/ would bundle
+// taxa.parquet (~160MB) and blow Vercel's 250MB function cap. Exclude them from
 // the species-store routes (the DuckDB routes already exclude all of data/).
 const COL_ARTIFACTS = [
-  "**/data/backbone.parquet",
+  "**/data/taxa.parquet",
   "**/data/species/**",
   "**/data/species_link.parquet",
   "**/data/synonym-index.parquet",
@@ -174,7 +174,7 @@ const nextConfig: NextConfig = {
     // parquets in R2 via the same DuckDB connection, needs the same trace.
     "/api/redlist/taxa-breakdown-live": DUCKDB_TRACE,
     // Live CoL-taxon-id lookup for a dynamic node's ancestor chain
-    // (live-breakdown.ts's getLiveColTaxonIds) — same backbone.parquet-via-R2
+    // (live-breakdown.ts's getLiveColTaxonIds) — same taxa.parquet-via-R2
     // DuckDB query as taxa-breakdown-live above, needs the same trace.
     "/api/redlist/col-taxon-ids-live": DUCKDB_TRACE,
     // Queries the committed (not R2) wcvp-native-countries.parquet directly via
@@ -208,7 +208,7 @@ const nextConfig: NextConfig = {
     // local mode and the R2-only files (species_link) then 404.
     "/api/redlist/species": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
     "/api/redlist/species/history": ["**/data/**"],
-    // Queries backbone.parquet + species_link in R2 (httpfs) — no local data.
+    // Queries taxa.parquet + species_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning
     // and the function balloons to the whole dataset (the credit lines' merge
@@ -231,12 +231,12 @@ const nextConfig: NextConfig = {
     // Reads only the small precomputed country-stats.json (no DuckDB — this is
     // a static aggregate, not a live query, see species-store.ts's getCountryStats).
     "/api/redlist/country-stats": ["**/data/search-index.json", "**/data/redlist/**", "**/data/gbif/**", "**/data/mapping.csv", "**/data/table1a-children-summaries.json", "**/data/ssc-group-children-summaries.json", "**/data/*.parquet", ...COL_ARTIFACTS],
-    // Backbone tree navigation queries backbone.parquet in R2 (httpfs) — no local data.
+    // Backbone tree navigation queries taxa.parquet in R2 (httpfs) — no local data.
     "/api/taxa/species": ["**/data/**"],
     // Reads assessed/species_link/species/backbone entirely from R2 (httpfs) — no
     // local data, same as /api/redlist/synonyms and /api/taxa/species above.
     "/api/redlist/taxa-breakdown-live": ["**/data/**"],
-    // Reads only backbone.parquet, entirely from R2 (httpfs) — no local data,
+    // Reads only taxa.parquet, entirely from R2 (httpfs) — no local data,
     // same as taxa-breakdown-live above (without this, Next traces the whole
     // dataset into the function via the shared live-breakdown.ts import,
     // blowing well past Vercel's 250MB uncompressed function-size limit).
@@ -263,7 +263,7 @@ const nextConfig: NextConfig = {
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.
     // Without this the shared species-store import drags the whole sync —
-    // backbone.parquet alone is ~170MB — into the page's function and the
+    // taxa.parquet alone is ~170MB — into the page's function and the
     // deployment fails the 250MB uncompressed limit. It builds fine locally,
     // where no such limit applies, so the only symptom is a failed deploy.
     // Wildcard, not "[key]" — see the note on the include above.

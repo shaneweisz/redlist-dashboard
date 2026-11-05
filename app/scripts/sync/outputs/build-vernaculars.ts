@@ -9,7 +9,7 @@
  *                                     (build-search-index makes each one searchable).
  *
  * Called by build-backbone in a sync (with its NameUsage table), and runnable on its own
- * against a sync's backbone.parquet — so the names can be rebuilt from the same CoL
+ * against a sync's taxa.parquet — so the names can be rebuilt from the same CoL
  * release without re-running the whole backbone:
  *
  *   npx tsx scripts/sync/outputs/build-vernaculars.ts <VernacularName.tsv> [dataDir]
@@ -30,7 +30,7 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 
 /**
  * @param usages a SQL relation with col_id, rank, scientific_name for every name usage
- *   (build-backbone's NameUsage table, or a sync's backbone.parquet).
+ *   (build-backbone's NameUsage table, or a sync's taxa.parquet).
  */
 export async function buildVernaculars(conn: DuckDBConnection, opts: { vernacularTsv: string; outDir: string; usages: string }): Promise<void> {
   const { vernacularTsv, outDir, usages } = opts;
@@ -129,7 +129,7 @@ if (isDirectRun) {
     await buildVernaculars(conn, {
       vernacularTsv: tsv,
       outDir: dir,
-      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, "backbone.parquet")}')`,
+      usages: `SELECT col_id, rank, scientific_name FROM read_parquet('${path.join(dir, "taxa.parquet")}')`,
     });
     process.exit(0);
   })().catch((e) => { console.error(e); process.exit(1); });

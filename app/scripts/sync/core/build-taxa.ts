@@ -1,7 +1,7 @@
 /**
  * build-taxa: the taxonomy core table, one row per CoL XR usage.
  *
- * Replaces backbone.parquet and species/. The species universe the app lists
+ * Replaces taxa.parquet and species/. The species universe the app lists
  * is a filter over this table, not a second copy of it.
  *
  * Columns:

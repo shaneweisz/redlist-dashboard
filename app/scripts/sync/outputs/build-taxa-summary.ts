@@ -38,7 +38,6 @@ import {
   SPLIT_CANDIDATES_SQL,
   SYNONYM_ASSESSED_SQL,
   COL_TO_ASSESSED_SQL,
-  backboneHasChecklistColumns,
   type BreakdownQueryContext,
 } from "../../../src/lib/data/col-breakdown";
 
@@ -172,7 +171,7 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   const link = path.join(DATA_DIR, "species_link.parquet");
   const assessedPath = path.join(DATA_DIR, "assessed.parquet");
   const speciesGlob = path.join(DATA_DIR, "species", "**", "*.parquet");
-  const backbonePath = path.join(DATA_DIR, "backbone.parquet");
+  const taxaPath = path.join(DATA_DIR, "taxa.parquet");
   if (!fs.existsSync(path.join(DATA_DIR, "species")) || !fs.existsSync(link)) {
     console.log("  CoL node counts: species/ or species_link.parquet missing — skipping.");
     return;
@@ -183,15 +182,15 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   );
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
-  const hasBackbone = fs.existsSync(backbonePath);
-  if (hasBackbone) {
-    await conn.run(SPLIT_CANDIDATES_SQL(backbonePath, assessedPath, "assessed_cids"));
-    await conn.run(SYNONYM_ASSESSED_SQL(backbonePath, assessedPath, "assessed_cids"));
+  const hasTaxa = fs.existsSync(taxaPath);
+  if (hasTaxa) {
+    await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
+    await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
     await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
     // Dump both to small precomputed parquet files — they're fully determined by
     // this data sync (never by which taxon/bucket a user is viewing), but building
-    // them requires a full scan + self-join over backbone.parquet (8M rows,
-    // ~125MB). live-breakdown.ts's ensureBackboneHelpers used to redo that same
+    // them requires a full scan + self-join over taxa.parquet (8M rows,
+    // ~125MB). live-breakdown.ts's ensureColMatchHelpers used to redo that same
     // scan+join from scratch on the first breakdown request after every cold
     // server start; loading these tiny files instead (~6K / ~173K rows) is
     // effectively instant. See that file's fallback if these are ever missing.
@@ -206,11 +205,7 @@ async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promis
   const breakdownCtx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql: universe, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasBackbone, backbonePath,
-    // See BreakdownQueryContext.hasChecklistColumns: the sync rebuilds a backbone
-    // that lacks these, so this is true for every real build — probed anyway so a
-    // hand-run against an older data dir degrades instead of throwing.
-    hasChecklistColumns: hasBackbone && (await backboneHasChecklistColumns(conn, backbonePath)),
+    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa, taxaPath,
   };
   let n = 0;
   let breakdownQueries = 0;

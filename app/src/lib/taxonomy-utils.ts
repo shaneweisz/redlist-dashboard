@@ -554,7 +554,7 @@ const capitalizeSpeciesName = (s: string): string => s.split(" ").map((w, i) => 
 export type FilterRank = "class" | "order" | "family" | "genus" | "species" | "remainder";
 
 // name → CoL taxon id, built by scripts/sync/outputs/build-col-taxon-ids.ts from the taxonomy tree
-// + backbone.parquet. Only covers names actually referenced by a SpeciesFilter
+// + taxa.parquet. Only covers names actually referenced by a SpeciesFilter
 // somewhere in the tree — not every name resolves (CoL classifies a few things
 // differently, e.g. Bison is lumped into Bos), in which case the segment below just
 // has no href and renders as plain text.
