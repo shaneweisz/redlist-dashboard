@@ -38,8 +38,8 @@
     },
     "gbif_species_count": 11269,
     "gbif_ne_species_count": 285,
-    "total_gbif_observations": 2226817973,
-    "mean_gbif_obs": 197605.64140562605,
+    "total_gbif_observations": 2226819255,
+    "mean_gbif_obs": 197605.75516904783,
     "median_gbif_obs": 4544,
     "col_described": 10886,
     "col_ne": 295
@@ -306,10 +306,10 @@
       "LR/lc": 16,
       "EW": 12
     },
-    "gbif_species_count": 30749,
+    "gbif_species_count": 30752,
     "gbif_ne_species_count": 25907,
-    "total_gbif_observations": 17338345,
-    "mean_gbif_obs": 563.8669550229275,
+    "total_gbif_observations": 17338355,
+    "mean_gbif_obs": 563.8122723725286,
     "median_gbif_obs": 6,
     "col_described": 89046,
     "col_ne": 79498
@@ -520,10 +520,10 @@
       "LR/cd": 102,
       "EX": 138
     },
-    "gbif_species_count": 292625,
+    "gbif_species_count": 292629,
     "gbif_ne_species_count": 222500,
-    "total_gbif_observations": 464285996,
-    "mean_gbif_obs": 1586.6245057667663,
+    "total_gbif_observations": 464287239,
+    "mean_gbif_obs": 1586.6070656018371,
     "median_gbif_obs": 28,
     "col_described": 355817,
     "col_ne": 280440
