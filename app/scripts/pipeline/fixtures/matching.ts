@@ -152,8 +152,76 @@ export const MATCHING_CASES: MatchCase[] = [
     name: "Fringilla polatzeki",
     why: "A subspecies of F. teydea in CoL, so no species facet emits its key; it showed 0.",
     source: "fetch-lumped-own-counts.ts",
-    // Its own records, not the 7,000+ of F. teydea.
-    expect: { linkedTo: "Fringilla teydea", hasRecords: true, maxRecords: 3_000 },
+    // Its own records (about 715), not the 7,000+ of F. teydea, and not its
+    // synonym's records twice (it showed 1,430 when the synonym sat under both
+    // of its roots).
+    expect: { linkedTo: "Fringilla teydea", hasRecords: true, maxRecords: 1_000 },
+  },
+  {
+    name: "Meandrina danae",
+    why: "CoL's synonym of M. danai with the same citation: one name spelled two ways. The Red List's citation is mistyped (\"Milen-Edwards & Haime, 1948\"), so the name rules called it lumped and counted 86 of its 2,200 records.",
+    source: "species-key.ts isCoLRespelling; build-link.ts",
+    expect: { linkedTo: "Meandrina danai", gbifKeyName: "Meandrina danai", minRecords: 1_500 },
+  },
+  {
+    name: "Clithon oualaniensis",
+    why: "CoL holds the name three times under different citations; only one is the respelling of C. oualaniense, and the tiebreak picked another (1 record of 201).",
+    source: "build-link.ts ownNameSynonyms",
+    expect: { linkedTo: "Clithon oualaniense", minRecords: 100 },
+  },
+  {
+    name: "Cipangopaludina chinensis",
+    why: "Provisionally accepted under exactly this name, and also an ambiguous synonym of Margarya chinensis; the ambiguous synonym won and counted 448 records.",
+    source: "build-link.ts offer kind 4",
+    expect: { linkedTo: "Cipangopaludina chinensis", minRecords: 2_000 },
+  },
+  {
+    name: "Vicia grandiflora",
+    why: "Its IUCN synonym Vicia kitaibeliana is a CoL ambiguous synonym also filed under V. cracca. Ambiguous says nothing about V. cracca, which prod kept off the NE list (871k records).",
+    source: "build-link.ts covered rows (kinds 0-2 only)",
+    expect: { neListed: { "Vicia cracca": true } },
+  },
+  {
+    name: "Centropogon australis",
+    why: "A waspfish, and also a plant. IUCN's class (Actinopterygii) isn't CoL's (Teleostei), so the homonym tiebreak fell through to id order and linked the plant (8 records).",
+    source: "build-link.ts tiebreak (phylum, kingdom)",
+    expect: { gbifKeyName: "Centropogon australis", minRecords: 1_500 },
+  },
+  {
+    name: "Acanthurus lineatus",
+    why: "A surgeonfish whose IUCN synonym Hepatus lineatus is, in CoL, a crab: Hepatus was a fish genus and a crab genus. The shared epithet passed as a genus transfer and the crab's records were counted.",
+    source: "build-link.ts sameLineage",
+    expect: { linkedTo: "Acanthurus lineatus", neListed: { "Hepatus lineatus": true } },
+  },
+  {
+    name: "Utricularia ochroleuca",
+    why: "CoL holds it twice, once with the hybrid sign (Utricularia × ochroleuca, 7,000 records) and once without (none). Twins are matched with the hybrid sign set aside.",
+    source: "build-link.ts twinKeys",
+    expect: { minRecords: 5_000 },
+  },
+  {
+    name: "Frullania azorica",
+    why: "Accepted in one liverwort family (61 records) and provisionally accepted in another (2,860). Twins within a class, not only a family.",
+    source: "build-link.ts twinKeys",
+    expect: { minRecords: 2_000 },
+  },
+  {
+    name: "Cathormion umbellatum",
+    why: "An XR species the checklist folds into Albizia umbellata, which has no records; GBIF files them under the XR name, which counted for nobody.",
+    source: "build-link.ts checklist_demoted",
+    expect: { linkedTo: "Albizia umbellata", minRecords: 500 },
+  },
+  {
+    name: "Cladorhynchus leucocephalus",
+    why: "The banded stilt (Vieillot, 1816). Its IUCN synonyms name Himantopus leucocephalus, which CoL has as the pied stilt (Gould, 1837); the shared epithet counted the pied stilt's 400k records.",
+    source: "build-link.ts covered rows (authorsAgree)",
+    expect: { maxRecords: 100_000 },
+  },
+  {
+    name: "Zosterops simplex",
+    why: "Owns the subspecies Z. japonicus simplex and the synonym Z. simplex filed under it; walking down from both counted the synonym's 571k records twice (1.14M).",
+    source: "build-read-models.ts ownedUsages",
+    expect: { linkedTo: "Zosterops japonicus", minRecords: 500_000, maxRecords: 700_000 },
   },
   {
     name: "Dasycercus hillieri",

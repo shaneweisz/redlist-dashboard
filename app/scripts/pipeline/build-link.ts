@@ -51,7 +51,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../utils";
-import { decideKey, sameOrganism, isSeparatelyAssessed, normaliseAuthorship, type Verdict } from "../species-key";
+import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, normaliseAuthorship, type Verdict } from "../species-key";
 import { speciesNameParts, normalisedKey, orthographicKey, canonicalEpithet } from "../name-variants";
 import { CORE_DIR } from "./paths";
 
@@ -61,7 +61,7 @@ const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', '
 /** Pass order is priority order. */
 const PASSES = ["accepted", "accepted_homonym", "synonym", "checklist_synonym", "ambiguous_synonym",
   "accepted_variant", "synonym_variant", "provisional", "iucn_synonym", "orthographic_variant",
-  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym"] as const;
+  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "checklist_demoted", "same_name_synonym"] as const;
 type Method = (typeof PASSES)[number];
 const VARIANT_METHODS = ["accepted_variant", "synonym_variant", "provisional", "orthographic_variant"] as const;
 
@@ -108,10 +108,10 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
 
   await conn.run(`CREATE OR REPLACE TEMP TABLE rl AS
     SELECT sis_taxon_id::INTEGER AS sis, scientific_name AS name, ${NAME("scientific_name")} AS nm, authority,
-           family, class_name, synonyms
+           family, class_name, phylum_name AS phylum, kingdom_name AS kingdom, synonyms
     FROM read_parquet(${assessments}) WHERE is_latest`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE tx AS
-    SELECT col_id, parent_id, status, rank, scientific_name, authorship, family, class_name, species_id, demoted,
+    SELECT col_id, parent_id, status, rank, scientific_name, authorship, family, class_name, phylum, kingdom, species_id, demoted,
            checklist_parent_id, ${NAME("scientific_name")} AS nm
     FROM read_parquet(${taxa})`);
   // What a CoL usage can be matched to, and the species that makes it.
@@ -121,10 +121,10 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
   //   kind 3: an ambiguous synonym: CoL isn't sure which species the name means,
   //           so it can only ever count its own records (see the verdict below)
   await conn.run(`CREATE OR REPLACE TEMP TABLE offer AS
-    SELECT nm, col_id AS usage_id, col_id AS target_id, 0 AS kind, family, class_name FROM tx
+    SELECT nm, col_id AS usage_id, col_id AS target_id, 0 AS kind, family, class_name, phylum, kingdom FROM tx
       WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
     UNION ALL
-    SELECT nm, col_id, species_id, 1, NULL, NULL FROM tx
+    SELECT nm, col_id, species_id, 1, family, class_name, phylum, kingdom FROM tx
       WHERE rank = 'species' AND status = 'synonym' AND species_id IS NOT NULL
     UNION ALL
     -- When the release's accepted species isn't in the XR (it holds ~95k usages
@@ -132,29 +132,46 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     -- Followed only to an accepted XR species: Pagrus auratus' release parent is
     -- an ambiguous synonym in the XR that resolves to Sparus aurata, another fish.
     SELECT t.nm, t.col_id, CASE WHEN p.status = 'accepted' AND p.rank = 'species' AND NOT p.demoted THEN p.col_id ELSE t.col_id END,
-           2, t.family, t.class_name FROM tx t LEFT JOIN tx p ON p.col_id = t.checklist_parent_id
+           2, t.family, t.class_name, t.phylum, t.kingdom FROM tx t LEFT JOIN tx p ON p.col_id = t.checklist_parent_id
       WHERE t.demoted
     UNION ALL
-    SELECT nm, col_id, species_id, 3, NULL, NULL FROM tx
-      WHERE rank = 'species' AND status = 'ambiguous synonym' AND species_id IS NOT NULL`);
+    SELECT nm, col_id, species_id, 3, family, class_name, phylum, kingdom FROM tx
+      WHERE rank = 'species' AND status = 'ambiguous synonym' AND species_id IS NOT NULL
+    UNION ALL
+    -- kind 4: provisionally accepted under exactly this name. Ranked above an
+    -- ambiguous synonym (kind 3) of the same name, which is CoL saying it can't
+    -- place the name at all (Cipangopaludina chinensis is both).
+    SELECT nm, col_id, col_id, 4, family, class_name, phylum, kingdom FROM tx
+      WHERE rank = 'species' AND status = 'provisionally accepted' AND NOT demoted`);
 
-  const tiebreak = `(CASE WHEN r.family = o.family THEN 3 WHEN r.class_name = o.class_name THEN 2 ELSE 1 END) DESC, o.usage_id`;
+  // Homonyms: the closest lineage. IUCN's and CoL's classes can differ for the
+  // same animal (Actinopterygii / Teleostei), so phylum and kingdom too: the
+  // waspfish Centropogon australis went to the plant on id order.
+  // Never across phyla. Old genus names are homonyms across kingdoms, so a
+  // shared epithet "proved" the surgeonfish Acanthurus lineatus was the crab
+  // Hepatus lineatus, and linked the plant Limnophila diffusa to a crane fly.
+  // IUCN and CoL name one phylum differently (the brown algae).
+  const sameLineage = `(r.kingdom IS NULL OR tt.kingdom IS NULL OR (r.kingdom = tt.kingdom AND (r.phylum IS NULL OR tt.phylum IS NULL
+    OR replace(r.phylum, 'heterokontophyta', 'ochrophyta') = tt.phylum)))`;
+  const tiebreak = `(CASE WHEN r.family = o.family THEN 5 WHEN r.class_name = o.class_name THEN 4
+    WHEN r.phylum = o.phylum THEN 3 WHEN r.kingdom = o.kingdom THEN 2 ELSE 1 END) DESC, o.usage_id`;
   // Passes 1-3 in SQL: every candidate, ranked, so the winner and the covered rows both come from here.
   await conn.run(`CREATE OR REPLACE TEMP TABLE cand AS
     WITH canon AS (
       SELECT r.sis, o.usage_id, o.target_id, o.kind, 'canonical' AS reached_by,
              CASE o.kind WHEN 0 THEN (CASE WHEN count(*) OVER (PARTITION BY r.sis, o.kind) > 1 THEN 'accepted_homonym' ELSE 'accepted' END)
-                         WHEN 1 THEN 'synonym' WHEN 2 THEN 'checklist_synonym' ELSE 'ambiguous_synonym' END AS method,
+                         WHEN 1 THEN 'synonym' WHEN 2 THEN 'checklist_synonym' WHEN 3 THEN 'ambiguous_synonym' ELSE 'provisional' END AS method,
              -- Among synonyms of one name, the target keeping the species' epithet
              -- (Galium palustre -> Hydrogalium palustre, not H. elongatum).
-             row_number() OVER (PARTITION BY r.sis ORDER BY o.kind,
+             row_number() OVER (PARTITION BY r.sis ORDER BY CASE o.kind WHEN 4 THEN 3 WHEN 3 THEN 4 ELSE o.kind END,
                (split_part(tt.nm, ' ', 2) = split_part(r.nm, ' ', 2)) DESC, ${tiebreak}) AS rn
-      FROM rl r JOIN offer o ON o.nm = r.nm JOIN tx tt ON tt.col_id = o.target_id),
+      FROM rl r JOIN offer o ON o.nm = r.nm JOIN tx tt ON tt.col_id = o.target_id AND ${sameLineage}),
     syn AS (
       SELECT r.sis, o.usage_id, o.target_id, o.kind, 'synonym' AS reached_by, 'iucn_synonym' AS method,
              row_number() OVER (PARTITION BY r.sis ORDER BY o.kind, ${tiebreak}) AS rn
-      FROM (SELECT sis, family, class_name, ${NAME("s.name")} AS snm FROM rl, unnest(synonyms) AS u(s)) r
-      JOIN offer o ON o.nm = r.snm)
+      FROM (SELECT sis, family, class_name, phylum, kingdom, ${NAME("s.name")} AS snm FROM rl, unnest(synonyms) AS u(s)) r
+      -- Not provisional names (kind 4): those are matched by the species' own name only.
+      JOIN offer o ON o.nm = r.snm AND o.kind <> 4 JOIN tx tt ON tt.col_id = o.target_id AND ${sameLineage})
     SELECT * FROM canon UNION ALL SELECT * FROM syn`);
 
   // Passes 4-7 in TypeScript, where the name rules are unit-tested. Variants of the
@@ -162,15 +179,23 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
   // and outrank its IUCN synonyms: Sminthopsis fuliginosa is CoL's fuliginosus,
   // not the S. aitkeni one of its synonyms points at. The orthographic pass, the
   // weakest, only runs for species nothing else matched.
-  const left = await rows<{ sis: number; name: string; authority: string | null; any_cand: boolean }>(conn, `
-    SELECT sis, name, authority, sis IN (SELECT sis FROM cand) AS any_cand
+  const left = await rows<{ sis: number; name: string; authority: string | null; any_cand: boolean; kingdom: string | null; phylum: string | null }>(conn, `
+    SELECT sis, name, authority, sis IN (SELECT sis FROM cand) AS any_cand, kingdom, phylum
     FROM rl WHERE sis NOT IN (SELECT sis FROM cand WHERE reached_by = 'canonical')`);
   const genera = new Set<string>();
   for (const r of left) { const p = speciesNameParts(r.name); if (p) genera.add(p[0]); }
-  const pool = genera.size === 0 ? [] : await rows<Usage & { species_id: string | null; demoted: boolean }>(conn, `
-    SELECT col_id, scientific_name, authorship, status, rank, parent_id, species_id, demoted FROM tx
+  const pool = genera.size === 0 ? [] : await rows<Usage & { species_id: string | null; demoted: boolean; kingdom: string | null; phylum: string | null }>(conn, `
+    SELECT col_id, scientific_name, authorship, status, rank, parent_id, species_id, demoted, kingdom, phylum FROM tx
     WHERE rank = 'species' AND lower(split_part(scientific_name, ' ', 1)) IN (${[...genera].map(lit).join(", ")})`);
 
+  // A spelling can't cross phyla either (see sameLineage); unknown lineage is no evidence.
+  const phy = (p: string | null) => p?.replace("heterokontophyta", "ochrophyta") ?? null;
+  const usageLineage = new Map(pool.map((u) => [u.col_id, u]));
+  const compatible = (r: { kingdom: string | null; phylum: string | null }, usage: string) => {
+    const u = usageLineage.get(usage);
+    if (!u || !r.kingdom || !u.kingdom) return true;
+    return r.kingdom === u.kingdom && (!r.phylum || !u.phylum || phy(r.phylum) === phy(u.phylum));
+  };
   type Tier = "accepted_variant" | "synonym_variant" | "provisional";
   const byNorm = new Map<string, Map<Tier, Map<string, string>>>(); // key → tier → usage → target
   const byOrtho = new Map<string, { usage: string; target: string; authorship: string | null }[]>();
@@ -204,7 +229,8 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     const nk = normalisedKey(r.name);
     const tiers = nk ? byNorm.get(nk) : undefined;
     const hit = tiers && (["accepted_variant", "synonym_variant", "provisional"] as Tier[])
-      .map((t) => ({ t, m: tiers.get(t) })).find((x) => x.m?.size);
+      .map((t) => ({ t, m: new Map([...(tiers.get(t) ?? new Map<string, string>())].filter(([u]) => compatible(r, u))) }))
+      .find((x) => x.m.size);
     if (hit?.m) {
       // Two records that differ only by a termination are one name: CoL holding a
       // species twice. Refuse rather than hand the assessment to whichever sorts first.
@@ -220,7 +246,7 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     }
     if (r.any_cand) continue;
     const ok = orthographicKey(r.name);
-    const same = ok ? (byOrtho.get(ok) ?? []).filter((c) => sameAuthors(r.authority, c.authorship)) : [];
+    const same = ok ? (byOrtho.get(ok) ?? []).filter((c) => compatible(r, c.usage) && sameAuthors(r.authority, c.authorship)) : [];
     if (new Set(same.map((c) => c.target)).size === 1) {
       extra.push({ sis: r.sis, usage: same[0].usage, target: same[0].target, method: "orthographic_variant" });
     }
@@ -253,6 +279,16 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     LEFT JOIN tx up ON up.col_id = u.parent_id`);
 
   const assessedNames = new Set((await rows<{ nm: string }>(conn, `SELECT nm FROM rl`)).map((r) => r.nm));
+  // Every CoL synonym carrying a species' own name, by species and target:
+  // CoL can hold the same name several times under different citations
+  // (Clithon oualaniensis, three times), and any one may be the respelling.
+  const ownNameSynonyms = new Map<string, { name: string; authorship: string | null }[]>();
+  for (const r of await rows<{ sis: number; target_id: string; name: string; authorship: string | null }>(conn, `
+      SELECT c.sis, c.target_id, u.scientific_name AS name, u.authorship FROM cand c JOIN tx u ON u.col_id = c.usage_id
+      WHERE c.reached_by = 'canonical' AND c.kind = 1`)) {
+    const k = `${r.sis}|${r.target_id}`;
+    ownNameSynonyms.set(k, [...(ownNameSynonyms.get(k) ?? []), { name: r.name, authorship: r.authorship }]);
+  }
   const links: LinkRow[] = [];
   for (const p of primary) {
     // A variant pass has already established that the usage is this species' own
@@ -264,8 +300,16 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
       : { scientificName: p.name, authorship: p.authority ?? undefined };
     const usage = { key: p.u_id, scientificName: p.u_name, authorship: p.u_auth ?? undefined };
     const target = { key: p.t_id, scientificName: p.t_name, authorship: p.t_auth ?? undefined };
+    // Its own name is a CoL synonym that CoL marks as a respelling of the
+    // accepted name (same citation): the same species, whatever the Red List's
+    // citation says (Meandrina danae / danai).
+    const respelled = p.reached_by === "canonical" && p.method === "synonym"
+      && (ownNameSynonyms.get(`${p.sis}|${p.t_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
+      && !isSeparatelyAssessed(p.t_name, p.name, assessedNames);
     const d = p.method === "ambiguous_synonym"
       ? { verdict: "lumped" as const, reason: `CoL lists ${p.u_name} as an ambiguous synonym of ${p.t_name}; counting only records under this name` }
+      : respelled
+      ? { verdict: "own" as const, reason: `CoL spells it ${p.t_name} (${p.u_name} is its orthographic variant, same citation)` }
       : decideKey({ species, reachedBy: p.reached_by, usage, acceptedUsage: p.t_id !== p.u_id ? target : undefined, assessedNames });
     // A lumped species' records start at its own usage, or at the infraspecific
     // CoL files that synonym under (Fringilla polatzeki → F. teydea polatzeki).
@@ -323,8 +367,15 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     links.push(row);
   };
   for (const c of covered) {
+    // A shared epithet under another genus is a genus move only if the authors
+    // agree too: Himantopus leucocephalus Gould, 1837 is the pied stilt, not the
+    // banded stilt Cladorhynchus leucocephalus (Vieillot, 1816), whose IUCN
+    // synonyms name it. Where either citation is missing there is nothing to check.
+    const otherGenus = c.name.split(" ")[0].toLowerCase() !== c.t_name.split(" ")[0].toLowerCase();
+    const authorsAgree = !c.authority || !c.t_auth || sameAuthors(c.authority, c.t_auth);
     const same = c.src === "twin" || ((c.kind === 0 || c.src === "own_name_synonym")
       && sameOrganism({ scientificName: c.name, authorship: c.authority ?? undefined }, { scientificName: c.t_name, authorship: c.t_auth ?? undefined })
+      && (!otherGenus || authorsAgree)
       && !isSeparatelyAssessed(c.t_name, c.name, assessedNames));
     cover({
       sis_taxon_id: c.sis, role: "covered", col_id: c.t_id, usage_id: same ? c.t_id : null, verdict: same ? "own" : "refused",
@@ -334,15 +385,19 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
   }
 
   // Twins and duplicate concepts of each species' own target.
-  const species = await rows<{ col_id: string; scientific_name: string; authorship: string | null; family: string | null }>(conn, `
-    SELECT col_id, scientific_name, authorship, family FROM tx
+  const species = await rows<{ col_id: string; scientific_name: string; authorship: string | null; family: string | null; class_name: string | null }>(conn, `
+    SELECT col_id, scientific_name, authorship, family, class_name FROM tx
     WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND NOT demoted`);
   const byId = new Map(species.map((x) => [x.col_id, x]));
-  // A twin: the identical name in the same family, or with the same author
-  // citation (Andoa berthelotiana sits in two moss families, both "(Mont.) Ochyra").
-  const twinKeys = (x: { scientific_name: string; family: string | null; authorship: string | null }) => [
-    `f|${x.family}|${x.scientific_name.toLowerCase()}`,
-    ...(x.authorship ? [`a|${normaliseAuthorship(x.authorship)}|${x.scientific_name.toLowerCase()}`] : []),
+  // A twin: the identical name (a hybrid sign aside: Utricularia × ochroleuca)
+  // in the same class, or with the same author citation (Andoa berthelotiana
+  // sits in two moss families, both "(Mont.) Ochyra"; Frullania azorica is
+  // accepted in one liverwort family and provisionally in another). Class, not
+  // kingdom: Centropogon australis is a plant and a fish.
+  const twinName = (n: string) => n.toLowerCase().replace(/\s*×\s*/g, " ").replace(/\s+/g, " ").trim();
+  const twinKeys = (x: { scientific_name: string; class_name: string | null; authorship: string | null }) => [
+    ...(x.class_name ? [`c|${x.class_name}|${twinName(x.scientific_name)}`] : []),
+    ...(x.authorship ? [`a|${normaliseAuthorship(x.authorship)}|${twinName(x.scientific_name)}`] : []),
   ];
   const dupKey = (x: { scientific_name: string; authorship: string | null; family: string | null }) => {
     const p = speciesNameParts(x.scientific_name);
@@ -375,6 +430,17 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     }
   }
 
+  // A checklist demotion followed to the checklist's species: the demoted XR
+  // species is where GBIF files the records (Cathormion umbellatum, 200; its
+  // checklist species Albizia umbellata has none), and it is on no list.
+  for (const l of [...links]) {
+    if (l.role !== "primary" || l.verdict !== "own" || l.method !== "checklist_synonym") continue;
+    const p = primary.find((x) => x.sis === l.sis_taxon_id);
+    if (!p || p.u_id === p.t_id) continue;
+    cover({ sis_taxon_id: l.sis_taxon_id, role: "covered", col_id: p.u_id, usage_id: p.u_id, verdict: "own", method: "checklist_demoted",
+      reason: `${p.u_name} is the XR species the checklist folds into ${p.t_name}; GBIF files its records there`, counted: true });
+  }
+
   // A lumped species owns every same-genus synonym usage carrying its exact name.
   const sameNameSyn = await rows<{ sis: number; usage: string; target: string }>(conn, `
     SELECT r.sis, t.col_id AS usage, t.species_id AS target FROM rl r
@@ -385,6 +451,23 @@ export async function buildLink(conn: DuckDBConnection, coreDir: string): Promis
     if (!l || x.usage === l.usage_id) continue;
     cover({ sis_taxon_id: x.sis, role: "covered", col_id: x.target, usage_id: x.usage, verdict: "lumped", method: "same_name_synonym",
       reason: "CoL files this name under more than one species; its records under each are its own", counted: true });
+  }
+
+  // The same guard over every row, however it was made: a link never crosses
+  // phyla (twins, duplicate concepts and lumps are found by name alone).
+  await conn.run(`CREATE OR REPLACE TEMP TABLE linked_pairs (sis INTEGER, col_id VARCHAR)`);
+  const pairAp = await conn.createAppender("linked_pairs");
+  for (const l of links) if (l.col_id) { pairAp.appendInteger(l.sis_taxon_id); pairAp.appendVarchar(l.col_id); pairAp.endRow(); }
+  pairAp.closeSync();
+  const crossing = new Set((await rows<{ k: string }>(conn, `
+    SELECT DISTINCT r.sis || '|' || tt.col_id AS k FROM linked_pairs i JOIN rl r ON r.sis = i.sis JOIN tx tt ON tt.col_id = i.col_id
+    WHERE NOT ${sameLineage}`)).map((x) => x.k));
+  for (let i = links.length - 1; i >= 0; i--) {
+    const l = links[i];
+    if (!l.col_id || !crossing.has(`${l.sis_taxon_id}|${l.col_id}`)) continue;
+    if (l.role === "covered") { links.splice(i, 1); continue; }
+    Object.assign(l, { col_id: null, usage_id: null, verdict: "none", method: "unmatched", counted: false,
+      reason: "the only CoL match is in another phylum" });
   }
 
   // One owner per usage: primary before covered, own before lumped, stronger pass, then lower SIS id.

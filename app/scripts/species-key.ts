@@ -128,6 +128,31 @@ export function sameOrganism(a: TaxonName, b: TaxonName): boolean {
 }
 
 /**
+ * Is a CoL synonym just a respelling of the accepted name CoL files it under?
+ *
+ * CoL marks an orthographic variant as a synonym carrying the accepted name's
+ * own author citation: Meandrina danae of M. danai, Clithon oualaniensis of
+ * C. oualaniense, both cited to the same authors and year. That is CoL saying
+ * the two are one name, so a species matched to the synonym by its own name is
+ * the accepted species, not lumped into it. sameOrganism can't see this when
+ * the Red List's own citation is mistyped ("Milen-Edwards & Haime, 1948").
+ *
+ * Asked only of two CoL usages: one genus, the same citation (an abbreviated
+ * "f." and "fil." count as one), and an epithet that differs by a Latin ending
+ * or a letter or two.
+ */
+export function isCoLRespelling(synonym: TaxonName, accepted: TaxonName): boolean {
+  if (genusOf(synonym.scientificName) !== genusOf(accepted.scientificName)) return false;
+  const cite = (a?: string) => normaliseAuthorship(a).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\bfil\b/g, "f");
+  const ca = cite(synonym.authorship);
+  if (!ca || ca !== cite(accepted.authorship)) return false;
+  const a = epithetOf(synonym.scientificName);
+  const b = epithetOf(accepted.scientificName);
+  if (!a || !b || a === b) return false;
+  return canonicalEpithet(a) === canonicalEpithet(b) || editDistance(a, b) <= MAX_RESPELLING_EDITS;
+}
+
+/**
  * Does the Red List assess this other name in its own right?
  *
  * Even when CoL is sure two names are one taxon, the Red List having assessed
