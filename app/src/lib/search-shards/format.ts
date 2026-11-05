@@ -1,5 +1,5 @@
 /**
- * Static search shards (scripts/build-search-shards.ts → public/search-shards/<sync>/).
+ * Static search shards (scripts/build/build-search-shards.ts → public/search-shards/<sync>/).
  *
  * Search is a prefix match over name-index.parquet (species) and rank-index.parquet
  * (class/order/family/genus suggestions), both sorted by name. Rather than read those off

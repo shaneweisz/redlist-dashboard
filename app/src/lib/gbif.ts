@@ -17,7 +17,7 @@
  * will converge eventually, and anything leaving `checklistKey` unset is relying
  * on which side of that convergence it happens to run on.
  *
- * See docs/gbif-col-migration.md for how the pipeline moved onto CoL and why
+ * See docs/archive/gbif-col-migration.md for how the pipeline moved onto CoL and why
  * GBIF, rather than a local copy of the checklist, is the authority for its keys.
  *
  * @see https://data-blog.gbif.org/post/catalogue-of-life-taxonomic-backbone/
@@ -39,7 +39,7 @@ export const GBIF_BACKBONE_CHECKLIST_KEY = "d7dddbf4-2cf0-4f39-9b2a-bb099caae36c
  * Flipping this constant is not by itself a migration — the stored keys have to
  * change with it, or every query asks one taxonomy about another's keys and gets
  * an empty result set back. The pipeline now derives its group keys from CoL
- * (scripts/derive-gbif-taxon-keys.ts) and resolves species keys and names through
+ * (scripts/sync/outputs/derive-gbif-taxon-keys.ts) and resolves species keys and names through
  * GBIF against this checklist, so the keys and this constant move together.
  */
 export const GBIF_CHECKLIST_KEY = COL_XR_CHECKLIST_KEY;

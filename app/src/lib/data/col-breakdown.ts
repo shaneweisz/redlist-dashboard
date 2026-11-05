@@ -1,7 +1,7 @@
 /**
  * Per-name CoL described/not-evaluated breakdown, with a "why doesn't this
  * assessed species have a clean 1:1 CoL match" diagnostic — shared between
- * scripts/build-taxa-summary.ts (build time, the static tree's official/SSC
+ * scripts/sync/outputs/build-taxa-summary.ts (build time, the static tree's official/SSC
  * nodes) and src/lib/data/live-taxa-children.ts (request time, dynamic
  * taxonomic-drilldown nodes — see dynamic-taxon.ts). Extracted from
  * build-taxa-summary.ts so the two call sites can never silently drift apart,
@@ -436,7 +436,7 @@ export async function backboneHasChecklistColumns(conn: DuckDBConnection, backbo
 /**
  * The "which assessed species here have no clean 1:1 CoL match, and why"
  * diagnostic on its own — shared between computeBreakdownEntry (one breakdown
- * name at a time) and scripts/build-col-revisions.ts, which runs it ONCE over
+ * name at a time) and scripts/sync/outputs/build-col-revisions.ts, which runs it ONCE over
  * every assessed species to build the dashboard-wide flag. Both call sites must
  * classify identically, so the query lives here rather than being written twice.
  *

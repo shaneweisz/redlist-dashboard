@@ -15,7 +15,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { currentReleaseOnDisk, currentChecklistOnDisk, writeReleaseMetadata } from "../fetch-col-xr";
+import { currentReleaseOnDisk, currentChecklistOnDisk, writeReleaseMetadata } from "../sync/inputs/fetch-col-xr";
 
 const PIN = path.join(__dirname, "../../src/config/col-release.json");
 const original = fs.readFileSync(PIN, "utf-8");

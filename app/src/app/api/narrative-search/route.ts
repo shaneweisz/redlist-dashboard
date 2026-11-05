@@ -11,7 +11,7 @@
  * group.
  *
  * See lib/data/narratives-duckdb.ts for why this reads a term index rather than
- * the prose, and scripts/build-narratives.ts for how the three files are built.
+ * the prose, and scripts/narratives/build-narratives.ts for how the three files are built.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";

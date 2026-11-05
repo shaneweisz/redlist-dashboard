@@ -535,7 +535,7 @@ export function getNodeDef(nodeId: string): { node: TaxonomyNode; parentId: stri
 
 export const COL_SOURCE_URL = "https://www.catalogueoflife.org/";
 
-// The exact CoL XR release colDescribed is built from (scripts/fetch-col-xr.ts writes
+// The exact CoL XR release colDescribed is built from (scripts/sync/inputs/fetch-col-xr.ts writes
 // this alongside every sync) — cited by alias (e.g. "COL26.6 XR") and linked via its
 // DOI, so "Source" points at the specific dataset version actually used instead of a
 // generic, dateless homepage link that says nothing about which release produced the
@@ -553,7 +553,7 @@ const capitalizeSpeciesName = (s: string): string => s.split(" ").map((w, i) => 
 // clauses — see primaryFilterRank below.
 export type FilterRank = "class" | "order" | "family" | "genus" | "species" | "remainder";
 
-// name → CoL taxon id, built by scripts/build-col-taxon-ids.ts from the taxonomy tree
+// name → CoL taxon id, built by scripts/sync/outputs/build-col-taxon-ids.ts from the taxonomy tree
 // + backbone.parquet. Only covers names actually referenced by a SpeciesFilter
 // somewhere in the tree — not every name resolves (CoL classifies a few things
 // differently, e.g. Bison is lumped into Bos), in which case the segment below just
@@ -562,7 +562,7 @@ const COL_TAXON_ID_MAP: Record<string, string> = COL_TAXON_IDS;
 
 // A container rank (class/order/family/genus) links to a species-level search scoped
 // to that taxon, with the same extant + accepted-only definition colDescribed itself
-// uses (SPECIES_STATUS in scripts/pipeline/build-taxa.ts) — so clicking through shows
+// uses (SPECIES_STATUS in scripts/sync/core/build-taxa.ts) — so clicking through shows
 // exactly the species being counted, not just a static profile page. Deliberately
 // omits status=provisionally%20accepted: colDescribed excludes those names (they
 // overshoot IUCN's own described-species totals — see the SPECIES_STATUS comment),
@@ -587,7 +587,7 @@ function colHref(rank: FilterRank, colId: string): string {
 // Which of a filter's include fields enumerates this node's species (its "primary
 // dimension") — the tree never sets more than one at a time (verified by
 // taxonomy-tree.test.ts), so the first non-empty one is unambiguous. Mirrors
-// primaryDimension() in scripts/build-taxa-summary.ts, which decides the same thing
+// primaryDimension() in scripts/sync/outputs/build-taxa-summary.ts, which decides the same thing
 // server-side to compute NodeSummary.colBreakdown.
 export function primaryFilterRank(filter: SpeciesFilter): { rank: FilterRank; label: string } | null {
   if (filter.classNames?.length) return { rank: "class", label: "Class" };
@@ -597,7 +597,7 @@ export function primaryFilterRank(filter: SpeciesFilter): { rank: FilterRank; la
   if (filter.speciesNames?.length) return { rank: "species", label: "Species" };
   // Catch-all/remainder node (excludeOrders/excludeClasses/excludeFamilies/
   // excludeGenera/excludeSpeciesNames only, no positive dimension) — mirrors
-  // isExcludeOnlyCatchAll in scripts/build-taxa-summary.ts, which computes exactly
+  // isExcludeOnlyCatchAll in scripts/sync/outputs/build-taxa-summary.ts, which computes exactly
   // one colBreakdown bucket (keyed by the node's own name) for these nodes.
   if (
     filter.excludeOrders?.length ||

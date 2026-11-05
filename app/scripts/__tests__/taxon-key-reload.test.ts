@@ -24,7 +24,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { getTaxa, reloadTaxonKeys } from "../taxa";
+import { getTaxa, reloadTaxonKeys } from "../lib/taxa";
 
 // A scratch copy, never the git-tracked file. Rewriting the real config to test
 // a rewrite means an interrupted run leaves invented keys in a committed file.

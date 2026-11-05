@@ -1,7 +1,7 @@
 /**
  * Splitting a species name into the parts the nomenclatural codes compare on.
  *
- * Lifted out of scripts/name-variants.ts (which still re-exports it, and holds
+ * Lifted out of scripts/sync/core/name-variants.ts (which still re-exports it, and holds
  * everything built on top: normalisedKey, orthographicallySame, the matching
  * ladder) because the read layer needs the same rule and must not import from
  * scripts/ — nothing shipped does. The rule decides, among other things,

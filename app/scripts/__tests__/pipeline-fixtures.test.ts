@@ -1,11 +1,11 @@
 /**
- * Matching fixtures (scripts/pipeline/fixtures/matching.ts) and the check that
+ * Matching fixtures (scripts/sync/checks/fixtures/matching.ts) and the check that
  * holds a sync to them: each expectation is checked only when stated, and the
  * case list itself stays well-formed.
  */
 import { describe, it, expect } from "vitest";
-import { mismatches, type Observed } from "../pipeline/check-fixtures";
-import { MATCHING_CASES, type MatchCase } from "../pipeline/fixtures/matching";
+import { mismatches, type Observed } from "../sync/checks/check-fixtures";
+import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
   assessed: true, category: "VU", linkedTo: "Malus domestica", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",

@@ -25,7 +25,7 @@ const COL_ARTIFACTS = [
 ];
 
 // The sync the pre-built species-list files belong to (public/species-lists/<sync>/,
-// written by scripts/build-species-lists.ts). Baked into the client bundle so a page
+// written by scripts/build/build-species-lists.ts). Baked into the client bundle so a page
 // asks for exactly the files its own deployment was built with.
 const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
 
@@ -48,7 +48,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Search prefix shards (scripts/build-search-shards.ts) — same storage, same reason.
+        // Search prefix shards (scripts/build/build-search-shards.ts) — same storage, same reason.
         source: "/search-shards/:path*.json.br",
         headers: [
           { key: "Content-Encoding", value: "br" },

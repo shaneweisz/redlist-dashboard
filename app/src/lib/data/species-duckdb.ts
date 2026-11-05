@@ -25,7 +25,7 @@ import { COL_DOMESTIC_EXCLUDE_NAMES } from "@/config/col-described-overrides";
 const DATA_DIR = path.join(process.cwd(), "data");
 // Dev has the parquets on disk; on Vercel they aren't bundled → read from R2.
 const USE_R2 = !fs.existsSync(path.join(DATA_DIR, "assessed.parquet"));
-// httpfs vendored at build time (scripts/fetch-duckdb-ext.ts) + traced into the
+// httpfs vendored at build time (scripts/build/fetch-duckdb-ext.ts) + traced into the
 // v2 function (next.config). LOAD by path avoids the cold-start network INSTALL.
 const HTTPFS_EXT = path.join(process.cwd(), "duckdb-ext", "httpfs.duckdb_extension");
 
@@ -81,7 +81,7 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
         SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE src = 'redlist' AND col_id IS NOT NULL`);
       // A species CoL flags extinct still belongs to the "described" universe if
       // IUCN's own linked assessment agrees (EX/EW) — see the matching comment +
-      // rationale next to createExEwAssessedTable in scripts/build-taxa-summary.ts.
+      // rationale next to createExEwAssessedTable in scripts/sync/outputs/build-taxa-summary.ts.
       // Mirrored here so this runtime species list and the build-time colDescribed/
       // colNe summary numbers never disagree with each other.
       await conn.run(`CREATE TEMP TABLE ne_ex_ew_col_ids AS
@@ -276,7 +276,7 @@ export async function querySpecies(opts: {
   offset?: number;
   /**
    * Query exactly one taxon_group partition instead of resolving `taxon` — what the
-   * build-time per-group species-list files (scripts/build-species-lists.ts) are made
+   * build-time per-group species-list files (scripts/build/build-species-lists.ts) are made
    * from. NE rows are stamped with the group's own display taxon (mapTaxonId), the
    * same value assessed rows carry, so one group file serves every view that needs
    * the group; and the NE cap never applies (the browser enforces it over the groups
@@ -627,7 +627,7 @@ export function toSearchResult(r: Record<string, unknown>, colIdOverride: string
 
 // dedupeByRowKey lives in lib/search-shards/rank.ts — shared with the browser's shard search.
 
-// Tier 0: prefix hits from the name-sorted index (scripts/build-search-index.ts).
+// Tier 0: prefix hits from the name-sorted index (scripts/sync/outputs/build-search-index.ts).
 //
 // name-index.parquet is one row per searchable name — scientific name, common name,
 // epithet, and each word of a multi-word common name — sorted by that name, so this
@@ -687,7 +687,7 @@ async function prefixSearch(conn: DuckDBConnection, q: string, lim: number): Pro
 // prefix hits (one pruned range read) → substring hits (the in-memory index) → the CoL
 // universe (species/) → synonyms. The gate is what keeps a precise query like "Panthera
 // leo" from ever touching the heavy tiers.
-/** Tier 0 alone (the prefix search the static shards replace) — for scripts/check-search-shards.ts. */
+/** Tier 0 alone (the prefix search the static shards replace) — for scripts/build/check-search-shards.ts. */
 export async function prefixSearchSpecies(query: string, limit = 10): Promise<SearchResult[]> {
   if (query.length < 2) return []; // as searchSpecies / the route
   return prefixSearch(await getConn(), query.toLowerCase(), Math.min(Math.max(limit, 1), 50));
@@ -1122,7 +1122,7 @@ export async function warmConnection(): Promise<void> {
 export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
   const conn = await getConn();
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
-  // rebuilt by a separate scheduled sync (scripts/pipeline/build-read-models.ts), not by this
+  // rebuilt by a separate scheduled sync (scripts/sync/outputs/build-read-models.ts), not by this
   // deploy, so there's a window where the deployed code expects a column the
   // currently-synced parquet doesn't have yet. Naming it would throw a DuckDB
   // Binder Error for every request in that window — this deploy's whole history

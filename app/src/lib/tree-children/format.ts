@@ -1,7 +1,7 @@
 import type { NodeSummary } from "@/lib/data/species-store";
 
 /**
- * One pre-built tree file (scripts/build-tree-children.ts): every expandable node under
+ * One pre-built tree file (scripts/build/build-tree-children.ts): every expandable node under
  * a dynamic drilldown root → the children /api/redlist/taxa-subgroups returns for it
  * when unscoped.
  */

@@ -22,7 +22,7 @@ import * as path from "path";
 const { execFileSyncMock } = vi.hoisted(() => ({ execFileSyncMock: vi.fn() }));
 vi.mock("child_process", () => ({ execFileSync: execFileSyncMock }));
 
-import { resolveChecklistDataset, run } from "../fetch-col-checklist";
+import { resolveChecklistDataset, run } from "../sync/inputs/fetch-col-checklist";
 
 /** The curated releases, newest first — as ChecklistBank listed them on 2026-09-14. */
 const RELEASES = [

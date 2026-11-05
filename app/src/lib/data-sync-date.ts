@@ -17,7 +17,7 @@ const LATEST_SYNC_PATH = path.join(process.cwd(), "latest-sync.txt");
  * The timestamp of the data sync that data/taxa-summary.json etc. were built
  * from (see README § Data Sync Pipeline) — i.e. the "now" the build script used
  * when it computed isOutdated() into that static file. Parses
- * scripts/upload-data-to-r2.ts's makeTimestamp format ("2026-07-16T17-03-30Z",
+ * scripts/sync/upload-data-to-r2.ts's makeTimestamp format ("2026-07-16T17-03-30Z",
  * colons swapped for dashes to be S3/URL-safe) back into a Date.
  */
 export function getDataSyncDate(): Date {

@@ -1,6 +1,6 @@
 /**
  * Browser loader for the pre-built per-group species-list files
- * (scripts/build-species-lists.ts → public/species-lists/<sync>/).
+ * (scripts/build/build-species-lists.ts → public/species-lists/<sync>/).
  *
  * A species-list request (the same `/api/redlist/species?taxon=…[&category=NE]` URL the
  * cache has always been keyed on) is answered by fetching the static files for the

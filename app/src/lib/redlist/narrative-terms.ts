@@ -1,7 +1,7 @@
 /**
  * How assessment prose is cut into words — for the index, and for the query.
  *
- * One module, imported by both `scripts/build-narratives.ts` (which writes the
+ * One module, imported by both `scripts/narratives/build-narratives.ts` (which writes the
  * index) and the search (which reads it). They were two functions for an hour
  * and had already drifted: the index dropped stop words and the query didn't,
  * so "guano mining in caves" looked up "in", found nothing, and returned

@@ -1,5 +1,5 @@
 /**
- * build-taxa (scripts/pipeline/build-taxa.ts): species_id resolution, checklist
+ * build-taxa (scripts/sync/core/build-taxa.ts): species_id resolution, checklist
  * demotion, one group per usage, and the Not Evaluated exclusion list, over a
  * tiny synthetic ColDP.
  */
@@ -8,7 +8,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { buildTaxa } from "../pipeline/build-taxa";
+import { buildTaxa } from "../sync/core/build-taxa";
 
 const HEAD = ["col:ID", "col:parentID", "col:status", "col:rank", "col:scientificName", "col:authorship",
   "col:combinationAuthorshipYear", "col:basionymAuthorshipYear", "col:nameReferenceID",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { plainText } from "../../../../scripts/build-narratives";
+import { plainText } from "../../../../scripts/narratives/build-narratives";
 import { indexPostings, phrasePattern, queryTerms, queryTokens } from "../narrative-terms";
 
 /**

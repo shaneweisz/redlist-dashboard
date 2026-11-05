@@ -175,7 +175,7 @@ export function getPrecomputedRealmStats() {
 /**
  * sis_taxon_id → the taxonomic-difference flag, for the ~6% of
  * assessed species carrying one (data/col-revisions.json, built by
- * scripts/build-col-revisions.ts). Two independent signals share the entry: no
+ * scripts/sync/outputs/build-col-revisions.ts). Two independent signals share the entry: no
  * clean 1:1 Catalogue of Life match, and species CoL has likely split out of
  * this one — see lib/col-revision.
  *
@@ -486,7 +486,7 @@ export interface NodeSummary {
   colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[];
 }
 
-// See scripts/build-taxa-summary.ts's classifyNoMatch for what each reason means and
+// See scripts/sync/outputs/build-taxa-summary.ts's classifyNoMatch for what each reason means and
 // how it's derived. Modular/additive on top of noMatchIds — safe to ignore or drop
 // without touching the count-only CoL Match / No CoL Match mechanism.
 // Re-exported from lib/data/col-breakdown, which is where classifyNoMatch
@@ -496,7 +496,7 @@ export interface NodeSummary {
 export type { NoMatchReason, NoMatchDetail };
 
 // Heuristic "split from" flag for Not Evaluated species — see
-// scripts/build-taxa-summary.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
+// scripts/sync/outputs/build-taxa-summary.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
 // caveats. Keyed by col_id (NE species have no sis_taxon_id), additive on top of
 // colBreakdown, and independently droppable.
 export interface SplitDetail {

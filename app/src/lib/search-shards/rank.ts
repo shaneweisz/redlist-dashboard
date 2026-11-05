@@ -1,10 +1,10 @@
 /**
  * Search ranking shared by the server (species-duckdb's tier-0 prefix search), the
- * build step that pre-ranks the two-letter shards (scripts/build-search-shards.ts), and
+ * build step that pre-ranks the two-letter shards (scripts/build/build-search-shards.ts), and
  * the browser (lib/search-shards/client.ts) — one implementation, so all three agree.
  *
  * rankSpecies / rankTaxa reproduce, row for row, the ORDER BY + LIMIT of prefixSearch
- * and suggestTaxa's SQL; scripts/check-search-shards.ts proves it against that SQL.
+ * and suggestTaxa's SQL; scripts/build/check-search-shards.ts proves it against that SQL.
  */
 import type { SearchResult, TaxonSuggestion } from "@/lib/data/species-duckdb";
 

@@ -1,5 +1,5 @@
 /**
- * Browser loader for the pre-built tree files (scripts/build-tree-children.ts →
+ * Browser loader for the pre-built tree files (scripts/build/build-tree-children.ts →
  * public/species-lists/<sync>/tree/<root>.json.br).
  *
  * Answers an UNSCOPED expand of a live-drilldown node (what

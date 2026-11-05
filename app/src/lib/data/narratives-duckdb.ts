@@ -5,7 +5,7 @@
  * a habitat type, a threat nobody has a code for, a place — and show where in
  * the text they mention it.
  *
- * Four parquets, built by `scripts/build-narratives.ts` and published once per
+ * Four parquets, built by `scripts/narratives/build-narratives.ts` and published once per
  * Red List release (see narrative-release.ts — they are not sync data):
  *
  *  - `narrative-index.parquet`, sorted by term, is what a search reads. Sorted,
@@ -83,7 +83,7 @@ export interface NarrativeSearchResult {
  * produced a 404 on every preview deployment, since no sync has ever held them.
  *
  * The local check is its own rule too, not `USE_R2`: they are built on their
- * own (`scripts/build-narratives.ts`, against a restored release database) long
+ * own (`scripts/narratives/build-narratives.ts`, against a restored release database) long
  * before a full sync is fetched, and a developer with them in `data/` means to
  * search them.
  */

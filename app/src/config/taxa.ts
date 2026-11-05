@@ -9,7 +9,7 @@
  * - estimatedSource: Source/citation for the estimate
  * GBIF keys are deliberately NOT here. They live in the generated
  * src/config/gbif-taxon-keys.json, derived from the Red List group definitions in
- * scripts/taxa.ts, and are read via gbifTaxonKeysForGroup(). A second copy in
+ * scripts/lib/taxa.ts, and are read via gbifTaxonKeysForGroup(). A second copy in
  * this file went stale when the pipeline moved to Catalogue of Life and silently
  * emptied the world map's occurrence layer.
  * - color: Theme color for UI elements

@@ -1,12 +1,12 @@
 /**
- * The decisions file (scripts/pipeline/decisions.ts): read, written, and
+ * The decisions file (scripts/sync/core/decisions.ts): read, written, and
  * resolved against a release by names, since CoL ids move.
  */
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, it, expect } from "vitest";
-import { readDecisions, writeDecisions, resolveDecision, COLUMNS, DECISIONS_FILE, type Decision } from "../pipeline/decisions";
+import { readDecisions, writeDecisions, resolveDecision, COLUMNS, DECISIONS_FILE, type Decision } from "../sync/core/decisions";
 
 const decision = (over: Partial<Decision> = {}): Decision => ({
   sis: 1, redlistName: "Ochotona pallasi", colName: "Ochotona pallasii", colAuthorship: "(Gray, 1867)", colId: "OLD",

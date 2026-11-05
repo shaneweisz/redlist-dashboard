@@ -1,6 +1,6 @@
 /**
  * Build-time generator for the taxonomy tree's live-drilldown children
- * (scripts/build-tree-children.ts writes its output as static files; the browser
+ * (scripts/build/build-tree-children.ts writes its output as static files; the browser
  * reads them via lib/tree-children/loader.ts).
  *
  * Produces, for one dynamic drilldown root (mammals, pl-flowering_plants, …), the
@@ -22,7 +22,7 @@
  *   - Bucket values are computed in SQL with the very RANK_COLUMN_SQL expressions the
  *     live route groups by.
  *   - Rows are grouped by every column either side reads, so no distinction is lost.
- * scripts/check-tree-children.ts proves it against getLiveRankChildren node by node.
+ * scripts/build/check-tree-children.ts proves it against getLiveRankChildren node by node.
  */
 // taxonomy-utils first: it and dynamic-taxon import each other, and entering the cycle
 // through dynamic-taxon hits its constants before they're initialised.

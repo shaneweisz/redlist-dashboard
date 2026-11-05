@@ -13,7 +13,7 @@
  * have 50-300+ distinct values, so looping per-value would be 50-300 round trips.
  *
  * Deliberately omits the no-match diagnostic breakdown (colBreakdown /
- * noMatchDetails / splitDetails) that scripts/build-taxa-summary.ts's
+ * noMatchDetails / splitDetails) that scripts/sync/outputs/build-taxa-summary.ts's
  * attachColCounts computes for the static tree — that machinery depends on
  * backbone.parquet-joined temp tables built once per whole build run, not cheap
  * per (rank,value) on demand. A later phase adds it back as a separate, lazy,
@@ -39,7 +39,7 @@ import {
   type DynamicRank,
 } from "@/lib/dynamic-taxon";
 
-// Keep in sync with the same constant in scripts/build-taxa-summary.ts and
+// Keep in sync with the same constant in scripts/sync/outputs/build-taxa-summary.ts and
 // species-duckdb.ts — Homo sapiens, which IUCN omits from its Red List export.
 export const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
 
