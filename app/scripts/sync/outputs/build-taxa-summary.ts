@@ -1,19 +1,21 @@
 /**
- * build-taxa-summary: Compute per-taxon summary stats → taxa-summary.json
- *                     + table1a-children-summaries.json / ssc-group-children-
- *                     summaries.json for instant drill-down
+ * build-taxa-summary: the summary table's numbers, from the read models.
  *
- * Reads per-taxon redlist and GBIF CSVs, computes summary statistics, and
- * writes to data/taxa-summary.json plus the two remaining static-tree
- * children-summary files — the only parent nodes left in the tree after the
- * ordinary-subgroup drilldown moved to live DuckDB queries (live-taxa-
- * children.ts) are the Table 1a official rows and the SSC Specialist Groups
- * subtree, so the single old node-children-summaries.json is split in two
- * along that same line (id.startsWith("ssc-")) rather than kept as one file
- * mixing two conceptually distinct, separately-versioned data sources.
+ *   summaries/taxa-summary.json                 per Table 1a group: assessed, by
+ *                                               category, outdated, GBIF totals in
+ *                                               both modes, CoL described / NE
+ *   summaries/country-stats.json, realm-stats.json   the same across all species,
+ *                                               per country and per realm
+ *   summaries/table1a-children-summaries.json   the static tree's children: the
+ *   summaries/ssc-group-children-summaries.json Table 1a rows and the SSC groups,
+ *                                               with each node's CoL breakdown
+ *   taxonomy/col-split-candidates, col-synonym-assessed, col-to-assessed.parquet
+ *                                               the CoL-differences helper tables
+ *                                               the app's live breakdown loads
  *
- * Usage:
- *   npx tsx scripts/sync/outputs/build-taxa-summary.ts
+ * Every other level of the tree is answered live (live-taxa-children.ts).
+ *
+ * Usage:  npx tsx scripts/sync/outputs/build-taxa-summary.ts
  */
 
 import * as fs from "fs";
@@ -41,10 +43,8 @@ import {
   type BreakdownQueryContext,
 } from "../../../src/lib/data/col-breakdown";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import { requireFiles } from "../paths";
 import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-records";
-
-/** The data directory this run reads and writes (the sync passes its build). */
-let dataDir = DATA_DIR;
 
 // CoL species kept out of the universe (like the domesticated-GBIF exclusion). Homo sapiens
 // — IUCN omits humans from its Red List export. Keep in sync with species-duckdb.ts.
@@ -57,10 +57,8 @@ export interface TaxonSummaryRow {
   by_category: Record<string, number>;
   /** GBIF totals for the group, georeferenced records only and all records. */
   gbif: Record<GbifRecordMode, GbifGroupTotals>;
-  // Catalogue of Life backbone (#271): the extant accepted-species universe in this
-  // group (col_described) and how many of those IUCN hasn't evaluated (col_ne =
-  // universe minus assessed, by col_id). Filled after the per-taxon loop; 0 if the
-  // CoL artifacts aren't present.
+  // The group's extant accepted CoL species (col_described) and how many of them
+  // IUCN hasn't assessed (col_ne = described minus assessed, by col_id).
   col_described?: number;
   col_ne?: number;
 }
@@ -101,19 +99,14 @@ function extantUniverseSql(exEwTable: string): string {
   return `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ${exEwTable}))`;
 }
 
-// Per-taxon_group CoL counts from the backbone artifacts: col_described = extant
-// accepted universe; col_ne = that minus the col_ids IUCN has assessed. species/ is
-// partitioned by taxon_group, so this is a single grouped scan. Returns empty (→ 0s)
-// when the CoL artifacts aren't present (e.g. a sync that hasn't built them yet).
-async function colCountsByGroup(): Promise<Map<string, { col_described: number; col_ne: number }>> {
+// Per-taxon_group CoL counts: col_described = the extant accepted universe;
+// col_ne = that minus the col_ids IUCN has assessed. species/ is partitioned by
+// taxon_group, so this is a single grouped scan.
+async function colCountsByGroup(dataDir: string): Promise<Map<string, { col_described: number; col_ne: number }>> {
   const out = new Map<string, { col_described: number; col_ne: number }>();
   const link = path.join(dataDir, syncPath("species_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
-  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
-    console.log("  CoL counts: species/ or species_link.parquet missing — skipping (col_described/col_ne = 0)");
-    return out;
-  }
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
@@ -138,9 +131,6 @@ async function colCountsByGroup(): Promise<Map<string, { col_described: number; 
   return out;
 }
 
-// filterToSql/sqlStrList now live in src/lib/taxonomy-sql.ts (imported above) — shared
-// with the live per-country query path (src/lib/data/country-taxa-summary-duckdb.ts).
-
 type PrimaryDim = { field: keyof NodeFilter; rank: string; names: string[] };
 
 // Whichever include field enumerates this node's species is its "primary dimension"
@@ -155,12 +145,6 @@ function primaryDimension(filter: NodeFilter): PrimaryDim | null {
   return null;
 }
 
-// NoMatchDetail/SplitDetail/classifyNoMatch/SPLIT_CANDIDATES_SQL/
-// COL_TO_ASSESSED_SQL/computeBreakdownEntry now live in
-// ../src/lib/data/col-breakdown.ts (imported above), shared with
-// live-taxa-children.ts's request-time equivalent for dynamic taxonomic-drilldown
-// nodes — see that file's doc comment for why.
-
 // Attach CoL counts (colDescribed / colNe) to every node-children summary — same
 // universe + assessed-by-col_id logic as the per-group counts, filtered per node so
 // sub-groups (e.g. mammals → rodents) get real numbers instead of "—". Also attaches
@@ -169,45 +153,34 @@ function primaryDimension(filter: NodeFilter): PrimaryDim | null {
 // re-runs filterToSql narrowed to that one name (keeping every other clause, so a
 // domestic-form exclusion or an overlapping node's excludeGenera still applies),
 // which is why the entries sum to exactly colDescribed.
-async function attachColCounts(summaries: Record<string, NodeSummary[]>): Promise<void> {
+async function attachColCounts(summaries: Record<string, NodeSummary[]>, dataDir: string): Promise<void> {
   const link = path.join(dataDir, syncPath("species_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
-  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
-    console.log("  CoL node counts: species/ or species_link.parquet missing — skipping.");
-    return;
-  }
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await conn.run(
     `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
   );
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
-  const hasTaxa = fs.existsSync(taxaPath);
-  if (hasTaxa) {
-    await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
-    await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
-    await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
-    // Dump both to small precomputed parquet files — they're fully determined by
-    // this data sync (never by which taxon/bucket a user is viewing), but building
-    // them requires a full scan + self-join over taxa.parquet (8M rows,
-    // ~125MB). live-breakdown.ts's ensureColMatchHelpers used to redo that same
-    // scan+join from scratch on the first breakdown request after every cold
-    // server start; loading these tiny files instead (~6K / ~173K rows) is
-    // effectively instant. See that file's fallback if these are ever missing.
-    const splitCandidatesOut = path.join(dataDir, syncPath("col-split-candidates.parquet"));
-    const synonymAssessedOut = path.join(dataDir, syncPath("col-synonym-assessed.parquet"));
-    const colToAssessedOut = path.join(dataDir, syncPath("col-to-assessed.parquet"));
-    await conn.run(`COPY split_candidates TO '${splitCandidatesOut}' (FORMAT PARQUET)`);
-    await conn.run(`COPY synonym_assessed TO '${synonymAssessedOut}' (FORMAT PARQUET)`);
-    await conn.run(`COPY col_to_assessed TO '${colToAssessedOut}' (FORMAT PARQUET)`);
-    console.log(`  CoL match helpers: ${splitCandidatesOut}, ${synonymAssessedOut}, ${colToAssessedOut}`);
-  }
+  await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
+  await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
+  await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
+  // Published as small parquets: they depend only on the sync, but building them
+  // is a full scan and self-join of taxa.parquet (8M rows), which the app's live
+  // breakdown (live-breakdown.ts) would otherwise redo after every cold start.
+  const splitCandidatesOut = path.join(dataDir, syncPath("col-split-candidates.parquet"));
+  const synonymAssessedOut = path.join(dataDir, syncPath("col-synonym-assessed.parquet"));
+  const colToAssessedOut = path.join(dataDir, syncPath("col-to-assessed.parquet"));
+  await conn.run(`COPY split_candidates TO '${splitCandidatesOut}' (FORMAT PARQUET)`);
+  await conn.run(`COPY synonym_assessed TO '${synonymAssessedOut}' (FORMAT PARQUET)`);
+  await conn.run(`COPY col_to_assessed TO '${colToAssessedOut}' (FORMAT PARQUET)`);
+  console.log(`  CoL match helpers: ${splitCandidatesOut}, ${synonymAssessedOut}, ${colToAssessedOut}`);
   const breakdownCtx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql: universe, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa, taxaPath,
+    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa: true, taxaPath,
   };
   let n = 0;
   let breakdownQueries = 0;
@@ -274,7 +247,7 @@ interface GbifRow { scientific_name: string; class_name: string | null; order_na
  * GBIF has records for (assessed ones in their IUCN group, NE ones in their CoL
  * group, from ne.parquet). "Linked" keys are the assessed species' GBIF keys.
  */
-async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
+async function loadGroups(dataDir: string): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   const assessed = (await conn.runAndReadAll(`
     SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
@@ -312,8 +285,10 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
 }
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
-  dataDir = opts.dataDir ?? DATA_DIR;
-  const groups = await loadGroups();
+  const dataDir = opts.dataDir ?? DATA_DIR;
+  requireFiles("build-taxa-summary", ...["species", "species_link.parquet", "assessed.parquet", "ne.parquet", "taxa.parquet"]
+    .map((f) => path.join(dataDir, syncPath(f))));
+  const groups = await loadGroups(dataDir);
   const summaries: TaxonSummaryRow[] = [];
 
   // Per-country totals across ALL species (unfiltered by taxon) — feeds the
@@ -410,7 +385,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // Catalogue of Life per-group counts: extant universe (col_described) and the
   // not-evaluated slice (col_ne = universe minus assessed col_ids). species/ is
   // partitioned by taxon_group, so this is one grouped scan. 0s if CoL not built yet.
-  const colCounts = await colCountsByGroup();
+  const colCounts = await colCountsByGroup(dataDir);
   for (const s of summaries) {
     const c = colCounts.get(s.table1a_taxon_group);
     s.col_described = c?.col_described ?? 0;
@@ -615,14 +590,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
     console.log(`  ${nodeId}: ${childSummaries.length} children`);
   }
 
-  await attachColCounts(nodeChildrenSummaries);
+  await attachColCounts(nodeChildrenSummaries, dataDir);
 
-  // Split along the same "ssc-" id prefix TaxaSummary.tsx's SSC_SECTIONS
-  // already uses to distinguish SSC breadcrumbs — Table 1a's official rows
-  // and the SSC Specialist Groups subtree are two unrelated data sources
-  // (citation-sourced counts vs. curated organizational units) that happened
-  // to share one file only because both were leftovers of the same static
-  // tree the ordinary-subgroup drilldown used to live in.
+  // Two files, split on the "ssc-" id prefix (as TaxaSummary.tsx's SSC_SECTIONS
+  // does): Table 1a's rows and the SSC Specialist Groups are unrelated sources.
   const table1aChildrenSummaries: Record<string, NodeSummary[]> = {};
   const sscGroupChildrenSummaries: Record<string, NodeSummary[]> = {};
   for (const [nodeId, summaries] of Object.entries(nodeChildrenSummaries)) {
@@ -638,7 +609,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   console.log(`Wrote ${Object.keys(sscGroupChildrenSummaries).length} SSC group parents (${childCount} total children across both files) → ${sscOutputPath}`);
 
   console.log("\nChecking for new IUCN/CoL class-order alias drift...");
-  await checkTaxonomyAliasDrift();
+  await checkTaxonomyAliasDrift(dataDir);
 }
 
 // Warns (does not fail the sync) about any IUCN class/order value with zero
@@ -663,13 +634,9 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 // taxon/rank combination regardless of relevance (e.g. Gymnosperms' class,
 // which nothing ever groups by) was tried first and buried the few real,
 // actionable mismatches under ~50 lines of noise nobody would keep reading.
-async function checkTaxonomyAliasDrift(): Promise<void> {
+async function checkTaxonomyAliasDrift(dataDir: string): Promise<void> {
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
-  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(assessedPath)) {
-    console.log("  Skipping — species/ or assessed.parquet missing.");
-    return;
-  }
   const liveTaxa = allTaxaUnchecked().filter((t) => DYNAMIC_DRILLDOWN_ROOTS.has(t.id));
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   const dimensions: { label: "class" | "order"; col: string; taxa: ReturnType<typeof allTaxaUnchecked> }[] = [
@@ -702,9 +669,6 @@ async function checkTaxonomyAliasDrift(): Promise<void> {
 
 async function main() {
   loadEnvFiles();
-
-  console.log("build-taxa-summary: per-taxon CSVs → taxa-summary.json");
-  console.log("=".repeat(50));
 
   await run();
 }

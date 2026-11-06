@@ -4,7 +4,7 @@
  * Species" tooltip can link each name straight to its CoL page
  * (catalogueoflife.org/data/taxon/<id>) instead of leaving it as plain text.
  *
- * taxa.parquet (built by build-backbone) already carries a col_id for every rank
+ * taxa.parquet already carries a col_id for every rank
  * (order/family/genus/species/…), not just species — so this is a lookup against data
  * we already sync locally, no extra network fetch. Output is small (~180 names) and
  * checked into git as src/config/col-taxon-ids.json, since it's derived from committed
@@ -22,6 +22,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
+import { requireFiles } from "../paths";
 import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "../../../src/config/taxonomy-tree";
 import { COL_DOMESTIC_EXCLUDE_NAMES, COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { syncPath } from "../../../src/lib/data/sync-layout";
@@ -122,9 +123,7 @@ function collectNames(): Map<string, Rank> {
 export async function run(opts: { taxaPath?: string; outPath?: string; aliasesOutPath?: string } = {}): Promise<Record<string, string>> {
   const taxaPath = opts.taxaPath ?? path.join(DATA_DIR, syncPath("taxa.parquet"));
   const outPath = opts.outPath ?? path.join(__dirname, "..", "..", "..", "src", "config", "col-taxon-ids.json");
-  if (!fs.existsSync(taxaPath)) {
-    throw new Error(`build-col-taxon-ids: taxa.parquet not found at ${taxaPath} — run the sync first.`);
-  }
+  requireFiles("build-col-taxon-ids", taxaPath);
 
   const names = collectNames();
   const conn = await (await DuckDBInstance.create(":memory:")).connect();

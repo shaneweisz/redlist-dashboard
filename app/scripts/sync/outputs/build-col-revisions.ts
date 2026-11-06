@@ -44,9 +44,7 @@ import {
 import { SPLIT_REASON, UNFLAGGED_REASONS, GENUS_DIFFERS_REASON, RENAMED_REASON } from "../../../src/lib/col-revision";
 import { orthographicallySame, speciesNameParts, canonicalEpithet } from "../core/name-variants";
 import { syncPath } from "../../../src/lib/data/sync-layout";
-
-/** The data directory this run reads and writes (the sync passes its build). */
-let dataDir = DATA_DIR;
+import { requireFiles } from "../paths";
 
 // Keep in sync with build-taxa-summary.ts / species-duckdb.ts.
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
@@ -77,17 +75,14 @@ export interface ColRevisionsFile {
 }
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
-  dataDir = opts.dataDir ?? DATA_DIR;
+  const dataDir = opts.dataDir ?? DATA_DIR;
   const link = path.join(dataDir, syncPath("species_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
   const outPath = path.join(dataDir, syncPath("col-revisions.json"));
 
-  if (!fs.existsSync(path.join(dataDir, syncPath("species"))) || !fs.existsSync(link)) {
-    console.log("  CoL revisions: species/ or species_link.parquet missing — skipping.");
-    return;
-  }
+  requireFiles("build-col-revisions", path.join(dataDir, syncPath("species")), link, assessedPath, taxaPath);
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await conn.run(
@@ -103,20 +98,14 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
   const universeSql = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_assessed))`;
 
-  const hasTaxa = fs.existsSync(taxaPath);
-  if (hasTaxa) {
-    // The infraspecific/provisional reasons need these; without taxa.parquet
-    // they collapse into the blanket "missing_from_backbone".
-    await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
-    await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
-  } else {
-    console.log("  CoL revisions: taxa.parquet missing — infraspecific/provisional reasons unavailable.");
-  }
+  // The infraspecific/provisional reasons need these.
+  await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
+  await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
 
   const ctx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
     universeSql, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa, taxaPath,
+    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa: true, taxaPath,
   };
 
   const started = Date.now();
@@ -154,93 +143,89 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // NoMatchDetail and no col_id from the diagnostic above — the join to
   // species_link supplies its own CoL record for the flag to link to.
   let splitParents = 0;
-  if (hasTaxa) {
-    // The evidence behind every split: CoL keeps the old infraspecific name as a
-    // synonym when one is promoted, so "which accepted species does the name
-    // 'Vallonia costata var. montana' resolve to today" IS the signal. Same
-    // resolution (including the autonym hop) as SPLIT_CANDIDATES_SQL, kept here
-    // rather than added to that shared table so the committed
-    // col-split-candidates.parquet keeps its current shape.
-    await conn.run(`
-      CREATE TEMP TABLE split_evidence AS
-      SELECT b.col_id AS syn_col_id,
-             b.scientific_name AS syn_name,
-             b.authorship AS syn_authorship,
-             lower(split_part(b.scientific_name, ' ', 1) || ' ' || split_part(b.scientific_name, ' ', 2)) AS binomial,
-             CASE WHEN p.rank = 'species' THEN p.col_id
-                  WHEN p.rank IN ('subspecies', 'infraspecific name', 'variety')
-                       AND p.status IN ('accepted', 'provisionally accepted') THEN p.parent_id
-             END AS target_col_id
-      FROM read_parquet('${taxaPath}') b
-      JOIN read_parquet('${taxaPath}') p ON p.col_id = b.parent_id
-      WHERE b.status = 'synonym' AND b.rank IN ('subspecies', 'infraspecific name', 'variety')`);
+  // The evidence behind every split: CoL keeps the old infraspecific name as a
+  // synonym when one is promoted, so "which accepted species does the name
+  // 'Vallonia costata var. montana' resolve to today" IS the signal. Same
+  // resolution (including the autonym hop) as SPLIT_CANDIDATES_SQL, kept here
+  // rather than added to that shared table so the committed
+  // col-split-candidates.parquet keeps its current shape.
+  await conn.run(`
+    CREATE TEMP TABLE split_evidence AS
+    SELECT b.col_id AS syn_col_id,
+           b.scientific_name AS syn_name,
+           b.authorship AS syn_authorship,
+           lower(split_part(b.scientific_name, ' ', 1) || ' ' || split_part(b.scientific_name, ' ', 2)) AS binomial,
+           CASE WHEN p.rank = 'species' THEN p.col_id
+                WHEN p.rank IN ('subspecies', 'infraspecific name', 'variety')
+                     AND p.status IN ('accepted', 'provisionally accepted') THEN p.parent_id
+           END AS target_col_id
+    FROM read_parquet('${taxaPath}') b
+    JOIN read_parquet('${taxaPath}') p ON p.col_id = b.parent_id
+    WHERE b.status = 'synonym' AND b.rank IN ('subspecies', 'infraspecific name', 'variety')`);
 
-    const splitRows = await (await conn.run(`
-      WITH ne AS (
-        SELECT col_id, scientific_name FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-        WHERE in_base AND ${universeSql} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
-          AND col_id NOT IN (SELECT col_id FROM assessed_cids)
-      ),
-      parent_col AS (
-        SELECT l.id AS id, any_value(l.col_id) AS col_id
-        FROM read_parquet('${link}') l
-        WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
-        GROUP BY l.id
-      ),
-      -- One split-off species per row, with the oldest-sorting synonym that
-      -- points at it as the evidence. More than one can back a split (26% of
-      -- pairs); one is enough to make the inference checkable by hand. Ties on
-      -- the name (CoL holding it twice) go to the lower id, so the pick is the
-      -- same every run and its id and authorship come from one usage.
-      pairs AS (
-        SELECT sc.parent_id AS parent_id, ne.scientific_name AS ne_name, ne.col_id AS ne_col_id,
-               min_by(ev.syn_name, (ev.syn_name, ev.syn_col_id)) AS prev_name,
-               min_by(ev.syn_col_id, (ev.syn_name, ev.syn_col_id)) AS prev_col_id,
-               min_by(ev.syn_authorship, (ev.syn_name, ev.syn_col_id)) AS prev_authorship
-        FROM split_candidates sc
-        JOIN ne ON ne.col_id = sc.ne_col_id
-        LEFT JOIN split_evidence ev
-          ON ev.target_col_id = sc.ne_col_id AND ev.binomial = lower(sc.parent_name)
-        WHERE sc.rn = 1
-        GROUP BY 1, 2, 3
-      )
-      SELECT p.parent_id AS parent_id,
-             list(struct_pack(name := p.ne_name, col_id := p.ne_col_id, prev_name := p.prev_name,
-                              prev_col_id := p.prev_col_id, prev_authorship := p.prev_authorship)
-                  ORDER BY p.ne_name) AS ne_names,
-             any_value(pc.col_id) AS parent_col_id
-      FROM pairs p
-      LEFT JOIN parent_col pc ON pc.id = p.parent_id
-      GROUP BY p.parent_id ORDER BY p.parent_id`)).getRowObjects();
+  const splitRows = await (await conn.run(`
+    WITH ne AS (
+      SELECT col_id, scientific_name FROM read_parquet('${speciesGlob}', hive_partitioning=true)
+      WHERE in_base AND ${universeSql} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+        AND col_id NOT IN (SELECT col_id FROM assessed_cids)
+    ),
+    parent_col AS (
+      SELECT l.id AS id, any_value(l.col_id) AS col_id
+      FROM read_parquet('${link}') l
+      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
+      GROUP BY l.id
+    ),
+    -- One split-off species per row, with the oldest-sorting synonym that
+    -- points at it as the evidence. More than one can back a split (26% of
+    -- pairs); one is enough to make the inference checkable by hand. Ties on
+    -- the name (CoL holding it twice) go to the lower id, so the pick is the
+    -- same every run and its id and authorship come from one usage.
+    pairs AS (
+      SELECT sc.parent_id AS parent_id, ne.scientific_name AS ne_name, ne.col_id AS ne_col_id,
+             min_by(ev.syn_name, (ev.syn_name, ev.syn_col_id)) AS prev_name,
+             min_by(ev.syn_col_id, (ev.syn_name, ev.syn_col_id)) AS prev_col_id,
+             min_by(ev.syn_authorship, (ev.syn_name, ev.syn_col_id)) AS prev_authorship
+      FROM split_candidates sc
+      JOIN ne ON ne.col_id = sc.ne_col_id
+      LEFT JOIN split_evidence ev
+        ON ev.target_col_id = sc.ne_col_id AND ev.binomial = lower(sc.parent_name)
+      WHERE sc.rn = 1
+      GROUP BY 1, 2, 3
+    )
+    SELECT p.parent_id AS parent_id,
+           list(struct_pack(name := p.ne_name, col_id := p.ne_col_id, prev_name := p.prev_name,
+                            prev_col_id := p.prev_col_id, prev_authorship := p.prev_authorship)
+                ORDER BY p.ne_name) AS ne_names,
+           any_value(pc.col_id) AS parent_col_id
+    FROM pairs p
+    LEFT JOIN parent_col pc ON pc.id = p.parent_id
+    GROUP BY p.parent_id ORDER BY p.parent_id`)).getRowObjects();
 
-    const unwrap = (v: unknown): Record<string, unknown>[] => {
-      // A LIST arrives as { items: [...] } and each STRUCT as { entries: {...} }.
-      const raw = v as { items?: unknown[] } | unknown[] | null;
-      const items = (Array.isArray(raw) ? raw : raw?.items ?? []) as { entries?: Record<string, unknown> }[];
-      return items.map((it) => it?.entries ?? {});
-    };
-    // CoL writes authorship separately; the tooltip wants the name exactly as CoL
-    // prints it — full binomial included, so it reads as a name someone can search
-    // for rather than a bare epithet.
-    const full = (name: unknown, authorship: unknown) =>
-      `${String(name ?? "")}${authorship ? ` ${String(authorship)}` : ""}`.trim();
+  const unwrap = (v: unknown): Record<string, unknown>[] => {
+    // A LIST arrives as { items: [...] } and each STRUCT as { entries: {...} }.
+    const raw = v as { items?: unknown[] } | unknown[] | null;
+    const items = (Array.isArray(raw) ? raw : raw?.items ?? []) as { entries?: Record<string, unknown> }[];
+    return items.map((it) => it?.entries ?? {});
+  };
+  // CoL writes authorship separately; the tooltip wants the name exactly as CoL
+  // prints it — full binomial included, so it reads as a name someone can search
+  // for rather than a bare epithet.
+  const full = (name: unknown, authorship: unknown) =>
+    `${String(name ?? "")}${authorship ? ` ${String(authorship)}` : ""}`.trim();
 
-    for (const r of splitRows) {
-      const id = String(r.parent_id);
-      const names = unwrap(r.ne_names)
-        .map((e) => [String(e.name ?? ""), String(e.col_id ?? ""), full(e.prev_name, e.prev_authorship), String(e.prev_col_id ?? "")] as [string, string, string, string])
-        .filter(([n]) => n.length > 0);
-      if (names.length === 0) continue;
-      splitParents++;
-      const entry = species[id] ?? {};
-      entry.s = names;
-      if (entry.c == null && r.parent_col_id != null) entry.c = String(r.parent_col_id);
-      species[id] = entry;
-    }
-    counts[SPLIT_REASON] = splitParents;
-  } else {
-    console.log("  CoL revisions: taxa.parquet missing — split signal unavailable.");
+  for (const r of splitRows) {
+    const id = String(r.parent_id);
+    const names = unwrap(r.ne_names)
+      .map((e) => [String(e.name ?? ""), String(e.col_id ?? ""), full(e.prev_name, e.prev_authorship), String(e.prev_col_id ?? "")] as [string, string, string, string])
+      .filter(([n]) => n.length > 0);
+    if (names.length === 0) continue;
+    splitParents++;
+    const entry = species[id] ?? {};
+    entry.s = names;
+    if (entry.c == null && r.parent_col_id != null) entry.c = String(r.parent_col_id);
+    species[id] = entry;
   }
+  counts[SPLIT_REASON] = splitParents;
 
   // The other side of a lump: IUCN assesses several species that CoL files as
   // one. The classifier already names the single assessment that won the
@@ -328,78 +313,76 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   //  - names differing only in spelling: one name under ICZN 58 / ICN 53.3
   //    (terminations) and ICZN 32.5.2 / ICN 60 (orthography), so reporting it as
   //    a different name is simply wrong.
-  if (hasTaxa) {
-    const renameRows = (await conn.runAndReadAll(`
-      WITH linked AS (
-        SELECT a.id, a.scientific_name AS iucn, b.col_id, b.in_checklist,
-               b.checklist_parent_id,
-               coalesce(b.checklist_name, b.scientific_name) AS self_name
-        FROM read_parquet('${assessedPath}') a
-        JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.src = 'redlist'
-        JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
-        WHERE b.rank = 'species'
-      ),
-      resolved AS (
-        SELECT k.id, k.iucn,
-               CASE WHEN k.checklist_parent_id IS NOT NULL THEN p.col_id ELSE k.col_id END AS acc_id,
-               CASE WHEN k.checklist_parent_id IS NOT NULL
-                    THEN coalesce(p.checklist_name, p.scientific_name) ELSE k.self_name END AS acc_name,
-               CASE WHEN k.checklist_parent_id IS NOT NULL THEN p.in_checklist ELSE k.in_checklist END AS acc_in_checklist
-        FROM linked k
-        LEFT JOIN read_parquet('${taxaPath}') p ON p.col_id = k.checklist_parent_id
-      )
-      SELECT id, any_value(iucn) AS name, any_value(acc_name) AS acc_name, any_value(acc_id) AS acc_id
-      FROM resolved
-      WHERE acc_in_checklist AND acc_name IS NOT NULL
-      GROUP BY id
-      HAVING count(DISTINCT acc_id) = 1
-         AND lower(any_value(acc_name)) <> lower(any_value(iucn))
-      ORDER BY id`)).getRowObjects();
+const renameRows = (await conn.runAndReadAll(`
+    WITH linked AS (
+      SELECT a.id, a.scientific_name AS iucn, b.col_id, b.in_checklist,
+             b.checklist_parent_id,
+             coalesce(b.checklist_name, b.scientific_name) AS self_name
+      FROM read_parquet('${assessedPath}') a
+      JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.src = 'redlist'
+      JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
+      WHERE b.rank = 'species'
+    ),
+    resolved AS (
+      SELECT k.id, k.iucn,
+             CASE WHEN k.checklist_parent_id IS NOT NULL THEN p.col_id ELSE k.col_id END AS acc_id,
+             CASE WHEN k.checklist_parent_id IS NOT NULL
+                  THEN coalesce(p.checklist_name, p.scientific_name) ELSE k.self_name END AS acc_name,
+             CASE WHEN k.checklist_parent_id IS NOT NULL THEN p.in_checklist ELSE k.in_checklist END AS acc_in_checklist
+      FROM linked k
+      LEFT JOIN read_parquet('${taxaPath}') p ON p.col_id = k.checklist_parent_id
+    )
+    SELECT id, any_value(iucn) AS name, any_value(acc_name) AS acc_name, any_value(acc_id) AS acc_id
+    FROM resolved
+    WHERE acc_in_checklist AND acc_name IS NOT NULL
+    GROUP BY id
+    HAVING count(DISTINCT acc_id) = 1
+       AND lower(any_value(acc_name)) <> lower(any_value(iucn))
+    ORDER BY id`)).getRowObjects();
 
-    let genusDiffers = 0, renamed = 0, variantOnly = 0, alsoLumped = 0;
-    for (const r of renameRows) {
-      const iucn = String(r.name), acc = String(r.acc_name);
-      // The full orthographic rule, not just terminations. "CoL accepts a
-      // different name" has to be FALSE of a name CoL merely spells differently
-      // — Colostygia puengeleri / pungeleri is one name under ICZN 32.5.2.1, and
-      // reporting it as a different name would be exactly the error this bar was
-      // built to avoid. Using the looser rule here reports FEWER differences,
-      // which is the safe direction for a claim about someone else's data.
-      if (orthographicallySame(iucn, acc)) { variantOnly++; continue; }
-      const mine = speciesNameParts(iucn), theirs = speciesNameParts(acc);
-      // A genus transfer keeps the epithet and changes the genus — canonically,
-      // since the epithet's ending usually shifts to agree with the new genus
-      // (Anolis wattsi -> Norops wattsii). Anything else is a different name.
-      const isGenusMove = mine != null && theirs != null
-        && mine[0] !== theirs[0] && canonicalEpithet(mine[1]) === canonicalEpithet(theirs[1]);
-      const entry = species[String(r.id)] ?? {};
-      // The lump bar already says this, with more: it names the other
-      // assessments sharing the record and their categories. 2,209 of the 2,218
-      // lumped-and-renamed species resolve to exactly the lump's own accepted
-      // name, so a second bar would restate one fact and inflate the count.
-      // Dropped entirely rather than silenced, because a bar that returns a row
-      // whose tooltip never explains it is the worse failure.
-      if (entry.lw?.length && entry.ln != null && entry.ln.toLowerCase() === acc.toLowerCase()) {
-        alsoLumped++;
-        continue;
-      }
-      entry.an = acc;
-      if (r.acc_id != null) entry.ac = String(r.acc_id);
-      // Where the flag points when this is the ONLY signal (7,915 species): the
-      // record CoL accepts. Without it the flag has no link target and no
-      // provenance block, so the reader is told CoL disagrees and given no way
-      // to check who said so.
-      if (entry.c == null && r.acc_id != null) entry.c = String(r.acc_id);
-      if (isGenusMove) entry.gd = 1;
-      species[String(r.id)] = entry;
-      if (isGenusMove) genusDiffers++; else renamed++;
+  let genusDiffers = 0, renamed = 0, variantOnly = 0, alsoLumped = 0;
+  for (const r of renameRows) {
+    const iucn = String(r.name), acc = String(r.acc_name);
+    // The full orthographic rule, not just terminations. "CoL accepts a
+    // different name" has to be FALSE of a name CoL merely spells differently
+    // — Colostygia puengeleri / pungeleri is one name under ICZN 32.5.2.1, and
+    // reporting it as a different name would be exactly the error this bar was
+    // built to avoid. Using the looser rule here reports FEWER differences,
+    // which is the safe direction for a claim about someone else's data.
+    if (orthographicallySame(iucn, acc)) { variantOnly++; continue; }
+    const mine = speciesNameParts(iucn), theirs = speciesNameParts(acc);
+    // A genus transfer keeps the epithet and changes the genus — canonically,
+    // since the epithet's ending usually shifts to agree with the new genus
+    // (Anolis wattsi -> Norops wattsii). Anything else is a different name.
+    const isGenusMove = mine != null && theirs != null
+      && mine[0] !== theirs[0] && canonicalEpithet(mine[1]) === canonicalEpithet(theirs[1]);
+    const entry = species[String(r.id)] ?? {};
+    // The lump bar already says this, with more: it names the other
+    // assessments sharing the record and their categories. 2,209 of the 2,218
+    // lumped-and-renamed species resolve to exactly the lump's own accepted
+    // name, so a second bar would restate one fact and inflate the count.
+    // Dropped entirely rather than silenced, because a bar that returns a row
+    // whose tooltip never explains it is the worse failure.
+    if (entry.lw?.length && entry.ln != null && entry.ln.toLowerCase() === acc.toLowerCase()) {
+      alsoLumped++;
+      continue;
     }
-    counts[GENUS_DIFFERS_REASON] = genusDiffers;
-    counts[RENAMED_REASON] = renamed;
-    console.log(`  CoL revisions: ${genusDiffers + renamed} assessments have a different accepted name in the release ` +
-      `(${genusDiffers} differ in genus alone, ${renamed} in the epithet; ${variantOnly} excluded as one name spelled two ways, ` +
-      `${alsoLumped} as already carried by the lump bar)`);
+    entry.an = acc;
+    if (r.acc_id != null) entry.ac = String(r.acc_id);
+    // Where the flag points when this is the ONLY signal (7,915 species): the
+    // record CoL accepts. Without it the flag has no link target and no
+    // provenance block, so the reader is told CoL disagrees and given no way
+    // to check who said so.
+    if (entry.c == null && r.acc_id != null) entry.c = String(r.acc_id);
+    if (isGenusMove) entry.gd = 1;
+    species[String(r.id)] = entry;
+    if (isGenusMove) genusDiffers++; else renamed++;
   }
+  counts[GENUS_DIFFERS_REASON] = genusDiffers;
+  counts[RENAMED_REASON] = renamed;
+  console.log(`  CoL revisions: ${genusDiffers + renamed} assessments have a different accepted name in the release ` +
+    `(${genusDiffers} differ in genus alone, ${renamed} in the epithet; ${variantOnly} excluded as one name spelled two ways, ` +
+    `${alsoLumped} as already carried by the lump bar)`);
 
   const out: ColRevisionsFile = { counts, total: Object.keys(species).length, species };
   fs.writeFileSync(outPath, JSON.stringify(out));

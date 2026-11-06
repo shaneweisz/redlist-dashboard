@@ -33,3 +33,8 @@ export async function cachedDir(dir: string, fill: (dir: string) => unknown): Pr
   fs.writeFileSync(marker, new Date().toISOString() + "\n");
   return dir;
 }
+
+/** Stop if a step's input is missing: a sync always builds them, so a gap is a bug, not a reason to write zeros. */
+export function requireFiles(step: string, ...files: string[]): void {
+  for (const f of files) if (!fs.existsSync(f)) throw new Error(`${step}: ${f} is missing`);
+}

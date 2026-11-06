@@ -1,5 +1,5 @@
 /**
- * build-synonym-index (#260 search): a name-sorted index mapping CoL synonyms → their
+ * build-synonym-index: a name-sorted index mapping CoL synonyms → their
  * accepted species, so a search for an old/synonym name finds the current species.
  *
  * taxa.parquet has ~3.8M synonyms (status='synonym', parent_id → the accepted taxon).
@@ -9,10 +9,10 @@
  * new-assessments/leaf-node (NE), exactly like a direct hit.
  *
  * Sorted by synonym_name_lower so searchSpecies' prefix-range query prunes to ~1 row group
- * (fast even cold). One file, R2-only.
+ * (fast even cold).
  *
- * Input: data/taxa.parquet, data/species/, data/species_link.parquet, data/assessed.parquet.
- * Output: data/synonym-index.parquet.
+ * Input: taxa.parquet, species/, species_link.parquet, assessed.parquet.
+ * Output: search/synonym-index.parquet.
  *
  *   npx tsx scripts/sync/outputs/build-synonym-index.ts
  */
@@ -21,6 +21,7 @@ import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import { requireFiles } from "../paths";
 
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens (matches the rest of the pipeline)
 
@@ -30,9 +31,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const link = path.join(dir, syncPath("species_link.parquet"));
   const asd = path.join(dir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dir, syncPath("species"), "**", "*.parquet");
-  if (!fs.existsSync(bb) || !fs.existsSync(path.join(dir, syncPath("species")))) {
-    throw new Error(`build-synonym-index: backbone/species not found in ${dir} (run the sync first)`);
-  }
+  requireFiles("build-synonym-index", bb, link, asd, path.join(dir, syncPath("species")));
   const out = path.join(dir, syncPath("synonym-index.parquet"));
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
