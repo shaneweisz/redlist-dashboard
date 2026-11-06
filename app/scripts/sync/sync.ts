@@ -115,8 +115,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   await buildAssessments();
   done();
   done = step("occurrences");
-  await buildOccurrences();
-  manifest.gbif = JSON.parse(fs.readFileSync(path.join(CORE_DIR, "occurrences.json"), "utf-8"));
+  manifest.gbif = await buildOccurrences();
   done();
 
   done = step("match names");
