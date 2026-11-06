@@ -25,18 +25,17 @@ import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_D
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
-import { useFilterParams, isScopeLayout, type SortField, type MapViewMode } from "@/hooks/useFilterParams";
+import { useFilterParams, isScopeLayout, type SortField } from "@/hooks/useFilterParams";
 import RealmBars from "@/components/redlist/RealmBars";
 import type { RealmStatsResponse } from "@/lib/data/scoped-taxa-summary-duckdb";
 import { HABITAT_CATEGORIES } from "@/lib/habitat-classification";
-import { readViewPreference, writeViewPreference } from "@/lib/view-preference";
 import { parseHabitatEntries, matchesHabitatFilter as matchesHabitatCriteria, coarseKnownCategories, isRestrictiveSelection, ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { type RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { useSpeciesCache } from "@/contexts/SpeciesCacheContext";
 import { isOutdated, outdatedCutoffDate } from "@/lib/outdated";
 
 import CandidatesTable from "../CandidatesTable";
-import { CREDIT_ROLES, type CreditRole } from "@/lib/credit-candidates";
+import type { CreditRole } from "@/lib/credit-candidates";
 import { getLastSearchResult, clearLastSearchResult, type SearchResult } from "../SpeciesSearchBar";
 import { migratePinnedSpecies } from "@/lib/species-row-key";
 
@@ -329,12 +328,7 @@ const HABITAT_SEASON_OPTIONS: { value: string; short: string }[] = [
 
 // Importance dropdown options — same checkbox-multi-select shape as season,
 // covering all 3 possible parseHabitatEntries().importance values.
-// Allowed values for the remembered view toggles — passed to readViewPreference
-// so a stale or hand-edited localStorage value can never reach a component.
-const YEARS_CHART_MODES = ["range", "year"] as const;
-const CREDIT_CHART_MODES = ["assessors", "reviewers", "facilitators", "contributors", "institutions"] as const;
-const MAP_VIEW_MODES = ["map", "list"] as const;
-type CreditChartMode = (typeof CREDIT_CHART_MODES)[number];
+type CreditChartMode = "assessors" | "reviewers" | "facilitators" | "contributors" | "institutions";
 
 const CATEGORY_ORDER: Record<string, number> = {
   EX: 0, EW: 1, CR: 2, EN: 3, VU: 4, NT: 5, LC: 6, DD: 7, NE: 8,
@@ -1492,70 +1486,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // — halves the vertical space these together take up, at the cost of one
   // click to see the other list. Local-only UI state, not URL-synced (same as
   // e.g. habitatPage above) since it's a view toggle, not a filter.
+  // Every visitor opens on the same default; nothing is remembered between
+  // visits, so everyone sees a consistent view.
   const [assessorReviewerMode, setAssessorReviewerMode] = useState<CreditChartMode>("assessors");
-  // Restore the remembered Assessors/Reviewers/Facilitators tab after mount
-  // (see the years toggle above for why it is an effect and not an initializer).
-  // The tab is display-only — it changes which names are charted, never which
-  // species the table shows — so there is no shared-link ambiguity to guard.
-  useEffect(() => {
-    const stored = readViewPreference("creditChartMode", CREDIT_CHART_MODES);
-    if (stored) setAssessorReviewerMode(stored);
-  }, []);
-  const changeCreditChartMode = useCallback((mode: CreditChartMode) => {
-    setAssessorReviewerMode(mode);
-    writeViewPreference("creditChartMode", mode);
-  }, []);
 
-  // Which credit line the Suggested Experts tab ranks. Remembered like the chart
-  // toggle above (someone at BirdLife wants Facilitators every session), but under
-  // its own key: the two are different surfaces and picking one shouldn't move the
-  // other. A legacy ?tab=assessors/reviewers link names a role explicitly, and an
-  // explicit choice in the URL beats the remembered one — so it wins the race with
-  // the restore effect by seeding the initial state.
-  const roleFromUrlRef = useRef(false);
-  const storedRoleAppliedRef = useRef(false);
+  // Which credit line the Suggested Experts tab ranks. A legacy
+  // ?tab=assessors/reviewers link names a role explicitly. It arrives LATE:
+  // useFilterParams hydrates from window.location in its own mount effect, so
+  // urlTab is still null on the first pass — hence an effect on urlTab rather
+  // than an initializer. Opening the tab then rewrites ?tab= to "candidates",
+  // which yields no legacy role and so leaves the chosen role alone.
   const [candidateRole, setCandidateRole] = useState<CreditRole>("assessors");
   useEffect(() => {
-    // A legacy ?tab=assessors/reviewers link names a role explicitly, and an
-    // explicit choice in the URL beats the remembered one. It arrives LATE:
-    // useFilterParams hydrates from window.location in its own mount effect, so
-    // urlTab is still null on the first pass through here — which is why this
-    // latches when the role turns up rather than reading it once at mount.
-    // Opening the tab then rewrites ?tab= to "candidates", and that must not undo
-    // it either: without the latch, a ?tab=reviewers link opened on Facilitators
-    // for anyone whose remembered choice was Facilitators.
     const legacy = roleFromLegacyTab(urlTab);
-    if (legacy) {
-      roleFromUrlRef.current = true;
-      setCandidateRole(legacy);
-      return;
-    }
-    if (roleFromUrlRef.current || storedRoleAppliedRef.current) return;
-    storedRoleAppliedRef.current = true;
-    const stored = readViewPreference("candidateRole", CREDIT_ROLES);
-    if (stored) setCandidateRole(stored);
+    if (legacy) setCandidateRole(legacy);
   }, [urlTab]);
-  const changeCandidateRole = useCallback((role: CreditRole) => {
-    setCandidateRole(role);
-    writeViewPreference("candidateRole", role);
-  }, []);
-
-  // Map/List is URL state (mapview=), so the stored preference applies only
-  // when the URL is silent about it — a link that says "list" stays a list for
-  // whoever opens it, regardless of what they last chose here.
-  const mapPrefRestored = useRef(false);
-  useEffect(() => {
-    if (mapPrefRestored.current) return;
-    mapPrefRestored.current = true;
-    if (new URLSearchParams(window.location.search).has("mapview")) return;
-    const stored = readViewPreference("countryViewMode", MAP_VIEW_MODES);
-    if (stored && stored !== mapViewMode) setMapViewMode(stored);
-  }, [mapViewMode, setMapViewMode]);
-
-  const changeMapViewMode = useCallback((mode: MapViewMode) => {
-    setMapViewMode(mode);
-    writeViewPreference("countryViewMode", mode);
-  }, [setMapViewMode]);
 
   // Breadth/Importance/Season/Suitability dropdown menus in the Habitat card header
   // (replacing a wall of individual toggle buttons — Breadth is a single-select
@@ -1918,26 +1863,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
   }, [selectedAssessmentYears, exactFilters.minAssessmentYear, exactFilters.maxAssessmentYear]);
 
-  // Restore the remembered Range/Year choice — after mount, not in the state
-  // initializer, so server and first client render agree. Skipped when the URL
-  // already implies a view (specific years, or an explicit year range), which
-  // must win so a shared link renders the same for whoever opens it.
-  const yearsPrefRestored = useRef(false);
-  useEffect(() => {
-    if (yearsPrefRestored.current) return;
-    yearsPrefRestored.current = true;
-    if (selectedAssessmentYears.size > 0) return;
-    if (exactFilters.minAssessmentYear != null || exactFilters.maxAssessmentYear != null) return;
-    const stored = readViewPreference("yearsChartMode", YEARS_CHART_MODES);
-    if (stored) setYearsChartMode(stored);
-  }, [selectedAssessmentYears, exactFilters.minAssessmentYear, exactFilters.maxAssessmentYear]);
-
-  // One place that both moves the toggle and remembers it, so the two can't
-  // drift apart (every caller goes through this rather than setYearsChartMode).
-  const changeYearsChartMode = useCallback((mode: "range" | "year") => {
-    setYearsChartMode(mode);
-    writeViewPreference("yearsChartMode", mode);
-  }, []);
   // Paginate the by-year chart: show 10 years at a time, defaulting to the most recent
   const YEARS_PAGE_SIZE = 10;
   const [yearsPage, setYearsPage] = useState(0);
@@ -3776,7 +3701,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       showGbifToggle={false}
       onRegionsChange={handleRegionsChange}
       mapViewMode={mapViewMode}
-      onMapViewModeChange={changeMapViewMode}
+      onMapViewModeChange={setMapViewMode}
       mapSortKey={mapSortKey}
       mapSortDirection={mapSortDirection}
       onMapSortChange={setMapSort}
@@ -3863,7 +3788,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           onEndemicsToggle={isNewAssessments ? undefined : () => setEndemicsOnly(!endemicsOnly)}
           showGbifToggle={showGbifToggle}
           mapViewMode={mapViewMode}
-          onMapViewModeChange={changeMapViewMode}
+          onMapViewModeChange={setMapViewMode}
           mapSortKey={mapSortKey}
           mapSortDirection={mapSortDirection}
           onMapSortChange={setMapSort}
@@ -4947,7 +4872,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <div className="relative">
                       <select
                         value={yearsChartMode}
-                        onChange={(e) => changeYearsChartMode(e.target.value as "range" | "year")}
+                        onChange={(e) => setYearsChartMode(e.target.value as "range" | "year")}
                         aria-label="Year chart view"
                         className="appearance-none text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 rounded-md pl-1 pr-3 py-0.5 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
                       >
@@ -5200,7 +5125,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <ReviewerChart
                       data={creditChartData}
                       viewMode={assessorReviewerMode}
-                      onViewModeChange={changeCreditChartMode}
+                      onViewModeChange={setAssessorReviewerMode}
                       selectedItems={creditSelection[assessorReviewerMode].selected}
                       onBarClick={makeAssessorClick(creditSelection[assessorReviewerMode].setter)}
                       onRangeSelect={makeRangeSelect(creditSelection[assessorReviewerMode].setter)}
@@ -6565,7 +6490,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {s.category === "NE" && (visitedTabs.has("candidates")) && (
                             <div style={{ display: activeDetailTab === "candidates" ? undefined : "none" }}>
-                              <CandidatesTable role={candidateRole} onRoleChange={changeCandidateRole} species={candidateSpecies} />
+                              <CandidatesTable role={candidateRole} onRoleChange={setCandidateRole} species={candidateSpecies} />
                             </div>
                           )}
                           </div>

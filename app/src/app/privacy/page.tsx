@@ -60,9 +60,7 @@ export default function PrivacyPage() {
           <strong>What stays in your browser.</strong> Some of what you do here
           is remembered on your own device using your browser&rsquo;s local
           storage: species you pin, columns you show or hide in the occurrence
-          table, any georeferencing you do, and which view a few charts open in
-          (Range vs Year, Assessors vs Reviewers vs Facilitators, Map vs List).
-          This never leaves your browser &mdash; it is not sent to us, not
+          table, and any georeferencing you do. This never leaves your browser &mdash; it is not sent to us, not
           shared with anyone, and identifies nobody. It exists only because you
           chose those settings, so it does not require a consent banner. Clearing
           your browser data for this site removes all of it.
