@@ -13,5 +13,7 @@ import * as path from "path";
 
 export const CACHE_ROOT = path.join(os.homedir(), ".cache", "redlist-dashboard");
 export const BUILD_DIR = process.env.PIPELINE_BUILD_DIR ?? path.join(CACHE_ROOT, "build");
+/** Where the sync's DuckDB instances spill to disk (left to itself, DuckDB uses ./.tmp in the repo). */
+export const DUCKDB_TMP = path.join(CACHE_ROOT, "duckdb-tmp");
 export const CORE_DIR = path.join(BUILD_DIR, "core");
 export const OUT_DIR = path.join(BUILD_DIR, "data");

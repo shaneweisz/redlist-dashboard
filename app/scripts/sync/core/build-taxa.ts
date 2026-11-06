@@ -41,7 +41,7 @@ import { loadEnvFiles } from "../../lib/utils";
 import { buildVernaculars } from "../outputs/build-vernaculars";
 import { ensureColInputs, type ColInputs } from "../inputs/col";
 import { TAXON_GROUP_CASE, NE_EXCLUDED } from "./taxon-groups";
-import { CORE_DIR, OUT_DIR } from "../paths";
+import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
 
 const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','natio','aberration','infraspecific name','infrasubspecific name')";
 /**
@@ -207,7 +207,7 @@ async function report(conn: DuckDBConnection, out: string): Promise<void> {
 
 export async function run(opts: { out?: string; inputs?: ColInputs } = {}): Promise<string> {
   const inputs = opts.inputs ?? (await ensureColInputs());
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "48GB" })).connect();
+  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "48GB", temp_directory: DUCKDB_TMP })).connect();
   const out = await buildTaxa(conn, inputs, opts.out ?? CORE_DIR, opts.out ?? OUT_DIR);
   await report(conn, out);
   return out;

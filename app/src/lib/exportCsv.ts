@@ -11,8 +11,13 @@ const CSV_COLUMNS: { header: string; getValue: (s: RedListSpecies) => string }[]
   { header: "Year Published", getValue: (s) => s.year_published ?? "" },
   { header: "Population Trend", getValue: (s) => s.population_trend ?? "" },
   { header: "Countries", getValue: (s) => s.countries.join("; ") },
-  { header: "GBIF Occurrence Count", getValue: (s) => s.gbif_occurrence_count?.toString() ?? "" },
-  { header: "GBIF Observations After Assessment Year", getValue: (s) => s.gbif_observations_after_assessment_year?.toString() ?? "" },
+  // Both record modes, whichever the view shows: georeferenced (coordinates, no
+  // geospatial issue) and all. Since-assessment counts start the day after the
+  // assessment date.
+  { header: "GBIF Georeferenced Records", getValue: (s) => s.gbif_georeferenced_records_count?.toString() ?? "" },
+  { header: "GBIF Georeferenced Records Since Assessment", getValue: (s) => s.gbif_georeferenced_records_since_assessment?.toString() ?? "" },
+  { header: "GBIF All Records", getValue: (s) => s.gbif_all_records_count?.toString() ?? "" },
+  { header: "GBIF All Records Since Assessment", getValue: (s) => s.gbif_all_records_since_assessment?.toString() ?? "" },
   { header: "SIS Taxon ID", getValue: (s) => s.sis_taxon_id?.toString() ?? "" },
   { header: "Assessment ID", getValue: (s) => s.assessment_id?.toString() ?? "" },
   { header: "GBIF Species Key", getValue: (s) => s.gbif_species_key?.toString() ?? "" },

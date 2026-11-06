@@ -163,8 +163,8 @@ describe("toSpeciesRow", () => {
       order_name: "primates",
       taxon_group: "mammals",
       gbif_species_key: BigInt(2436503),
-      gbif_occurrence_count: BigInt(1273),
-      gbif_observations_after_assessment_year: BigInt(42),
+      gbif_georeferenced_records_count: BigInt(1273),
+      gbif_georeferenced_records_since_assessment: BigInt(42),
       systems: "Terrestrial",
       growth_forms: "",
       movement_pattern: null,
@@ -182,8 +182,8 @@ describe("toSpeciesRow", () => {
     expect(row.systems).toEqual(["Terrestrial"]);
     expect(row.growth_forms).toEqual([]);
     expect(row.threat_codes).toEqual(["1.1", "2.2.1"]);
-    expect(row.gbif_occurrence_count).toBe(1273);
-    expect(row.gbif_observations_after_assessment_year).toBe(42);
+    expect(row.gbif_georeferenced_records_count).toBe(1273);
+    expect(row.gbif_georeferenced_records_since_assessment).toBe(42);
     expect(row.taxon_id).toBe("mammals"); // mapTaxonId fallthrough (display root)
     // latest assessors/reviewers are inline; full history is lazy (empty here).
     expect(row.latest_assessors).toBe("X, Y.");
@@ -207,11 +207,11 @@ describe("toSpeciesRow", () => {
       order_name: "coleoptera",
       taxon_group: "beetles",
       gbif_species_key: BigInt(99),
-      gbif_occurrence_count: BigInt(5),
+      gbif_georeferenced_records_count: BigInt(5),
     });
     expect(row.previous_assessments).toEqual([]);
     expect(row.taxon_id).toBe("invertebrates"); // mapTaxonId("beetles")
-    expect(row.gbif_observations_after_assessment_year).toBeNull();
+    expect(row.gbif_georeferenced_records_since_assessment).toBeNull();
   });
 });
 

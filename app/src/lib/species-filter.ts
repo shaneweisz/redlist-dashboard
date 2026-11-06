@@ -21,6 +21,7 @@
  * and the "starred" filter are intentionally NOT included here — they depend on
  * the current date, GBIF counts, or local UI state and stay inline in RedListView.
  */
+import { DEFAULT_GBIF_RECORD_MODE, gbifRecordCount, type GbifRecordMode } from "@/lib/gbif-records";
 import { matchSharedFilters } from "@/lib/shared-filters";
 
 /** Minimal structural shape this predicate needs. Both `SpeciesRow`
@@ -35,7 +36,8 @@ export interface FilterableSpecies {
   growth_forms?: string[] | null;
   scientific_name: string;
   common_name: string | null;
-  gbif_occurrence_count?: number | null;
+  gbif_georeferenced_records_count?: number | null;
+  gbif_all_records_count?: number | null;
   assessment_date?: string | null;
 }
 
@@ -51,9 +53,11 @@ export interface SpeciesFilterCriteria {
   endemicsOnly?: boolean;
   /** Already lowercased by the caller. */
   search?: string;
-  /** GBIF occurrence count bounds (null obs counts as 0). */
+  /** GBIF record-count bounds (null counts as 0), in the `records` mode. */
   minObs?: number;
   maxObs?: number;
+  /** Which GBIF records the bounds count; georeferenced by default. */
+  records?: GbifRecordMode;
   /** Assessment year bounds (inclusive). */
   minAssessmentYear?: number;
   maxAssessmentYear?: number;
@@ -74,7 +78,7 @@ export function matchesSpeciesFilter(s: FilterableSpecies, f: SpeciesFilterCrite
     s.scientific_name.toLowerCase().includes(q) ||
     (s.common_name?.toLowerCase().includes(q) ?? false);
 
-  const obs = s.gbif_occurrence_count ?? 0;
+  const obs = gbifRecordCount(s, f.records ?? DEFAULT_GBIF_RECORD_MODE) ?? 0;
   const matchesMinObs = f.minObs == null || obs >= f.minObs;
   const matchesMaxObs = f.maxObs == null || obs <= f.maxObs;
 

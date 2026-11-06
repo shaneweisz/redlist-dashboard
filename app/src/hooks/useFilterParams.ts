@@ -8,6 +8,7 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
+import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
 // checked" (nothing excluded) rather than "nothing checked" — see
@@ -107,7 +108,7 @@ const paramKey = (name: string, suffix: string): string => (suffix ? `${name}${s
 // sync" test).
 export const OWN_PARAM_NAMES = [
   "view", "layout", "origin", "countries", "region", "taxa", "subgroups",
-  "categories", "years", "assessmentYears", "describedYears", "obsRanges", "assessmentCounts",
+  "categories", "years", "assessmentYears", "describedYears", "assessmentCounts",
   "systems", "trends", "movement", "threats", "threatsScope", "criteria", "habitat", "habitatBreadth",
   "habitatImportance", "habitatSeasons", "habitatSuitability", "bd", "endemics", "growthForms",
   "colMatch", "colReasons",
@@ -115,6 +116,8 @@ export const OWN_PARAM_NAMES = [
   "search", "outdated", "minObs", "maxObs",
   "minAssessmentYear", "maxAssessmentYear", "minDescribedYear", "maxDescribedYear",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
+  GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
+  ...Object.values(GBIF_RANGE_PARAM),
 ];
 
 /**
@@ -268,9 +271,12 @@ export function parseParams(search: string, suffix: string = "") {
       ? new Set(p.get(k("describedYears"))!.split(",").filter(Boolean))
       : new Set<string>(),
     countries: countryCodes,
-    obsRanges: p.get(k("obsRanges"))
-      ? new Set(p.get(k("obsRanges"))!.split(",").filter(Boolean))
-      : new Set<string>(),
+    // The GBIF Records chart's six selections (Total / New / % New, each all
+    // records or georeferenced), one URL parameter each; see gbif-records.ts.
+    gbifRanges: Object.fromEntries(GBIF_RANGE_KEYS.map((key) => {
+      const v = p.get(k(GBIF_RANGE_PARAM[key]));
+      return [key, v ? new Set(v.split(",").filter(Boolean)) : new Set<string>()];
+    })) as GbifRanges,
     assessmentCounts: p.get(k("assessmentCounts"))
       ? new Set(p.get(k("assessmentCounts"))!.split(",").filter(Boolean))
       : new Set<string>(),
@@ -371,6 +377,11 @@ export function parseParams(search: string, suffix: string = "") {
     sortField2: parseSortField(p.get(k("sort2"))),
     sortDirection2: (p.get(k("dir2")) === "asc" ? "asc" : "desc") as "asc" | "desc",
     mapViewMode: (p.get(k("mapview")) === "list" ? "list" : "map") as MapViewMode,
+    // Which GBIF records every count counts (georeferenced, the default, or all).
+    // A measure rather than a filter, so clearing filters leaves it alone.
+    gbifRecordMode: parseGbifRecordMode(p.get(k(GBIF_RECORDS_PARAM))),
+    // Which of the six the GBIF Records chart shows (a display choice, like mapview).
+    gbifChartKey: parseGbifChartKey(p.get(k(GBIF_CHART_PARAM))),
     mapSortKey: (
       p.get(k("mapsort")) === "name" ? "name" :
       p.get(k("mapsort")) === "outdated" ? "outdated" :
@@ -422,7 +433,7 @@ export function buildQs(state: {
   assessmentYears: Set<string>;
   describedYears: Set<string>;
   countries: Set<string>;
-  obsRanges: Set<string>;
+  gbifRanges: GbifRanges;
   assessmentCounts: Set<string>;
   systems: Set<string>;
   populationTrends: Set<string>;
@@ -461,6 +472,8 @@ export function buildQs(state: {
   sortField2: SortField | null;
   sortDirection2: "asc" | "desc";
   mapViewMode?: MapViewMode;
+  gbifRecordMode?: GbifRecordMode;
+  gbifChartKey?: GbifRangeKey;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
   species: string | null;
@@ -480,7 +493,9 @@ export function buildQs(state: {
   if (state.assessmentYears.size > 0) p.set(k("assessmentYears"), [...state.assessmentYears].join(","));
   if (state.describedYears.size > 0) p.set(k("describedYears"), [...state.describedYears].join(","));
   if (state.countries.size > 0) p.set(k("countries"), [...state.countries].join(","));
-  if (state.obsRanges.size > 0) p.set(k("obsRanges"), [...state.obsRanges].join(","));
+  for (const key of GBIF_RANGE_KEYS) {
+    if (state.gbifRanges[key].size > 0) p.set(k(GBIF_RANGE_PARAM[key]), [...state.gbifRanges[key]].join(","));
+  }
   if (state.assessmentCounts.size > 0) p.set(k("assessmentCounts"), [...state.assessmentCounts].join(","));
   if (state.systems.size > 0) p.set(k("systems"), [...state.systems].join(","));
   if (state.populationTrends.size > 0) p.set(k("trends"), [...state.populationTrends].join(","));
@@ -533,6 +548,8 @@ export function buildQs(state: {
     if (state.sortDirection2 !== "desc") p.set(k("dir2"), state.sortDirection2);
   }
   if (state.mapViewMode === "list") p.set(k("mapview"), "list");
+  if (state.gbifRecordMode && state.gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE) p.set(k(GBIF_RECORDS_PARAM), state.gbifRecordMode);
+  if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(k(GBIF_CHART_PARAM), state.gbifChartKey);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set(k("mapsort"), state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set(k("mapdir"), "asc");
   const qs = prettifyQs(p.toString());
@@ -705,11 +722,11 @@ export function useFilterParams(paramSuffix: string = "") {
     [syncUrl]
   );
 
-  const setSelectedObsRanges = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+  const setGbifRanges = useCallback(
+    (key: GbifRangeKey, updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       setState(prev => {
-        const nextObsRanges = typeof updater === "function" ? updater(prev.obsRanges) : updater;
-        const next = { ...prev, obsRanges: nextObsRanges };
+        const nextSel = typeof updater === "function" ? updater(prev.gbifRanges[key]) : updater;
+        const next = { ...prev, gbifRanges: { ...prev.gbifRanges, [key]: nextSel } };
         queueMicrotask(() => syncUrl(next, false));
         return next;
       });
@@ -1206,6 +1223,28 @@ export function useFilterParams(paramSuffix: string = "") {
     [syncUrl]
   );
 
+  const setGbifChartKey = useCallback(
+    (key: GbifRangeKey) => {
+      setState(prev => {
+        const next = { ...prev, gbifChartKey: key };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
+  const setGbifRecordMode = useCallback(
+    (mode: GbifRecordMode) => {
+      setState(prev => {
+        const next = { ...prev, gbifRecordMode: mode };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setMapSort = useCallback(
     (key: MapSortKey, direction: "asc" | "desc") => {
       setState(prev => {
@@ -1250,7 +1289,7 @@ export function useFilterParams(paramSuffix: string = "") {
         assessmentYears: new Set<string>(),
         describedYears: new Set<string>(),
         countries: new Set<string>(),
-        obsRanges: new Set<string>(),
+        gbifRanges: emptyGbifRanges(),
         assessmentCounts: new Set<string>(),
         systems: new Set<string>(),
         populationTrends: new Set<string>(),
@@ -1298,7 +1337,7 @@ export function useFilterParams(paramSuffix: string = "") {
         assessmentYears: new Set<string>(),
         describedYears: new Set<string>(),
         countries: new Set<string>(),
-        obsRanges: new Set<string>(),
+        gbifRanges: emptyGbifRanges(),
         assessmentCounts: new Set<string>(),
         systems: new Set<string>(),
         populationTrends: new Set<string>(),
@@ -1346,7 +1385,8 @@ export function useFilterParams(paramSuffix: string = "") {
     selectedAssessmentYears: state.assessmentYears,
     selectedDescribedYears: state.describedYears,
     selectedCountries: state.countries,
-    selectedObsRanges: state.obsRanges,
+    gbifRanges: state.gbifRanges,
+    gbifChartKey: state.gbifChartKey ?? DEFAULT_GBIF_CHART_KEY,
     selectedAssessmentCounts: state.assessmentCounts,
     selectedSystems: state.systems,
     selectedPopulationTrends: state.populationTrends,
@@ -1377,6 +1417,7 @@ export function useFilterParams(paramSuffix: string = "") {
     sortField2: state.sortField2,
     sortDirection2: state.sortDirection2,
     mapViewMode: state.mapViewMode,
+    gbifRecordMode: state.gbifRecordMode,
     mapSortKey: state.mapSortKey,
     mapSortDirection: state.mapSortDirection,
 
@@ -1396,7 +1437,8 @@ export function useFilterParams(paramSuffix: string = "") {
     setSelectedAssessmentYears,
     setSelectedDescribedYears,
     setSelectedCountries,
-    setSelectedObsRanges,
+    setGbifRanges,
+    setGbifChartKey,
     setSelectedAssessmentCounts,
     setSelectedSystems,
     setSelectedPopulationTrends,
@@ -1421,6 +1463,7 @@ export function useFilterParams(paramSuffix: string = "") {
     setSort,
     setSort2,
     setMapViewMode,
+    setGbifRecordMode,
     setMapSort,
     fromPopstateRef,
     clearAllFilters,

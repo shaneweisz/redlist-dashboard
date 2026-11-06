@@ -54,6 +54,53 @@ export function detectLayout(dir: string): Layout {
 
 const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
+/**
+ * GBIF fields renamed on 2026-11-06, so a sync from before compares with one
+ * from after: the old name maps to the new. The since-assessment window also
+ * moved from the year after the assessment to the day after it, which the
+ * reasons explain.
+ */
+const LEGACY_FIELDS: Record<string, string> = {
+  gbif_occurrence_count: "gbif_georeferenced_records_count",
+  gbif_observations_after_assessment_year: "gbif_georeferenced_records_since_assessment",
+};
+
+async function renameLegacyColumns(conn: DuckDBConnection, table: string): Promise<void> {
+  const [schema, name] = table.split(".");
+  const cols = new Set((await conn.runAndReadAll(`SELECT column_name FROM information_schema.columns
+    WHERE table_schema = ${q(schema)} AND table_name = ${q(name)}`)).getRowObjects().map((r) => String(r.column_name)));
+  for (const [old, now] of Object.entries(LEGACY_FIELDS)) {
+    if (cols.has(old) && !cols.has(now)) await conn.run(`ALTER TABLE ${table} RENAME COLUMN ${old} TO ${now}`);
+  }
+}
+
+/** A group's GBIF totals as flat fields, from either the per-mode object or the old flat names. */
+function gbifGroupFields(g: Record<string, unknown>): Record<string, unknown> {
+  const { gbif, gbif_species_count, gbif_ne_species_count, total_gbif_observations, median_gbif_obs, mean_gbif_obs: _mean, ...rest } = g;
+  const out: Record<string, unknown> = { ...rest };
+  if (gbif && typeof gbif === "object") {
+    for (const [mode, t] of Object.entries(gbif as Record<string, Record<string, unknown>>)) {
+      for (const [k, v] of Object.entries(t)) out[`gbif_${mode}_${k}`] = v;
+    }
+  } else if (gbif_species_count !== undefined) {
+    Object.assign(out, {
+      gbif_georeferenced_species_count: gbif_species_count, gbif_georeferenced_ne_species_count: gbif_ne_species_count,
+      gbif_georeferenced_records: total_gbif_observations, gbif_georeferenced_median: median_gbif_obs,
+    });
+  }
+  return out;
+}
+
+/** A node's NE-with-records counts as flat fields, from either shape. */
+function gbifNodeFields(n: Record<string, unknown>): Record<string, unknown> {
+  const { gbifNeSpecies, gbifNeSpeciesCount, ...rest } = n;
+  if (gbifNeSpecies && typeof gbifNeSpecies === "object") {
+    const t = gbifNeSpecies as Record<string, number>;
+    return { ...rest, gbif_ne_species_georeferenced: t.georeferenced, gbif_ne_species_all: t.all };
+  }
+  return gbifNeSpeciesCount === undefined ? rest : { ...rest, gbif_ne_species_georeferenced: gbifNeSpeciesCount };
+}
+
 function flattenCategories(by: Record<string, number> | undefined, prefix = "cat_"): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of CATEGORIES) out[prefix + c.replace("/", "_")] = 0;
@@ -89,8 +136,8 @@ async function loadSummaryFacts(conn: DuckDBConnection, schema: string, dir: str
   type GroupRow = Record<string, unknown> & { table1a_taxon_group: string; by_category?: Record<string, number> };
   const groups = readJson<GroupRow[]>(dir, "taxa-summary.json") ?? [];
   await loadRows(conn, `${schema}.groups`, groups.map((g) => {
-    const { table1a_taxon_group, by_category, mean_gbif_obs: _unusedMean, ...rest } = g;
-    return { key: table1a_taxon_group, ...rest, ...flattenCategories(by_category) };
+    const { table1a_taxon_group, by_category, ...rest } = g;
+    return { key: table1a_taxon_group, ...gbifGroupFields(rest), ...flattenCategories(by_category) };
   }));
 
   type Node = { id: string; byCategory?: Record<string, number>; colBreakdown?: unknown[] } & Record<string, unknown>;
@@ -103,7 +150,7 @@ async function loadSummaryFacts(conn: DuckDBConnection, schema: string, dir: str
         nodes.push({
           key: `${parent}/${id}`,
           name,
-          ...rest,
+          ...gbifNodeFields(rest),
           ...flattenCategories(byCategory),
           // The breakdown is a nested list; compare it as one canonical string.
           col_breakdown: colBreakdown === undefined ? null : JSON.stringify(colBreakdown),
@@ -166,6 +213,8 @@ async function loadV1(conn: DuckDBConnection, schema: string, dir: string): Prom
       AND u.col_id NOT IN (SELECT col_id FROM assessed_cols)
       AND u.col_id <> '6MB3T'
       AND coalesce(lower(u.scientific_name), '') NOT IN (${domestic})`);
+  await renameLegacyColumns(conn, `${schema}.assessed`);
+  await renameLegacyColumns(conn, `${schema}.ne`);
 
   await loadSummaryFacts(conn, schema, dir);
 }
@@ -181,8 +230,15 @@ async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Prom
     FROM read_parquet(${f("assessed.parquet")}) a
     LEFT JOIN (SELECT sis_taxon_id, col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
       ON l.sis_taxon_id = a.id`);
+  await renameLegacyColumns(conn, `${schema}.assessed`);
   // The NE list as the app builds it: the CoL universe minus assessed col_ids,
   // fossils (unless IUCN says EX/EW) and excluded names, with ne.parquet's overlay.
+  const neCols = new Set((await conn.runAndReadAll(`SELECT name FROM parquet_schema(${f("ne.parquet")})`))
+    .getRowObjects().map((r) => String(r.name)));
+  const neGbif = [
+    neCols.has("gbif_georeferenced_records_count") ? "g.gbif_georeferenced_records_count" : "g.gbif_occurrence_count AS gbif_georeferenced_records_count",
+    ...["gbif_all_records_count", "gbif_all_records_countries"].filter((c) => neCols.has(c)).map((c) => `g.${c}`),
+  ].join(", ");
   await conn.run(`CREATE TABLE ${schema}.ne AS
     WITH assessed_cols AS (
       SELECT DISTINCT col_id FROM read_parquet(${f("species_link.parquet")}) WHERE src = 'redlist' AND col_id IS NOT NULL),
@@ -191,7 +247,7 @@ async function loadV2(conn: DuckDBConnection, schema: string, dir: string): Prom
       JOIN read_parquet(${f("assessed.parquet")}) a ON a.id = l.id
       WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW'))
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
-           u.described_year, g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
+           u.described_year, g.gbif_species_key, ${neGbif}, g.countries, g.common_name
     FROM read_parquet(${q(path.join(inSync(dir, "species"), "**", "*.parquet"))}, hive_partitioning=true) u
     JOIN read_parquet(${f("taxa.parquet")}) t ON t.col_id = u.col_id
     LEFT JOIN read_parquet(${f("ne.parquet")}) g ON g.col_id = u.col_id

@@ -70,6 +70,7 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 | `taxa` | CoL usage (8.0M) | `build-taxa.ts` |
 | `assessments` | global assessment of a current species (all years) | `build-assessments.ts` |
 | `occurrence_counts` | usage × year × georeferenced × record type, with a count | `build-occurrences.ts` |
+| `occurrence_dates` | usage × year × month × day × georeferenced × record type, for records dated at least to the month | `build-occurrences.ts` |
 | `assessment_link` | assessed species × CoL species it is (primary, plus covered rows) | `build-link.ts`, from the matcher's answers (`matches`, `build-matches.ts`) and `decisions.tsv` |
 
 **`taxa`** is the XR with three things worked out per usage:
@@ -82,15 +83,28 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 
 **`occurrence_counts`** is the whole snapshot (3.9 billion records) reduced to 4.1M usages' counts by year, by whether the record is georeferenced, and by basis of record. *Georeferenced* means what GBIF's API means by `hasCoordinate=true&hasGeospatialIssue=false`; the snapshot has no `hasGeospatialIssue` column, so it is recomputed from each record's issues using GBIF's own set (`GBIF_GEOSPATIAL_ISSUES` in `app/src/lib/gbif.ts`, checked per code against the live API). A companion table holds the same by country.
 
+**`occurrence_dates`** is the same with the record's month and, where it has one, its day (records dated at least to the month, 90% of them dated to the day). It exists for one number: records since an assessment start the day after the assessment date, so the assessment's own year has to be split at that date. Later years come from `occurrence_counts`, whatever their precision. In the assessment's own year a record counts if it is dated to a later day, or only to a later month; one dated only to that year, or only to the assessment's own month, can't be placed either side and is left out.
+
 **`assessment_link`** is the subject of [Matching](#matching-which-col-species-an-assessed-species-is).
 
 ## The counting rule
 
-`counts.ts`, 62 lines. Every GBIF number on the dashboard is this rule with a different filter (georeferenced or all records, since the assessment year, by country, by group).
+`counts.ts`. Every GBIF number on the dashboard is this rule with a different filter: georeferenced or all records, since the assessment date, by country, by group.
 
-> A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**, keeping only the record types its kingdom counts.
+**Two record modes.** Every count is published twice, and the dashboard's Georeferenced / All records toggle (`records=all` in the URL, `src/lib/gbif-records.ts`) picks one for every number on the page at once:
 
-**Record types.** Animals count observations of living organisms (human, machine, material samples and the like), not preserved specimens: a museum skin says the species was there once, not that it is now. Plants, fungi and algae also count preserved specimens, because a herbarium sheet is often the only georeferenced record a species has. The kingdom is the *species'*, not the usage's: some plant synonyms in CoL carry no kingdom, and would otherwise lose their herbarium records.
+| | Georeferenced | All records (default) |
+|---|---|---|
+| Counts | records with coordinates and no geospatial issue | every record, with or without coordinates |
+| Species columns | `gbif_georeferenced_records_count`, `gbif_georeferenced_records_since_assessment` | `gbif_all_records_count`, `gbif_all_records_since_assessment` |
+| NE countries | `countries` | `gbif_all_records_countries` |
+| Group totals (`taxa-summary.json`) | `gbif.georeferenced` | `gbif.all` |
+
+A species with no records in a mode reads 0 there. The since-assessment count is NULL only when there is no window: an undated assessment, or one dated after the sync.
+
+> A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**.
+
+**Record types.** Both modes count every record type, the same for every kingdom: *all records* is every record (the number gbif.org shows), *georeferenced* is the ones with coordinates and no geospatial issue. Until 2026-11-06 the rule was per kingdom and left out zoo and garden, fossil and literature records, and for animals museum specimens too, so 16,801 assessed animals showed no records at all. The occurrence map applies its own record-type defaults.
 
 **Ownership** is what "minus" means. Most assessed species simply own their CoL species and everything under it. The exceptions come from IUCN and CoL drawing species boundaries differently:
 

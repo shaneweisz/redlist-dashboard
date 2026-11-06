@@ -65,11 +65,12 @@ describe("gbifOccurrenceParams", () => {
     expect(GBIF_CHECKLIST_KEY).toBe(COL_XR_CHECKLIST_KEY);
   });
 
-  it("counts preserved specimens only when asked to", () => {
-    expect(gbifOccurrenceParams().getAll("basisOfRecord")).not.toContain("PRESERVED_SPECIMEN");
-    expect(
-      gbifOccurrenceParams({}, { includePreservedSpecimens: true }).getAll("basisOfRecord"),
-    ).toContain("PRESERVED_SPECIMEN");
+  it("asks for coordinates only when georeferenced, and never filters record types", () => {
+    const geo = gbifOccurrenceParams({}, { mode: "georeferenced" });
+    expect(geo.get("hasCoordinate")).toBe("true");
+    expect(geo.get("hasGeospatialIssue")).toBe("false");
+    expect(geo.has("basisOfRecord")).toBe(false);
+    expect([...gbifOccurrenceParams().keys()]).toEqual(["checklistKey"]);
   });
 });
 

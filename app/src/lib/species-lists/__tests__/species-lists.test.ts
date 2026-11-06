@@ -4,8 +4,8 @@ import { decodeColumns, encodeColumns, type SpeciesListManifest } from "../forma
 describe("columnar species-list format", () => {
   it("round-trips assessed rows, keeping nulls and empty arrays as they were", () => {
     const rows = [
-      { species_key: "sis-1", col_id: null, countries: ["GB", "FR"], previous_assessments: [], possibly_extinct: false, gbif_occurrence_count: 7 },
-      { species_key: "sis-2", col_id: null, countries: [], previous_assessments: [], possibly_extinct: true, gbif_occurrence_count: null },
+      { species_key: "sis-1", col_id: null, countries: ["GB", "FR"], previous_assessments: [], possibly_extinct: false, gbif_georeferenced_records_count: 7 },
+      { species_key: "sis-2", col_id: null, countries: [], previous_assessments: [], possibly_extinct: true, gbif_georeferenced_records_count: null },
     ];
     const decoded = decodeColumns(JSON.parse(JSON.stringify(encodeColumns(rows))));
     expect(decoded).toEqual(rows);

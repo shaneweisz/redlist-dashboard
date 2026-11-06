@@ -7,17 +7,27 @@
  * Catalogue of Life ids as taxa.parquet. A local mirror of it (pulled with
  * `aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>/
  * ~/Data/gbif/<date>/ --no-sign-request`) is read once, and every count the
- * dashboard shows comes from two small tables:
+ * dashboard shows comes from three small tables:
  *
  *   occurrence_counts     usage_key × year × georef × basis → n
+ *   occurrence_dates      usage_key × year × month × event_date × georef × basis → n
  *   occurrence_countries  usage_key × countrycode × georef × basis → n
+ *
+ * occurrence_dates holds the records dated at least to the month (event_date
+ * is NULL for those dated only to the month), so a since-assessment count can
+ * start the day after the assessment rather than the year after it. Within the
+ * assessment's own year a record dated to a later month counts, and one dated
+ * only to the assessment's month, or only to its year, can't be placed and is
+ * left out.
  *
  * usage_key is the record's taxonkey, the usage its name matched (a species,
  * a synonym, a subspecies). Which species a usage counts towards is
  * taxa.species_id, so totals, synonyms, subspecies, lumped species and
  * since-assessment counts are all one rule over these tables (counts.ts).
  *
- * georef is the API's hasCoordinate=true&hasGeospatialIssue=false. The
+ * georef is the API's hasCoordinate=true&hasGeospatialIssue=false; the rest
+ * of a usage's records have no coordinates or a geospatial issue, and count
+ * only towards its all-records numbers. The
  * snapshot has no hasGeospatialIssue column, so it is recomputed from the
  * issue list with GBIF's own set (GBIF_GEOSPATIAL_ISSUES).
  *
@@ -116,6 +126,9 @@ export async function assertComplete(conn: DuckDBConnection, snap: Snapshot): Pr
   return actual;
 }
 
+/** What the cached aggregate holds; a change here rebuilds it rather than reusing it. */
+const GRAIN = "year+month+day";
+
 const GEOREF = `decimallatitude IS NOT NULL AND decimallongitude IS NOT NULL
   AND NOT list_has_any(coalesce(issue, []), [${[...GBIF_GEOSPATIAL_ISSUES].map(lit).join(", ")}])`;
 
@@ -131,11 +144,17 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
     if (fs.existsSync(done)) continue;
     await conn.run(`CREATE OR REPLACE TEMP TABLE batch AS
       SELECT taxonkey AS usage_key, specieskey, CAST(year AS SMALLINT) AS year, basisofrecord AS basis,
-             ${GEOREF} AS georef, countrycode
+             ${GEOREF} AS georef, countrycode, CAST(month AS TINYINT) AS month,
+             -- try_cast: a malformed date (31 February) is undated, not an error
+             CASE WHEN day IS NOT NULL AND month IS NOT NULL AND year IS NOT NULL
+                  THEN TRY_CAST(printf('%04d-%02d-%02d', year, month, day) AS DATE) END AS event_date
       FROM read_parquet([${batches[b].map(lit).join(", ")}])
       WHERE taxonkey IS NOT NULL`);
     await conn.run(`COPY (SELECT usage_key, year, georef, basis, count(*) AS n FROM batch GROUP BY ALL)
       TO ${lit(path.join(parts, `counts-${tag}.parquet`))} (FORMAT parquet)`);
+    await conn.run(`COPY (SELECT usage_key, year, month, event_date, georef, basis, count(*) AS n FROM batch
+      WHERE year IS NOT NULL AND month BETWEEN 1 AND 12 GROUP BY ALL)
+      TO ${lit(path.join(parts, `dates-${tag}.parquet`))} (FORMAT parquet)`);
     await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, count(*) AS n FROM batch WHERE countrycode IS NOT NULL GROUP BY ALL)
       TO ${lit(path.join(parts, `countries-${tag}.parquet`))} (FORMAT parquet)`);
     await conn.run(`COPY (SELECT usage_key, specieskey, count(*) AS n FROM batch GROUP BY ALL)
@@ -176,22 +195,27 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
   const workDir = path.join(CACHE_ROOT, "occurrences", snap.date);
   const marker = path.join(workDir, "complete.json");
   let sourceRows: number;
-  // The aggregate bakes in which issues count as geospatial, so a change to that
-  // set (GBIF changes its own) has to rebuild it rather than reuse it.
+  // The aggregate bakes in which issues count as geospatial (GBIF changes its
+  // own set) and what it is grouped by, so a change to either has to rebuild it
+  // rather than reuse it.
   const done = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, "utf-8")) : null;
-  if (done && done.georef === GEOREF) {
+  if (done && done.georef === GEOREF && done.grain === GRAIN) {
     sourceRows = done.sourceRows;
   } else {
     fs.rmSync(path.join(workDir, "parts"), { recursive: true, force: true });
     sourceRows = await assertComplete(conn, snap);
     await aggregate(conn, snap, workDir);
-    fs.writeFileSync(marker, JSON.stringify({ date: snap.date, citation: snap.citation, files: snap.files.length, sourceRows, georef: GEOREF }, null, 2) + "\n");
+    fs.writeFileSync(marker, JSON.stringify({ date: snap.date, citation: snap.citation, files: snap.files.length, sourceRows, georef: GEOREF, grain: GRAIN }, null, 2) + "\n");
   }
 
   fs.mkdirSync(coreDir, { recursive: true });
   const parts = (p: string) => lit(path.join(workDir, "parts", `${p}-*.parquet`));
   await conn.run(`COPY (SELECT usage_key, year, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("counts")}) GROUP BY ALL ORDER BY usage_key, year)
     TO ${lit(path.join(coreDir, "occurrence_counts.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  await conn.run(`COPY (SELECT usage_key, year, month, event_date, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("dates")})
+    GROUP BY ALL ORDER BY usage_key, year, month, event_date)
+    TO ${lit(path.join(coreDir, "occurrence_dates.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  fs.rmSync(path.join(coreDir, "occurrence_days.parquet"), { force: true });
   await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("countries")}) GROUP BY ALL ORDER BY usage_key, countrycode)
     TO ${lit(path.join(coreDir, "occurrence_countries.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
   await conn.run(`COPY (SELECT usage_key, specieskey, sum(n)::BIGINT AS n FROM read_parquet(${parts("species-keys")}) GROUP BY ALL ORDER BY usage_key)

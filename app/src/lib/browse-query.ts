@@ -9,6 +9,7 @@
  * the SPA-local filters, and returns a structured result (total + by-category
  * breakdown + outdated stats + a capped, labelled species list).
  */
+import type { GbifRecordMode } from "@/lib/gbif-records";
 import { querySpecies, searchSpecies, type SearchResult } from "@/lib/data/species-duckdb";
 import { isOutdated } from "@/lib/data/species-store";
 import { getDataSyncDate } from "@/lib/data-sync-date";
@@ -43,6 +44,8 @@ export interface BrowseInput extends SharedFilterInput {
   institutions?: string[];
   minObs?: number;
   maxObs?: number;
+  /** Which GBIF records minObs/maxObs count: all (default) or georeferenced. */
+  records?: GbifRecordMode;
   minAssessmentYear?: number;
   maxAssessmentYear?: number;
   minDescribedYear?: number;
@@ -61,7 +64,8 @@ export interface BrowseSpecies {
   population_trend: string | null;
   assessment_date: string | null;
   outdated: boolean;
-  gbif_occurrence_count: number | null;
+  gbif_georeferenced_records_count: number | null;
+  gbif_all_records_count: number | null;
 }
 
 export interface BrowseResult {
@@ -102,7 +106,7 @@ function searchHitToRow(h: SearchResult): Row {
     category: h.category, countries: h.countries ?? [], systems: null,
     population_trend: null, movement_pattern: null, threat_codes: null,
     growth_forms: null, scientific_name: h.scientific_name, common_name: h.common_name,
-    gbif_occurrence_count: null, assessment_date: h.assessment_date, taxon_group: h.taxon_group,
+    gbif_georeferenced_records_count: null, assessment_date: h.assessment_date, taxon_group: h.taxon_group,
     latest_assessors: null, latest_reviewers: null, latest_facilitators: null,
     latest_contributors: null, latest_institutions: null, described_year: null,
     matched_synonym: h.matched_synonym ?? null,
@@ -133,6 +137,7 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
   criteria.search = search ? search.toLowerCase() : undefined;
   criteria.minObs = minObs;
   criteria.maxObs = maxObs;
+  criteria.records = input.records;
   criteria.minAssessmentYear = minAssessmentYear;
   criteria.maxAssessmentYear = maxAssessmentYear;
 
@@ -223,8 +228,9 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
   if (facilitators.length) interpreted.push(`Facilitator: ${facilitators.join(", ")}`);
   if (contributors.length) interpreted.push(`Contributor: ${contributors.join(", ")}`);
   if (institutions.length) interpreted.push(`Institution: ${institutions.join(", ")}`);
-  if (minObs != null) interpreted.push(`GBIF observations ≥ ${minObs.toLocaleString()}`);
-  if (maxObs != null) interpreted.push(`GBIF observations ≤ ${maxObs.toLocaleString()}`);
+  const obsLabel = input.records === "georeferenced" ? "GBIF georeferenced records" : "GBIF records (all)";
+  if (minObs != null) interpreted.push(`${obsLabel} ≥ ${minObs.toLocaleString()}`);
+  if (maxObs != null) interpreted.push(`${obsLabel} ≤ ${maxObs.toLocaleString()}`);
   if (minAssessmentYear != null) interpreted.push(`Assessed in or after ${minAssessmentYear}`);
   if (maxAssessmentYear != null) interpreted.push(`Assessed in or before ${maxAssessmentYear}`);
   if (minDescribedYear != null) interpreted.push(`Described in or after ${minDescribedYear}`);
@@ -247,7 +253,8 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
       population_trend: s.population_trend,
       assessment_date: s.assessment_date ?? null,
       outdated: isOutdated(s.assessment_date ?? null, getDataSyncDate()),
-      gbif_occurrence_count: s.gbif_occurrence_count ?? null,
+      gbif_georeferenced_records_count: s.gbif_georeferenced_records_count ?? null,
+      gbif_all_records_count: s.gbif_all_records_count ?? null,
     })),
   };
 }

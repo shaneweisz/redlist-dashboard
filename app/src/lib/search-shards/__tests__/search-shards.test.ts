@@ -7,7 +7,7 @@ const row = (n: string, sci: string, common: string | null, key: string, gbif = 
   n, sl: sci.toLowerCase(), cl: common?.toLowerCase() ?? null,
   species_key: key as ShardSpeciesRow["species_key"], sis_taxon_id: null, col_id: null,
   scientific_name: sci, common_name: common, taxon_id: "mammals", taxon_group: "mammals", category: "LC",
-  gbif_species_key: null, gbif_occurrence_count: gbif, assessment_id: null, assessment_date: null, countries: [],
+  gbif_species_key: null, gbif_georeferenced_records_count: gbif, assessment_id: null, assessment_date: null, countries: [],
   class_name: null, order_name: null, family: null, node_id: null,
 });
 
@@ -32,12 +32,12 @@ describe("rankSpecies (the route's tier-0 ORDER BY)", () => {
     const rows = [row("panthera leo", "Panthera leo", "Lion", "sis-1", 5), row("panthera", "Panthera leo", "Lion", "sis-1", 9)];
     const out = rankSpecies(rows, "panthera", 10);
     expect(out).toHaveLength(1);
-    expect(out[0].gbif_occurrence_count).toBe(9);
+    expect(out[0].gbif_georeferenced_records_count).toBe(9);
     expect(out[0]).not.toHaveProperty("n"); // internal sort keys never leak into results
   });
 
   it("dedupeByRowKey never collapses rows without a key", () => {
-    const hits = [{ species_key: null, gbif_occurrence_count: 1 }, { species_key: null, gbif_occurrence_count: 2 }];
+    const hits = [{ species_key: null, gbif_georeferenced_records_count: 1 }, { species_key: null, gbif_georeferenced_records_count: 2 }];
     expect(dedupeByRowKey(hits as never)).toHaveLength(2);
   });
 });

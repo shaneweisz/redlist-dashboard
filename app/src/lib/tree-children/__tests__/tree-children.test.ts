@@ -54,7 +54,7 @@ const SYNC = "2026-11-02T09-47-21Z";
 const FILE: TreeChildrenFile = {
   v: 1, sync: SYNC, root: "mammals",
   children: {
-    mammals: [{ id: "mammals~order:rodentia", name: "Rodents", estimatedDescribed: 0, totalAssessed: 1, outdated: 0, gbifNeSpeciesCount: 0, byCategory: { LC: 1 } }],
+    mammals: [{ id: "mammals~order:rodentia", name: "Rodents", estimatedDescribed: 0, totalAssessed: 1, outdated: 0, gbifNeSpecies: { georeferenced: 0, all: 0 }, byCategory: { LC: 1 } }],
   },
 };
 type Loader = typeof import("../loader");

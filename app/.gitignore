@@ -64,3 +64,6 @@ next-env.d.ts
 
 # Written by the sync's regression phase; surfaced in the weekly PR body, not committed.
 /sync-regressions.md
+
+# DuckDB spill files (the sync points its own at ~/.cache/redlist-dashboard/duckdb-tmp)
+/.tmp/
