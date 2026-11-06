@@ -12,7 +12,7 @@ function sp(overrides: Partial<FilterableSpecies> = {}): FilterableSpecies {
     growth_forms: [],
     scientific_name: "Acropora cervicornis",
     common_name: "Staghorn coral",
-    gbif_occurrence_count: 50,
+    gbif_georeferenced_records_count: 50,
     assessment_date: "2018-06-01",
     ...overrides,
   };
@@ -74,11 +74,11 @@ describe("matchesSpeciesFilter", () => {
   });
 
   it("matches GBIF observation bounds (null counts as 0)", () => {
-    expect(matchesSpeciesFilter(sp({ gbif_occurrence_count: 150 }), { minObs: 100 })).toBe(true);
-    expect(matchesSpeciesFilter(sp({ gbif_occurrence_count: 50 }), { minObs: 100 })).toBe(false);
-    expect(matchesSpeciesFilter(sp({ gbif_occurrence_count: null }), { minObs: 1 })).toBe(false);
-    expect(matchesSpeciesFilter(sp({ gbif_occurrence_count: 5 }), { maxObs: 10 })).toBe(true);
-    expect(matchesSpeciesFilter(sp({ gbif_occurrence_count: 500 }), { minObs: 100, maxObs: 1000 })).toBe(true);
+    expect(matchesSpeciesFilter(sp({ gbif_georeferenced_records_count: 150 }), { minObs: 100 })).toBe(true);
+    expect(matchesSpeciesFilter(sp({ gbif_georeferenced_records_count: 50 }), { minObs: 100 })).toBe(false);
+    expect(matchesSpeciesFilter(sp({ gbif_georeferenced_records_count: null }), { minObs: 1 })).toBe(false);
+    expect(matchesSpeciesFilter(sp({ gbif_georeferenced_records_count: 5 }), { maxObs: 10 })).toBe(true);
+    expect(matchesSpeciesFilter(sp({ gbif_georeferenced_records_count: 500 }), { minObs: 100, maxObs: 1000 })).toBe(true);
   });
 
   it("matches assessment-year bounds (inclusive)", () => {

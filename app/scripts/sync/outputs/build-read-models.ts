@@ -18,7 +18,13 @@
  * row before a "lumped" one), which is how Hylatomus pileatus links to
  * Dryocopus pileatus' 5M records rather than its own 156: CoL holds that bird
  * twice, and both halves now count. A species with no records of any kind has
- * no key.
+ * no key, and counts of 0.
+ *
+ * Every count comes twice: georeferenced (coordinates and no geospatial issue,
+ * GBIF's hasCoordinate=true&hasGeospatialIssue=false) and all records. The
+ * since-assessment counts start the day after the assessment date: records in
+ * later years from occurrence_counts, records later in the assessment's own
+ * year from occurrence_days (so a record dated only to that year is left out).
  *
  * Usage:  npx tsx scripts/sync/outputs/build-read-models.ts
  */
@@ -41,14 +47,15 @@ export interface ReadModelInputs {
   coreDir: string;
   outDir: string;
   inatNames?: string;
-  /** The year since-assessment windows end; defaults to this year. */
-  currentYear?: number;
+  /** The day since-assessment windows end (YYYY-MM-DD); defaults to today. */
+  today?: string;
 }
 
 async function loadCore(conn: DuckDBConnection, coreDir: string): Promise<void> {
   const f = (n: string) => lit(path.join(coreDir, n));
   await conn.run(`CREATE OR REPLACE VIEW taxa AS SELECT * FROM read_parquet(${f("taxa.parquet")})`);
   await conn.run(`CREATE OR REPLACE VIEW occ AS SELECT * FROM read_parquet(${f("occurrence_counts.parquet")})`);
+  await conn.run(`CREATE OR REPLACE VIEW occ_days AS SELECT * FROM read_parquet(${f("occurrence_days.parquet")})`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE link AS SELECT * FROM read_parquet(${f("assessment_link.parquet")})`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE latest AS SELECT * FROM read_parquet(${f("assessments.parquet")}) WHERE is_latest`);
 }
@@ -71,33 +78,45 @@ async function ownedUsages(conn: DuckDBConnection): Promise<void> {
     QUALIFY row_number() OVER (PARTITION BY usage_key ORDER BY depth, sis, root) = 1`);
 }
 
-async function gbifCounts(conn: DuckDBConnection, currentYear: number): Promise<void> {
+async function gbifCounts(conn: DuckDBConnection, today: string): Promise<void> {
+  const d = lit(today);
   await conn.run(`CREATE OR REPLACE TEMP TABLE uc AS ${usageCountsSql({ taxa: "taxa", counts: "occ" })}`);
-  // Every counted usage-year, with the species and link row it counts for.
-  await conn.run(`CREATE OR REPLACE TEMP TABLE hits AS
-    WITH rows AS (
-      SELECT l.sis_taxon_id AS sis, l.usage_id, l.verdict, l.role,
-             year(la.assessment_date) AS y
-      FROM link l JOIN latest la USING (sis_taxon_id) WHERE l.counted),
-    hits AS (
-      -- own / covered: the species' records, minus usages someone else owns
-      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.usage_key, u.year, u.georef, u.n
-      FROM rows r JOIN uc u ON u.species_id = r.usage_id
-      WHERE r.verdict = 'own'
-        AND NOT EXISTS (SELECT 1 FROM owned o WHERE o.usage_key = u.usage_key)
-      UNION ALL
-      -- lumped: its own usage and what is under it
-      SELECT r.sis, r.usage_id, r.verdict, r.role, r.y, u.usage_key, u.year, u.georef, u.n
-      FROM rows r JOIN owned o ON o.sis = r.sis AND o.root = r.usage_id JOIN uc u ON u.usage_key = o.usage_key
-      WHERE r.verdict = 'lumped')
-    SELECT * FROM hits`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE ucd AS ${usageCountsSql({ taxa: "taxa", counts: "occ_days", dated: true })}`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE link_rows AS
+    SELECT l.sis_taxon_id AS sis, l.usage_id, l.verdict, l.role, CAST(la.assessment_date AS DATE) AS ad
+    FROM link l JOIN latest la USING (sis_taxon_id) WHERE l.counted`);
+  // Every counted usage-year (or usage-day), with the species and link row it counts for.
+  const hitsFrom = (u: string, cols: string) => `
+    -- own / covered: the species' records, minus usages someone else owns
+    SELECT r.sis, r.usage_id, r.verdict, r.role, r.ad, u.usage_key, ${cols}, u.georef, u.n
+    FROM link_rows r JOIN ${u} u ON u.species_id = r.usage_id
+    WHERE r.verdict = 'own'
+      AND NOT EXISTS (SELECT 1 FROM owned o WHERE o.usage_key = u.usage_key)
+    UNION ALL
+    -- lumped: its own usage and what is under it
+    SELECT r.sis, r.usage_id, r.verdict, r.role, r.ad, u.usage_key, ${cols}, u.georef, u.n
+    FROM link_rows r JOIN owned o ON o.sis = r.sis AND o.root = r.usage_id JOIN ${u} u ON u.usage_key = o.usage_key
+    WHERE r.verdict = 'lumped'`;
+  await conn.run(`CREATE OR REPLACE TEMP TABLE hits AS ${hitsFrom("uc", "u.year")}`);
+  // Only the assessment's own year is read by day; later years come from hits.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE day_hits AS
+    SELECT * FROM (${hitsFrom("ucd", "u.event_date")})
+    WHERE year(event_date) = year(ad) AND event_date > ad AND event_date <= ${d}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE row_counts AS
-    SELECT sis, usage_id, any_value(verdict) AS verdict, any_value(role) AS role,
-           coalesce(sum(n) FILTER (georef), 0)::BIGINT AS georef,
-           coalesce(sum(n), 0)::BIGINT AS all_records,
-           coalesce(sum(n) FILTER (georef AND year > y AND year <= ${currentYear}), 0)::BIGINT AS georef_since,
-           any_value(y) AS y
-    FROM hits GROUP BY sis, usage_id`);
+    WITH by_year AS (
+      SELECT sis, usage_id, any_value(verdict) AS verdict, any_value(role) AS role, any_value(ad) AS ad,
+             coalesce(sum(n) FILTER (georef), 0)::BIGINT AS georef,
+             coalesce(sum(n), 0)::BIGINT AS all_records,
+             coalesce(sum(n) FILTER (georef AND year > year(ad) AND year <= year(${d}::DATE)), 0)::BIGINT AS georef_since,
+             coalesce(sum(n) FILTER (year > year(ad) AND year <= year(${d}::DATE)), 0)::BIGINT AS all_since
+      FROM hits GROUP BY sis, usage_id),
+    by_day AS (
+      SELECT sis, usage_id, coalesce(sum(n) FILTER (georef), 0)::BIGINT AS georef_since, sum(n)::BIGINT AS all_since
+      FROM day_hits GROUP BY sis, usage_id)
+    SELECT y.sis, y.usage_id, y.verdict, y.role, y.ad, y.georef, y.all_records,
+           (y.georef_since + coalesce(dd.georef_since, 0))::BIGINT AS georef_since,
+           (y.all_since + coalesce(dd.all_since, 0))::BIGINT AS all_since
+    FROM by_year y LEFT JOIN by_day dd USING (sis, usage_id)`);
   // What each species' count is made of, so a change in it can be explained:
   // records left out because another assessed species owns the usage, and
   // records added from a covered duplicate or a lumped species' own usage.
@@ -118,8 +137,9 @@ async function gbifCounts(conn: DuckDBConnection, currentYear: number): Promise<
            -- usage_id last: two usages with the same counts would otherwise swap between runs.
            arg_min(usage_id, (CASE verdict WHEN 'own' THEN 0 ELSE 1 END, -georef, -all_records, usage_id)) AS gbif_species_key,
            sum(georef)::BIGINT AS georef, sum(all_records)::BIGINT AS all_records,
-           -- No window for a species assessed this year: nothing can postdate it yet.
-           CASE WHEN any_value(y) + 1 > ${currentYear} THEN NULL ELSE sum(georef_since)::BIGINT END AS georef_since
+           -- No window for an undated assessment, or one dated today or later: nothing can postdate it yet.
+           CASE WHEN any_value(ad) IS NULL OR any_value(ad) >= ${d}::DATE THEN NULL ELSE sum(georef_since)::BIGINT END AS georef_since,
+           CASE WHEN any_value(ad) IS NULL OR any_value(ad) >= ${d}::DATE THEN NULL ELSE sum(all_since)::BIGINT END AS all_since
     FROM row_counts GROUP BY sis HAVING sum(all_records) > 0`);
 }
 
@@ -180,10 +200,14 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: str
     FROM uc WHERE species_id IS NOT NULL AND usage_key NOT IN (SELECT usage_key FROM owned)
     GROUP BY 1`);
   await conn.run(`CREATE OR REPLACE VIEW occ_countries AS SELECT * FROM read_parquet(${lit(path.join(CORE_DIR_FOR_COUNTRIES, "occurrence_countries.parquet"))})`);
+  // A record's country is its countrycode, which GBIF fills from coordinates or
+  // from what the publisher wrote, so an all-records country list is longer.
   await conn.run(`CREATE OR REPLACE TEMP TABLE ne_countries AS
-    SELECT u.species_id, string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) AS countries
+    SELECT u.species_id,
+           string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) FILTER (c.georef) AS countries,
+           string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) AS all_records_countries
     FROM occ_countries c JOIN taxa u ON u.col_id = c.usage_key LEFT JOIN taxa sp ON sp.col_id = u.species_id
-    WHERE c.georef AND ${countedBasisSql("c.basis", "coalesce(sp.kingdom, u.kingdom)")}
+    WHERE ${countedBasisSql("c.basis", "coalesce(sp.kingdom, u.kingdom)")}
       AND u.species_id IS NOT NULL AND c.usage_key NOT IN (SELECT usage_key FROM owned)
     GROUP BY 1`);
   const vern = path.join(coreDir, "species-vernaculars.parquet");
@@ -195,7 +219,9 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: str
            -- iNaturalist's preferred name, else CoL's.
            coalesce(i.preferred_name, v.vernacular_name) AS common_name,
            t.taxon_group, t.class_name, t.order_name, t.family, 'NE' AS iucn_category,
-           c.countries, t.col_id AS gbif_species_key, n.georef AS gbif_occurrence_count, n.all_records AS gbif_all_records_count
+           c.countries, c.all_records_countries AS gbif_all_records_countries,
+           t.col_id AS gbif_species_key,
+           coalesce(n.georef, 0) AS gbif_georeferenced_records_count, n.all_records AS gbif_all_records_count
     FROM taxa t
     JOIN ne_counts n ON n.species_id = t.col_id AND n.all_records > 0
     LEFT JOIN ne_countries c ON c.species_id = t.col_id
@@ -233,10 +259,10 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
   for (const f of SYNC_FOLDERS) fs.mkdirSync(path.join(o.outDir, f), { recursive: true });
   fs.mkdirSync(o.outDir, { recursive: true });
   CORE_DIR_FOR_COUNTRIES = o.coreDir;
-  const currentYear = o.currentYear ?? new Date().getUTCFullYear();
+  const today = o.today ?? new Date().toISOString().slice(0, 10);
   await loadCore(conn, o.coreDir);
   await ownedUsages(conn);
-  await gbifCounts(conn, currentYear);
+  await gbifCounts(conn, today);
   await history(conn, o.coreDir);
 
   await conn.run(o.inatNames && fs.existsSync(o.inatNames)
@@ -254,8 +280,16 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
            la.category AS iucn_category, la.assessment_id,
            CAST(la.assessment_date AS VARCHAR) AS assessment_date, la.year_published,
            ${joined("la.countries")} AS countries,
-           g.gbif_species_key, g.georef AS gbif_occurrence_count, g.georef_since AS gbif_observations_after_assessment_year,
-           g.all_records AS gbif_all_records_count,
+           g.gbif_species_key,
+           coalesce(g.georef, 0) AS gbif_georeferenced_records_count,
+           coalesce(g.all_records, 0) AS gbif_all_records_count,
+           -- A species with no records still has a window, unless its assessment has none.
+           CASE WHEN g.sis IS NOT NULL THEN g.georef_since
+                WHEN la.assessment_date IS NOT NULL AND CAST(la.assessment_date AS DATE) < ${lit(today)}::DATE THEN 0 END
+             AS gbif_georeferenced_records_since_assessment,
+           CASE WHEN g.sis IS NOT NULL THEN g.all_since
+                WHEN la.assessment_date IS NOT NULL AND CAST(la.assessment_date AS DATE) < ${lit(today)}::DATE THEN 0 END
+             AS gbif_all_records_since_assessment,
            la.population_trend, ${joined("la.systems")} AS systems, ${joined("la.growth_forms")} AS growth_forms,
            la.movement_pattern, la.possibly_extinct, la.possibly_extinct_in_the_wild, la.criteria,
            ${joined("la.threat_codes")} AS threat_codes, ${joined("la.habitat_codes")} AS habitat_codes,
@@ -287,7 +321,7 @@ export async function run(): Promise<void> {
   const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB" })).connect();
   const inatNames = await ensureInatNames();
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames });
-  const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(gbif_species_key) AS keyed, sum(gbif_occurrence_count) AS georef
+  const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(gbif_species_key) AS keyed, sum(gbif_georeferenced_records_count) AS georef
     FROM read_parquet(${lit(path.join(OUT_DIR, syncPath("assessed.parquet")))})`)).getRowObjects();
   console.log(`Wrote ${OUT_DIR}/assessed.parquet: ${Number(s.n).toLocaleString()} species, ${Number(s.keyed).toLocaleString()} with GBIF records ` +
     `(${Number(s.georef).toLocaleString()} georeferenced)`);

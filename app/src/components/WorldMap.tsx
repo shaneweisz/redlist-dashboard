@@ -13,6 +13,7 @@ import { NAME_TO_ALPHA2, ALPHA2_TO_NAME } from "@/lib/countries";
 import { splitEmbeddedTerritories } from "@/lib/map-territories";
 import CountryStatsList from "./CountryStatsList";
 import type { MapViewMode, MapSortKey } from "@/hooks/useFilterParams";
+import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, type GbifRecordMode } from "@/lib/gbif-records";
 
 // Using the recommended TopoJSON from react-simple-maps
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
@@ -174,6 +175,8 @@ interface WorldMapProps {
   // Called with the hovered country's code on mouseenter, and null on
   // mouseleave, only while selectOnHover is true.
   onCountryHover?: (countryCode: string | null) => void;
+  /** Which GBIF records the "# GBIF Obs" layer counts (src/lib/gbif-records.ts). */
+  gbifRecordMode?: GbifRecordMode;
 }
 
 const DEFAULT_CENTER: [number, number] = [10, 10];
@@ -181,7 +184,7 @@ const DEFAULT_ZOOM = 1.5;
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 8.0;
 
-function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomputedStats, precomputedStatsTotal, selectedTaxa, speciesLabel = "# Assessed", onRegionsChange, endemicsOnly = false, onEndemicsToggle, footer, showGbifToggle = true, showOutdatedMode = true, showColorModeDropdown = true, mapViewMode, onMapViewModeChange, mapSortKey, mapSortDirection, onMapSortChange, selectOnHover = false, onCountryHover }: WorldMapProps) {
+function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomputedStats, precomputedStatsTotal, selectedTaxa, speciesLabel = "# Assessed", onRegionsChange, endemicsOnly = false, onEndemicsToggle, footer, showGbifToggle = true, showOutdatedMode = true, showColorModeDropdown = true, mapViewMode, onMapViewModeChange, mapSortKey, mapSortDirection, onMapSortChange, selectOnHover = false, onCountryHover, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: WorldMapProps) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
   const [hoveredCountryCode, setHoveredCountryCode] = useState<string | null>(null);
   const [speciesStats, setSpeciesStats] = useState<CountryStats>(precomputedStats || {});
@@ -322,13 +325,15 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
     if (!selectedTaxa || selectedTaxa.size === 0) return "all";
     return Array.from(selectedTaxa).sort().join(",");
   }, [selectedTaxa]);
+  // The occurrence layer's cache key: its taxa and the record mode it counts.
+  const occurrenceKey = `${taxaKey}|${gbifRecordMode}`;
 
   // Fetch real per-country occurrence counts from GBIF API in the background
   // All taxa fire in parallel; map updates once when all resolve
   useEffect(() => {
     // Use cached result if available
-    if (occurrenceCacheRef.current[taxaKey]) {
-      setOccurrenceStats(occurrenceCacheRef.current[taxaKey]);
+    if (occurrenceCacheRef.current[occurrenceKey]) {
+      setOccurrenceStats(occurrenceCacheRef.current[occurrenceKey]);
       return;
     }
 
@@ -339,7 +344,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
 
     Promise.all(
       taxaToFetch.map(taxon =>
-        fetch(`/api/country/stats?taxon=${encodeURIComponent(taxon)}`, { signal: controller.signal })
+        fetch(`/api/country/stats?taxon=${encodeURIComponent(taxon)}${gbifRecordMode === "all" ? `&${GBIF_RECORDS_PARAM}=all` : ""}`, { signal: controller.signal })
           .then(res => res.json())
           .then(data => (data.stats || {}) as CountryStats)
           .catch(() => ({} as CountryStats))
@@ -353,19 +358,19 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
           combined[code].occurrences += stat.occurrences;
         }
       }
-      occurrenceCacheRef.current[taxaKey] = combined;
+      occurrenceCacheRef.current[occurrenceKey] = combined;
       setOccurrenceStats(combined);
     }).finally(() => {
       if (!controller.signal.aborted) setOccurrenceLoading(false);
     });
 
     return () => controller.abort();
-  }, [taxaKey]);
+  }, [taxaKey, occurrenceKey, gbifRecordMode]);
 
-  // Invalidate occurrence cache when taxa change
+  // Invalidate occurrence cache when taxa or the record mode change
   useEffect(() => {
-    setOccurrenceStats(occurrenceCacheRef.current[taxaKey] || null);
-  }, [taxaKey]);
+    setOccurrenceStats(occurrenceCacheRef.current[occurrenceKey] || null);
+  }, [occurrenceKey]);
 
   // Active stats for coloring based on mode ("outdated" reuses the species stats,
   // since outdated counts are computed alongside species counts, not fetched separately)

@@ -29,7 +29,7 @@ export interface ReasonRule {
 }
 
 const CREDITS = ["latest_assessors", "latest_reviewers", "latest_facilitators", "latest_contributors", "latest_institutions"];
-const COUNTS = ["gbif_occurrence_count", "gbif_observations_after_assessment_year"];
+const COUNTS = ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment"];
 const GBIF = ["gbif_species_key", ...COUNTS];
 /** Within the noise between a monthly snapshot and the live API two days later. */
 const NOISE = (before: string, after: string) => `abs(${after} - ${before}) <= greatest(5, 0.05 * ${before})`;
@@ -166,26 +166,48 @@ export const REASONS: ReasonRule[] = [
               JOIN ctx_link l ON l.sis_taxon_id = p.key::BIGINT AND l.role = 'primary' AND l.verdict = 'lumped' AND l.counted
               JOIN ctx_usage u ON u.usage_key = p.b_key
               WHERE ${NOISE("p.b_n::DOUBLE", "u.georef::DOUBLE")} AND p.a_n >= p.b_n)
-            AND (d.field = 'gbif_occurrence_count' OR d.delta > 0)`,
+            AND (d.field = 'gbif_georeferenced_records_count' OR d.delta > 0)`,
   },
   {
     code: "separately_assessed_split_not_double_counted",
     description: "Records of a usage another assessed species owns (a split IUCN assesses, CoL files as a subspecies) are no longer counted for both.",
     kinds: ["assessed"], fields: COUNTS,
-    where: `(d.field = 'gbif_occurrence_count' AND d.key IN (SELECT p.key FROM pair p JOIN ctx_components c ON c.sis = p.key::BIGINT
+    where: `(d.field = 'gbif_georeferenced_records_count' AND d.key IN (SELECT p.key FROM pair p JOIN ctx_components c ON c.sis = p.key::BIGINT
               WHERE c.owned_by_others_georef > 0
                 AND ${NOISE("p.b_n::DOUBLE", "(c.key_georef + CASE WHEN c.key_is_own_species THEN c.owned_by_others_georef ELSE 0 END)")}))
-            OR (d.field = 'gbif_observations_after_assessment_year' AND d.delta < 0
+            OR (d.field = 'gbif_georeferenced_records_since_assessment' AND d.delta < 0
                 AND ${sis} IN (SELECT sis FROM ctx_components WHERE owned_by_others_georef > 0))`,
   },
   {
     code: "duplicate_concept_summed",
     description: "CoL holds the organism twice (Hylatomus / Dryocopus pileatus); both halves now count.",
     kinds: ["assessed"], fields: COUNTS,
-    where: `(d.field = 'gbif_occurrence_count' AND d.key IN (SELECT p.key FROM pair p JOIN ctx_components c ON c.sis = p.key::BIGINT
+    where: `(d.field = 'gbif_georeferenced_records_count' AND d.key IN (SELECT p.key FROM pair p JOIN ctx_components c ON c.sis = p.key::BIGINT
               WHERE c.covered_georef > 0 AND (${NOISE("p.b_n::DOUBLE", "c.key_georef")} OR ${NOISE("p.b_n::DOUBLE", "c.own_georef")})))
-            OR (d.field = 'gbif_observations_after_assessment_year' AND d.delta > 0
+            OR (d.field = 'gbif_georeferenced_records_since_assessment' AND d.delta > 0
                 AND ${sis} IN (SELECT sis FROM ctx_components WHERE covered_georef > 0))`,
+  },
+  {
+    code: "since_assessment_from_the_date",
+    // The window starts the day after the assessment, not on 1 January of the
+    // year after: it only gains the rest of the assessment's own year, so it
+    // can't shrink.
+    description: "Records since assessment now start the day after the assessment date, not the year after it.",
+    kinds: ["assessed"], fields: ["gbif_georeferenced_records_since_assessment"],
+    where: `d.before IS NOT NULL AND d.after >= d.before`,
+  },
+  {
+    code: "since_assessment_window_this_year",
+    description: "A species assessed this year had no window under the year rule; by date it has one.",
+    kinds: ["assessed"], fields: ["gbif_georeferenced_records_since_assessment"],
+    where: `d.before IS NULL AND d.after IS NOT NULL
+            AND ${sis} IN (SELECT sis_taxon_id FROM ctx_assessments WHERE is_latest AND year(assessment_date) = year(current_date))`,
+  },
+  {
+    code: "no_records_is_zero",
+    description: "A species with no records in a mode now reads 0 there, not NULL.",
+    kinds: ["assessed", "ne"], fields: ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment"],
+    where: `d.before IS NULL AND d.after = 0`,
   },
   {
     code: "snapshot_vs_api",
@@ -210,8 +232,8 @@ export const REASONS: ReasonRule[] = [
   {
     code: "key_for_ungeoreferenced_records",
     description: "A species whose records all lack coordinates now has a key (and a count of 0) for the all-records view.",
-    kinds: ["ne"], fields: ["gbif_species_key", "gbif_occurrence_count", "countries"],
-    where: `d.before IS NULL AND d.key IN (SELECT key FROM a.ne WHERE gbif_occurrence_count = 0)`,
+    kinds: ["ne"], fields: ["gbif_species_key", "gbif_georeferenced_records_count", "countries"],
+    where: `d.before IS NULL AND d.key IN (SELECT key FROM a.ne WHERE gbif_georeferenced_records_count = 0)`,
   },
   {
     code: "outside_the_28_groups",
@@ -222,7 +244,7 @@ export const REASONS: ReasonRule[] = [
   {
     code: "records_outside_old_facet_roots",
     description: "The old pipeline fetched GBIF species per group root key (17 taxa for other invertebrates); the snapshot covers every species.",
-    kinds: ["ne"], fields: ["gbif_species_key", "gbif_occurrence_count", "countries", "common_name"],
+    kinds: ["ne"], fields: ["gbif_species_key", "gbif_georeferenced_records_count", "countries", "common_name"],
     where: `d.before IS NULL AND d.after IS NOT NULL`,
   },
   {
@@ -276,7 +298,7 @@ export const REASONS: ReasonRule[] = [
   {
     code: "gbif_stats_from_the_ne_list",
     description: "Per-group GBIF figures count each species once, NE ones by the NE list's own rules, instead of from per-group API facet files that counted a species in every group whose root reached it.",
-    kinds: ["groups", "nodes"], fields: ["gbif_species_count", "gbif_ne_species_count", "total_gbif_observations", "median_gbif_obs", "gbifNeSpeciesCount"],
+    kinds: ["groups", "nodes"], fields: ["gbif_georeferenced_species_count", "gbif_georeferenced_ne_species_count", "gbif_georeferenced_records", "gbif_georeferenced_median", "gbif_ne_species_georeferenced"],
     where: `TRUE`,
   },
   {

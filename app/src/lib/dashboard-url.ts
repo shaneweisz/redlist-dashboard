@@ -98,6 +98,7 @@ export function browseInputToDashboardQuery(input: BrowseInput): string {
   if (input.outdated === "yes" || input.outdated === "no") p.set("outdated", input.outdated);
   if (input.minObs != null) p.set("minObs", String(input.minObs));
   if (input.maxObs != null) p.set("maxObs", String(input.maxObs));
+  if (input.records === "all") p.set("records", "all");
   if (input.minAssessmentYear != null) p.set("minAssessmentYear", String(input.minAssessmentYear));
   if (input.maxAssessmentYear != null) p.set("maxAssessmentYear", String(input.maxAssessmentYear));
   if (input.minDescribedYear != null) p.set("minDescribedYear", String(input.minDescribedYear));

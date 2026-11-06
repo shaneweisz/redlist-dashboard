@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { syncPath } from "./sync-layout";
+import type { GbifGroupTotals, GbifRecordMode } from "../gbif-records";
 import { countryToRegion } from "../regions";
 import type { ColRevision } from "../col-revision";
 import type { NoMatchReason, NoMatchDetail } from "./col-breakdown";
@@ -75,11 +76,8 @@ export interface TaxaSummaryRow {
   total_assessed: number;
   outdated: number;
   by_category: Record<string, number>;
-  gbif_species_count: number;
-  gbif_ne_species_count: number;
-  total_gbif_observations: number;
-  mean_gbif_obs: number;
-  median_gbif_obs: number | null;
+  /** GBIF totals, georeferenced records only and all records. */
+  gbif: Record<GbifRecordMode, GbifGroupTotals>;
   col_described?: number; // CoL extant universe in this group (#271)
   col_ne?: number;        // CoL universe not yet IUCN-assessed
 }
@@ -468,7 +466,8 @@ export interface NodeSummary {
   estimatedDescribed: number;
   totalAssessed: number;
   outdated: number;
-  gbifNeSpeciesCount: number;
+  /** NE species under this node with at least one GBIF record, per record mode. */
+  gbifNeSpecies: Record<GbifRecordMode, number>;
   byCategory: Record<string, number>;
   // Catalogue of Life backbone (#272): extant accepted universe under this node and
   // the not-evaluated slice (universe − assessed, by col_id). Undefined when the CoL

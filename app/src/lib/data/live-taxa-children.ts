@@ -155,7 +155,7 @@ export async function getLiveRankChildren(
       estimatedDescribed: 0,
       totalAssessed: acc.totalAssessed,
       outdated: acc.outdated,
-      gbifNeSpeciesCount: 0,
+      gbifNeSpecies: { georeferenced: 0, all: 0 },
       byCategory: acc.byCategory,
       colDescribed: col?.colDescribed,
       colNe: col?.colNe,

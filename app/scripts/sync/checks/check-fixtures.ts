@@ -64,7 +64,7 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
   for (const c of cases) {
     const [row] = (await conn.runAndReadAll(`
       SELECT a.iucn_category AS category, l.species_name AS linked, a.gbif_species_key AS gkey,
-             g.scientific_name AS gname, a.gbif_occurrence_count AS n
+             g.scientific_name AS gname, a.gbif_georeferenced_records_count AS n
       FROM f.assessed a
       LEFT JOIN names l ON l.col_id = a.link_col_id
       LEFT JOIN names g ON g.col_id = a.gbif_species_key

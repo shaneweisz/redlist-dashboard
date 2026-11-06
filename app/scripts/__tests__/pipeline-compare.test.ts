@@ -138,7 +138,7 @@ describe("compare over the old layout", () => {
     expect(s.byKind.groups.diffs).toBe(0);
     expect(s.unexplained).toBe(2);
     const report = fs.readFileSync(path.join(out, "report.md"), "utf-8");
-    expect(report).toContain("### `gbif_occurrence_count`");
+    expect(report).toContain("### `gbif_georeferenced_records_count`");
     expect(report).toContain("Panthera onka");
     expect(fs.existsSync(path.join(out, "diffs.parquet"))).toBe(true);
   });

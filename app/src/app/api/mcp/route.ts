@@ -60,6 +60,7 @@ const FILTERS = {
   institutions: z.array(z.string()).optional().describe("Latest-assessment institution (substring match). The organisation behind the assessment, e.g. 'BirdLife International', 'Royal Botanic Gardens, Kew', 'Botanic Gardens Conservation International', 'NatureServe'."),
   outdated: z.enum(["yes", "no"]).optional().describe("Assessment older than 10 years."),
   minObs: z.number().optional(), maxObs: z.number().optional(),
+  records: z.enum(["georeferenced", "all"]).optional(),
   minAssessmentYear: z.number().optional(), maxAssessmentYear: z.number().optional(),
   minDescribedYear: z.number().optional(), maxDescribedYear: z.number().optional(),
 };

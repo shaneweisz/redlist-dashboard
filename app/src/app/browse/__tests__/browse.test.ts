@@ -23,7 +23,7 @@ function row(over: Record<string, unknown> = {}) {
   return {
     species_key: `sis-${Math.floor(Math.random() * 1e9)}`, scientific_name: "Acropora sp.", common_name: null,
     category: "EN", countries: ["AU"], systems: [], population_trend: null, movement_pattern: null,
-    threat_codes: ["11.1"], growth_forms: [], gbif_occurrence_count: 5,
+    threat_codes: ["11.1"], growth_forms: [], gbif_georeferenced_records_count: 5,
     assessment_date: "2020-01-01", taxon_group: "corals", class_name: "anthozoa",
     order_name: "scleractinia", family: "acroporidae",
     latest_assessors: "Smith, J.A.", latest_reviewers: "Jones, B.", described_year: 2000, ...over,

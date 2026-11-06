@@ -41,6 +41,7 @@ import {
   type BreakdownQueryContext,
 } from "../../../src/lib/data/col-breakdown";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-records";
 
 /** The data directory this run reads and writes (the sync passes its build). */
 let dataDir = DATA_DIR;
@@ -54,11 +55,8 @@ export interface TaxonSummaryRow {
   total_assessed: number;
   outdated: number;
   by_category: Record<string, number>;
-  gbif_species_count: number;
-  gbif_ne_species_count: number;
-  total_gbif_observations: number;
-  mean_gbif_obs: number;
-  median_gbif_obs: number | null;
+  /** GBIF totals for the group, georeferenced records only and all records. */
+  gbif: Record<GbifRecordMode, GbifGroupTotals>;
   // Catalogue of Life backbone (#271): the extant accepted-species universe in this
   // group (col_described) and how many of those IUCN hasn't evaluated (col_ne =
   // universe minus assessed, by col_id). Filled after the per-taxon loop; 0 if the
@@ -269,7 +267,7 @@ interface AssessedRow {
   category: string; assessment_date: string | null; countries: string[]; systems: string[];
 }
 /** A species GBIF has records for, as the summaries need it. */
-interface GbifRow { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; total_count: number }
+interface GbifRow { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; counts: Record<GbifRecordMode, number> }
 
 /**
  * Per Table 1a group: its assessed species (by IUCN's group), and the species
@@ -281,11 +279,11 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
   const assessed = (await conn.runAndReadAll(`
     SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
-           countries, systems, gbif_species_key, gbif_occurrence_count
+           countries, systems, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
     FROM read_parquet('${path.join(dataDir, syncPath("assessed.parquet"))}')`)).getRowObjects();
   const ne = (await conn.runAndReadAll(`
-    SELECT taxon_group, scientific_name, class_name, order_name, family, gbif_species_key, gbif_occurrence_count
-    FROM read_parquet('${path.join(dataDir, syncPath("ne.parquet"))}') WHERE gbif_occurrence_count > 0`)).getRowObjects();
+    SELECT taxon_group, scientific_name, class_name, order_name, family, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
+    FROM read_parquet('${path.join(dataDir, syncPath("ne.parquet"))}') WHERE gbif_all_records_count > 0`)).getRowObjects();
   const redlist = new Map<string, AssessedRow[]>();
   const gbif = new Map<string, Map<string, GbifRow>>();
   const linked = new Set<string>();
@@ -295,7 +293,8 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
     const m = gbif.get(g) ?? new Map<string, GbifRow>();
     gbif.set(g, m);
     m.set(key, { scientific_name: String(r.scientific_name), class_name: str(r.class_name), order_name: str(r.order_name),
-      family: str(r.family), total_count: Number(r.gbif_occurrence_count) });
+      family: str(r.family),
+      counts: { georeferenced: Number(r.gbif_georeferenced_records_count ?? 0), all: Number(r.gbif_all_records_count ?? 0) } });
   };
   for (const r of assessed) {
     const g = String(r.taxon_group);
@@ -306,7 +305,7 @@ async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif
       countries: split(r.countries), systems: split(r.systems) });
     if (r.gbif_species_key != null) {
       linked.add(String(r.gbif_species_key));
-      if (Number(r.gbif_occurrence_count) > 0) addGbif(g, String(r.gbif_species_key), r);
+      if (Number(r.gbif_all_records_count) > 0) addGbif(g, String(r.gbif_species_key), r);
     }
   }
   for (const r of ne) addGbif(String(r.taxon_group), String(r.gbif_species_key), r);
@@ -377,40 +376,36 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       }
     }
 
-    // GBIF stats
-    let gbifSpeciesCount = 0;
-    let gbifNeSpeciesCount = 0;
-    let totalGbifObservations = 0;
-    const obsCounts: number[] = [];
-
-    {
-      const gbifMap = groups.gbif.get(taxon.id) ?? new Map<string, GbifRow>();
-      gbifSpeciesCount = gbifMap.size;
+    // GBIF stats, once per record mode. A species counts in a mode only if it
+    // has a record in it, so the georeferenced species count is the smaller.
+    const gbifMap = groups.gbif.get(taxon.id) ?? new Map<string, GbifRow>();
+    const gbifTotals = (mode: GbifRecordMode): GbifGroupTotals => {
+      const t: GbifGroupTotals = { species_count: 0, ne_species_count: 0, records: 0, median: null };
+      const counts: number[] = [];
       for (const [key, g] of gbifMap) {
-        totalGbifObservations += g.total_count;
-        obsCounts.push(g.total_count);
+        const n = g.counts[mode];
+        if (n <= 0) continue;
+        t.species_count++;
+        t.records += n;
+        counts.push(n);
         // NE = GBIF species not linked to any redlist entry
-        if (!linkedGbifKeys.has(key)) gbifNeSpeciesCount++;
+        if (!linkedGbifKeys.has(key)) t.ne_species_count++;
       }
-    }
-
-    const meanGbifObs = gbifSpeciesCount > 0
-      ? totalGbifObservations / gbifSpeciesCount
-      : 0;
+      t.median = median(counts);
+      return t;
+    };
+    const gbif = { georeferenced: gbifTotals("georeferenced"), all: gbifTotals("all") };
 
     summaries.push({
       table1a_taxon_group: taxon.id,
       total_assessed: totalAssessed,
       outdated,
       by_category: byCategory,
-      gbif_species_count: gbifSpeciesCount,
-      gbif_ne_species_count: gbifNeSpeciesCount,
-      total_gbif_observations: totalGbifObservations,
-      mean_gbif_obs: meanGbifObs,
-      median_gbif_obs: median(obsCounts),
+      gbif,
     });
 
-    console.log(`  ${taxon.id}: ${totalAssessed} assessed, ${gbifNeSpeciesCount} unassessed, ${outdated} outdated, ${gbifSpeciesCount} GBIF species`);
+    console.log(`  ${taxon.id}: ${totalAssessed} assessed, ${gbif.georeferenced.ne_species_count} unassessed, ${outdated} outdated, ` +
+      `${gbif.georeferenced.species_count} GBIF species (${gbif.all.species_count} with any record)`);
   }
 
   // Catalogue of Life per-group counts: extant universe (col_described) and the
@@ -463,11 +458,17 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // the two be kept in step; imported now so they cannot drift.
   const excludedDomesticatedGbifKeys = EXCLUDED_DOMESTICATED_GBIF_KEYS;
 
+  /** An NE species counts in each mode it has a record in. */
+  const countNe = (t: Record<GbifRecordMode, number>, g: GbifRow) => {
+    if (g.counts.georeferenced > 0) t.georeferenced++;
+    if (g.counts.all > 0) t.all++;
+  };
+
   function computeNodeSummary(node: TaxonomyNode): NodeSummary {
     const filter = node.filter;
     let totalAssessed = 0;
     let outdatedCount = 0;
-    let gbifNeSpeciesCount = 0;
+    const gbifNeSpecies = { georeferenced: 0, all: 0 };
     const byCategory: Record<string, number> = {};
 
     for (const group of filter.taxonGroups) {
@@ -486,7 +487,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
           if (linkedGbifKeys.has(key)) continue;
           if (excludedDomesticatedGbifKeys.has(key)) continue;
           if (!matchesFilter(gbifRow, filter)) continue;
-          gbifNeSpeciesCount++;
+          countNe(gbifNeSpecies, gbifRow);
         }
       }
     }
@@ -497,7 +498,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       estimatedDescribed: node.estimatedDescribed ?? 0,
       totalAssessed,
       outdated: outdatedCount,
-      gbifNeSpeciesCount,
+      gbifNeSpecies,
       byCategory,
     };
   }
@@ -553,7 +554,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
     for (const child of catchAll) {
       let totalAssessed = 0;
       let outdatedCount = 0;
-      let gbifNeSpeciesCount = 0;
+      const gbifNeSpecies = { georeferenced: 0, all: 0 };
       const byCategory: Record<string, number> = {};
 
       for (const group of child.filter.taxonGroups) {
@@ -574,7 +575,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
             if (excludedDomesticatedGbifKeys.has(key)) continue;
             if (!matchesFilter(gbifRow, child.filter)) continue;
             if (claimedGbifKeys.has(key)) continue;
-            gbifNeSpeciesCount++;
+            countNe(gbifNeSpecies, gbifRow);
           }
         }
       }
@@ -585,7 +586,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
         estimatedDescribed: child.estimatedDescribed ?? 0,
         totalAssessed,
         outdated: outdatedCount,
-        gbifNeSpeciesCount,
+        gbifNeSpecies,
         byCategory,
       });
     }
