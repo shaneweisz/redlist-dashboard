@@ -1,7 +1,9 @@
 /**
  * The counting rule (scripts/sync/core/counts.ts): a species counts its own,
  * its synonyms' and its infraspecifics' records, not usages another assessed
- * species owns, and preserved specimens only outside Animalia.
+ * species owns. All records counts every record type; georeferenced keeps the
+ * types that place the species where it lives wild (preserved specimens
+ * included, for every kingdom; fossils, living specimens and citations not).
  */
 import { describe, it, expect } from "vitest";
 import { DuckDBInstance } from "@duckdb/node-api";
@@ -30,16 +32,17 @@ async function counts(owned: string[] = []) {
 describe("speciesCountsSql", () => {
   it("sums a species' own, synonym, infraspecific and BIN usages", async () => {
     const r = await counts();
-    // 100 + 7 + 3 + 2 + 11 georeferenced; plus the 5 ungeoreferenced in all.
-    expect(r.LEO).toEqual({ georef: 123, all: 128 });
+    // 100 + 40 (museum) + 7 + 3 + 2 + 11 georeferenced; all adds the 5
+    // ungeoreferenced and the 9 fossils.
+    expect(r.LEO).toEqual({ georef: 163, all: 177 });
   });
   it("leaves out a usage another assessed species owns", async () => {
-    expect((await counts(["LUMP"])).LEO).toEqual({ georef: 112, all: 117 });
+    expect((await counts(["LUMP"])).LEO).toEqual({ georef: 152, all: 166 });
   });
-  it("counts preserved specimens for plants, even on a synonym with no lineage, never for animals or fossils", async () => {
+  it("counts preserved specimens for every kingdom, and fossils only in all records", async () => {
     const r = await counts();
     expect(r.OAK).toEqual({ georef: 31, all: 31 });
-    expect(r.LEO.georef).not.toBeGreaterThan(123);
+    expect(r.LEO.all - r.LEO.georef).toBe(5 + 9);
   });
   it("credits nothing above species rank", async () => {
     expect(Object.keys(await counts())).toEqual(["LEO", "OAK"]);

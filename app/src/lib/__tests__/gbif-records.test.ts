@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  gbifRecordCount, gbifRecordsSinceAssessment, gbifRecordModeParams, parseGbifRecordMode, sinceAssessmentStart,
+  gbifRecordCount, gbifRecordsSinceAssessment, applyGbifRecordMode, parseGbifRecordMode, sinceAssessmentStart,
 } from "../gbif-records";
 import { gbifOccurrenceParams } from "../gbif";
 
@@ -24,12 +24,12 @@ describe("gbif record modes", () => {
     expect(parseGbifRecordMode("ALL")).toBe("georeferenced");
   });
 
-  it("asks GBIF for coordinates only when georeferenced", () => {
-    expect(gbifRecordModeParams("georeferenced")).toEqual({ hasCoordinate: "true", hasGeospatialIssue: "false" });
-    expect(gbifRecordModeParams("all")).toEqual({});
-    const all = gbifOccurrenceParams({}, { mode: "all" });
-    expect(all.has("hasCoordinate")).toBe(false);
-    expect(all.has("hasGeospatialIssue")).toBe(false);
+  it("asks GBIF for coordinates and record types only when georeferenced", () => {
+    const geo = applyGbifRecordMode(new URLSearchParams(), "georeferenced");
+    expect(geo.get("hasCoordinate")).toBe("true");
+    expect(geo.get("hasGeospatialIssue")).toBe("false");
+    expect(geo.getAll("basisOfRecord")).toHaveLength(6);
+    expect(applyGbifRecordMode(new URLSearchParams(), "all").toString()).toBe("");
     expect(gbifOccurrenceParams().get("hasCoordinate")).toBe("true");
   });
 

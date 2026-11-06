@@ -1,20 +1,39 @@
 /**
  * Which GBIF records a count counts.
  *
- *   georeferenced  records with coordinates and none of GBIF's geospatial
- *                  issues (hasCoordinate=true&hasGeospatialIssue=false), the
- *                  records a map can place. The default.
- *   all            every record of a counted type, with or without coordinates.
+ *   georeferenced  the records a map can use: coordinates and none of GBIF's
+ *                  geospatial issues (hasCoordinate=true&hasGeospatialIssue=false),
+ *                  of a type that places the species where it lives wild
+ *                  (GEOREFERENCED_BASIS_OF_RECORD). The default.
+ *   all            every record GBIF holds for the species, of any type, with
+ *                  or without coordinates: the number gbif.org shows.
  *
- * Both follow the same counting rule otherwise (record types by kingdom,
- * synonyms and subspecies, scripts/sync/core/counts.ts). Every GBIF number on
- * the dashboard reads its mode through here, so a toggle changes them together.
+ * Both count the species' own name, synonyms and subspecies the same way
+ * (scripts/sync/core/counts.ts). Every GBIF number on the dashboard reads its
+ * mode through here, so the toggle changes them together.
  */
 
 export type GbifRecordMode = "georeferenced" | "all";
 
 export const GBIF_RECORD_MODES: readonly GbifRecordMode[] = ["georeferenced", "all"];
 export const DEFAULT_GBIF_RECORD_MODE: GbifRecordMode = "georeferenced";
+
+/**
+ * Record types a georeferenced count keeps, for every kingdom: observations,
+ * machine records (camera traps, sound), material samples (eDNA), the generic
+ * types, and preserved specimens (museum and herbarium material, often the
+ * main record of a rare species). Left out: living specimens (zoos, botanic
+ * gardens: not where the species lives wild), fossils, and material citations
+ * (literature records, often copies of a specimen GBIF already holds).
+ */
+export const GEOREFERENCED_BASIS_OF_RECORD = [
+  "HUMAN_OBSERVATION",
+  "MACHINE_OBSERVATION",
+  "MATERIAL_SAMPLE",
+  "OCCURRENCE",
+  "OBSERVATION",
+  "PRESERVED_SPECIMEN",
+] as const;
 
 /** The URL parameter holding the mode; absent means the default. */
 export const GBIF_RECORDS_PARAM = "records";
@@ -59,11 +78,16 @@ export function gbifRecordsSinceAssessment(s: GbifRecordCounts, mode: GbifRecord
 }
 
 /**
- * The GBIF occurrence-search parameters for a mode. Georeferenced asks for
- * coordinates and no geospatial issue; all records asks for neither.
+ * The GBIF occurrence-search filter for a mode, appended to `params`.
+ * Georeferenced asks for coordinates, no geospatial issue and its record
+ * types; all records asks for nothing.
  */
-export function gbifRecordModeParams(mode: GbifRecordMode): Record<string, string> {
-  return mode === "all" ? {} : { hasCoordinate: "true", hasGeospatialIssue: "false" };
+export function applyGbifRecordMode(params: URLSearchParams, mode: GbifRecordMode): URLSearchParams {
+  if (mode === "all") return params;
+  params.set("hasCoordinate", "true");
+  params.set("hasGeospatialIssue", "false");
+  for (const b of GEOREFERENCED_BASIS_OF_RECORD) params.append("basisOfRecord", b);
+  return params;
 }
 
 /**

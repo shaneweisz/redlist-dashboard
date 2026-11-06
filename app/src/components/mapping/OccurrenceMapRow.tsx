@@ -547,10 +547,9 @@ interface OccurrenceMapRowProps {
  * epoch. Both are off until asked for.
  *
  * The third, preserved specimens, follows the taxon — on for plants and fungi
- * (and the brown algae filed with them), off for animals. It is the same rule
- * `taxonGroupCountsPreservedSpecimens` applies to the dashboard's own GBIF
- * counts, and the viewer opening on a different record set from the count that
- * sent you to it is the confusion worth avoiding: a plant is known mostly from
+ * (and the brown algae filed with them), off for animals. The dashboard's
+ * counts are simpler (every kingdom counts preserved specimens; see
+ * gbif-records.ts): the map applies its own defaults, because a plant is known mostly from
  * collected, preserved material, an animal mostly from observation, and a
  * mammal's herbarium-equivalent museum skins are a small tail of records whose
  * localities are the oldest and vaguest in the set.

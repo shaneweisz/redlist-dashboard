@@ -102,9 +102,9 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 
 A species with no records in a mode reads 0 there. The since-assessment count is NULL only when there is no window: an undated assessment, or one dated after the sync.
 
-> A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**, keeping only the record types its kingdom counts.
+> A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**.
 
-**Record types.** Animals count observations of living organisms (human, machine, material samples and the like), not preserved specimens: a museum skin says the species was there once, not that it is now. Plants, fungi and algae also count preserved specimens, because a herbarium sheet is often the only georeferenced record a species has. The kingdom is the *species'*, not the usage's: some plant synonyms in CoL carry no kingdom, and would otherwise lose their herbarium records.
+**Record types.** *All records* counts every record, of any type: the number gbif.org shows. A *georeferenced* record also has to be of a type that places the species where it lives wild, the same for every kingdom: observations, machine records, material samples, the generic types, and preserved specimens (museum and herbarium material, often the main record of a rare species). Living specimens (zoos, botanic gardens), fossils and material citations (literature records, often copies of a specimen GBIF already holds) are left out of it. Until 2026-11-06 the rule was per kingdom: animals left out preserved specimens, so 16,801 assessed animals showed no records at all. The occurrence map keeps its own per-kingdom defaults.
 
 **Ownership** is what "minus" means. Most assessed species simply own their CoL species and everything under it. The exceptions come from IUCN and CoL drawing species boundaries differently:
 

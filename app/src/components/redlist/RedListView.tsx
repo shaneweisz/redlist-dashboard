@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary from "./TaxaSummary";
 import LiteratureTimeline from "../LiteratureTimeline";
-import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams, taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
+import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode } from "@/lib/gbif-records";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -1069,33 +1069,29 @@ function GbifInfoTooltip({ mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecor
           {mode === "all" ? (
             <>
               <div className="font-medium text-[10px] mb-0.5">All GBIF records:</div>
-              <div className="text-zinc-400">With or without coordinates, including records GBIF flags with a geospatial issue.</div>
+              <div className="text-zinc-400">Every record GBIF holds for the species, of any type, with or without coordinates: the number gbif.org shows.</div>
             </>
           ) : (
             <>
-              <div className="font-medium text-[10px] mb-0.5">Georeferenced GBIF records only:</div>
+              <div className="font-medium text-[10px] mb-0.5">Georeferenced records, the ones a map can use:</div>
               <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
+              <div className="font-medium text-zinc-100 mt-1">Included:</div>
+              <ul className="text-zinc-300 list-disc list-inside">
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MACHINE_OBSERVATION</code> <span className="text-zinc-400">(e.g. camera traps)</span></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_SAMPLE</code> <span className="text-zinc-400">(e.g. eDNA)</span></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">PRESERVED_SPECIMEN</code> <span className="text-zinc-400">(museums, herbaria)</span></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OCCURRENCE</code>, <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OBSERVATION</code></li>
+              </ul>
+              <div className="font-medium text-zinc-100 mt-1">Excluded:</div>
+              <ul className="text-zinc-300 list-disc list-inside">
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">LIVING_SPECIMEN</code> <span className="text-zinc-400">(zoos, botanic gardens)</span></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">FOSSIL_SPECIMEN</code></li>
+                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_CITATION</code> <span className="text-zinc-400">(literature records)</span></li>
+              </ul>
             </>
           )}
           <div className="text-zinc-400 mt-1">New: records dated after the assessment date. % New: New as a share of Total.</div>
-          <div className="font-medium text-zinc-100 mt-1">Included:</div>
-          <ul className="text-zinc-300 list-disc list-inside">
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MACHINE_OBSERVATION</code> <span className="text-zinc-400">(e.g. camera traps)</span></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_SAMPLE</code> <span className="text-zinc-400">(e.g. eDNA)</span></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OCCURRENCE</code></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OBSERVATION</code></li>
-          </ul>
-          <div className="font-medium text-zinc-100 mt-1">Plants &amp; fungi also (not animals):</div>
-          <ul className="text-zinc-300 list-disc list-inside">
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">PRESERVED_SPECIMEN</code> <span className="text-zinc-400">(e.g. herbaria, fungaria)</span></li>
-          </ul>
-          <div className="font-medium text-zinc-100 mt-1">Excluded:</div>
-          <ul className="text-zinc-300 list-disc list-inside">
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_CITATION</code> <span className="text-zinc-400">(may include fossils)</span></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">FOSSIL_SPECIMEN</code></li>
-            <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">LIVING_SPECIMEN</code> <span className="text-zinc-400">(e.g. zoos)</span></li>
-          </ul>
         </div>,
         document.body
       )}
@@ -3622,12 +3618,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Built from the shared module so the links and the queries behind the numbers
   // they sit next to can never name different checklists.
   const GBIF_FILTERS = gbifOccurrenceParams({}, { mode: gbifRecordMode }).toString();
-  // Plants and fungi count preserved specimens and animals do not, so the filter
-  // string follows the species: a herbarium-heavy plant linking to the animal
-  // filter set lands on a search holding a fraction of the number clicked on.
-  const GBIF_FILTERS_WITH_SPECIMENS = gbifOccurrenceParams({}, { includePreservedSpecimens: true, mode: gbifRecordMode }).toString();
-  const gbifFiltersFor = (taxonGroup: string | undefined) =>
-    taxonGroupCountsPreservedSpecimens(taxonGroup) ? GBIF_FILTERS_WITH_SPECIMENS : GBIF_FILTERS;
+  // Every kingdom counts the same record types (gbif-records.ts), so the link
+  // beside a count is the same filter whatever the species.
+  const gbifFiltersFor = (_taxonGroup?: string) => GBIF_FILTERS;
   const isNE = (s: Species) => s.category === "NE";
 
   // GBIF occurrence counts aren't filterable per-country/category/etc. — only show

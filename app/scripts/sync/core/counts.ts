@@ -3,30 +3,27 @@
  *
  * A species' record count is the records on every usage that counts towards
  * it (taxa.species_id: its own, its synonyms', its infraspecifics', its BINs'),
- * leaving out usages a separately assessed species owns, and keeping only the
- * record types the species' kingdom counts: preserved specimens count for
- * plants, fungi and algae (herbarium sheets are their primary records), not for
- * animals (see INCLUDED_BASIS_OF_RECORD in src/lib/gbif.ts).
+ * leaving out usages a separately assessed species owns.
  *
- * Every number the dashboard shows from GBIF is this rule with a different
- * filter: georeferenced or all records, since an assessment date, per country.
+ * All records counts every record, of any type. A georeferenced record has
+ * coordinates, no geospatial issue and a record type that places the species
+ * where it lives wild (GEOREFERENCED_BASIS_OF_RECORD in src/lib/gbif-records.ts),
+ * the same for every kingdom. Every number the dashboard shows from GBIF is
+ * this rule with a different filter: georeferenced or all records, since an
+ * assessment date, per country.
  */
 
-import { INCLUDED_BASIS_OF_RECORD, INCLUDED_BASIS_OF_RECORD_WITH_SPECIMENS } from "../../../src/lib/gbif";
+import { GEOREFERENCED_BASIS_OF_RECORD } from "../../../src/lib/gbif-records";
 
 const list = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(", ");
 
-/**
- * Is this record type counted for a species of this (lowercase CoL) kingdom?
- * An unknown kingdom counts what an animal would, the narrower set.
- */
-export function countedBasisSql(basisCol: string, kingdomCol: string): string {
-  return `(${basisCol} IN (${list(INCLUDED_BASIS_OF_RECORD)})
-    OR (coalesce(${kingdomCol}, 'animalia') <> 'animalia' AND ${basisCol} IN (${list(INCLUDED_BASIS_OF_RECORD_WITH_SPECIMENS)})))`;
+/** Is this aggregate row georeferenced, in the dashboard's sense? */
+export function georeferencedSql(georefCol: string, basisCol: string): string {
+  return `(${georefCol} AND ${basisCol} IN (${list(GEOREFERENCED_BASIS_OF_RECORD)}))`;
 }
 
 export interface CountSources {
-  /** A relation with col_id, species_id, kingdom (taxa.parquet). */
+  /** A relation with col_id and species_id (taxa.parquet). */
   taxa: string;
   /** usage_key, year, georef, basis, n (occurrence_counts.parquet), or with
    *  month and event_date too (occurrence_dates.parquet) when `dated`. */
@@ -43,11 +40,10 @@ export interface CountSources {
  */
 export function usageCountsSql(s: CountSources): string {
   return `
-    SELECT c.usage_key, u.species_id, ${s.dated ? "c.year, c.month, c.event_date" : "c.year"}, c.georef, c.n
+    SELECT c.usage_key, u.species_id, ${s.dated ? "c.year, c.month, c.event_date" : "c.year"},
+           ${georeferencedSql("c.georef", "c.basis")} AS georef, c.n
     FROM ${s.counts} c
-    JOIN ${s.taxa} u ON u.col_id = c.usage_key
-    LEFT JOIN ${s.taxa} sp ON sp.col_id = u.species_id
-    WHERE ${countedBasisSql("c.basis", "coalesce(sp.kingdom, u.kingdom)")}`;
+    JOIN ${s.taxa} u ON u.col_id = c.usage_key`;
 }
 
 /** species_id → georef, all_records. */

@@ -65,11 +65,14 @@ describe("gbifOccurrenceParams", () => {
     expect(GBIF_CHECKLIST_KEY).toBe(COL_XR_CHECKLIST_KEY);
   });
 
-  it("counts preserved specimens only when asked to", () => {
-    expect(gbifOccurrenceParams().getAll("basisOfRecord")).not.toContain("PRESERVED_SPECIMEN");
-    expect(
-      gbifOccurrenceParams({}, { includePreservedSpecimens: true }).getAll("basisOfRecord"),
-    ).toContain("PRESERVED_SPECIMEN");
+  it("filters to georeferenced record types, the same for every kingdom, and not at all for all records", () => {
+    const geo = gbifOccurrenceParams();
+    expect(geo.get("hasCoordinate")).toBe("true");
+    expect(geo.getAll("basisOfRecord")).toContain("PRESERVED_SPECIMEN");
+    expect(geo.getAll("basisOfRecord")).not.toContain("LIVING_SPECIMEN");
+    expect(geo.getAll("basisOfRecord")).not.toContain("FOSSIL_SPECIMEN");
+    const all = gbifOccurrenceParams({}, { mode: "all" });
+    expect([...all.keys()]).toEqual(["checklistKey"]);
   });
 });
 

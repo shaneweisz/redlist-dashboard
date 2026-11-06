@@ -25,7 +25,7 @@
 
 import DERIVED_TAXON_KEYS from "@/config/gbif-taxon-keys.json";
 import { mapTaxonId } from "@/lib/data/taxonomy-constants";
-import { DEFAULT_GBIF_RECORD_MODE, gbifRecordModeParams, type GbifRecordMode } from "@/lib/gbif-records";
+import { DEFAULT_GBIF_RECORD_MODE, applyGbifRecordMode, type GbifRecordMode } from "@/lib/gbif-records";
 
 /** Catalogue of Life Extended Release — gbif.org's default taxonomy since June 2026. */
 export const COL_XR_CHECKLIST_KEY = "7ddf754f-d193-4cc9-b351-99906754a03b";
@@ -46,10 +46,10 @@ export const GBIF_BACKBONE_CHECKLIST_KEY = "d7dddbf4-2cf0-4f39-9b2a-bb099caae36c
 export const GBIF_CHECKLIST_KEY = COL_XR_CHECKLIST_KEY;
 
 /**
- * Occurrence types this dashboard counts for animals: georeferenced records
- * representing an observation of a living organism in the wild. Excludes
- * preserved, fossil and living specimens (herbaria, museums, zoos) and material
- * citations.
+ * The occurrence viewer's default record types for animals (OccurrenceMapRow):
+ * an observation of a living organism in the wild. Excludes preserved, fossil
+ * and living specimens (herbaria, museums, zoos) and material citations. The
+ * counts no longer use this per-kingdom rule: see gbif-records.ts.
  */
 export const INCLUDED_BASIS_OF_RECORD = [
   "HUMAN_OBSERVATION",
@@ -70,9 +70,8 @@ export const INCLUDED_BASIS_OF_RECORD = [
  * herbarium sheets. That reads as "almost nothing is known about this species"
  * when what is known simply sits in a different record type.
  *
- * The map's basis-of-record checkboxes have defaulted preserved specimens ON for
- * plants and fungi since they were added; this applies the same rule to the
- * counts behind the map, so the two describe the same records.
+ * The map's basis-of-record checkboxes default preserved specimens ON for
+ * plants and fungi for that reason.
  */
 export const INCLUDED_BASIS_OF_RECORD_WITH_SPECIMENS = [
   ...INCLUDED_BASIS_OF_RECORD,
@@ -175,28 +174,17 @@ export function taxonGroupCountsPreservedSpecimens(taxonGroup: string | undefine
 }
 
 /**
- * Base parameters shared by every GBIF occurrence query and outbound link, so a
- * count shown here and the search a user lands on describe the same records.
- *
- * `mode` is the record mode the count beside it uses (src/lib/gbif-records.ts).
- * `includePreservedSpecimens` follows the taxon: pass it wherever the caller
- * knows which group the query is about, or the link next to a plant's count will
- * land on a search that excludes most of what the count included.
+ * Base parameters shared by every GBIF count query and the links beside the
+ * counts, so a number shown here and the search a user lands on describe the
+ * same records: the record mode's filter (src/lib/gbif-records.ts), the same
+ * for every kingdom. The maps keep their own record-type defaults
+ * (OccurrenceMapRow's defaultCheckedTypes).
  */
 export function gbifOccurrenceParams(
   extra: Record<string, string> = {},
-  { includePreservedSpecimens = false, mode = DEFAULT_GBIF_RECORD_MODE }: { includePreservedSpecimens?: boolean; mode?: GbifRecordMode } = {},
+  { mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecordMode } = {},
 ): URLSearchParams {
-  const params = new URLSearchParams({
-    checklistKey: GBIF_CHECKLIST_KEY,
-    // Georeferenced: coordinates and no geospatial issue. All records: neither.
-    ...gbifRecordModeParams(mode),
-    ...extra,
-  });
-  includedBasisOfRecord(includePreservedSpecimens).forEach((b) =>
-    params.append("basisOfRecord", b),
-  );
-  return params;
+  return applyGbifRecordMode(new URLSearchParams({ checklistKey: GBIF_CHECKLIST_KEY, ...extra }), mode);
 }
 
 /**
