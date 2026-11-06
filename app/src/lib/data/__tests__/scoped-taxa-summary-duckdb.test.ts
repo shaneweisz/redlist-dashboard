@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countryWhere, countriesWhere, systemsWhere, scopeWhere, outdatedSql, claimEligibleSiblingsSql } from "@/lib/data/scoped-taxa-summary-duckdb";
+import { countryWhere, countriesWhere, scopeWhere, outdatedSql, claimEligibleSiblingsSql } from "@/lib/data/scoped-taxa-summary-duckdb";
 import type { TaxonomyNode } from "@/config/taxonomy-tree";
 
 // Unit tests for the pure SQL-fragment builders in scoped-taxa-summary-duckdb.ts.
@@ -92,60 +92,13 @@ describe("claimEligibleSiblingsSql", () => {
   });
 });
 
-describe("systemsWhere", () => {
-  it("checks exact list membership of the systems column", () => {
-    expect(systemsWhere(["Marine"])).toBe(
-      "list_contains(string_split(coalesce(systems, ''), ';'), 'Marine')"
-    );
-  });
-
-  it("ORs multiple realms together — a Freshwater;Marine species counts once, not twice", () => {
-    const sql = systemsWhere(["Freshwater", "Marine"]);
-    expect(sql).toBe(`${systemsWhere(["Freshwater"])} OR ${systemsWhere(["Marine"])}`);
-  });
-
-  it("returns a predicate that matches nothing for an empty list", () => {
-    expect(systemsWhere([])).toBe("FALSE");
-  });
-
-  // Realm is a closed set of three known values, unlike country codes — an
-  // unrecognized one is dropped rather than escaped into the query, so it can
-  // never reach DuckDB as a literal at all.
-  it("drops unrecognized realms instead of quoting them into the SQL", () => {
-    expect(systemsWhere(["Marine", "Lunar"])).toBe(systemsWhere(["Marine"]));
-    expect(systemsWhere(["'; DROP TABLE x --"])).toBe("FALSE");
-  });
-
-  it("is case-sensitive — the data spells realms exactly as the Red List does", () => {
-    expect(systemsWhere(["marine"])).toBe("FALSE");
-  });
-});
-
 describe("scopeWhere", () => {
-  it("returns null when neither dimension is scoped, signalling 'use the precomputed global artifacts'", () => {
-    expect(scopeWhere([], [])).toBeNull();
+  it("returns null when nothing is scoped, signalling 'use the precomputed global artifacts'", () => {
+    expect(scopeWhere([])).toBeNull();
   });
 
-  it("returns just the country clause when only countries are scoped", () => {
-    expect(scopeWhere(["FR"], [])).toBe(`(${countriesWhere(["FR"])})`);
-  });
-
-  it("returns just the realm clause when only realms are scoped", () => {
-    expect(scopeWhere([], ["Marine"])).toBe(`(${systemsWhere(["Marine"])})`);
-  });
-
-  // AND, not OR: marine species IN Indonesia, not marine species plus Indonesian ones.
-  it("ANDs the two dimensions so they intersect rather than union", () => {
-    expect(scopeWhere(["ID"], ["Marine"])).toBe(
-      `(${countriesWhere(["ID"])}) AND (${systemsWhere(["Marine"])})`
-    );
-  });
-
-  // Each dimension stays internally OR'd inside its own parens — without them the
-  // AND would bind to the last country only (a OR b AND c), silently narrowing.
-  it("parenthesizes each dimension's own OR list before ANDing them", () => {
-    const sql = scopeWhere(["FR", "DE"], ["Marine", "Freshwater"])!;
-    expect(sql.startsWith("(")).toBe(true);
-    expect(sql).toContain(") AND (");
+  it("wraps the countries' OR list in parens so it composes safely with other predicates", () => {
+    expect(scopeWhere(["FR"])).toBe(`(${countriesWhere(["FR"])})`);
+    expect(scopeWhere(["FR", "DE"])).toBe(`(${countriesWhere(["FR", "DE"])})`);
   });
 });

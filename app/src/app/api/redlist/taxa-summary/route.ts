@@ -82,21 +82,19 @@ function mergeByCategory(
 
 export async function GET(request: NextRequest) {
   try {
-    // Scoped rows (by country and/or realm) carry zeroed estimatedDescribed/gbif*/col*
+    // Scoped rows (by country) carry zeroed estimatedDescribed/gbif*/col*
     // fields — neither dimension exists in that data, see scoped-taxa-summary-duckdb.ts's
     // doc comment. `scoped` tells the client to hide those columns outright
     // rather than render a misleading 0 — TaxaSummary.tsx must gate on this flag,
     // not on a field being present/absent, since every field is still populated.
     // Both params take one or more comma-separated values — a single country, a
     // whole region's worth, or an arbitrary multi-select all arrive the same way
-    // here — and the two compose (?country=ID&realm=Marine is marine species in
-    // Indonesia, not the union of the two).
+    // here.
     const countries = request.nextUrl.searchParams.get("country")?.split(",").map((c) => c.trim()).filter(Boolean) ?? [];
-    const realms = request.nextUrl.searchParams.get("realm")?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];
     // Which GBIF records the flat gbif* fields count (src/lib/gbif-records.ts);
     // gbifByMode carries both, which is what the dashboard reads.
     const mode = parseGbifRecordMode(request.nextUrl.searchParams.get(GBIF_RECORDS_PARAM));
-    const where = scopeWhere(countries, realms);
+    const where = scopeWhere(countries);
     const data = where ? await getScopedTaxaSummary(where) : getTaxaSummary();
     const scoped = where !== null;
     const rowsByGroup = new Map(

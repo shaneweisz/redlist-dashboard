@@ -219,7 +219,7 @@ Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/s
 | | `col-revisions.json`, the three `col-*` parquets | the CoL-differences card: each species' flag, and the precomputed tables its breakdowns join |
 | | `vernacular-names.json` | common names for the tree's class, order, family and genus labels |
 | `search/` | `name-index.parquet`, `rank-index.parquet`, `synonym-index.parquet` | the search bar |
-| `summaries/` | `taxa-summary.json`, the two children summaries, `country-stats.json`, `realm-stats.json` | per-group and per-place totals |
+| `summaries/` | `taxa-summary.json`, the two children summaries, `country-stats.json` | per-group and per-country totals |
 | | `sync.json` | every input version and check result |
 | | `sync.log` | everything the run printed: each step, its timings and counts, the data tests and the comparison summary. Written as the sync runs, so a failed run leaves one in `build/data/` too |
 

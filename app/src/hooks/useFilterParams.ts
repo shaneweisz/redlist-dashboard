@@ -21,29 +21,28 @@ const setEqualsArray = (a: Set<string>, b: string[]): boolean => a.size === b.le
 
 export type ViewMode = "reassessments" | "new-assessments";
 
-// Flat-table layout ("Table 1a mode" / "SSC groups mode") plus the two
-// landing-page views that scope the taxa tree to a slice of species rather than
-// re-arranging it: "country" and "realm" — URL-synced so they survive
-// reload/share and so the browser back button can return to them after drilling
-// into a group (see navigateToTaxonSubgroup below), a country (see
-// enterCountryDrilldown) or a realm (enterRealmDrilldown).
-export type LayoutMode = "table1a" | "ssc" | "country" | "realm" | null;
+// Flat-table layout ("Table 1a mode" / "SSC groups mode") plus the landing-page
+// view that scopes the taxa tree to a slice of species rather than re-arranging
+// it: "country" — URL-synced so they survive reload/share and so the browser
+// back button can return to them after drilling into a group (see
+// navigateToTaxonSubgroup below) or a country (see enterCountryDrilldown).
+export type LayoutMode = "table1a" | "ssc" | "country" | null;
 
 // Every layout mode that isn't the default taxonomic table. Kept as one list so
 // adding a mode doesn't mean remembering to widen two separate parse sites
 // (layout= and origin=) that would otherwise silently drop the new value.
-const LAYOUT_MODES = ["table1a", "ssc", "country", "realm"] as const;
+const LAYOUT_MODES = ["table1a", "ssc", "country"] as const;
 
 function parseLayoutMode(value: string | null): LayoutMode {
   return value && (LAYOUT_MODES as readonly string[]).includes(value) ? (value as LayoutMode) : null;
 }
 
-// The layout modes that scope the taxa tree to a subset of species (as opposed
-// to re-arranging the whole tree, like Table 1a/SSC). Both land on a chooser
-// first and drill into the same taxa table once a selection is made, so they
-// share TaxaSummary's scoped-fetch/hidden-column handling.
-export function isScopeLayout(mode: LayoutMode): mode is "country" | "realm" {
-  return mode === "country" || mode === "realm";
+// The layout mode that scopes the taxa tree to a subset of species (as opposed
+// to re-arranging the whole tree, like Table 1a/SSC): it lands on a chooser
+// first and drills into the taxa table once a selection is made, with
+// TaxaSummary's scoped-fetch/hidden-column handling.
+export function isScopeLayout(mode: LayoutMode): mode is "country" {
+  return mode === "country";
 }
 
 /**
@@ -238,7 +237,7 @@ export function parseParams(search: string) {
     // Remembers the layout mode a taxon drill-down exited FROM (see
     // exitLayoutModeForTaxon) — survives even while layoutMode itself is
     // null/something-else, so "All Species" and the site logo's Home button
-    // can jump back to Country/Realm View's landing page rather than the generic
+    // can jump back to Country View's landing page rather than the generic
     // default, and so that memory itself survives a reload/shared link
     // (page.tsx's Home handler reads this directly off the URL, outside this
     // hook entirely). Cleared wherever a new layoutMode is deliberately set
@@ -769,14 +768,14 @@ export function useFilterParams() {
     [syncUrl]
   );
 
-  // Exits a scope view (Country or Realm) to the full charts+species-table view
+  // Exits a scope view (Country) to the full charts+species-table view
   // when a taxon's clicked from its scoped landing table (see RedListView's
   // handleToggleTaxon) — atomic (one setState + one history push), same
   // reasoning as navigateToTaxonSubgroup above: without this, layoutMode and
   // taxa/subgroups would each get their own history entry, so a single
   // "back" press would land on some half-updated intermediate (e.g.
   // layoutMode cleared but taxa not yet set) instead of cleanly restoring
-  // the landing page. The scope itself (countries/systems) is deliberately
+  // the landing page. The scope itself (countries) is deliberately
   // left untouched — the taxon drill-down stays scoped to whatever was
   // selected. Also records originLayout as the mode being left — layoutMode
   // itself is about to go null, so without this nothing durable remembers
@@ -841,32 +840,6 @@ export function useFilterParams() {
       setState(prev => {
         const nextCountries = typeof updater === "function" ? updater(prev.countries) : updater;
         const next = { ...prev, countries: nextCountries, taxa: new Set<string>(), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
-        queueMicrotask(() => syncUrl(next, true));
-        return next;
-      });
-    },
-    [syncUrl]
-  );
-
-  // Realm View's equivalent of enterCountryDrilldown — picks realm(s) from the
-  // Realm view landing cards, atomically with clearing taxa/subgroups, and needs
-  // the same fromPopstateRef escape hatch for the same reason (RedListView's
-  // generic "reset all other filters when taxa selection changes" effect would
-  // otherwise fire right after this non-empty→empty taxa change and clear the
-  // very `systems` this call just set). Deliberately leaves layoutMode untouched
-  // (stays "realm"): the cards and the scoped taxa table show together until an
-  // actual taxon row is clicked.
-  //
-  // Writes the same `systems` filter the Realm buttons under More Filters set,
-  // rather than a view-private field — so leaving Realm View keeps the realm
-  // narrowing, exactly as leaving Country View keeps the country one, and a
-  // shared ?systems=Marine link means the same thing however it was built.
-  const enterRealmDrilldown = useCallback(
-    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      fromPopstateRef.current = true;
-      setState(prev => {
-        const nextSystems = typeof updater === "function" ? updater(prev.systems) : updater;
-        const next = { ...prev, systems: nextSystems, taxa: new Set<string>(), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
         queueMicrotask(() => syncUrl(next, true));
         return next;
       });
@@ -1407,7 +1380,6 @@ export function useFilterParams() {
     setLayoutMode,
     navigateToTaxonSubgroup,
     exitLayoutModeForTaxon,
-    enterRealmDrilldown,
     returnToLayoutMode,
     enterCountryDrilldown,
     setSelectedTaxa,

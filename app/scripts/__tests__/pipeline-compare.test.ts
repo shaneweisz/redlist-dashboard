@@ -59,8 +59,8 @@ describe("diffFacts", () => {
   it("notes a kind only one side has", async () => {
     const c = await conn();
     await c.run(`CREATE SCHEMA b; CREATE SCHEMA a;
-      CREATE TABLE b.realms AS SELECT 'Marine' AS key, 1 AS species;`);
-    expect(await diffFacts(c)).toEqual([{ kind: "realms", field: "*", side: "baseline only" }]);
+      CREATE TABLE b.countries AS SELECT 'FR' AS key, 1 AS species;`);
+    expect(await diffFacts(c)).toEqual([{ kind: "countries", field: "*", side: "baseline only" }]);
   });
 });
 

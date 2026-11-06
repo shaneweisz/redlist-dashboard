@@ -44,7 +44,7 @@ export const REASONS: ReasonRule[] = [
   {
     code: "outdated_as_of_a_later_sync_date",
     description: "'Outdated' is as of the sync date, and this sync is later than the baseline's, so more species have crossed the 10-year line.",
-    kinds: ["groups", "nodes", "countries", "realms"], fields: ["outdated"],
+    kinds: ["groups", "nodes", "countries"], fields: ["outdated"],
     where: `d.delta > 0`,
   },
 ];

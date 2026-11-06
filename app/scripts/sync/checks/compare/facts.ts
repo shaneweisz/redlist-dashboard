@@ -12,7 +12,6 @@
  *   groups        one row per Table 1a group, from taxa-summary.json
  *   nodes         one row per tree node summary (key: parentId/id)
  *   countries     one row per country, from country-stats.json
- *   realms        one row per realm, from realm-stats.json
  *   col_revisions one row per flagged species, from col-revisions.json
  */
 
@@ -22,7 +21,7 @@ import * as path from "path";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { syncPath } from "../../../../src/lib/data/sync-layout";
 
-export const FACT_KINDS = ["assessed", "ne", "groups", "nodes", "countries", "realms", "col_revisions"] as const;
+export const FACT_KINDS = ["assessed", "ne", "groups", "nodes", "countries", "col_revisions"] as const;
 export type FactKind = (typeof FACT_KINDS)[number];
 
 /** Red List categories as they appear in summary maps; missing ones read as 0. */
@@ -112,13 +111,6 @@ async function loadSummaryFacts(conn: DuckDBConnection, schema: string, dir: str
 
   const countries = readJson<Record<string, { species: number; outdated: number }>>(dir, "country-stats.json") ?? {};
   await loadRows(conn, `${schema}.countries`, Object.entries(countries).map(([cc, v]) => ({ key: cc, ...v })));
-
-  const realms = readJson<{ realms: { realm: string; species: number; outdated: number }[]; totalAssessed: number }>(
-    dir, "realm-stats.json");
-  await loadRows(conn, `${schema}.realms`, realms
-    ? [...realms.realms.map(({ realm, ...v }) => ({ key: realm, ...v })),
-       { key: "(all)", species: realms.totalAssessed, outdated: null }]
-    : []);
 
   const revisions = readJson<{ species: Record<string, unknown> }>(dir, "col-revisions.json");
   await loadRows(conn, `${schema}.col_revisions`, Object.entries(revisions?.species ?? {})

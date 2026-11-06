@@ -150,11 +150,6 @@ const nextConfig: NextConfig = {
     "/api/redlist/taxa-subgroups": DUCKDB_TRACE,
     // Reads assessed.parquet + assessments.parquet over R2 (getCreditSource).
     "/api/redlist/credit-candidates": DUCKDB_TRACE,
-    // Realm view's landing cards — one live GROUP BY over assessed.parquet
-    // (getRealmStats), so the same native addon and the same two entries as the
-    // pair above. Unlike /api/redlist/country-stats next to it, this is NOT a
-    // precomputed JSON read, so it does need the DuckDB trace.
-    "/api/redlist/realm-stats": DUCKDB_TRACE,
     // "What else is assessed near here" joins a GBIF radius facet against
     // assessed.parquet in R2 (getAssessedByGbifKeys) — the same DuckDB-over-R2
     // query as every route above, so it needs the dlopen'd .so and the sync
@@ -209,13 +204,6 @@ const nextConfig: NextConfig = {
     // gated on assessed.parquet NOT existing locally.
     "/api/redlist/taxa-summary": ONLY_SUMMARIES,
     "/api/redlist/taxa-subgroups": ONLY_SUMMARIES,
-    // Reads the small precomputed realm-stats.json, falling back to a live DuckDB
-    // query over assessed.parquet in R2 when a sync predates that file — so it
-    // keeps the DuckDB trace above, and the same CRITICAL parquet exclusion as
-    // /api/redlist/species (USE_R2 is gated on assessed.parquet NOT existing
-    // locally). The two children-summaries files it never opens are pruned, same
-    // as /api/redlist/country-stats.
-    "/api/redlist/realm-stats": ONLY_SMALL_SUMMARIES,
     // Reads only the small precomputed country-stats.json (no DuckDB — this is
     // a static aggregate, not a live query, see species-store.ts's getCountryStats).
     "/api/redlist/country-stats": ONLY_SMALL_SUMMARIES,

@@ -33,8 +33,6 @@ import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
 import { useFilterParams, isScopeLayout, type SortField } from "@/hooks/useFilterParams";
-import RealmBars from "@/components/redlist/RealmBars";
-import type { RealmStatsResponse } from "@/lib/data/scoped-taxa-summary-duckdb";
 import { HABITAT_CATEGORIES } from "@/lib/habitat-classification";
 import { parseHabitatEntries, matchesHabitatFilter as matchesHabitatCriteria, coarseKnownCategories, isRestrictiveSelection, ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { type RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
@@ -1173,7 +1171,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     originLayout,
     navigateToTaxonSubgroup,
     exitLayoutModeForTaxon,
-    enterRealmDrilldown,
     returnToLayoutMode,
     enterCountryDrilldown,
     selectedTaxa, setSelectedTaxa,
@@ -1238,12 +1235,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     []
   );
 
-  // Both scope views need data Not Evaluated species don't have: country needs a
-  // per-country location (no assessment means no assessment_locations row) and
-  // realm needs the assessment's own `systems` field — see the matching
-  // disabled-option guards in TaxaSummary's layoutModeSelect. Exit back to the
-  // taxonomic default if New Assessments is switched on while already in one of
-  // them, rather than leaving an unreachable-but-still-active mode selected.
+  // Country view needs data Not Evaluated species don't have: a per-country
+  // location (no assessment means no assessment_locations row) — see the
+  // matching disabled-option guard in TaxaSummary's layoutModeSelect. Exit back
+  // to the taxonomic default if New Assessments is switched on while in it, rather than leaving an unreachable-but-still-active mode selected.
   useEffect(() => {
     if (isNewAssessments && isScopeLayout(layoutMode)) setLayoutMode(null);
   }, [isNewAssessments, layoutMode, setLayoutMode]);
@@ -1342,10 +1337,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const isMulti = event.metaKey || event.ctrlKey;
 
     // Clicking a specific taxon row while browsing a scoped bare summary table
-    // (Country or Realm view, a selection made, no taxon picked yet — see
-    // TaxaSummary's countryMode/realmMode rendering) exits to the full charts+
-    // species-table view, still scoped the same way (selectedCountries /
-    // selectedSystems untouched). Atomic (one history push) via
+    // (Country view, a selection made, no taxon picked yet — see TaxaSummary's
+    // countryMode rendering) exits to the full charts+species-table view, still
+    // scoped the same way (selectedCountries untouched). Atomic (one history push) via
     // exitLayoutModeForTaxon, so a single "back" press cleanly restores that view's landing page
     // instead of layoutMode and taxa unwinding as separate history entries.
     // The "all" row and multi-select (ctrl/cmd-click) cases fall through to
@@ -1364,14 +1358,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxonId === "all") {
       if (selectedTaxa.size > 0 || selectedSubgroups.size > 0) {
         if (isScopeLayout(originLayout)) {
-          // Came from Country or Realm View's landing page via a taxon drill-down
+          // Came from Country View's landing page via a taxon drill-down
           // (exitLayoutModeForTaxon) — return there instead of the generic
           // default view. See originLayout's own doc in useFilterParams.ts.
           // fromPopstateRef first: this taxa non-empty→empty transition is
           // part of one atomic, fully-specified navigation (countries stays
           // as-is), not a generic "taxon deselected" — without the ref, the
           // "reset filters on taxa change" effect below would immediately
-          // clear the very countries/realms this navigation means to keep (see
+          // clear the very countries this navigation means to keep (see
           // its own comment on enterCountryDrilldown for the same escape hatch).
           fromPopstateRef.current = true;
           returnToLayoutMode(originLayout);
@@ -3661,13 +3655,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // special-case region vs. multi-select here.
   const countryScope = selectedCountries.size > 0 ? [...selectedCountries] : null;
 
-  // The realm counterpart, on exactly the same terms: realms selected anywhere
-  // (the Realm buttons under More Filters as much as the Realm view's own cards)
-  // scope TaxaSummary's fetches while that view is open. It reads the ordinary
-  // `systems` filter rather than anything view-private, so the two entry points
-  // can't disagree about what's selected.
-  const realmScope = selectedSystems.size > 0 ? [...selectedSystems] : null;
-
   // Country view's own map click select — click-only (no hover preview: the
   // table only appears once a country is actually locked in, so scanning the
   // map with the mouse never itself changes what's shown below it). A plain
@@ -3733,58 +3720,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       })
       .catch(() => {});
   }, [layoutMode, countryLandingStats]);
-
-  // Realm view's landing chart — three numbers plus their denominator from one
-  // live GROUP BY (/api/redlist/realm-stats), fetched once per session on
-  // entering the view. Same reasoning as countryLandingStats above: aggregating
-  // these client-side would mean downloading the whole assessed-species dataset
-  // for three totals.
-  const [realmLandingStats, setRealmLandingStats] = useState<RealmStatsResponse | null>(null);
-  useEffect(() => {
-    if (layoutMode !== "realm" || realmLandingStats) return;
-    fetch("/api/redlist/realm-stats")
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (data?.realms) setRealmLandingStats({ realms: data.realms, totalAssessed: data.totalAssessed ?? 0 }); })
-      .catch(() => {});
-  }, [layoutMode, realmLandingStats]);
-
-  // Realm card click — the same gesture the country map uses: a plain click
-  // REPLACES the selection with just that realm (clicking the sole-selected one
-  // again clears back to the unscoped landing state), ctrl/cmd-click toggles it
-  // in/out of a multi-select. Routed through enterRealmDrilldown so the realm
-  // change stays atomic with clearing taxa/subgroups (see its own comment).
-  const handleRealmDrilldown = useCallback(
-    (realm: string, event: React.MouseEvent) => {
-      const isMultiSelect = event.metaKey || event.ctrlKey;
-      enterRealmDrilldown(prev => {
-        if (isMultiSelect) {
-          const next = new Set(prev);
-          if (next.has(realm)) next.delete(realm);
-          else next.add(realm);
-          return next;
-        }
-        if (prev.size === 1 && prev.has(realm)) return new Set<string>();
-        return new Set([realm]);
-      });
-    },
-    [enterRealmDrilldown]
-  );
-
-  // Placeholder sized like the loaded chart (not a bare spinner) so swapping in
-  // the real bars doesn't shift the taxa table below it — same reasoning as
-  // countryModeContent's own placeholder.
-  const realmModeContent = realmLandingStats ? (
-    <RealmBars
-      realms={realmLandingStats.realms}
-      totalAssessed={realmLandingStats.totalAssessed}
-      selected={selectedSystems}
-      onSelect={handleRealmDrilldown}
-    />
-  ) : (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 h-[164px] flex items-center justify-center">
-      <Spinner className="h-6 w-6" />
-    </div>
-  );
 
   // Country view landing page content — a promoted WorldMap (its own Map/List
   // toggle applies here too), passed into TaxaSummary rather than duplicating a
@@ -4731,8 +4666,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryModeContent={countryModeContent}
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
-        realmModeContent={realmModeContent}
-        realmScope={realmScope}
         onSelectedRow={setSelectedRow}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
@@ -4905,9 +4838,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           Hidden in the scope views too: TaxaSummary's own countryModeContent (the
           promoted WorldMap) is the entire page in country mode, and selectedTaxa is
           only "all" in that mode as a side effect of loading species for the map's own
-          stats (see setLayoutMode), not a real drill-down into All Species. Realm
-          mode clears taxa on entry for the same reason, so this only bites on a
-          shared ?layout=realm&taxa=… link. */}
+          stats (see setLayoutMode), not a real drill-down into All Species. */}
       {selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (
       // The drill-down prompt is about not being able to list a whole giant taxon — it
       // must not swallow a specific species the user searched for, which is already in

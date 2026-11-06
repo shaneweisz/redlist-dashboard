@@ -27,7 +27,6 @@ const TAXA_SUMMARY_PATH = path.join(DATA_DIR, syncPath("taxa-summary.json"));
 const TABLE1A_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, syncPath("table1a-children-summaries.json"));
 const SSC_GROUP_CHILDREN_SUMMARIES_PATH = path.join(DATA_DIR, syncPath("ssc-group-children-summaries.json"));
 const COUNTRY_STATS_PATH = path.join(DATA_DIR, syncPath("country-stats.json"));
-const REALM_STATS_PATH = path.join(DATA_DIR, syncPath("realm-stats.json"));
 const COL_REVISIONS_PATH = path.join(DATA_DIR, syncPath("col-revisions.json"));
 
 // =============================================================================
@@ -150,26 +149,6 @@ export function getCountryStats(): Record<string, { species: number; outdated: n
   return countryStatsCache;
 }
 
-/**
- * Per-realm totals for the Realm view's landing chart, precomputed by
- * build-taxa-summary.ts (same pass, same reasoning as getCountryStats above).
- *
- * Returns null when the file is absent — a sync predating that pass has no
- * realm-stats.json in it, and the route falls back to computing the same three
- * numbers live rather than 500ing. Delete this fallback once no reachable sync
- * predates the pass.
- */
-let realmStatsCache: { realms: { realm: string; species: number; outdated: number }[]; totalAssessed: number } | null | undefined;
-export function getPrecomputedRealmStats() {
-  if (realmStatsCache === undefined) {
-    try {
-      realmStatsCache = JSON.parse(fs.readFileSync(REALM_STATS_PATH, "utf-8"));
-    } catch {
-      realmStatsCache = null;
-    }
-  }
-  return realmStatsCache;
-}
 
 /**
  * sis_taxon_id → the taxonomic-difference flag, for the ~6% of

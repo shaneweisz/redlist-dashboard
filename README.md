@@ -74,9 +74,6 @@ From a record, a right-click anywhere on the occurrence map, or the locate contr
 ### Narrative search
 A view of its own that searches what the assessors actually wrote — all 175,910 current global assessments, ~470 MB of prose — over a purpose-built term index. Published once per Red List release under `narratives/<release>/` in the `dashboard-data` bucket rather than once per monthly sync, since the prose only changes when the Red List publishes.
 
-### Realm view
-A three-bar Terrestrial / Freshwater / Marine chart over the same taxa table Country view scopes, so a realm narrows the tree in place. It writes the ordinary `systems` filter, so the narrowing survives leaving the view and composes with a country (`?country=ID&realm=Marine` is marine species *in* Indonesia). Realm is recorded on the assessment, so species not yet assessed have no realm even in principle — the described-species and observation columns are hidden here for that reason.
-
 ### Range maps and Area of Habitat
 IUCN range maps and Area of Habitat (AOH) rasters can be overlaid on the species occurrence map, served from the `dashboard-maps` R2 bucket via `/api/species/[key]/range-map` and `/api/species/[key]/aoh`. Both are **gated to `admin` accounts** — the routes return 403 otherwise. Rasters are uploaded out of band with `scripts/maps/upload-range-maps.ts` and `scripts/maps/upload-aoh-maps.ts`.
 

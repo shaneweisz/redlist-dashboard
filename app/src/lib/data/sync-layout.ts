@@ -32,7 +32,7 @@ export const SYNC_LAYOUT = {
   search: ["name-index.parquet", "rank-index.parquet", "synonym-index.parquet"],
   summaries: [
     "taxa-summary.json", "table1a-children-summaries.json", "ssc-group-children-summaries.json",
-    "country-stats.json", "realm-stats.json",
+    "country-stats.json",
   ],
   "": ["sync.json", "sync.log"],
 } as const;
