@@ -71,6 +71,23 @@ export interface ColProvenance {
 const sectorToSource = new Map<number, number | null>();
 const sourceMeta = new Map<number, { alias?: string; title?: string }>();
 
+/**
+ * Source links CoL still hands out that no longer resolve, so "Original record"
+ * would open an error page. World Plants (worldplants.de, the source of most CoL
+ * plant records) redesigned its site and dropped per-species URLs: every
+ * `?deeplink=Genus-species` link CoL carries now 404s, and the new site has no
+ * replacement to rewrite it to (checked 2026-11-06). The source name still
+ * shows, so the reader knows where to look.
+ */
+function isDeadSourceLink(link: string): boolean {
+  try {
+    const url = new URL(link);
+    return /(^|\.)worldplants\.de$/i.test(url.hostname) && url.searchParams.has("deeplink");
+  } catch {
+    return true;
+  }
+}
+
 async function getJson(path: string): Promise<Record<string, unknown> | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -97,7 +114,7 @@ export async function GET(request: NextRequest) {
 
   const out: ColProvenance = {};
   if (typeof taxon.scrutinizer === "string") out.scrutinizer = taxon.scrutinizer;
-  if (typeof taxon.link === "string") out.link = taxon.link;
+  if (typeof taxon.link === "string" && !isDeadSourceLink(taxon.link)) out.link = taxon.link;
 
   const sectorKey = typeof taxon.sectorKey === "number" ? taxon.sectorKey : null;
   if (sectorKey != null) {

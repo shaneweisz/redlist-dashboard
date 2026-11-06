@@ -119,6 +119,18 @@ describe("/api/col/provenance", () => {
     expect(body.sourceTitle).toBe("MolluscaBase");
   });
 
+  it("drops a World Plants deeplink, which 404s since that site's redesign", async () => {
+    // CoL still carries ?deeplink= for every World Plants record (Aria
+    // croceocarpa among them), and the new site has no per-species URL to
+    // rewrite it to. The source name is kept.
+    const worldPlants = async (u: string) =>
+      u.includes("/sector/") ? json(SECTOR) : u.includes("/source/") ? json({ ...SOURCE, alias: "WP", title: "World Plants" })
+        : json(taxon({ link: "http://www.worldplants.de/?deeplink=Aria-croceocarpa" }));
+    const { body } = await callRoute(`${URL_BASE}?colId=V5C4M`, worldPlants);
+    expect(body).not.toHaveProperty("link");
+    expect(body.sourceTitle).toBe("World Plants");
+  });
+
   it("survives a taxon with no sector to resolve", async () => {
     const noSector = async () => json(taxon({ sectorKey: undefined }));
     const { body, calls } = await callRoute(`${URL_BASE}?colId=7FDLW`, noSector);

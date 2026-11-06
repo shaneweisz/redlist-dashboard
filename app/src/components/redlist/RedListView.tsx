@@ -804,10 +804,20 @@ function prefetchColProvenance(colId: string): Promise<void> {
 
 /**
  * Where CoL's record came from — scrutiny, source dataset, and the record on the
- * source's own site. Reads the cache only: whatever `prepare` managed to fetch
- * before the panel opened is what shows, and nothing arrives later to reflow it.
+ * source's own site. Usually `prepare` has already filled the cache before the
+ * panel opened. When the lookup outran PREPARE_MAX_WAIT_MS (a cold API route or
+ * a slow ChecklistBank), the panel opens without it and this block fills in
+ * once the fetch lands: a late reflow beats the source never appearing until
+ * the second hover, which is what reading the cache alone did.
  */
 function ColProvenanceBlock({ colId }: { colId: string }) {
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    if (colProvenanceCache.has(colId)) return;
+    let live = true;
+    void prefetchColProvenance(colId).then(() => { if (live) rerender((n) => n + 1); });
+    return () => { live = false; };
+  }, [colId]);
   const data = colProvenanceCache.get(colId);
   if (!data) return null;
   const source = [data.sourceAlias, data.sourceTitle].filter(Boolean).join(": ");
@@ -2033,10 +2043,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     (s: Species): boolean => matchesRevisionFilter(s.col_revision, colMatch, selectedColReasons),
     [colMatch, selectedColReasons],
   );
-
-  // Is either half of that filter active? The ⚑ marker on a species row keys off
-  // this — see the row itself for why the flag is opt-in rather than always on.
-  const colFilterActive = colMatch != null || selectedColReasons.size > 0;
 
   // Consolidates all 5 habitat-related filters into one predicate (rather than 5
   // separate inline checks repeated at every filter site) since major/resident both
@@ -6384,17 +6390,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               "give me all of these" case. A species can carry
                               both signals, hence a list of sentences.
 
-                              Shown only while that card is actually filtering
-                              (colFilterActive). The flag answers a question the
-                              reader has to have asked — "which of these differ
-                              from CoL, and how?" — and on the unfiltered table
-                              it was answering it unprompted, putting a caveat
-                              about a second checklist beside names in a list
-                              that is otherwise about assessments. Once a
-                              flagged/clean or reason filter is on, the marker
-                              earns its place: it says which signal each row
-                              matched on, which is exactly what was asked. */}
-                          {colFilterActive && isFlagged(s.col_revision) && (
+                              Shown on every flagged row, whether or not that
+                              card is filtering: the difference is a property
+                              of the species, so a reader browsing the
+                              unfiltered table sees it too. */}
+                          {isFlagged(s.col_revision) && (
                             <SelectableHoverTooltip
                               content={<RevisionTooltipContent flag={s.col_revision!} name={s.scientific_name} category={s.category} />}
                               prepare={s.col_revision!.colId ? () => prefetchColProvenance(s.col_revision!.colId!) : undefined}
