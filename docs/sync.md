@@ -70,7 +70,7 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 | `taxa` | CoL usage (8.0M) | `build-taxa.ts` |
 | `assessments` | global assessment of a current species (all years) | `build-assessments.ts` |
 | `occurrence_counts` | usage × year × georeferenced × record type, with a count | `build-occurrences.ts` |
-| `occurrence_days` | usage × day × georeferenced × record type, for records dated to the day | `build-occurrences.ts` |
+| `occurrence_dates` | usage × year × month × day × georeferenced × record type, for records dated at least to the month | `build-occurrences.ts` |
 | `assessment_link` | assessed species × CoL species it is (primary, plus covered rows) | `build-link.ts`, from the matcher's answers (`matches`, `build-matches.ts`) and `decisions.tsv` |
 
 **`taxa`** is the XR with three things worked out per usage:
@@ -83,7 +83,7 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 
 **`occurrence_counts`** is the whole snapshot (3.9 billion records) reduced to 4.1M usages' counts by year, by whether the record is georeferenced, and by basis of record. *Georeferenced* means what GBIF's API means by `hasCoordinate=true&hasGeospatialIssue=false`; the snapshot has no `hasGeospatialIssue` column, so it is recomputed from each record's issues using GBIF's own set (`GBIF_GEOSPATIAL_ISSUES` in `app/src/lib/gbif.ts`, checked per code against the live API). A companion table holds the same by country.
 
-**`occurrence_days`** is the same with the record's date in place of its year (324M rows, 789 MB, from the 90% of records dated to the day). It exists for one number: records since an assessment start the day after the assessment date, so the assessment's own year has to be split at that date. Later years come from `occurrence_counts`. A record dated only to a year or month can't be placed against a date in its own year, so it is left out of that year's window.
+**`occurrence_dates`** is the same with the record's month and, where it has one, its day (records dated at least to the month, 90% of them dated to the day). It exists for one number: records since an assessment start the day after the assessment date, so the assessment's own year has to be split at that date. Later years come from `occurrence_counts`, whatever their precision. In the assessment's own year a record counts if it is dated to a later day, or only to a later month; one dated only to that year, or only to the assessment's own month, can't be placed either side and is left out.
 
 **`assessment_link`** is the subject of [Matching](#matching-which-col-species-an-assessed-species-is).
 

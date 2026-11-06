@@ -29,7 +29,7 @@ export interface CountSources {
   /** A relation with col_id, species_id, kingdom (taxa.parquet). */
   taxa: string;
   /** usage_key, year, georef, basis, n (occurrence_counts.parquet), or with
-   *  event_date in place of year (occurrence_days.parquet) when `dated`. */
+   *  month and event_date too (occurrence_dates.parquet) when `dated`. */
   counts: string;
   dated?: boolean;
   /** Optional relation with a usage_key column: usages owned by an assessed species other than their species_id. */
@@ -43,7 +43,7 @@ export interface CountSources {
  */
 export function usageCountsSql(s: CountSources): string {
   return `
-    SELECT c.usage_key, u.species_id, ${s.dated ? "c.event_date" : "c.year"}, c.georef, c.n
+    SELECT c.usage_key, u.species_id, ${s.dated ? "c.year, c.month, c.event_date" : "c.year"}, c.georef, c.n
     FROM ${s.counts} c
     JOIN ${s.taxa} u ON u.col_id = c.usage_key
     LEFT JOIN ${s.taxa} sp ON sp.col_id = u.species_id

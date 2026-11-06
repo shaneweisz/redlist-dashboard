@@ -24,7 +24,9 @@
  * GBIF's hasCoordinate=true&hasGeospatialIssue=false) and all records. The
  * since-assessment counts start the day after the assessment date: records in
  * later years from occurrence_counts, records later in the assessment's own
- * year from occurrence_days (so a record dated only to that year is left out).
+ * year from occurrence_dates (a later day, or a later month for a record dated
+ * only to the month). A record dated only to the assessment's year, or only to
+ * its month, can't be placed either side of it and is left out.
  *
  * Usage:  npx tsx scripts/sync/outputs/build-read-models.ts
  */
@@ -55,7 +57,7 @@ async function loadCore(conn: DuckDBConnection, coreDir: string): Promise<void> 
   const f = (n: string) => lit(path.join(coreDir, n));
   await conn.run(`CREATE OR REPLACE VIEW taxa AS SELECT * FROM read_parquet(${f("taxa.parquet")})`);
   await conn.run(`CREATE OR REPLACE VIEW occ AS SELECT * FROM read_parquet(${f("occurrence_counts.parquet")})`);
-  await conn.run(`CREATE OR REPLACE VIEW occ_days AS SELECT * FROM read_parquet(${f("occurrence_days.parquet")})`);
+  await conn.run(`CREATE OR REPLACE VIEW occ_dates AS SELECT * FROM read_parquet(${f("occurrence_dates.parquet")})`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE link AS SELECT * FROM read_parquet(${f("assessment_link.parquet")})`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE latest AS SELECT * FROM read_parquet(${f("assessments.parquet")}) WHERE is_latest`);
 }
@@ -81,11 +83,11 @@ async function ownedUsages(conn: DuckDBConnection): Promise<void> {
 async function gbifCounts(conn: DuckDBConnection, today: string): Promise<void> {
   const d = lit(today);
   await conn.run(`CREATE OR REPLACE TEMP TABLE uc AS ${usageCountsSql({ taxa: "taxa", counts: "occ" })}`);
-  await conn.run(`CREATE OR REPLACE TEMP TABLE ucd AS ${usageCountsSql({ taxa: "taxa", counts: "occ_days", dated: true })}`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE ucd AS ${usageCountsSql({ taxa: "taxa", counts: "occ_dates", dated: true })}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE link_rows AS
     SELECT l.sis_taxon_id AS sis, l.usage_id, l.verdict, l.role, CAST(la.assessment_date AS DATE) AS ad
     FROM link l JOIN latest la USING (sis_taxon_id) WHERE l.counted`);
-  // Every counted usage-year (or usage-day), with the species and link row it counts for.
+  // Every counted usage-year (or usage-date), with the species and link row it counts for.
   const hitsFrom = (u: string, cols: string) => `
     -- own / covered: the species' records, minus usages someone else owns
     SELECT r.sis, r.usage_id, r.verdict, r.role, r.ad, u.usage_key, ${cols}, u.georef, u.n
@@ -98,10 +100,14 @@ async function gbifCounts(conn: DuckDBConnection, today: string): Promise<void> 
     FROM link_rows r JOIN owned o ON o.sis = r.sis AND o.root = r.usage_id JOIN ${u} u ON u.usage_key = o.usage_key
     WHERE r.verdict = 'lumped'`;
   await conn.run(`CREATE OR REPLACE TEMP TABLE hits AS ${hitsFrom("uc", "u.year")}`);
-  // Only the assessment's own year is read by day; later years come from hits.
+  // Only the assessment's own year is read by date; later years come from hits.
+  // In it, a record counts on a later day, or (dated only to the month) in a
+  // later month.
   await conn.run(`CREATE OR REPLACE TEMP TABLE day_hits AS
-    SELECT * FROM (${hitsFrom("ucd", "u.event_date")})
-    WHERE year(event_date) = year(ad) AND event_date > ad AND event_date <= ${d}`);
+    SELECT * FROM (${hitsFrom("ucd", "u.year, u.month, u.event_date")})
+    WHERE year = year(ad)
+      AND (CASE WHEN event_date IS NOT NULL THEN event_date > ad AND event_date <= ${d}
+                ELSE month > month(ad) AND make_date(year, month, 1) <= ${d}::DATE END)`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE row_counts AS
     WITH by_year AS (
       SELECT sis, usage_id, any_value(verdict) AS verdict, any_value(role) AS role, any_value(ad) AS ad,
