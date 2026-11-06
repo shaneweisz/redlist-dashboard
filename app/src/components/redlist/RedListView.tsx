@@ -1000,8 +1000,8 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
  * counts. Kept in the URL (records=georeferenced), so a shared link shows the same numbers.
  */
 /**
- * The GBIF Records chart's two toggles: which records (All records /
- * Georeferenced) and which metric (Total / New / % New). Each of the six
+ * The GBIF Records chart's controls: which metric (Total / New / % New, a
+ * dropdown) and which records (All records / Georeferenced, a toggle). Each of the six
  * combinations keeps its own bucket selection, so a filter made under one
  * stays on while another is shown. Independent of the table's toggle. The Not
  * Evaluated list has no assessment, so no metric toggle.
@@ -1011,22 +1011,19 @@ function GbifChartControls({ value, onChange, showMetric }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
 }) {
   const { metric, mode } = gbifKeyParts(value);
-  const seg = (on: boolean) => `px-1.5 py-0.5 transition-colors ${on
-    ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
-    : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <GbifRecordModeToggle mode={mode} onChange={(m) => onChange(`${metric}.${m}`)} />
       {showMetric && (
-        <div role="radiogroup" aria-label="Which GBIF metric the chart shows"
-          className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-700 overflow-hidden text-[11px]">
-          {GBIF_METRICS.map((m) => (
-            <button key={m} type="button" role="radio" aria-checked={metric === m} onClick={() => onChange(`${m}.${mode}`)} className={seg(metric === m)}>
-              {GBIF_METRIC_LABEL[m]}
-            </button>
-          ))}
-        </div>
+        <select
+          aria-label="Which GBIF metric the chart shows"
+          value={metric}
+          onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}
+          className="text-[11px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5"
+        >
+          {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+        </select>
       )}
+      <GbifRecordModeToggle mode={mode} onChange={(m) => onChange(`${metric}.${m}`)} />
     </div>
   );
 }
@@ -1050,59 +1047,6 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
         </button>
       ))}
     </div>
-  );
-}
-
-function GbifInfoTooltip({ mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecordMode }) {
-  const [isHovered, setIsHovered] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (isHovered && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setPosition({
-        top: rect.top - 8,
-        left: rect.left + rect.width / 2,
-      });
-    }
-  }, [isHovered]);
-
-  return (
-    <span
-      ref={triggerRef}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 16v-4M12 8h.01" />
-      </svg>
-      {isHovered && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed z-[99999] bg-zinc-900 dark:bg-zinc-800 text-white text-[9px] leading-snug rounded px-2 py-1.5 shadow-lg w-64"
-          style={{
-            top: position.top,
-            left: position.left,
-            transform: 'translateX(-50%) translateY(-100%)',
-          }}
-        >
-          {mode === "all" ? (
-            <>
-              <div className="font-medium text-[10px] mb-0.5">All GBIF records:</div>
-              <div className="text-zinc-400">Every record GBIF holds for the species, of any type, with or without coordinates: the number gbif.org shows.</div>
-            </>
-          ) : (
-            <>
-              <div className="font-medium text-[10px] mb-0.5">Georeferenced records:</div>
-              <div className="text-zinc-400">Records with coordinates and no geospatial issue, of any type: <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
-            </>
-          )}
-          <div className="text-zinc-400 mt-1">New: records dated after the assessment date. % New: New as a share of Total.</div>
-        </div>,
-        document.body
-      )}
-    </span>
   );
 }
 
@@ -5059,7 +5003,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifKeyParts(gbifChartKey).mode} /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
               </div>
               <div className="mb-1">
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
@@ -5141,7 +5085,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifKeyParts(gbifChartKey).mode} /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
               </div>
               <div className="mb-1">
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
@@ -6059,7 +6003,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={isNewAssessments ? `${SPECIES_TH_LABEL} w-[96px]` : SPECIES_TH_NOWRAP}>{isNewAssessments ? "GBIF Records" : "Total"}</span>
-                    {isNewAssessments && <GbifInfoTooltip mode={gbifRecordMode} />}
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6149,7 +6092,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     the mode is said once here, not under every column. */}
                 <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
-                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records <GbifInfoTooltip mode={gbifRecordMode} /></span>
+                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records</span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
