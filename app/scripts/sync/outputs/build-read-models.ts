@@ -38,7 +38,7 @@ import { loadEnvFiles } from "../../lib/utils";
 import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
 import { usageCountsSql, countedBasisSql } from "../core/counts";
 import { ensureInatNames } from "../inputs/inat";
-import { CORE_DIR, OUT_DIR } from "../paths";
+import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
 import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
 
 let CORE_DIR_FOR_COUNTRIES = CORE_DIR;
@@ -83,7 +83,9 @@ async function ownedUsages(conn: DuckDBConnection): Promise<void> {
 async function gbifCounts(conn: DuckDBConnection, today: string): Promise<void> {
   const d = lit(today);
   await conn.run(`CREATE OR REPLACE TEMP TABLE uc AS ${usageCountsSql({ taxa: "taxa", counts: "occ" })}`);
-  await conn.run(`CREATE OR REPLACE TEMP TABLE ucd AS ${usageCountsSql({ taxa: "taxa", counts: "occ_dates", dated: true })}`);
+  // A view, not a table: of its 300M+ rows only the assessed species' own
+  // assessment year is read (day_hits).
+  await conn.run(`CREATE OR REPLACE VIEW ucd AS ${usageCountsSql({ taxa: "taxa", counts: "occ_dates", dated: true })}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE link_rows AS
     SELECT l.sis_taxon_id AS sis, l.usage_id, l.verdict, l.role, CAST(la.assessment_date AS DATE) AS ad
     FROM link l JOIN latest la USING (sis_taxon_id) WHERE l.counted`);
@@ -324,7 +326,7 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
 }
 
 export async function run(): Promise<void> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB" })).connect();
+  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB", temp_directory: DUCKDB_TMP })).connect();
   const inatNames = await ensureInatNames();
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames });
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(gbif_species_key) AS keyed, sum(gbif_georeferenced_records_count) AS georef

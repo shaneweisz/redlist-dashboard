@@ -47,7 +47,7 @@ import { observe, mismatches } from "./checks/check-fixtures";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
-import { BUILD_DIR, CORE_DIR, OUT_DIR } from "./paths";
+import { BUILD_DIR, CORE_DIR, DUCKDB_TMP, OUT_DIR } from "./paths";
 import { syncPath } from "../../src/lib/data/sync-layout";
 
 const APP = path.join(__dirname, "..", "..");
@@ -100,7 +100,8 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   done();
 
   done = step("match names");
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB" })).connect();
+  // Spills go to the cache, not DuckDB's default ./.tmp inside the repo.
+  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB", temp_directory: DUCKDB_TMP })).connect();
   const matcher = await ensureMatcher(col.xr, col.nameUsage);
   const m = await buildMatches(conn, CORE_DIR, matcher);
   console.log(`   ${m.asked.toLocaleString()} names asked, ${m.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
