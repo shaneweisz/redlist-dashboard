@@ -200,7 +200,7 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 
 ## What the app reads
 
-![The files in a sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-NNN-system-docs/01-sync-files.png)
+![The files in a sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/01-sync-files.png)
 
 Every file in a sync: the step that writes it, and what reads it. The source is [`diagrams/sync-files.excalidraw`](diagrams/sync-files.excalidraw) (`python3 -I diagrams/gen.py files <out>` regenerates it); the routes behind "who reads it" are in [app.md](app.md).
 

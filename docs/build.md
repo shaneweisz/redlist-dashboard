@@ -2,7 +2,7 @@
 
 What happens between a sync landing in R2 and a page on the site. The sync ([sync.md](sync.md)) decides the numbers; the build only packages them for the deployed code. Scripts are in [`app/scripts/build/`](../app/scripts/build). What the deployed app then reads, route by route, is [app.md](app.md).
 
-![The build](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-NNN-system-docs/02-build-files.png)
+![The build](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/02-build-files.png)
 
 The diagram's source is [`diagrams/build-files.excalidraw`](diagrams/build-files.excalidraw) (`python3 -I diagrams/gen.py build <out>` regenerates it).
 
