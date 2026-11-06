@@ -558,10 +558,11 @@ const SPECIES_TH_SORTABLE = "cursor-pointer hover:text-zinc-900 dark:hover:text-
 // two lines it should break into, measured at this size and weight:
 //
 //   Assessment / Date               84   ("Assessment" 83)
-//   Total GBIF / Records            72   ("Total GBIF" 70)
-//   GBIF Records / Since Assessment 124  ("Since Assessment" 124)
+//   Total / Records                 58   ("Records" 57; under the GBIF heading)
+//   New Records / Since Assessment  124  ("Since Assessment" 124)
+//   % New Records / Since Assessment 124 (likewise)
 //   Year Described                  104  (one line, 102 — new-assessments has the room)
-//   GBIF Records                    96   (one line, 94 — likewise)
+//   Records                         64   (one line — likewise)
 //
 // One shared width would have to be the largest of them, which is what left Assessment
 // Date and Total GBIF Records ~50px wider than their text and put a gutter of dead space
@@ -6051,18 +6052,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         >
           <table className="w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-800">
-              <tr className="border-b border-zinc-200 dark:border-zinc-700">
-                <th className="sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-800 px-2 py-3 text-center text-sm font-bold text-zinc-600 dark:text-zinc-300 w-10">
+              <tr>
+                <th rowSpan={2} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-800 px-2 py-3 text-center text-sm font-bold text-zinc-600 dark:text-zinc-300 w-10">
                   <svg className="w-4 h-4 mx-auto text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                   </svg>
                 </th>
-                <th className="sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left text-sm font-bold text-zinc-600 dark:text-zinc-300">
+                <th rowSpan={2} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left text-sm font-bold text-zinc-600 dark:text-zinc-300">
                   Species
                 </th>
                 {!isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-left ${SPECIES_TH_NOWRAP} ${SPECIES_TH_SORTABLE}`}
+                <th rowSpan={2}
+                  className={`${SPECIES_TH} border-b border-zinc-200 dark:border-zinc-700 text-left ${SPECIES_TH_NOWRAP} ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("category", e)}
                 >
                   <span className="flex items-center gap-1">
@@ -6072,8 +6073,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </th>
                 )}
                 {!isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-left ${SPECIES_TH_SORTABLE}`}
+                <th rowSpan={2}
+                  className={`${SPECIES_TH} border-b border-zinc-200 dark:border-zinc-700 text-left ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("year", e)}
                 >
                   <span className="flex items-center gap-1">
@@ -6083,8 +6084,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </th>
                 )}
                 {isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-left ${SPECIES_TH_SORTABLE}`}
+                <th rowSpan={2}
+                  className={`${SPECIES_TH} border-b border-zinc-200 dark:border-zinc-700 text-left ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("describedYear", e)}
                 >
                   <span className="flex items-center gap-1">
@@ -6093,13 +6094,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
+                {/* One heading over the GBIF columns, with the record-mode toggle:
+                    the mode is said once here, not under every column. */}
+                <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
+                  <span className="flex items-center justify-end gap-2">
+                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF <GbifInfoTooltip mode={gbifRecordMode} /></span>
+                    {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
+                  </span>
+                </th>
+              </tr>
+              <tr className="border-b border-zinc-200 dark:border-zinc-700">
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("totalGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} ${isNewAssessments ? "w-[96px]" : "w-[72px]"}`}>{isNewAssessments ? "GBIF Records" : "Total GBIF Records"}</span>
-                    <GbifInfoTooltip mode={gbifRecordMode} />
+                    <span className={`${SPECIES_TH_LABEL} ${isNewAssessments ? "w-[64px]" : "w-[58px]"}`}>{isNewAssessments ? "Records" : "Total Records"}</span>
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6109,8 +6119,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("newGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>GBIF Records Since Assessment</span>
-                    <HoverTooltip text="Records added after the assessment year (not the exact date). Uses the year following the assessment as the start of the range.">
+                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>New Records Since Assessment</span>
+                    <HoverTooltip text="Records dated after the assessment date. A record dated only to a month or a year counts when that month or year is later than the assessment's; one dated only to the assessment's own month or year can't be placed, and is left out.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
@@ -6126,7 +6136,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("pctNewGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>% GBIF Records Since Assessment</span>
+                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>% New Records Since Assessment</span>
+                    <HoverTooltip text="New records since the assessment, as a share of all the species' records (in the same record mode).">
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
                     <SortIndicator field="pctNewGbif" />
                   </span>
                 </th>

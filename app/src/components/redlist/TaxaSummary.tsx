@@ -28,7 +28,7 @@ import { neSplitSentence, neSynonymSentence, reasonComposition, displayReason, N
 import { NoMatchLine } from "@/components/redlist/revision-links";
 import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
 import { treeChildrenFromFiles } from "@/lib/tree-children/loader";
-import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, type GbifRecordMode } from "@/lib/gbif-records";
+import { DEFAULT_GBIF_RECORD_MODE, type GbifRecordMode } from "@/lib/gbif-records";
 
 // See scripts/sync/outputs/build-taxa-summary.ts's classifyNoMatch for what each reason means.
 // Modular/additive on top of colBreakdown[].noMatchIds — safe to drop independently
@@ -62,6 +62,10 @@ interface Table1aRowData {
   totalGbifObservations?: number;
   meanGbifObsPerSpecies?: number;
   medianGbifObsPerSpecies?: number;
+  /** Every record mode's GBIF figures (taxa-summary route); see withGbifMode. */
+  gbifByMode?: Record<GbifRecordMode, Partial<Table1aRowData>>;
+  /** SSC rows: NE species with GBIF records per mode (node summaries); see withNeCount. */
+  gbifNeSpecies?: Record<GbifRecordMode, number>;
   colDescribed?: number;
   colNe?: number;
   colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
@@ -121,6 +125,7 @@ interface TaxonSummary {
   gbifSpeciesCount?: number;
   gbifNeSpeciesCount?: number;
   gbifObsDistribution?: Record<string, number>;
+  gbifByMode?: Record<GbifRecordMode, Partial<TaxonSummary>>;
   colDescribed?: number;
   colNe?: number;
 }
@@ -132,6 +137,8 @@ interface SubGroupSummary {
   totalAssessed: number;
   outdated: number;
   gbifNeSpeciesCount: number;
+  /** As node summaries carry it: per record mode (see withNeCount). */
+  gbifNeSpecies?: Record<GbifRecordMode, number>;
   byCategory: Record<string, number>;
   colDescribed?: number;
   colNe?: number;
@@ -179,13 +186,16 @@ interface Props {
 }
 
 /**
- * A node summary as the table reads it: the NE-with-records count for the
- * record mode in force. Node summaries carry both (gbifNeSpecies); the table
- * resolves one on arrival, and a mode change clears what it has (scopeKey).
+ * GBIF figures as the table reads them: the record mode in force. Rows arrive
+ * carrying every mode (a node's gbifNeSpecies, a taxon's gbifByMode) and are
+ * kept that way, so switching mode re-reads them instead of refetching, and
+ * the table never blanks.
  */
-function withNeCount(subs: unknown, mode: GbifRecordMode): SubGroupSummary[] {
-  return ((subs ?? []) as (SubGroupSummary & { gbifNeSpecies?: Record<GbifRecordMode, number> })[])
-    .map((sg) => ({ ...sg, gbifNeSpeciesCount: sg.gbifNeSpecies?.[mode] ?? sg.gbifNeSpeciesCount ?? 0 }));
+function withNeCount<T extends { gbifNeSpeciesCount?: number; gbifNeSpecies?: Record<GbifRecordMode, number> }>(rows: T[], mode: GbifRecordMode): T[] {
+  return rows.map((r) => (r.gbifNeSpecies ? { ...r, gbifNeSpeciesCount: r.gbifNeSpecies[mode] } : r));
+}
+function withGbifMode<T extends { gbifByMode?: Record<GbifRecordMode, Partial<T>> }>(rows: T[], mode: GbifRecordMode): T[] {
+  return rows.map((r) => (r.gbifByMode ? { ...r, ...r.gbifByMode[mode] } : r));
 }
 
 // Any static tree node with children is expandable — plus any node under a live
@@ -1512,7 +1522,8 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
 export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
-  const [taxa, setTaxa] = useState<TaxonSummary[]>([]);
+  const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
+  const taxa = useMemo(() => withGbifMode(rawTaxa, gbifRecordMode), [rawTaxa, gbifRecordMode]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1523,11 +1534,14 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // Which taxa are expanded to show subgroups (e.g., "reptiles", "fishes")
   const [expandedTaxa, setExpandedTaxa] = useState<Set<string>>(new Set());
   // Fetched subgroup data keyed by taxonId
-  const [subgroupData, setSubgroupData] = useState<Record<string, SubGroupSummary[]>>({});
+  const [rawSubgroupData, setSubgroupData] = useState<Record<string, SubGroupSummary[]>>({});
+  const subgroupData = useMemo(
+    () => Object.fromEntries(Object.entries(rawSubgroupData).map(([k, subs]) => [k, withNeCount(subs, gbifRecordMode)])),
+    [rawSubgroupData, gbifRecordMode]);
   const [loadingSubgroups, setLoadingSubgroups] = useState<Set<string>>(new Set());
   // Refs to avoid stale closures in toggleExpand
-  const subgroupDataRef = useRef(subgroupData);
-  subgroupDataRef.current = subgroupData;
+  const subgroupDataRef = useRef(rawSubgroupData);
+  subgroupDataRef.current = rawSubgroupData;
   const loadingSubgroupsRef = useRef(loadingSubgroups);
   loadingSubgroupsRef.current = loadingSubgroups;
   const initialFocus: FocusMode = isNewAssessments ? "new-assessments" : "redlist";
@@ -1570,10 +1584,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // Prefixed rather than plain-concatenated so the two dimensions can't collide
   // into the same key (a country coded "Marine" doesn't exist, but a key whose
   // meaning depends on no value ever overlapping is a trap worth not setting).
-  // The record mode is part of the key: every cache it resets holds GBIF
-  // figures for one mode.
-  const scopeKey = (scoped ? `c:${countryPart}|r:${realmPart}` : "") + (gbifRecordMode === "all" ? "|records:all" : "");
-  const recordsQs = gbifRecordMode === "all" ? `${GBIF_RECORDS_PARAM}=all` : "";
+  const scopeKey = scoped ? `c:${countryPart}|r:${realmPart}` : "";
   // The query string both scoped dimensions contribute to, built once here so
   // every fetch below stays in lockstep with scopeKey (the staleness guard) —
   // no leading ? or &, callers add whichever they need.
@@ -1682,7 +1693,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       if (!scopeQs) {
         const prebuilt = await treeChildrenFromFiles(taxonId);
         if (prebuilt) {
-          if (scopeKeyRef.current === requestScopeKey) setSubgroupData((prev) => ({ ...prev, [taxonId]: withNeCount(prebuilt, gbifRecordMode) }));
+          if (scopeKeyRef.current === requestScopeKey) setSubgroupData((prev) => ({ ...prev, [taxonId]: prebuilt as SubGroupSummary[] }));
           return;
         }
       }
@@ -1693,7 +1704,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       // re-add wrongly-scoped numbers for taxonId right after that clear.
       if (res.ok && scopeKeyRef.current === requestScopeKey) {
         const data = await res.json();
-        setSubgroupData((prev) => ({ ...prev, [taxonId]: withNeCount(data.subgroups, gbifRecordMode) }));
+        setSubgroupData((prev) => ({ ...prev, [taxonId]: data.subgroups }));
       }
     } finally {
       setLoadingSubgroups((prev) => {
@@ -1702,7 +1713,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         return next;
       });
     }
-  }, [scopeKey, scopeQs, gbifRecordMode]);
+  }, [scopeKey, scopeQs]);
 
   // A node's own summary comes from its PARENT's subgroupData bucket (that's what
   // ensureSubgroupData(parentId) fetches — the parent's children, one of which is
@@ -1795,7 +1806,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       </select>
     </span>
   );
-  const [table1aData, setTable1aData] = useState<Table1aSectionData[] | null>(null);
+  const [rawTable1aData, setTable1aData] = useState<Table1aSectionData[] | null>(null);
+  const table1aData = useMemo(() => rawTable1aData?.map((sec) => ({ ...sec, rows: withGbifMode(sec.rows, gbifRecordMode) })) ?? null,
+    [rawTable1aData, gbifRecordMode]);
   const [table1aLoading, setTable1aLoading] = useState(false);
 
   // "# Described" source toggle (#272/#274): IUCN Table 1a estimates vs the CoL
@@ -1853,28 +1866,30 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // setTable1aLoading(true) commits, cancelling the very fetch it just started.
   const table1aFetchStartedRef = useRef(false);
   useEffect(() => {
-    if (!table1aMode || table1aData || table1aFetchStartedRef.current) return;
+    if (!table1aMode || rawTable1aData || table1aFetchStartedRef.current) return;
     table1aFetchStartedRef.current = true;
     setTable1aLoading(true);
     const requestScopeKey = scopeKey;
-    fetch(`/api/redlist/taxa-summary?table1a=true${scopeQs ? `&${scopeQs}` : ""}${recordsQs ? `&${recordsQs}` : ""}`)
+    fetch(`/api/redlist/taxa-summary?table1a=true${scopeQs ? `&${scopeQs}` : ""}`)
       .then(res => res.ok ? res.json() : null)
       // scopeKey changing already resets table1aData/table1aFetchStartedRef
       // (see the effect above) so a fresh fetch can start — but doesn't cancel
       // THIS one, so skip applying it if it resolves after that happened.
       .then(data => { if (data && scopeKeyRef.current === requestScopeKey) setTable1aData(data.sections); })
       .finally(() => setTable1aLoading(false));
-  }, [table1aMode, table1aData, scopeKey, scopeQs, recordsQs]);
+  }, [table1aMode, rawTable1aData, scopeKey, scopeQs]);
 
   // SSC groups mode — same flat-table layout as Table 1a mode, sourced from
   // the precomputed SSC wrapper nodes' children instead of the top-level
   // Table 1a taxon groups (see SSC_SECTIONS above).
-  const [sscData, setSscData] = useState<Table1aSectionData[] | null>(null);
+  const [rawSscData, setSscData] = useState<Table1aSectionData[] | null>(null);
+  const sscData = useMemo(() => rawSscData?.map((sec) => ({ ...sec, rows: withNeCount(sec.rows, gbifRecordMode) })) ?? null,
+    [rawSscData, gbifRecordMode]);
   const [sscLoading, setSscLoading] = useState(false);
   const sscFetchStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!sscMode || sscData || sscFetchStartedRef.current) return;
+    if (!sscMode || rawSscData || sscFetchStartedRef.current) return;
     sscFetchStartedRef.current = true;
     setSscLoading(true);
     const requestScopeKey = scopeKey;
@@ -1888,7 +1903,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         SSC_SECTIONS.flatMap((section) => {
           const subgroups = data?.subgroupsByNode?.[section.nodeId];
           if (!subgroups) return [];
-          const rows: Table1aRowData[] = withNeCount(subgroups, gbifRecordMode).map((sg: SubGroupSummary) => ({
+          const rows: Table1aRowData[] = subgroups.map((sg: SubGroupSummary) => ({
             group: sg.id,
             name: sg.name,
             estimatedDescribed: sg.estimatedDescribed,
@@ -1898,6 +1913,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             percentOutdated: sg.totalAssessed > 0 ? (sg.outdated / sg.totalAssessed) * 100 : 0,
             byCategory: sg.byCategory,
             gbifNeSpeciesCount: sg.gbifNeSpeciesCount,
+            gbifNeSpecies: sg.gbifNeSpecies,
             colDescribed: sg.colDescribed,
             colNe: sg.colNe,
             colBreakdown: sg.colBreakdown,
@@ -1919,7 +1935,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       // this in-flight request.
       .then((sections) => { if (scopeKeyRef.current === requestScopeKey) setSscData(sections); })
       .finally(() => setSscLoading(false));
-  }, [sscMode, sscData, scopeKey, scopeQs, gbifRecordMode]);
+  }, [sscMode, rawSscData, scopeKey, scopeQs]);
 
   // Shared flat-table data source for whichever mode (Table 1a / SSC groups) is active
   const flatMode = table1aMode || sscMode;
@@ -2028,8 +2044,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     async function fetchTaxa() {
       setLoading(true);
       try {
-        const qs = [scopeQs, recordsQs].filter(Boolean).join("&");
-        const res = await fetch(`/api/redlist/taxa-summary${qs ? `?${qs}` : ""}`, { signal: controller.signal });
+        const res = await fetch(`/api/redlist/taxa-summary${scopeQs ? `?${scopeQs}` : ""}`, { signal: controller.signal });
         if (!res.ok) throw new Error("Failed to load taxa");
         const data = await res.json();
         setTaxa(data.taxa);
@@ -2042,7 +2057,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     }
     fetchTaxa();
     return () => controller.abort();
-  }, [scopeKey, scopeQs, recordsQs]);
+  }, [scopeKey, scopeQs]);
 
   // Only the very first load (no data at all yet, in any mode) blanks the
   // WHOLE component out to this — in country mode the table itself is still

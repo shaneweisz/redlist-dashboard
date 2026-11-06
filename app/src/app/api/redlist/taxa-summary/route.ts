@@ -4,7 +4,8 @@ import { getScopedTaxaSummary, scopeWhere } from "@/lib/data/scoped-taxa-summary
 import { findNode, getTaxonGroupsForNode } from "@/lib/taxonomy-utils";
 import { getView } from "@/config/taxonomy-views";
 import { CACHE_1H } from "@/lib/cache-headers";
-import { GBIF_RECORDS_PARAM, parseGbifRecordMode } from "@/lib/gbif-records";
+import { GBIF_RECORD_MODES, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode } from "@/lib/gbif-records";
+import type { TaxaSummaryRow } from "@/lib/data/species-store";
 
 interface TaxonSummary {
   id: string;
@@ -24,10 +25,47 @@ interface TaxonSummary {
   gbifSpeciesCount?: number;
   gbifNeSpeciesCount?: number;
   gbifObsDistribution?: Record<string, number>;
+  /** The gbif* fields for each record mode, so the client can switch without refetching. */
+  gbifByMode?: Record<GbifRecordMode, GbifFields>;
   // Catalogue of Life backbone (#271): extant accepted universe in this group and the
   // not-evaluated slice (universe − assessed). 0 if CoL artifacts aren't present.
   colDescribed?: number;
   colNe?: number;
+}
+
+/** A row's GBIF figures under one record mode, as the table reads them. */
+interface GbifFields {
+  gbifSpeciesCount: number;
+  gbifNeSpeciesCount: number;
+  totalGbifObservations: number;
+  meanGbifObsPerSpecies?: number;
+  medianGbifObsPerSpecies?: number;
+}
+
+/** GBIF figures for groups merged into one row, for every record mode. A median only survives for a single group. */
+function gbifByMode(rows: TaxaSummaryRow[]): Record<GbifRecordMode, GbifFields> {
+  return Object.fromEntries(GBIF_RECORD_MODES.map((m) => {
+    const sum = (k: "species_count" | "ne_species_count" | "records") => rows.reduce((s, r) => s + Number(r.gbif?.[m]?.[k] ?? 0), 0);
+    const species = sum("species_count");
+    const records = sum("records");
+    const median = rows.length === 1 ? rows[0].gbif?.[m]?.median : null;
+    return [m, {
+      gbifSpeciesCount: species, gbifNeSpeciesCount: sum("ne_species_count"), totalGbifObservations: records,
+      meanGbifObsPerSpecies: species > 0 ? records / species : undefined,
+      medianGbifObsPerSpecies: median != null ? Number(median) : undefined,
+    }];
+  })) as Record<GbifRecordMode, GbifFields>;
+}
+
+/** The "all" row's GBIF figures: its groups' summed, per mode (no median across groups). */
+function sumGbifByMode(rows: { gbifByMode?: Record<GbifRecordMode, GbifFields> }[]): Record<GbifRecordMode, GbifFields> {
+  return Object.fromEntries(GBIF_RECORD_MODES.map((m) => {
+    const sum = (k: "gbifSpeciesCount" | "gbifNeSpeciesCount" | "totalGbifObservations") => rows.reduce((s, r) => s + (r.gbifByMode?.[m]?.[k] ?? 0), 0);
+    const species = sum("gbifSpeciesCount");
+    const records = sum("totalGbifObservations");
+    return [m, { gbifSpeciesCount: species, gbifNeSpeciesCount: sum("gbifNeSpeciesCount"), totalGbifObservations: records,
+      meanGbifObsPerSpecies: species > 0 ? records / species : undefined }];
+  })) as Record<GbifRecordMode, GbifFields>;
 }
 
 function mergeByCategory(
@@ -55,7 +93,8 @@ export async function GET(request: NextRequest) {
     // Indonesia, not the union of the two).
     const countries = request.nextUrl.searchParams.get("country")?.split(",").map((c) => c.trim()).filter(Boolean) ?? [];
     const realms = request.nextUrl.searchParams.get("realm")?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];
-    // Which GBIF records the gbif* totals count (src/lib/gbif-records.ts).
+    // Which GBIF records the flat gbif* fields count (src/lib/gbif-records.ts);
+    // gbifByMode carries both, which is what the dashboard reads.
     const mode = parseGbifRecordMode(request.nextUrl.searchParams.get(GBIF_RECORDS_PARAM));
     const where = scopeWhere(countries, realms);
     const data = where ? await getScopedTaxaSummary(where) : getTaxaSummary();
@@ -114,6 +153,7 @@ export async function GET(request: NextRequest) {
             medianGbifObsPerSpecies: matchedRows.length === 1 && matchedRows[0].gbif?.[mode]?.median != null
               ? Number(matchedRows[0].gbif[mode].median)
               : undefined,
+            gbifByMode: gbifByMode(matchedRows),
           };
         }),
       }));
@@ -216,6 +256,7 @@ export async function GET(request: NextRequest) {
           medianGbifObsPerSpecies: available ? medianGbifObsPerSpecies : undefined,
           gbifSpeciesCount: available ? gbifSpeciesCount : undefined,
           gbifNeSpeciesCount: available ? gbifNeSpeciesCount : undefined,
+          gbifByMode: available ? gbifByMode(matchedRows) : undefined,
           colDescribed: available ? colDescribed : undefined,
           colNe: available ? colNe : undefined,
         };
@@ -244,6 +285,7 @@ export async function GET(request: NextRequest) {
       allEntry.gbifSpeciesCount = gbifCount;
       allEntry.gbifNeSpeciesCount = gbifNeCount;
       allEntry.meanGbifObsPerSpecies = gbifCount > 0 ? totalGbif / gbifCount : undefined;
+      allEntry.gbifByMode = sumGbifByMode(perTaxonRows);
       allEntry.colDescribed = perTaxonRows.reduce((s, t) => s + (t.colDescribed ?? 0), 0);
       allEntry.colNe = perTaxonRows.reduce((s, t) => s + (t.colNe ?? 0), 0);
     }
