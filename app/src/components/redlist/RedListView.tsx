@@ -27,7 +27,8 @@ import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
-import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
+import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
+import COL_RELEASE from "@/config/col-release.json";
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
@@ -803,11 +804,39 @@ function prefetchColProvenance(colId: string): Promise<void> {
 }
 
 /**
+ * Warm the cache for every ⚑ on the current table page, a few lookups at a
+ * time, so a hover opens the panel complete. Uncached, the route takes
+ * 0.3-0.75s on prod (three ChecklistBank hops), longer than the tooltip will
+ * wait, and a source block landing after the panel opened grew it upward under
+ * the pointer. Only runs while the flags are shown (the CoL filter is on),
+ * which caps it at one page of rows; `isCancelled` stops a page the reader
+ * has already left from queueing more.
+ */
+const COL_PROVENANCE_PREFETCH_CONCURRENCY = 3;
+async function prefetchColProvenanceAll(colIds: string[], isCancelled: () => boolean): Promise<void> {
+  const queue = colIds.filter((id) => !colProvenanceCache.has(id));
+  const worker = async () => {
+    while (queue.length > 0 && !isCancelled()) await prefetchColProvenance(queue.shift()!);
+  };
+  await Promise.all(Array.from({ length: COL_PROVENANCE_PREFETCH_CONCURRENCY }, worker));
+}
+
+/**
  * Where CoL's record came from — scrutiny, source dataset, and the record on the
- * source's own site. Reads the cache only: whatever `prepare` managed to fetch
- * before the panel opened is what shows, and nothing arrives later to reflow it.
+ * source's own site. Usually `prepare` has already filled the cache before the
+ * panel opened. When the lookup outran PREPARE_MAX_WAIT_MS (a cold API route or
+ * a slow ChecklistBank), the panel opens without it and this block fills in
+ * once the fetch lands: a late reflow beats the source never appearing until
+ * the second hover, which is what reading the cache alone did.
  */
 function ColProvenanceBlock({ colId }: { colId: string }) {
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    if (colProvenanceCache.has(colId)) return;
+    let live = true;
+    void prefetchColProvenance(colId).then(() => { if (live) rerender((n) => n + 1); });
+    return () => { live = false; };
+  }, [colId]);
   const data = colProvenanceCache.get(colId);
   if (!data) return null;
   const source = [data.sourceAlias, data.sourceTitle].filter(Boolean).join(": ");
@@ -1009,6 +1038,7 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
         ))}
       </div>
       <p className="mt-2 text-[11px] italic leading-snug text-zinc-400">{REVISION_CAVEAT}</p>
+      <p className="mt-1 text-[11px] italic leading-snug text-zinc-400">{colReleaseNote(COL_RELEASE)}</p>
       {flag.colId && <ColProvenanceBlock colId={flag.colId} />}
     </>
   );
@@ -3051,6 +3081,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return [singleSpeciesPreview, ...paginatedSpeciesBase];
   }, [paginatedSpeciesBase, singleSpeciesPreview]);
+
+  // The CoL records behind this page's ⚑ markers, as one string so the effect
+  // below re-runs when the page's flags change, not on every render.
+  const pageFlagColIds = colFilterActive
+    ? [...new Set(paginatedSpecies.flatMap((s) => (isFlagged(s.col_revision) && s.col_revision!.colId ? [s.col_revision!.colId] : [])))].join(",")
+    : "";
+  useEffect(() => {
+    if (!pageFlagColIds) return;
+    let cancelled = false;
+    void prefetchColProvenanceAll(pageFlagColIds.split(","), () => cancelled);
+    return () => { cancelled = true; };
+  }, [pageFlagColIds]);
 
   // ── Single species mode: show info card instead of charts ──────────
   // Only activate when arrived via the main search bar (which sets the
@@ -6393,7 +6435,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               that is otherwise about assessments. Once a
                               flagged/clean or reason filter is on, the marker
                               earns its place: it says which signal each row
-                              matched on, which is exactly what was asked. */}
+                              matched on, which is exactly what was asked.
+                              Showing it on every row was tried in #607 and
+                              backed out for now. */}
                           {colFilterActive && isFlagged(s.col_revision) && (
                             <SelectableHoverTooltip
                               content={<RevisionTooltipContent flag={s.col_revision!} name={s.scientific_name} category={s.category} />}

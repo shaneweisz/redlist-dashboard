@@ -377,6 +377,27 @@ export const REVISION_REASON_SUMMARY: Record<string, string> = {
 export const REVISION_CAVEAT =
   "Flagged for information only — Catalogue of Life can be out of date or incorrect.";
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * Which CoL release every flag describes, for the tooltip. Flags come from the
+ * same matching that assigns each species its GBIF records, so they follow the
+ * release the GBIF snapshot was built on (col-release.json), not the newest
+ * one. catalogueoflife.org only ever shows the newest, so between a CoL release
+ * and the snapshot that catches up with it, a flag's link can open a record
+ * that no longer says what the flag does — Dasycercus hillieri was a synonym of
+ * D. cristicauda in COL26.6 XR and its own species in COL26.10 XR. Naming the
+ * release turns that from a contradiction into CoL having moved on.
+ *
+ * The month is spelled out from a fixed list rather than toLocaleDateString,
+ * so server and client render the same string.
+ */
+export function colReleaseNote(release: { alias: string; issued: string }): string {
+  const [year, month] = release.issued.split("-").map(Number);
+  const when = MONTHS[month - 1] ? ` (${MONTHS[month - 1]} ${year})` : "";
+  return `As of ${release.alias}${when}, the Catalogue of Life release this dashboard's GBIF data is matched to. catalogueoflife.org shows the latest release, which may differ.`;
+}
+
 /** The per-species flag the dashboard carries on every assessed row (null when
  *  the species has neither signal — the large majority). */
 export interface ColRevision {
