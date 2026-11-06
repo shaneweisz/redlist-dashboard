@@ -24,9 +24,8 @@ export interface CountSources {
 }
 
 /**
- * Counted records per usage, with the species they count towards and the
- * kingdom that decides their record types. The building block for both
- * per-species totals and a lumped species' own usage.
+ * Records per usage, with the species they count towards: the building block
+ * for per-species totals and for a lumped species' own usage.
  */
 export function usageCountsSql(s: CountSources): string {
   return `
@@ -36,7 +35,7 @@ export function usageCountsSql(s: CountSources): string {
     JOIN ${s.taxa} u ON u.col_id = c.usage_key`;
 }
 
-/** species_id → georef, all_records. */
+/** species_id → georef, all_records: each species' records, minus the usages in `owned`. Not Evaluated species are counted this way. */
 export function speciesCountsSql(s: CountSources): string {
   return `
     WITH uc AS (${usageCountsSql(s)})

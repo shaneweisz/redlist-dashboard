@@ -23,8 +23,8 @@ The monthly data release. `sync.ts` runs the steps in order; each also runs alon
 | `publish.ts`, `upload-data-to-r2.ts` | copy a finished build into `app/data/sync/` and upload it as a new sync |
 | `paths.ts` | where the cache and the build live (`~/.cache/redlist-dashboard/`) |
 | **`inputs/`** | what a sync is built from, each cached by version |
-| `col.ts`, `fetch-col-xr.ts`, `fetch-col-checklist.ts` | Catalogue of Life: the XR GBIF indexes, the curated checklist, Base sources |
-| `inat.ts`, `fetch-inat-vernaculars.ts` | iNaturalist's English common names |
+| `col.ts`, `col-xr.ts`, `col-checklist.ts` | Catalogue of Life: the XR GBIF indexes, the curated checklist, Base sources |
+| `inat-names.ts` | iNaturalist's English common names |
 | `matcher.ts` | GBIF's name matcher (matching-ws), built and served in Docker |
 | **`core/`** | the four source-of-truth tables, and the rules that make them |
 | `build-taxa.ts`, `build-assessments.ts`, `build-occurrences.ts` | CoL usages, Red List assessments, GBIF record counts |
@@ -33,7 +33,7 @@ The monthly data release. `sync.ts` runs the steps in order; each also runs alon
 | `species-key.ts`, `name-variants.ts`, `taxon-groups.ts` | the concept rules, name spellings, Table 1a groups |
 | **`outputs/`** | what the app reads, built from the core tables |
 | `build-read-models.ts` | `assessed`, `ne`, `species/` and the other parquets |
-| `build-taxa-summary.ts`, `build-col-revisions.ts`, `build-synonym-index.ts`, `build-search-index.ts`, `build-col-taxon-ids.ts`, `build-vernaculars.ts` | summaries, the CoL-revision flag, the search and synonym indexes, CoL ids for the taxonomy tree, common names; all called by `sync.ts` |
+| `build-taxa-summary.ts`, `build-col-revisions.ts`, `build-synonym-index.ts`, `build-search-index.ts`, `build-col-taxon-ids.ts`, `build-common-names.ts` | summaries, the CoL-revision flag, the search and synonym indexes, CoL ids for the taxonomy tree, common names; all called by `sync.ts` |
 | `derive-gbif-taxon-keys.ts` | by hand, with `--write`, when CoL moves: the group root keys the country-stats route queries GBIF with (`src/config/gbif-taxon-keys.json`) |
 | **`checks/`** | what a build is held to before it is published |
 | `check-fixtures.ts`, `fixtures/matching.ts` | 50 named matching cases |
@@ -60,4 +60,4 @@ Run by hand when their source changes: `upload-range-maps.ts` and `upload-aoh-ma
 
 ## lib/
 
-`utils.ts` (env loading, `DATA_DIR`, logging), `taxa.ts` (the Red List group definitions scripts share), `r2.ts` (listing and downloading a sync).
+`utils.ts` (env loading, `DATA_DIR`, a JSONL logger the map uploaders use, a concurrency helper), `taxa.ts` (the 28 Table 1a group definitions), `r2.ts` (the one R2 client every script uses, and downloading a sync), `redlist-db.ts` (the Red List database, opened read-only, for the scripts outside the sync).

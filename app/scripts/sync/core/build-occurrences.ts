@@ -39,8 +39,7 @@
  *
  * The aggregation runs in batches written to
  * ~/.cache/redlist-dashboard/occurrences/<date>/, so an interrupted run
- * resumes. It also keeps occurrence_species_keys (usage_key × GBIF's own
- * specieskey → n), to check species_id against GBIF's resolution.
+ * resumes.
  *
  * Environment:
  *   GBIF_SNAPSHOT_ROOT  where mirrors live; default ~/Data/gbif
@@ -52,18 +51,18 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { gbifJson } from "../../../src/lib/gbif-fetch";
 import { GBIF_GEOSPATIAL_ISSUES } from "../../../src/lib/gbif";
 import { CACHE_ROOT, CORE_DIR } from "../paths";
+import { lit, openDuckDB } from "../sql";
 
 const SNAPSHOT_ROOT = process.env.GBIF_SNAPSHOT_ROOT ?? path.join(os.homedir(), "Data", "gbif");
 /** The earliest snapshot keyed by Catalogue of Life rather than GBIF's old Backbone. */
 const FIRST_COL_SNAPSHOT = "2026-10-01";
 const FILES_PER_BATCH = 400;
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 export interface Snapshot {
   date: string;
@@ -143,7 +142,7 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
     const done = path.join(parts, `${tag}.done`);
     if (fs.existsSync(done)) continue;
     await conn.run(`CREATE OR REPLACE TEMP TABLE batch AS
-      SELECT taxonkey AS usage_key, specieskey, CAST(year AS SMALLINT) AS year, basisofrecord AS basis,
+      SELECT taxonkey AS usage_key, CAST(year AS SMALLINT) AS year, basisofrecord AS basis,
              ${GEOREF} AS georef, countrycode, CAST(month AS TINYINT) AS month,
              -- try_cast: a malformed date (31 February) is undated, not an error
              CASE WHEN day IS NOT NULL AND month IS NOT NULL AND year IS NOT NULL
@@ -157,8 +156,6 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
       TO ${lit(path.join(parts, `dates-${tag}.parquet`))} (FORMAT parquet)`);
     await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, count(*) AS n FROM batch WHERE countrycode IS NOT NULL GROUP BY ALL)
       TO ${lit(path.join(parts, `countries-${tag}.parquet`))} (FORMAT parquet)`);
-    await conn.run(`COPY (SELECT usage_key, specieskey, count(*) AS n FROM batch GROUP BY ALL)
-      TO ${lit(path.join(parts, `species-keys-${tag}.parquet`))} (FORMAT parquet)`);
     fs.writeFileSync(done, "");
     const mins = (Date.now() - start) / 60000;
     console.log(`  batch ${b + 1}/${batches.length} (${mins.toFixed(1)} min)`);
@@ -191,7 +188,14 @@ async function assertKeysFitTaxonomy(conn: DuckDBConnection, coreDir: string): P
   }
 }
 
-export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, coreDir: string): Promise<{ sourceRows: number }> {
+/** What sync.json records about the snapshot. */
+export interface OccurrenceSource {
+  snapshot: string;
+  citation: string;
+  sourceRows: number;
+}
+
+export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, coreDir: string): Promise<OccurrenceSource> {
   const workDir = path.join(CACHE_ROOT, "occurrences", snap.date);
   const marker = path.join(workDir, "complete.json");
   let sourceRows: number;
@@ -215,34 +219,27 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
   await conn.run(`COPY (SELECT usage_key, year, month, event_date, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("dates")})
     GROUP BY ALL ORDER BY usage_key, year, month, event_date)
     TO ${lit(path.join(coreDir, "occurrence_dates.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
-  fs.rmSync(path.join(coreDir, "occurrence_days.parquet"), { force: true });
   await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("countries")}) GROUP BY ALL ORDER BY usage_key, countrycode)
     TO ${lit(path.join(coreDir, "occurrence_countries.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
-  await conn.run(`COPY (SELECT usage_key, specieskey, sum(n)::BIGINT AS n FROM read_parquet(${parts("species-keys")}) GROUP BY ALL ORDER BY usage_key)
-    TO ${lit(path.join(coreDir, "occurrence_species_keys.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
-  fs.writeFileSync(path.join(coreDir, "occurrences.json"),
-    JSON.stringify({ snapshot: snap.date, citation: snap.citation, sourceRows }, null, 2) + "\n");
 
   // Every record with a usage is in the aggregate, so its total can't fall short of the source.
   const [s] = (await conn.runAndReadAll(`SELECT sum(n) AS n FROM read_parquet(${lit(path.join(coreDir, "occurrence_counts.parquet"))})`)).getRowObjects();
   if (Number(s.n) > sourceRows) throw new Error(`build-occurrences: aggregated ${s.n} records from a ${sourceRows}-record snapshot`);
   await assertKeysFitTaxonomy(conn, coreDir);
-  return { sourceRows };
+  return { snapshot: snap.date, citation: snap.citation, sourceRows };
 }
 
-export async function run(opts: { out?: string } = {}): Promise<void> {
+export async function run(opts: { out?: string } = {}): Promise<OccurrenceSource> {
   const snap = resolveSnapshot();
   console.log(`build-occurrences: ${snap.date} (${snap.files.length} files) — ${snap.citation}`);
-  const tmp = path.join(CACHE_ROOT, "occurrences", "tmp");
-  fs.mkdirSync(tmp, { recursive: true });
-  const conn = await (await DuckDBInstance.create(":memory:", {
-    threads: "20", memory_limit: "96GB", temp_directory: tmp, preserve_insertion_order: "false",
-  })).connect();
-  const { sourceRows } = await buildOccurrences(conn, snap, opts.out ?? CORE_DIR);
+  const conn = await openDuckDB({ threads: "20", memory_limit: "96GB", preserve_insertion_order: "false" });
+  const source = await buildOccurrences(conn, snap, opts.out ?? CORE_DIR);
+  const { sourceRows } = source;
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS rows, sum(n) AS records, sum(n) FILTER (georef) AS georef
     FROM read_parquet(${lit(path.join(opts.out ?? CORE_DIR, "occurrence_counts.parquet"))})`)).getRowObjects();
   console.log(`occurrence_counts: ${Number(s.rows).toLocaleString()} rows covering ${Number(s.records).toLocaleString()} ` +
     `of ${sourceRows.toLocaleString()} records (${Number(s.georef).toLocaleString()} georeferenced)`);
+  return source;
 }
 
 const isDirectRun = process.argv[1]?.endsWith("core/build-occurrences.ts") || process.argv[1]?.endsWith("core/build-occurrences.js");

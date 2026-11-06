@@ -26,15 +26,11 @@ import { dynamicNodeFilter, isDynamicNodeId, dynamicNodeMatchValue, parseDynamic
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
 import type { NodeFilter } from "@/lib/taxonomy-sql";
 
-// Keep in sync with the same constant in scripts/sync/outputs/build-taxa-summary.ts and
-// species-duckdb.ts — Homo sapiens, which IUCN omits from its Red List export.
-const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
-
 let helpersPromise: Promise<{ hasTaxa: boolean }> | null = null;
 async function ensureColMatchHelpers(conn: Awaited<ReturnType<typeof getConn>>): Promise<{ hasTaxa: boolean }> {
   if (!helpersPromise) {
     helpersPromise = (async () => {
-      await ensureNeHelpers(conn); // ne_assessed_col_ids / ne_ex_ew_col_ids
+      await ensureNeHelpers(conn); // ne_assessed_col_ids
       try {
         await conn.run(`CREATE TEMP TABLE split_candidates AS SELECT * FROM read_parquet('${parquetUri("col-split-candidates.parquet")}')`);
         await conn.run(`CREATE TEMP TABLE synonym_assessed AS SELECT * FROM read_parquet('${parquetUri("col-synonym-assessed.parquet")}')`);
@@ -97,9 +93,7 @@ export async function getLiveBreakdown(nodeId: string): Promise<BreakdownEntry |
     speciesGlob: parquetUri("species/**/*.parquet"),
     assessedPath: parquetUri("assessed.parquet"),
     linkPath: parquetUri("species_link.parquet"),
-    universeSql: `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ne_ex_ew_col_ids))`,
     assessedCidsTable: "ne_assessed_col_ids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL,
     hasTaxa,
     taxaPath: hasTaxa ? parquetUri("taxa.parquet") : undefined,
   };

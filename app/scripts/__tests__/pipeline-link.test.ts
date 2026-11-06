@@ -4,7 +4,7 @@
  * but a different author or year must still refuse.
  */
 import { describe, it, expect } from "vitest";
-import { sameAuthors } from "../sync/core/build-link";
+import { sameAuthors } from "../sync/core/accept-match";
 
 describe("sameAuthors", () => {
   it.each([

@@ -19,9 +19,8 @@ import { canonicalizeTaxonId, mapTaxonId } from "@/lib/data/taxonomy-constants";
 import { dedupeByRowKey, pickTaxa } from "@/lib/search-shards/rank";
 import { getTaxaSummary, getColRevisions, type CreditSource, type HistoryMap } from "@/lib/data/species-store";
 import { isDynamicNodeId, dynamicNodeFilter, buildDynamicNodeId, rankOrderFor, isLiveDrilldownNode, type DynamicRank, type DynamicSegment } from "@/lib/dynamic-taxon";
-import { filterToSql, sqlStrList, GENUS_SQL } from "@/lib/taxonomy-sql";
+import { filterToSql, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { sisRowKey, colRowKey, speciesRowKey, type SpeciesRowKey } from "@/lib/species-row-key";
-import { COL_DOMESTIC_EXCLUDE_NAMES } from "@/config/col-described-overrides";
 
 const DATA_DIR = path.join(process.cwd(), "data", "sync");
 // Dev has the parquets on disk; on Vercel they aren't bundled → read from R2.
@@ -66,30 +65,16 @@ export async function getConn(): Promise<DuckDBConnection> {
 // scanned twice. Materialize both once per warm container as temp tables; large
 // groups (plants ~280k) stop paying for the ~557k-row GBIF aggregation + the 173k
 // anti-set on each request. Reset on failure so a transient R2 error can retry.
-// Exported for src/lib/data/live-taxa-children.ts, which needs the exact same
-// "assessed col_ids" / "CoL-extinct but IUCN-confirmed EX/EW" universe (ne_assessed_
-// col_ids / ne_ex_ew_col_ids) for its own colDescribed/colNe counts — reusing these
-// avoids building a second, redundant set of identical temp tables on the same
-// warm connection.
+// Exported for src/lib/data/live-taxa-children.ts, which needs the same assessed
+// col_ids (ne_assessed_col_ids) for its own colNe counts on the same connection.
 let neHelpersPromise: Promise<void> | null = null;
 export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
   if (!neHelpersPromise) {
     neHelpersPromise = (async () => {
       const linkUri = parquetUri("species_link.parquet");
       const neUri = parquetUri("ne.parquet");
-      const assessedUri = parquetUri("assessed.parquet");
       await conn.run(`CREATE TEMP TABLE ne_assessed_col_ids AS
         SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE src = 'redlist' AND col_id IS NOT NULL`);
-      // A species CoL flags extinct still belongs to the "described" universe if
-      // IUCN's own linked assessment agrees (EX/EW) — see the matching comment +
-      // rationale next to createExEwAssessedTable in scripts/sync/outputs/build-taxa-summary.ts.
-      // Mirrored here so this runtime species list and the build-time colDescribed/
-      // colNe summary numbers never disagree with each other.
-      await conn.run(`CREATE TEMP TABLE ne_ex_ew_col_ids AS
-        SELECT DISTINCT l.col_id
-        FROM read_parquet('${linkUri}') l
-        JOIN read_parquet('${assessedUri}') a ON a.id = l.id
-        WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
@@ -237,23 +222,6 @@ export function toSpeciesRow(r: Record<string, unknown>) {
   };
 }
 
-// CoL species deliberately kept out of the universe (analogous to the domesticated-GBIF
-// exclusion). Homo sapiens — IUCN omits humans from its Red List export, so it would
-// otherwise surface as "not evaluated". Keep in sync with build-taxa-summary.
-const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
-
-// Domestic/feral forms (dog, cat, cattle, etc.) excluded from the NE universe here too —
-// each has a wild-form sibling species already counted separately (see
-// COL_DOMESTIC_EXCLUDE_NAMES's doc comment), so counting the domestic form as "Not
-// Evaluated" as well would double up. Matches build-taxa-summary.ts's colCountsByGroup,
-// whose precomputed col_ne this live count must agree with (#397 — Mammals showed 530
-// live vs. 520 precomputed, a gap of exactly these 10 names). Node-scoped queries that
-// go through filterToSql already exclude the wider COL_EXCLUDE_ALL_NODES (this list plus
-// the Bison SG name overrides) via whereSql, making this redundant-but-harmless for them;
-// this is the only exclusion applied for the taxon_group-partition fast path (top-level
-// taxa like "mammals"), which bypasses filterToSql entirely.
-const NOT_DOMESTIC_SQL = `coalesce(lower(scientific_name), '') NOT IN (${sqlStrList(COL_DOMESTIC_EXCLUDE_NAMES)})`;
-
 // Cap on how many Not-Evaluated species one query may return. A giant aggregate
 // (insects ~935k, invertebrates ~1.3M) can't be serialized in one response (it 500s /
 // times out), so a taxon over the cap returns no rows with tooLarge=true and the UI
@@ -347,10 +315,10 @@ export async function querySpecies(opts: {
     const assessedColIds = "(SELECT col_id FROM ne_assessed_col_ids)"; // assessed col_ids (de-dup key)
     const speciesUri = parquetUri("species/**/*.parquet");
 
-    // The NE list IS the CoL extant universe under the taxon, not already assessed
-    // (minus the small EXCLUDED_COL_IDS denylist). species/ is partitioned by taxon_group,
+    // The NE list IS the described species under the taxon (species/'s `described`:
+    // the sync's one definition) not already assessed. species/ is partitioned by taxon_group,
     // so the SAME `whereSql` used for the assessed parquet filters + prunes it.
-    const univFilter = `${whereSql} AND in_base AND (extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ne_ex_ew_col_ids)) AND col_id NOT IN ${assessedColIds} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${NOT_DOMESTIC_SQL}`;
+    const univFilter = `${whereSql} AND described AND col_id NOT IN ${assessedColIds}`;
 
     // Count first (cheap). A giant aggregate (insects ~935k, invertebrates ~1.3M) exceeds
     // the cap — serializing it is a 250MB+ payload the browser can't load. Flag `tooLarge`
@@ -740,8 +708,7 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
   const colSql = `
     SELECT col_id, scientific_name, taxon_group, class_name, order_name, family
     FROM read_parquet('${parquetUri("species/**/*.parquet")}', hive_partitioning=true)
-    WHERE scientific_name ILIKE '%' || $q || '%' AND in_base AND extinct IS NOT TRUE
-      AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+    WHERE scientific_name ILIKE '%' || $q || '%' AND described
     ORDER BY (lower(scientific_name) LIKE $q || '%') DESC, lower(scientific_name)
     LIMIT ${(lim - fast.length) * 3 + 5}`;
   const colRows = (await conn.runAndReadAll(colSql, { q: query.toLowerCase() })).getRowObjects();
@@ -1104,7 +1071,7 @@ function primeFallbackTiers(conn: DuckDBConnection): Promise<void> {
     primePromise = (async () => {
       const NO_MATCH = "zzq~unmatchable~qzz";
       await conn.run(`SELECT col_id FROM read_parquet('${parquetUri("species/**/*.parquet")}', hive_partitioning=true)
-        WHERE scientific_name ILIKE '%${NO_MATCH}%' AND in_base AND extinct IS NOT TRUE LIMIT 1`).catch(() => {});
+        WHERE scientific_name ILIKE '%${NO_MATCH}%' AND described LIMIT 1`).catch(() => {});
       await conn.run(`SELECT synonym_name FROM read_parquet('${parquetUri("synonym-index.parquet")}')
         WHERE synonym_name_lower LIKE '%${NO_MATCH}%' LIMIT 1`).catch(() => {});
     })();
@@ -1175,7 +1142,7 @@ export async function getSpeciesUnder(taxon: string, limit = 50): Promise<{
   // Arbitrary-rank lineage match over the extant universe. species/ is partitioned by
   // taxon_group, not by clade, so an arbitrary rank can't prune — it full-scans. (This
   // is a power-user endpoint not wired into the UI; the hot path is querySpecies.)
-  const where = `$t IN (kingdom, phylum, class_name, order_name, family, genus) AND in_base AND extinct IS NOT TRUE`;
+  const where = `$t IN (kingdom, phylum, class_name, order_name, family, genus) AND described`;
   const params: Record<string, string> = { t };
   const lim = Math.min(Math.max(limit, 1), 200);
   const head = (await conn.runAndReadAll(

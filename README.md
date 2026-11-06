@@ -157,7 +157,7 @@ Four ways, and each has its own folder in [`app/scripts/`](app/scripts/README.md
 | **Sync** | monthly, by hand | your machine | builds every number (counts, links, the Not Evaluated list) from the Red List database, a GBIF snapshot and Catalogue of Life, and uploads it to R2 as a new `syncs/<timestamp>/` | [docs/sync.md](docs/sync.md) |
 | **Build** | every deploy | Vercel | downloads the sync `app/latest-sync.txt` names and packages it for the deployed code: species lists, search and tree as static files. Never changes a number | [docs/build.md](docs/build.md) |
 | **Occasional publishes** | when their source changes | your machine | narratives (each Red List release), range maps and AOH rasters, map overlays, reference data | [app/scripts/README.md](app/scripts/README.md) |
-| **Live** | each request | Vercel | GBIF occurrence points, CITES, literature, the Red List API (see Architecture) | |
+| **Live** | each request | Vercel | the API routes: the sync's parquets from R2, its summaries, and GBIF, iNaturalist, CITES, literature and the Red List API | [docs/app.md](docs/app.md) |
 
 A sync goes live only when its one-line `app/latest-sync.txt` change merges to `main`; uploading one changes nothing anyone sees. Reverting that line goes back.
 

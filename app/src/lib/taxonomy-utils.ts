@@ -404,7 +404,7 @@ export function matchesFilter(
 ): boolean {
   const sciNameLower = (row.scientific_name ?? "").trim().toLowerCase();
 
-  // CoL-only universe exclusion applies unconditionally, even to extraSpeciesNames
+  // Names another node's CoL override claims (Bison), even for extraSpeciesNames
   // below — checked first so nothing can bypass it.
   if (sciNameLower && COL_EXCLUDE_ALL_NODES.includes(sciNameLower)) return false;
 
@@ -464,8 +464,7 @@ export function matchesFilter(
     if (filter.excludeSpeciesNames && filter.excludeSpeciesNames.length > 0 && name && filter.excludeSpeciesNames.includes(name)) return false;
   }
 
-  // (CoL-only universe exclusions — domestic/feral forms, e.g. Felis catus, + names
-  // reassigned to another node's species-name override, e.g. Bison — already
+  // (Names reassigned to another node's species-name override, e.g. Bison, are
   // checked at the top of this function, before the extraSpeciesNames bypass.)
 
   return true;
@@ -535,8 +534,8 @@ export function getNodeDef(nodeId: string): { node: TaxonomyNode; parentId: stri
 
 export const COL_SOURCE_URL = "https://www.catalogueoflife.org/";
 
-// The exact CoL XR release colDescribed is built from (scripts/sync/inputs/fetch-col-xr.ts writes
-// this alongside every sync) — cited by alias (e.g. "COL26.6 XR") and linked via its
+// The exact CoL XR release colDescribed is built from (the sync writes
+// this, scripts/sync/inputs/col.ts) — cited by alias (e.g. "COL26.6 XR") and linked via its
 // DOI, so "Source" points at the specific dataset version actually used instead of a
 // generic, dateless homepage link that says nothing about which release produced the
 // numbers on screen.

@@ -23,13 +23,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, CORE_DIR } from "../paths";
 import { ensureColInputs } from "../inputs/col";
 import { ensureMatcher, type Matcher } from "../inputs/matcher";
+import { lit, writeTable, openDuckDB } from "../sql";
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const THREADS = 16;
 
 export interface Usage { usage_id: string; name: string; authorship: string | null; rank: string | null; status: string | null }
@@ -115,10 +115,8 @@ export async function buildMatches(conn: DuckDBConnection, coreDir: string, matc
     fs.closeSync(fd);
   }
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE match_rows (sis_taxon_id INTEGER, answer JSON)`);
-  const ap = await conn.createAppender("match_rows");
-  for (const j of jobs) { ap.appendInteger(j.sis); ap.appendVarchar(JSON.stringify(cache.get(j.hash))); ap.endRow(); }
-  ap.closeSync();
+  await writeTable(conn, "match_rows", { sis_taxon_id: "INTEGER", answer: "JSON" },
+    jobs.map((j) => ({ sis_taxon_id: j.sis, answer: JSON.stringify(cache.get(j.hash)) })));
   const ALT = `STRUCT(usage_id VARCHAR, name VARCHAR, authorship VARCHAR, rank VARCHAR, status VARCHAR, confidence INTEGER, match_type VARCHAR)`;
   fs.mkdirSync(coreDir, { recursive: true });
   await conn.run(`COPY (
@@ -130,15 +128,13 @@ export async function buildMatches(conn: DuckDBConnection, coreDir: string, matc
            CAST(answer->'$.alternatives' AS ${ALT}[]) AS alternatives
     FROM match_rows ORDER BY sis_taxon_id
   ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
-  fs.writeFileSync(path.join(coreDir, "matches.json"), JSON.stringify({ matcher: matcher.version, xr: matcher.datasetKey,
-    names: jobs.length, asked: missing.length }, null, 2) + "\n");
   return { out, asked: missing.length, cached: jobs.length - missing.length };
 }
 
 export async function run(): Promise<void> {
   const col = await ensureColInputs();
   const matcher = await ensureMatcher(col.xr, col.nameUsage);
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
   const r = await buildMatches(conn, CORE_DIR, matcher);
   console.log(`Wrote ${r.out}: ${r.asked.toLocaleString()} asked, ${r.cached.toLocaleString()} from cache`);
 }

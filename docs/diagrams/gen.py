@@ -1,6 +1,6 @@
 """Generator for the sync diagrams: boxes on a grid, arrows bound between them.
 
-Usage: python3 -I gen.py <today|target> <out.excalidraw>
+Usage: python3 -I gen.py <today|target|files|build|routes> <out.excalidraw>
 Render: npx @excalidraw/cli@0.2.0 render <out.excalidraw> --out <out.png> --scale 2
 The .excalidraw files are the editable sources (open them at excalidraw.com).
 Specs are Python functions below returning (nodes, edges, notes).
@@ -204,8 +204,197 @@ def target():
                              ("step", "derivation step"), ("out", "what the app reads")])
 
 
+def files():
+    """Every file a sync reads and writes, step by step in sync.ts order, and where each lands."""
+    heading(0, -190, "A sync, step by step: every file it reads and writes, and where it lands", 34)
+    heading(0, -140, "npm run sync (scripts/sync/sync.ts), top to bottom in the order it runs. Paths under ~/.cache/redlist-dashboard/. "
+            "build/data/ is what sync:publish uploads to syncs/<timestamp>/ in R2 and copies to app/data/sync/.", 17, "#495057")
+    heading(0, -110, "Dashed: unused, or could be simpler (docs/sync.md). sync.log is written throughout.", 17, "#495057")
+    cols = [("inputs and caches", 0.0, 290, "#495057"), ("step", 1.05, 250, "#5f3dc4"),
+            ("build/core/  (working, not published)", 2.0, 320, "#2b8a3e"),
+            ("build/data/  (published)", 3.15, 340, "#d9480f"), ("elsewhere", 4.4, 300, "#1e1e1e")]
+    for title, x, _w, color in cols:
+        heading(x * COL_W, -55, title, 18, color)
+    kinds = {0: "source", 2: "core", 3: "out", 4: "app"}
+    steps = [
+        ("1  inputs\ninputs/col.ts, inat-names.ts", {
+            0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat-names-<month>/\niNaturalist names", False)]}),
+        ("2  taxa\ncore/build-taxa.ts", {
+            2: [("taxa.parquet  159 MB\nevery CoL usage", False)]}),
+        ("3  assessments\ncore/build-assessments.ts", {
+            0: [("Red List Postgres\n(read-only, not cached)", False)],
+            2: [("assessments.parquet  12 MB\nevery assessment", False)]}),
+        ("4  occurrences\ncore/build-occurrences.ts", {
+            0: [("~/Data/gbif/<date>/\nthe snapshot mirror", False), ("occurrences/<date>/parts/\nresumable aggregate", False)],
+            2: [("occurrence_counts  135 MB\nusage x year x georef x type", False),
+                ("occurrence_dates  943 MB\n... x month x day", False),
+                ("occurrence_countries  58 MB", False)]}),
+        ("5  match names\ncore/build-matches.ts", {
+            0: [("matching-ws/export-<xr>/\nthe matcher's index (Docker)", False)],
+            2: [("matches.parquet  6 MB\nthe matcher's answers", False)]}),
+        ("6  link\ncore/build-link.ts", {
+            0: [("core/decisions.tsv\n(in the repo)", False)],
+            2: [("assessment_link.parquet\nSIS id -> CoL species", False)],
+            4: [("build/match-queue.tsv\nthe queue, to review", False)]}),
+        ("7  common names, read models\noutputs/build-common-names.ts,\nbuild-read-models.ts", {
+            2: [("species-common-names-col\n.parquet  (for search)", False), ("species-fallback-display-\nname-col.parquet", False),
+                ("count_components.parquet\nwhat each count is made of", False)],
+            3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False), ("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
+                ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", True),
+                ("taxonomy/species_link.parquet  3 MB", True), ("taxonomy/taxa.parquet  152 MB (copy)", True),
+                ("taxonomy/assessment_link (copy)", False)]}),
+        ("8  summaries, indexes\noutputs/build-taxa-summary,\n-col-revisions, -synonym-\nindex, -search-index", {
+            3: [("summaries/  5 JSON, 2.4 MB", False), ("taxonomy/col-*.parquet  3 files", False),
+                ("taxonomy/col-revisions.json", False), ("search/name-index  160 MB", False),
+                ("search/rank-index  3 MB", False), ("search/synonym-index  78 MB", False)],
+            4: [("app/src/config/col-taxon-ids\n.json, col-release.json (repo)", False)]}),
+        ("9  checks\nsync.ts, checks/", {
+            0: [("baseline-<sync>/  prod's\nsync, downloaded once", False)],
+            3: [("sync.json  every input\nversion, check result", False), ("sync.log  everything\nthe run printed", False)],
+            4: [("build/compare/  report.md,\ndiffs.parquet, summary.json", False)]}),
+        ("10  npm run sync:publish\nscripts/sync/publish.ts", {
+            4: [("app/data/sync/ and R2\nsyncs/<timestamp>/", False), ("app/latest-sync.txt\n(the data PR)", False)]}),
+    ]
+    BH, GAP = 54, 12
+    y = 0
+    for n, (label, files) in enumerate(steps):
+        rows = max([len(v) for v in files.values()] + [1])
+        bh = max(rows * (BH + GAP) + GAP, 2 * BH)
+        band = base(f"band{n}", "rectangle", -15, y, 4.4 * COL_W + 300 + 30, bh, "transparent",
+                    "#f1f3f5" if n % 2 == 0 else "#ffffff", strokeWidth=0, roundness=None)
+        elements.append(band)
+        step_h = min(bh - 2 * GAP, 96)
+        box(f"st{n}", 1.05, 0, label, "step", w=250, h=step_h, dy=y + (bh - step_h) / 2, size=14)
+        for col, items in files.items():
+            x, w = [(c[1], c[2]) for c in cols][col]
+            for k, (txt, dashed) in enumerate(items):
+                box(f"f{n}_{col}_{k}", x, 0, txt, kinds[col], w=w, h=BH, dy=y + GAP + k * (BH + GAP), size=13, dashed=dashed)
+        y += bh
+    legend(0, y + 30, [("source", "input or cache"), ("step", "sync step"), ("core", "working table"),
+                        ("out", "published"), ("app", "elsewhere")])
+
+
+def build():
+    """Every deploy: what the build fetches and writes, and who reads it."""
+    heading(0, -170, "The build: what every deploy fetches, writes and serves", 34)
+    heading(0, -118, "npm run build = prebuild (scripts/build/) then next build, on Vercel for every deploy. "
+            "The prebuilt files are reused from .next/cache unless the sync or their code changed.", 17, "#495057")
+    S = {}
+    S["ptr"] = box("ptr", 0, 0.0, "app/latest-sync.txt\n(which sync, in git)", "source")
+    S["r2"] = box("r2", 0, 1.1, "R2 dashboard-data\nsyncs/<timestamp>/", "source")
+    S["code"] = box("code", 0, 2.6, "the repo's code: taxonomy\ntree, display names, formats", "source", h=80)
+    S["cache"] = box("cache", 0, 3.7, ".next/cache/prebuilt/\n(restored by Vercel)", "source")
+    S["duck"] = box("duck", 0, 5.6, "extensions.duckdb.org\n(httpfs for Linux)", "source")
+
+    S["s_fetch"] = box("s_fetch", 1, 0.55, "fetch-data-from-r2", "step")
+    S["f_data"] = box("f_data", 2, 0.55, "app/data/sync/\nthe sync, 447 MB", "out")
+    S["s_pre"] = box("s_pre", 2, 2.6, "build-prebuilt\n(cache key: sync +\nthe builders' code)", "step", h=86)
+    S["s_sl"] = box("s_sl", 3, 1.6, "build-species-lists", "step")
+    S["s_ss"] = box("s_ss", 3, 2.7, "build-search-shards", "step")
+    S["s_tc"] = box("s_tc", 3, 3.8, "build-tree-children", "step")
+    S["f_sl"] = box("f_sl", 4, 1.6, "species-lists/\n59 files, 42 MB", "out")
+    S["f_ss"] = box("f_ss", 4, 2.7, "search-shards/\n4,827 files, 146 MB", "out")
+    S["f_tc"] = box("f_tc", 4, 3.8, "tree/\n37 files, 4.5 MB", "out")
+    S["r_cdn"] = box("r_cdn", 5, 2.55, "the browser, from\nthe CDN (loaders in\nsrc/lib/species-lists,\nsearch-shards, tree-children)", "app", h=110)
+
+    S["s_ext"] = box("s_ext", 1, 5.6, "fetch-duckdb-ext", "step")
+    S["f_ext"] = box("f_ext", 2, 5.6, "app/duckdb-ext/\nhttpfs extension", "out")
+    S["s_next"] = box("s_next", 3, 5.6, "next build\n(no type-check: CI does it)", "step")
+    S["f_fn"] = box("f_fn", 4, 5.6, "serverless functions:\nsummaries JSON bundled,\nparquets left out", "out", h=86)
+    S["r_fn"] = box("r_fn", 5, 5.6, "API routes: DuckDB reads\nthe parquets from R2 at\nrequest time", "app", h=86)
+
+    for a, b in [("ptr", "s_fetch"), ("r2", "s_fetch"), ("s_fetch", "f_data"), ("f_data", "s_pre"),
+                 ("code", "s_pre"), ("cache", "s_pre"),
+                 ("s_pre", "s_sl"), ("s_pre", "s_ss"), ("s_pre", "s_tc"),
+                 ("s_sl", "f_sl"), ("s_ss", "f_ss"), ("s_tc", "f_tc"),
+                 ("f_sl", "r_cdn"), ("f_ss", "r_cdn"), ("f_tc", "r_cdn"),
+                 ("duck", "s_ext"), ("s_ext", "f_ext"), ("f_ext", "s_next"), ("s_next", "f_fn"), ("f_fn", "r_fn")]:
+        arrow(S[a], S[b])
+    heading(3 * COL_W, 0.2 * ROW_H, "public/prebuilt/<sync>/, served from the CDN:\n"
+            "species-lists: assessed, ne, species/, species_link, col-revisions\n"
+            "search-shards: name-index, rank-index\n"
+            "tree: assessed, species/", 15, "#495057")
+    legend(0, 7.0 * ROW_H, [("source", "input"), ("step", "build step"), ("out", "what it writes"), ("app", "reader")])
+
+
+def routes():
+    """The API routes, grouped: what each group reads, and which part of the app calls it."""
+    heading(0, -170, "The API routes: what they read, and who calls them", 34)
+    heading(0, -118, "42 route handlers in app/src/app, grouped. Dashed: unused, or mostly answered by the prebuilt files "
+            "(see docs/app.md).", 17, "#495057")
+    S = {}
+    W1, X1 = 380, 1.05
+    # sources
+    S["pq"] = box("pq", 0, 0.4, "sync parquets on R2\n(DuckDB over httpfs)", "out")
+    S["js"] = box("js", 0, 2.6, "sync JSON bundled\ninto the function", "out")
+    S["nar"] = box("nar", 0, 4.6, "narratives parquets\n(R2 narratives/<release>/)", "out")
+    S["maps"] = box("maps", 0, 6.4, "R2 maps bucket: range\nmaps, AOH, overlays", "out")
+    S["gbif"] = box("gbif", 0, 8.4, "GBIF API", "api")
+    S["inat"] = box("inat", 0, 10.4, "iNaturalist API", "api")
+    S["iucn"] = box("iucn", 0, 12.0, "IUCN Red List API v4", "api")
+    S["ext"] = box("ext", 0, 13.6, "CITES, ChecklistBank,\nOpenAlex & co, EOL", "api")
+    S["supa"] = box("supa", 0, 15.2, "Supabase (auth,\nuser_roles)", "source")
+
+    def group(id_, row, title, lines, dashed=False):
+        h = 30 + 19 * (len(lines) + 1)
+        S[id_] = box(id_, X1, row, title + "\n" + "\n".join(lines), "step", w=W1, h=h, size=14, dashed=dashed)
+
+    group("g_list", 0.0, "Species lists and summaries", [
+        "/api/redlist/species  (fallback: prebuilt lists)",
+        "/api/redlist/species/history, /synonyms",
+        "/api/redlist/taxa-summary, /taxa-subgroups",
+        "/api/redlist/country-stats, /realm-stats",
+        "/api/redlist/credit-candidates, /api/data-sync-date"])
+    group("g_col", 2.1, "CoL differences", [
+        "/api/redlist/taxa-breakdown-live",
+        "/api/redlist/col-taxon-ids-live",
+        "/api/col/provenance  (ChecklistBank)"])
+    group("g_srch", 3.6, "Search  (fallback: prebuilt shards)", [
+        "/api/search, /api/search/warm"], dashed=True)
+    group("g_agent", 4.6, "For agents", ["/api/mcp, /browse, /llms.txt"])
+    group("g_nar", 5.6, "Narrative search", ["/api/narrative-search, /[assessmentId]"])
+    group("g_maps", 6.6, "Map layers  (range map + AOH: admins only)", [
+        "/api/species/[key]/range-map, /aoh, /aoh/metadata",
+        "/api/overlays/[asset]"])
+    group("g_gbif", 8.0, "GBIF, live", [
+        "/api/occurrences, /api/country/stats",
+        "/api/species/[key]/breakdown, /inat-photos",
+        "/api/nearby-species, /nearby-species/points"])
+    group("g_inat", 9.9, "iNaturalist, live", [
+        "/api/inat/observations, /api/inat/thumbnail",
+        "/api/species/[key]/inat-top-observers"])
+    group("g_iucn", 11.6, "Red List assessment, literature", [
+        "/api/redlist/assessment/[id], /api/literature"])
+    group("g_misc", 12.8, "CITES, native range", [
+        "/api/cites, /api/cites/trade",
+        "/api/wcvp-native-range  (bundled parquet)"])
+    group("g_auth", 14.3, "Sign-in", ["/api/auth/me, /auth/callback"])
+    group("g_dead", 15.4, "No callers", ["/api/taxa/species, /api/eol, /api/eol/traits"], dashed=True)
+
+    # consumers
+    S["c_tbl"] = box("c_tbl", 2.75, 0.3, "species table, charts,\nfilters, summary table", "app")
+    S["c_srch"] = box("c_srch", 2.75, 3.4, "search bar", "app")
+    S["c_agent"] = box("c_agent", 2.75, 4.6, "AI agents (MCP)", "app")
+    S["c_nar"] = box("c_nar", 2.75, 5.6, "narrative search page", "app")
+    S["c_det"] = box("c_det", 2.75, 8.4, "species detail panel:\nGBIF map, iNat, literature,\nCITES, CoL, Red List tabs", "app", h=96)
+    S["c_map"] = box("c_map", 2.75, 11.2, "nearby / world map", "app")
+    S["c_hdr"] = box("c_hdr", 2.75, 14.3, "sign-in, header", "app")
+
+    for a, b in [("pq", "g_list"), ("js", "g_list"), ("pq", "g_col"), ("ext", "g_col"),
+                 ("pq", "g_srch"), ("pq", "g_agent"), ("js", "g_agent"), ("nar", "g_nar"),
+                 ("maps", "g_maps"), ("supa", "g_maps"), ("gbif", "g_gbif"), ("pq", "g_gbif"),
+                 ("inat", "g_inat"), ("gbif", "g_inat"), ("iucn", "g_iucn"), ("ext", "g_iucn"),
+                 ("ext", "g_misc"), ("supa", "g_auth"), ("pq", "g_dead"), ("ext", "g_dead"),
+                 ("g_list", "c_tbl"), ("g_col", "c_tbl"), ("g_srch", "c_srch"), ("g_agent", "c_agent"),
+                 ("g_nar", "c_nar"), ("g_maps", "c_det"), ("g_gbif", "c_det"), ("g_gbif", "c_map"),
+                 ("g_inat", "c_det"), ("g_iucn", "c_det"), ("g_misc", "c_det"), ("g_auth", "c_hdr")]:
+        arrow(S[a], S[b])
+    legend(2.75 * COL_W, 16.2 * ROW_H, [("out", "our data"), ("api", "external API"), ("source", "Supabase"),
+                                       ("step", "route group"), ("app", "caller")])
+
+
 if __name__ == "__main__":
-    {"today": today, "target": target}[sys.argv[1]]()
+    {"today": today, "target": target, "files": files, "build": build, "routes": routes}[sys.argv[1]]()
     doc = {"type": "excalidraw", "version": 2, "source": "redlist-dashboard",
            "elements": elements,
            "appState": {"viewBackgroundColor": "#ffffff", "gridSize": None},

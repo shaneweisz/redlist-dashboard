@@ -26,6 +26,7 @@ import { execFileSync } from "child_process";
 import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { r2Client } from "../lib/r2";
 
 const R2_PREFIX = "aoh-maps";
 const STAR_DATA_DIR = "/scratch/sw984/star";
@@ -39,22 +40,6 @@ const TAXON_GROUP_LOWER: Record<string, string> = {
   reptilia: "REPTILIA",
   amphibia: "AMPHIBIA",
 };
-
-function getR2Client(): S3Client {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-
-  if (!accountId || !accessKeyId || !secretAccessKey) {
-    throw new Error("Missing R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)");
-  }
-
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId, secretAccessKey },
-  });
-}
 
 async function listExistingKeys(r2: S3Client, bucket: string): Promise<Set<string>> {
   const keys = new Set<string>();
@@ -366,7 +351,7 @@ export async function run(opts: {
   force?: boolean;
 } = {}): Promise<void> {
   const logger = opts.logger ?? new SyncLogger("upload-aoh-maps");
-  const r2 = getR2Client();
+  const r2 = r2Client();
   const bucket = process.env.R2_MAPS_BUCKET_NAME;
 
   if (!bucket) {
@@ -438,7 +423,7 @@ async function main() {
       process.exit(1);
     }
 
-    const r2 = getR2Client();
+    const r2 = r2Client();
     const bucket = process.env.R2_MAPS_BUCKET_NAME!;
     const logger = new SyncLogger("upload-aoh-maps");
 

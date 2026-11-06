@@ -30,8 +30,9 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { loadEnvFiles } from "../lib/utils";
+import { r2Client } from "../lib/r2";
 
 export const OVERLAY_PREFIX = "overlays";
 
@@ -44,20 +45,6 @@ const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
-function getR2Client(): S3Client {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  if (!accountId || !accessKeyId || !secretAccessKey) {
-    throw new Error("Missing R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)");
-  }
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId, secretAccessKey },
-  });
-}
-
 async function main() {
   loadEnvFiles();
   const bucket = process.env.R2_MAPS_BUCKET_NAME;
@@ -66,7 +53,7 @@ async function main() {
     throw new Error(`No ${OVERLAYS_DIR} — run the build scripts first (see the header of this file)`);
   }
 
-  const client = getR2Client();
+  const client = r2Client();
   // The uncompressed .json is kept locally for inspection; only the gzip goes
   // up, since that is what the route serves.
   const files = fs

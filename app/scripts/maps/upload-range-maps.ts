@@ -15,10 +15,13 @@
  *       {id}.json              — full resolution (no simplification)
  *       {id}_s0.001.json       — simplified at 0.001° (~100m)
  *
+ * Which assessments have a map comes from the database (assessments.has_map),
+ * for each species' latest global assessment, opened read-only
+ * (lib/redlist-db.ts).
+ *
  * Prerequisites:
- *   1. SSH tunnel to IUCN DB
+ *   1. The Red List database with geometry (the SSH tunnel; the local restore has none)
  *   2. Environment variables: DB_*, R2_*
- *   3. Per-taxon CSVs must exist (run fetch-redlist-species first)
  *
  * Usage:
  *   npx tsx scripts/maps/upload-range-maps.ts                    # all taxa
@@ -28,8 +31,11 @@
 
 import { Client } from "pg";
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
-import { loadEnvFiles, SyncLogger, readCsv, REDLIST_DIR } from "../lib/utils";
-import { getTaxa } from "../lib/taxa";
+import { loadEnvFiles, SyncLogger } from "../lib/utils";
+import { getTaxa, type Taxon } from "../lib/taxa";
+import { connectRedListDb } from "../lib/redlist-db";
+import { CURRENT_TAXON, GLOBAL_ASSESSMENT } from "../sync/core/build-assessments";
+import { r2Client } from "../lib/r2";
 
 const R2_PREFIX = "iucn-range-maps";
 
@@ -57,32 +63,6 @@ const ORIGIN_LABELS: Record<number, string> = {
   5: "Origin Uncertain",
   6: "Assisted Colonisation",
 };
-
-function getR2Client(): S3Client {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-
-  if (!accountId || !accessKeyId || !secretAccessKey) {
-    throw new Error("Missing R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY)");
-  }
-
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId, secretAccessKey },
-  });
-}
-
-function getDbClient(): Client {
-  return new Client({
-    host: process.env.DB_HOST || "localhost",
-    port: parseInt(process.env.DB_PORT || "5432", 10),
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  });
-}
 
 async function listExistingKeys(r2: S3Client, bucket: string): Promise<Set<string>> {
   const keys = new Set<string>();
@@ -282,29 +262,19 @@ async function generateRangeGeoJSON(
   };
 }
 
-function getAssessmentIdsFromCsvs(taxaFilter?: string[]): { assessmentId: number; hasMap: boolean; scientificName: string }[] {
-  const taxa = getTaxa(taxaFilter);
-  const results: { assessmentId: number; hasMap: boolean; scientificName: string }[] = [];
-
-  for (const taxon of taxa) {
-    const csvPath = `${REDLIST_DIR}/${taxon.id}.csv`;
-    try {
-      const rows = readCsv(csvPath, (row) => ({
-        assessmentId: parseInt(row.assessment_id, 10),
-        hasMap: row.has_map === "true",
-        scientificName: row.scientific_name,
-      }));
-      for (const row of rows) {
-        if (row.hasMap && !isNaN(row.assessmentId)) {
-          results.push(row);
-        }
-      }
-    } catch {
-      console.warn(`  Warning: Could not read ${csvPath}, skipping`);
-    }
-  }
-
-  return results;
+/** The latest global assessments with a range map, for one Table 1a group. */
+async function mappedAssessments(db: Client, taxon: Taxon): Promise<{ assessmentId: number; scientificName: string }[]> {
+  const col = { kingdom_name: "kingdom_name", phylum_name: "phylum_name", class_name: "class_name", order_name: "order_name" } as const;
+  const params: string[][] = [];
+  const inGroup = taxon.redlist.map((q) => { params.push(q.filterValues); return `upper(t.${col[q.filterColumn]}) = ANY($${params.length})`; }).join(" OR ");
+  const { rows } = await db.query(
+    `SELECT a.id AS assessment_id, t.scientific_name
+     FROM assessments a JOIN taxons t ON t.id = a.taxon_id
+     WHERE a.latest AND a.has_map AND ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT} AND (${inGroup})
+     ORDER BY a.id`,
+    params,
+  );
+  return rows.map((r: { assessment_id: string; scientific_name: string }) => ({ assessmentId: Number(r.assessment_id), scientificName: r.scientific_name }));
 }
 
 async function uploadBatch(
@@ -380,15 +350,14 @@ export async function run(opts: {
   force?: boolean;
 } = {}): Promise<void> {
   const logger = opts.logger ?? new SyncLogger("upload-range-maps");
-  const db = getDbClient();
-  const r2 = getR2Client();
+  const r2 = r2Client();
   const bucket = process.env.R2_MAPS_BUCKET_NAME;
 
   if (!bucket) {
     throw new Error("Missing R2_MAPS_BUCKET_NAME");
   }
 
-  await db.connect();
+  const db = await connectRedListDb();
   console.log("  Connected to database");
 
   let existingKeys: Set<string>;
@@ -408,7 +377,7 @@ export async function run(opts: {
   let totalFailed = 0;
 
   for (const taxon of taxa) {
-    const species = getAssessmentIdsFromCsvs([taxon.id]);
+    const species = await mappedAssessments(db, taxon);
     const assessmentIds = species.map((s) => s.assessmentId);
     const nameMap = new Map(species.map((s) => [s.assessmentId, s.scientificName]));
 
@@ -455,12 +424,11 @@ async function main() {
       process.exit(1);
     }
 
-    const db = getDbClient();
-    const r2 = getR2Client();
+    const r2 = r2Client();
     const bucket = process.env.R2_MAPS_BUCKET_NAME!;
     const logger = new SyncLogger("upload-range-maps");
 
-    await db.connect();
+    const db = await connectRedListDb();
     console.log("Connected to database");
 
     // Look up species names for the given assessment IDs

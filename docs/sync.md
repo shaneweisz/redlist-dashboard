@@ -24,7 +24,7 @@ The diagram's source is [`diagrams/sync.excalidraw`](diagrams/sync.excalidraw) (
 
 A sync is one immutable set of data files, named by the time it was uploaded (`syncs/2026-11-04T16-18-27Z/` in the `dashboard-data` R2 bucket). Production reads whichever sync `app/latest-sync.txt` names on `main`. Building and uploading a sync changes nothing anyone sees; merging the one-line `latest-sync.txt` change is what goes live, and reverting it goes back.
 
-A sync is built from three inputs (and GBIF's matcher) and nothing else, monthly, on a local machine (it reads a 255 GiB GBIF mirror, which is why it doesn't run in CI). `npm run sync` takes about five minutes once the inputs are on disk; a new XR adds about 15 minutes, once, to index it for the matcher.
+A sync is built from the inputs below and nothing else, monthly, on a local machine (it reads a 255 GiB GBIF mirror, which is why it doesn't run in CI). `npm run sync` takes about five minutes once the inputs are on disk; a new XR adds about 15 minutes, once, to index it for the matcher.
 
 The design has one idea: **every number comes from four tables, by one rule.** The old sync answered "how many GBIF records does this species have?" separately for each place the number appeared (per-species API counts, per-group facet files, lumped-species fetches, the Not Evaluated overlay), with two independent matching chains deciding which GBIF taxon a species was. They disagreed, and each disagreement was a bug. Now the question has one answer, computed once.
 
@@ -39,7 +39,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 | `outputs/` | what the app reads, built from the core tables |
 | `checks/` | the fixtures and the comparison with production |
 
-`sync.ts` runs them in order; `publish.ts` uploads the result.
+`sync.ts` runs them in order, as nine numbered steps (the same numbers in its log, in `sync.log` and in the diagram below); `publish.ts` uploads the result. Every step opens DuckDB through `sql.ts`'s `openDuckDB`, which spills to `~/.cache/redlist-dashboard/duckdb-tmp/`, and each gets its own connection, so no step reads another's temporary tables.
 
 ## Inputs
 
@@ -47,11 +47,11 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 
 | Input | What it gives | Version | Code |
 |---|---|---|---|
-| **Catalogue of Life XR** | every name usage: accepted species, synonyms, infraspecifics, BOLD BINs, with lineage | the release GBIF *indexes* (asked of GBIF), not the newest, so every GBIF key resolves | `inputs/col.ts` |
-| **CoL curated checklist** | what catalogueoflife.org shows; used to *demote* XR species the curators treat as synonyms | newest release | `inputs/col.ts` |
+| **Catalogue of Life XR** | every name usage: accepted species, synonyms, infraspecifics, BOLD BINs, with lineage | the release GBIF *indexes* (asked of GBIF), not the newest, so every GBIF key resolves | `inputs/col-xr.ts` |
+| **CoL curated checklist** | what catalogueoflife.org shows; used to *demote* XR species the curators treat as synonyms | newest release whose export ChecklistBank has built (up to three back) | `inputs/col-checklist.ts` |
 | **IUCN Red List Postgres** | every global assessment, taxonomy, synonyms, credits | the database named by `DB_NAME` | `build-assessments.ts` |
 | **GBIF monthly snapshot** | every occurrence record, as parquet, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `build-occurrences.ts` |
-| iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat.ts` |
+| iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat-names.ts` |
 | GBIF's name matcher | matching-ws, run locally in Docker against the XR | pinned release (v1.0.12), index built once per XR | `inputs/matcher.ts` |
 
 Two inputs are guarded:
@@ -200,6 +200,10 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 
 ## What the app reads
 
+![The files in a sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/01-sync-files-v3.png)
+
+A sync step by step, in the order `sync.ts` runs them: every input and cache each step reads, and every file it writes, in `build/core/` (working, not published), `build/data/` (published) or elsewhere. What reads each published file is in [app.md](app.md). The source is [`diagrams/sync-files.excalidraw`](diagrams/sync-files.excalidraw) (`python3 -I diagrams/gen.py files <out>` regenerates it).
+
 `build/data/`, which is exactly what gets uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch: the same tree in all three places. Each run starts it empty, so no file outlives the code that wrote it. Built from the core tables by `outputs/build-read-models.ts`, then the other `outputs/` builders run against it in the same process. Intermediates only those builders read (the CoL and iNaturalist common-name tables) stay in `build/core/`.
 
 Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of them: everything reads a file by its name (`syncPath("assessed.parquet")` is `lists/assessed.parquet`), so a file moves by moving its line there.
@@ -218,6 +222,13 @@ Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/s
 | `search/` | `name-index.parquet`, `rank-index.parquet`, `synonym-index.parquet` | the search bar |
 | `summaries/` | `taxa-summary.json`, the two children summaries, `country-stats.json`, `realm-stats.json` | per-group and per-place totals |
 | | `sync.json` | every input version and check result |
+| | `sync.log` | everything the run printed: each step, its timings and counts, the data tests and the comparison summary. Written as the sync runs, so a failed run leaves one in `build/data/` too |
+
+Every published file has a reader, but three could be simpler (dashed in the diagram):
+
+- **`taxa.parquet` is a third of a sync (152 of 447 MB)**, yet the app reads 5 of its 16 columns for two lookups by CoL id (a species' synonyms, and the CoL links in the differences popover). A slim copy with those columns, sorted by id, would be a fraction of the size, and cheaper to query over R2.
+- **`species_link.parquet` is `assessment_link.parquet` in the old shape** the app read before the sync rewrite. Pointing its readers at `assessment_link` would drop the file and the reshaping.
+- **`ne.parquet` is joined onto `species/` wherever it is read** (the Not Evaluated list, the build, the summaries). Its GBIF columns could live on the species rows.
 
 Not sync data, and siblings of `app/data/sync/`: `app/data/narratives/` (per Red List release, from `narratives/<release>/` in R2 or built locally) and `app/data/overlays/` (map layers, from the maps bucket or built locally).
 
@@ -239,13 +250,12 @@ Four layers, from strict to advisory.
 
 **4. The comparison, which is for review.** `compare.ts` reduces the new sync and the one production serves to the same fact tables, diffs every field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. The report lands in `build/compare/report.md`; unexplained differences don't stop the sync, they are what you read before publishing.
 
-A reason is only as good as its bound. The rules come in three strengths:
+A reason is only as good as its bound: a rule that explains a change without bounding it can hide a bug. There are two, and both are bounded:
 
-- **Bounded**: they check the size of the change against what the reason predicts. `snapshot_vs_api` (within 5% or 5 records), `separately_assessed_split_not_double_counted` and `duplicate_concept_summed` (the new count must equal the old one plus or minus the records moved, within noise), the date and credit rules (the exact record they predict).
-- **Sign-only**: `outdated_as_of_a_later_sync_date` (outdated may only rise), `duplicate_concepts_no_longer_not_evaluated` (NE counts may only fall).
-- **Catch-alls**: `gbif_stats_from_the_ne_list`, `follows_the_new_links`, `common_name_from_inaturalist_or_col`. Read these as "not checked here": per-group GBIF figures, CoL-revision flags and NE common names are covered by the invariants and by the per-species checks they derive from, not by the comparison.
+- `newer_gbif_snapshot`: the syncs counted different snapshots, and a GBIF figure rose, or fell by no more than 5%.
+- `outdated_as_of_a_later_sync_date`: outdated may only rise.
 
-A rule that explains a change without bounding it can hide a bug, and this is how the first review of the rewrite found most of its bugs. `lumped_counts_from_its_infraspecific` once covered any change to a lumped species' counts, and so explained *Zosterops simplex*'s count doubling to 1.14M; it now requires the baseline's count to equal the records on its old key alone. `no_longer_linked` once explained every species joining the NE list; it now covers only species the baseline linked. Tightening the two surfaced a counting bug, a prod bug (`ambiguous_synonym_no_longer_hides`: *Vicia cracca*, 871k records, kept off the NE list by an ambiguous synonym) and, in the unexplained remainder, the respelling, provisional-name, twin, demotion and cross-phylum cases above.
+Everything else is unexplained until a rule says why, so a new Red List or CoL release shows up in full the first time. Add a rule when a change is understood, with the evidence in its commit message, and bound it by what the change predicts. The rewrite's acceptance review ran on 38 such rules (the history of `compare/reasons.ts` before November 2026); tightening two of them is what surfaced *Zosterops simplex*'s doubled count and *Vicia cracca* missing from the NE list.
 
 When reading the unexplained list, sort by size and look at **falls** first: a number dropping below production's is where a matching regression shows.
 
@@ -292,7 +302,7 @@ Each comparison then explains one source's changes. Publish the second (or both,
 
 ### Running parts
 
-Each step runs on its own: `npx tsx scripts/sync/core/build-taxa.ts` (likewise `core/build-assessments`, `core/build-occurrences`, `core/build-matches`, `core/build-link`, `outputs/build-read-models`, `checks/check-fixtures`). `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+Each step runs on its own, against the build: `npx tsx scripts/sync/core/build-taxa.ts` (likewise `core/build-assessments`, `core/build-occurrences`, `core/build-matches`, `core/build-link`, `outputs/build-common-names`, `outputs/build-read-models`, `outputs/build-search-index`, `checks/check-fixtures`). `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone. `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone; it stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 
@@ -327,7 +337,7 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 
 - **IUCN's group for assessed species, CoL's for the rest.** Table 1a stays exact; NE species are grouped by CoL lineage.
 - **IUCN's synonyms keep CoL species off the NE list.** If IUCN lists a name as a synonym of an assessed species and CoL accepts it, it isn't Not Evaluated as far as the Red List is concerned, even when the records aren't counted (5,674 refused covered rows; *Rubus plicatus* and *R. vestitus* sit under the *R. fruticosus* aggregate).
-- **Preserved specimens count only outside Animalia.** Several animals once listed as "known bugs" (*Stenocranius raddei*, *Hylomyscus anselli*) have only museum specimens, so zero is right.
+- **Every record type counts, for every kingdom.** Museum specimens, fossils and literature records are in both the all-records and georeferenced totals, as on gbif.org; the occurrence map applies its own filters.
 - **Outdated is as of the sync date.**
 - **The XR, not the curated checklist, decides `species_id`**, because that is what GBIF indexes. The checklist only demotes.
 

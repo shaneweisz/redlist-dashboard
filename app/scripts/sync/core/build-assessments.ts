@@ -2,13 +2,9 @@
  * build-assessments: the assessments core table, straight from the IUCN Red
  * List Postgres database, one row per global assessment of a current species.
  *
- * Replaces fetch-redlist-species' per-group CSVs and history JSON. One pass
- * over every species instead of one query per group, list columns as real
- * lists, and the Table 1a group as a column rather than a file layout.
- *
- * The database is somebody else's (see the repo's memory notes): the session
- * is opened with default_transaction_read_only=on, and the build refuses to
- * run unless Postgres confirms it.
+ * The database is a colleague's, not ours, so the session is opened with
+ * default_transaction_read_only=on and the build refuses to run unless
+ * Postgres confirms it.
  *
  * Columns, per assessment:
  *   sis_taxon_id, assessment_id, is_latest, year_published, assessment_date,
@@ -20,15 +16,20 @@
  *   scientific_name, authority, common_name, kingdom_name … family (IUCN's, as
  *   lowercase), taxon_group, synonyms[{name, status}]
  *
+ * taxon_group is the Table 1a group from IUCN's own lineage (scripts/lib/taxa.ts),
+ * so Table 1a's totals stay exact. taxa.parquet's taxon_group uses the same ids
+ * from CoL's lineage (taxon-groups.ts), for the species IUCN hasn't assessed.
+ *
  * Usage:  npx tsx scripts/sync/core/build-assessments.ts [--out DIR]
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { TAXA_DEFINITIONS } from "../../lib/taxa";
 import { CORE_DIR } from "../paths";
+import { lit, openDuckDB } from "../sql";
 
 /**
  * Mayaheros ericymba's only global assessment is an amendment, which the
@@ -37,12 +38,18 @@ import { CORE_DIR } from "../paths";
  */
 const FORCED_LATEST = [288151174];
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** The Red List database a sync reads unless DB_NAME says otherwise. */
+export const REDLIST_DB = process.env.DB_NAME ?? "redlist_2026_1";
+
+/** assessment_credits.credit_type_id → the column it fills. */
+const CREDIT_TYPES = { 1: "assessors", 2: "reviewers", 3: "contributors", 4: "facilitators", 5: "institutions" } as const;
+
 /** A query run inside Postgres; DuckDB only sees its result. */
 const pg = (sql: string) => `postgres_query('pg', ${lit(sql)})`;
 
-const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
-const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
+/** A species' current taxon record (as alias t), and a global assessment of it (as alias a). */
+export const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
+export const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
   SELECT 1 FROM assessment_scopes s WHERE s.assessment_id = a.id AND s.scope_lookup_id = 15)`;
 const IN_SCOPE = `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon_id WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`;
 
@@ -66,7 +73,7 @@ export async function attachRedList(conn: DuckDBConnection): Promise<void> {
   const env = (k: string, d?: string) => process.env[k] ?? d;
   const parts = [
     `host=${env("DB_HOST", "localhost")}`, `port=${env("DB_PORT", "5432")}`,
-    `dbname=${env("DB_NAME", "redlist_2026_1")}`, `user=${env("DB_USER", process.env.USER)}`,
+    `dbname=${REDLIST_DB}`, `user=${env("DB_USER", process.env.USER)}`,
     ...(env("DB_PASSWORD") ? [`password=${env("DB_PASSWORD")}`] : []),
     `options='-c default_transaction_read_only=on -c statement_timeout=600000'`,
   ];
@@ -82,25 +89,25 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
   const out = path.join(coreDir, "assessments.parquet");
   const { caseSql, matchCount } = groupSql();
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE a AS SELECT * FROM ${pg(`
+  const credits = Object.entries(CREDIT_TYPES).map(([id, col]) =>
+    `(SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = ${id} ORDER BY c.id LIMIT 1) AS ${col}`);
+
+  // The database's latest flag, plus FORCED_LATEST; is_latest picks one per species below.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE assessment AS SELECT * FROM ${pg(`
     SELECT t.sis_id AS sis_taxon_id, a.id AS assessment_id,
-           (a.latest OR a.id IN (${FORCED_LATEST.join(", ")})) AS latest_candidate,
+           (a.latest OR a.id IN (${FORCED_LATEST.join(", ")})) AS flagged_latest,
            a.year_published, a.assessment_date::date AS assessment_date, rlc.code AS category, a.criteria,
            coalesce(a.possibly_extinct, false) AS possibly_extinct,
            coalesce(a.possibly_extinct_in_the_wild, false) AS possibly_extinct_in_the_wild,
            pt.code AS trend_code,
-           (SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = 1 ORDER BY c.id LIMIT 1) AS assessors,
-           (SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = 2 ORDER BY c.id LIMIT 1) AS reviewers,
-           (SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = 4 ORDER BY c.id LIMIT 1) AS facilitators,
-           (SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = 3 ORDER BY c.id LIMIT 1) AS contributors,
-           (SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = 5 ORDER BY c.id LIMIT 1) AS institutions
+           ${credits.join(",\n           ")}
     FROM taxons t
     JOIN assessments a ON a.taxon_id = t.id
     JOIN red_list_category_lookup rlc ON rlc.id = a.red_list_category_id
     LEFT JOIN population_trend_lookup pt ON pt.id = a.population_trend_id
     WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`)}`);
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE sp AS SELECT * FROM ${pg(`
+  await conn.run(`CREATE OR REPLACE TEMP TABLE species AS SELECT * FROM ${pg(`
     SELECT t.sis_id AS sis_taxon_id, t.scientific_name, t.authority,
            lower(t.kingdom_name) AS kingdom_name, lower(t.phylum_name) AS phylum_name,
            lower(t.class_name) AS class_name, lower(t.order_name) AS order_name, lower(t.family_name) AS family,
@@ -112,36 +119,36 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
       -- assessments (Rhantus fennicus, Amolops daorum); keep the one assessed.
       AND EXISTS (SELECT 1 FROM assessments a WHERE a.taxon_id = t.id AND ${GLOBAL_ASSESSMENT})`)}`);
   const [dup] = (await conn.runAndReadAll(
-    `SELECT count(*) AS n FROM (SELECT sis_taxon_id FROM sp GROUP BY 1 HAVING count(*) > 1)`)).getRowObjects();
+    `SELECT count(*) AS n FROM (SELECT sis_taxon_id FROM species GROUP BY 1 HAVING count(*) > 1)`)).getRowObjects();
   if (Number(dup.n) > 0) throw new Error(`build-assessments: ${dup.n} species have more than one current assessed taxon record`);
 
   // Native, extant, country-level (two-letter) locations only.
-  await conn.run(`CREATE OR REPLACE TEMP TABLE lists AS
-    WITH c AS (SELECT * FROM ${pg(`
+  await conn.run(`CREATE OR REPLACE TEMP TABLE assessment_lists AS
+    WITH countries AS (SELECT * FROM ${pg(`
       SELECT al.assessment_id, array_agg(DISTINCT ll.code ORDER BY ll.code) AS countries
       FROM assessment_locations al JOIN location_lookup ll ON ll.id = al.location_id
       JOIN legend_lookup leg ON leg.id = al.legend_id
       WHERE al.assessment_id IN (${IN_SCOPE}) AND leg.origin = 'Native' AND leg.presence = 'Extant' AND length(ll.code) = 2
       GROUP BY 1`)}),
-    s AS (SELECT * FROM ${pg(`
+    systems AS (SELECT * FROM ${pg(`
       SELECT x.assessment_id, array_agg(DISTINCT regexp_replace(l.description->>'en', ' \\(=.*\\)', '')) AS systems
       FROM assessment_systems x JOIN system_lookup l ON l.id = x.system_lookup_id
       WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
-    g AS (SELECT * FROM ${pg(`
+    growth_forms AS (SELECT * FROM ${pg(`
       SELECT x.assessment_id, array_agg(DISTINCT l.description->>'en') AS growth_forms
       FROM assessment_growth_forms x JOIN growth_form_lookup l ON l.id = x.growth_form_id
       WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
-    m AS (SELECT * FROM ${pg(`
+    movement AS (SELECT * FROM ${pg(`
       SELECT assessment_id, max(supplementary_fields->>'MovementPatterns.pattern') AS movement_pattern
       FROM assessment_supplementary_infos
       WHERE assessment_id IN (${IN_SCOPE}) AND supplementary_fields->>'MovementPatterns.pattern' IS NOT NULL GROUP BY 1`)}),
-    th AS (SELECT * FROM ${pg(`
+    threats AS (SELECT * FROM ${pg(`
       SELECT x.assessment_id, array_agg(DISTINCT l.code) AS threat_codes
       FROM assessment_threats x JOIN threat_lookup l ON l.id = x.threat_id
       WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
     -- One code:season:suitability:major tuple per row, deduped on the whole
     -- tuple: a habitat can appear twice under different seasons.
-    h AS (SELECT * FROM ${pg(`
+    habitats AS (SELECT * FROM ${pg(`
       SELECT x.assessment_id, array_agg(DISTINCT l.code || ':' ||
                CASE x.supplementary_fields->>'season' WHEN 'Resident' THEN 'R' WHEN 'Breeding Season' THEN 'B'
                  WHEN 'Non-Breeding Season' THEN 'N' WHEN 'Passage' THEN 'P' WHEN 'Seasonal Occurrence Unknown' THEN 'U' ELSE '-' END || ':' ||
@@ -149,16 +156,17 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
                CASE x.supplementary_fields->>'majorImportance' WHEN 'Yes' THEN '1' WHEN 'No' THEN '0' ELSE '-' END) AS habitat_codes
       FROM assessment_habitats x JOIN habitat_lookup l ON l.id = x.habitat_id
       WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)})
-    SELECT a.assessment_id, c.countries, s.systems, g.growth_forms, m.movement_pattern, th.threat_codes, h.habitat_codes
-    FROM a LEFT JOIN c USING (assessment_id) LEFT JOIN s USING (assessment_id) LEFT JOIN g USING (assessment_id)
-    LEFT JOIN m USING (assessment_id) LEFT JOIN th USING (assessment_id) LEFT JOIN h USING (assessment_id)`);
+    SELECT assessment_id, countries, systems, growth_forms, movement_pattern, threat_codes, habitat_codes
+    FROM assessment
+    LEFT JOIN countries USING (assessment_id) LEFT JOIN systems USING (assessment_id) LEFT JOIN growth_forms USING (assessment_id)
+    LEFT JOIN movement USING (assessment_id) LEFT JOIN threats USING (assessment_id) LEFT JOIN habitats USING (assessment_id)`);
 
   // IUCN synonyms. A binomial claimed by more than one current species (as a
   // synonym of one and the name of another, or a synonym of both halves of a
   // split) is dropped: it can't say which species it means. The same name filed
   // twice under different statuses (Bufo arunco, A and ADD) is kept once; the
   // status is never read for meaning.
-  await conn.run(`CREATE OR REPLACE TEMP TABLE syn AS
+  await conn.run(`CREATE OR REPLACE TEMP TABLE synonyms AS
     WITH raw AS (SELECT * FROM ${pg(`
       SELECT t.sis_id, ts.genus_name AS g, ts.species_name AS s, ts.status
       FROM taxon_synonyms ts JOIN taxons t ON t.id = ts.taxon_id
@@ -174,14 +182,14 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
     one AS (SELECT r.sis_id, r.g || ' ' || r.s AS name, min(r.status) AS status
             FROM raw r JOIN claims c ON c.g = r.g AND c.s = r.s WHERE c.n = 1 GROUP BY 1, 2)
     SELECT o.sis_id AS sis_taxon_id, list({'name': o.name, 'status': o.status} ORDER BY o.name) AS synonyms
-    FROM one o JOIN sp ON sp.sis_taxon_id = o.sis_id WHERE o.name <> sp.scientific_name GROUP BY 1`);
+    FROM one o JOIN species sp ON sp.sis_taxon_id = o.sis_id WHERE o.name <> sp.scientific_name GROUP BY 1`);
 
-  await conn.run(`ALTER TABLE sp ADD COLUMN taxon_group VARCHAR; UPDATE sp SET taxon_group = ${caseSql}`);
+  await conn.run(`ALTER TABLE species ADD COLUMN taxon_group VARCHAR; UPDATE species SET taxon_group = ${caseSql}`);
 
   // Every current species must fall in exactly one Table 1a group.
   const coverage = (await conn.runAndReadAll(`
     SELECT k, p, c, o, ${matchCount} AS hits, count(*) AS n
-    FROM sp WHERE sis_taxon_id IN (SELECT sis_taxon_id FROM a WHERE latest_candidate)
+    FROM species WHERE sis_taxon_id IN (SELECT sis_taxon_id FROM assessment WHERE flagged_latest)
     GROUP BY ALL HAVING hits <> 1 ORDER BY n DESC`)).getRowObjects();
   if (coverage.length > 0) {
     const lines = coverage.map((r) => `  ${r.k}/${r.p}/${r.c}/${r.o}: ${r.n} species in ${r.hits} groups`);
@@ -198,7 +206,7 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
     WITH latest AS (
       SELECT assessment_id FROM (
         SELECT assessment_id, row_number() OVER (PARTITION BY sis_taxon_id ORDER BY assessment_date DESC, assessment_id DESC) AS rn
-        FROM a WHERE latest_candidate) WHERE rn = 1)
+        FROM assessment WHERE flagged_latest) WHERE rn = 1)
     SELECT a.sis_taxon_id, a.assessment_id, a.assessment_id IN (SELECT assessment_id FROM latest) AS is_latest,
            a.year_published, a.assessment_date, a.category, nullif(a.criteria, '') AS criteria,
            a.possibly_extinct, a.possibly_extinct_in_the_wild,
@@ -214,17 +222,17 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
            sp.common_name, sp.kingdom_name, sp.phylum_name, sp.class_name, sp.order_name, sp.family,
            sp.taxon_group,
            coalesce(syn.synonyms, []) AS synonyms
-    FROM a
-    JOIN sp USING (sis_taxon_id)
-    LEFT JOIN lists l USING (assessment_id)
-    LEFT JOIN syn USING (sis_taxon_id)
+    FROM assessment a
+    JOIN species sp USING (sis_taxon_id)
+    LEFT JOIN assessment_lists l USING (assessment_id)
+    LEFT JOIN synonyms syn USING (sis_taxon_id)
     ORDER BY a.sis_taxon_id, a.year_published DESC, a.assessment_id DESC
   ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
   return out;
 }
 
 export async function run(opts: { out?: string } = {}): Promise<string> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "8" })).connect();
+  const conn = await openDuckDB();
   await attachRedList(conn);
   const out = await buildAssessments(conn, opts.out ?? CORE_DIR);
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(*) FILTER (is_latest) AS latest,

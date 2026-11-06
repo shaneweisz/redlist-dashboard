@@ -1,7 +1,7 @@
 /**
  * CoL lineage → IUCN Table 1a group: the one rule for every species not
- * assessed (assessed species keep IUCN's own classification, so Table 1a stays
- * exact).
+ * assessed. Assessed species keep IUCN's own classification (build-assessments,
+ * from scripts/lib/taxa.ts), so Table 1a stays exact; both use the same ids.
  *
  * Per Table 1a's footnote definitions: crustaceans = note 6's classes (with
  * Maxillopoda split into CoL's copepoda/thecostraca/hexanauplia/ichthyostraca);
@@ -51,9 +51,7 @@ export const TAXON_GROUP_CASE = `
  * name. Domestic forms have a wild sibling that is counted (and usually
  * assessed) on its own; humans aren't a Red List subject.
  *
- * One list, replacing the two that disagreed (GBIF keys in
- * taxonomy-constants.ts, names in col-described-overrides.ts). build-taxa
- * fails if a name isn't an accepted species in the release: if CoL ever lumps
+ * build-taxa fails if a name isn't an accepted species in the release: if CoL ever lumps
  * a domestic form into its wild sibling, the wild species would absorb its
  * records, and that needs a person to look at it.
  *

@@ -39,10 +39,6 @@ import {
   type DynamicRank,
 } from "@/lib/dynamic-taxon";
 
-// Keep in sync with the same constant in scripts/sync/outputs/build-taxa-summary.ts and
-// species-duckdb.ts — Homo sapiens, which IUCN omits from its Red List export.
-export const EXCLUDED_COL_IDS_SQL = `('6MB3T')`;
-
 // Mirrors filterToSql's own column derivation exactly (taxonomy-sql.ts) — genus
 // is always derived from scientific_name, never a raw `genus` column, so a
 // species' bucket here is guaranteed consistent with how matchesFilter/
@@ -61,7 +57,7 @@ export const RANK_COLUMN_SQL: Record<DynamicRank, string> = {
 };
 
 // A value can appear in colByValue's GROUP BY (at least one raw CoL row has
-// it) yet still carry colDescribed=0 once the in_base/universe/exclusion
+// it) yet still carry colDescribed=0 once the `described`
 // FILTERs zero it out (e.g. Reptiles' blank order_name: 202 raw rows, but
 // 201 are non-accepted synonyms/extinct-unconfirmed and the 1 real one gets
 // reclassified away by canonicalOrderColumnSql's species override — see
@@ -125,11 +121,10 @@ export async function getLiveRankChildren(
   if (!extraWhere) {
     await ensureNeHelpers(conn);
     const speciesGlob = parquetUri("species/**/*.parquet");
-    const universe = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ne_ex_ew_col_ids))`;
     const colRows = (await conn.runAndReadAll(
       `SELECT ${rankCol} AS v,
-              count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}) AS col_described,
-              count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND col_id NOT IN (SELECT col_id FROM ne_assessed_col_ids)) AS col_ne
+              count(*) FILTER (described) AS col_described,
+              count(*) FILTER (described AND col_id NOT IN (SELECT col_id FROM ne_assessed_col_ids)) AS col_ne
        FROM read_parquet('${speciesGlob}', hive_partitioning=true)
        WHERE (${parentWhere})
        GROUP BY v`

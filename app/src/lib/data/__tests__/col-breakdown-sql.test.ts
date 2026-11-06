@@ -34,7 +34,8 @@ beforeAll(async () => {
   // The lineage columns are what the classified_elsewhere wording names — CoL's
   // own placement for the record — and CLSEW carries no family, to exercise the
   // fallback down the rank chain (CoL's family/order coverage is genuinely patchy).
-  await copy(`SELECT * FROM (VALUES
+  // `described` as the sync sets it: in Base and extant (none here is EX/EW or excluded).
+  await copy(`SELECT *, in_base AND extinct IS NOT TRUE AS described FROM (VALUES
       ('IN1','Clean species', true, false, 'Felidae', 'Carnivora', 'Mammalia'),
       ('XR1','Xr onlyus', false, false, 'Felidae', 'Carnivora', 'Mammalia'),
       ('LUMP','Lump winner', true, false, 'Felidae', 'Carnivora', 'Mammalia'),
@@ -116,9 +117,7 @@ beforeAll(async () => {
     linkPath: path.join(tmp, "species_link.parquet"),
     taxaPath: path.join(tmp, "taxa.parquet"),
     hasTaxa: true,
-    universeSql: "extinct IS NOT TRUE",
     assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: "('__none__')",
   } as unknown as BreakdownQueryContext;
 });
 

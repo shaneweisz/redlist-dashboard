@@ -1,8 +1,6 @@
 /**
- * build-taxa: the taxonomy core table, one row per CoL XR usage.
- *
- * Replaces taxa.parquet and species/. The species universe the app lists
- * is a filter over this table, not a second copy of it.
+ * build-taxa: the taxonomy core table, one row per CoL XR usage. The species
+ * the app lists (assessed and Not Evaluated) are a filter over it.
  *
  * Columns:
  *   col_id, parent_id, status, rank, scientific_name, authorship   from the XR
@@ -25,23 +23,19 @@
  *   taxon_group          TAXON_GROUP_CASE over the species' lineage
  *   ne_excluded          'domesticated' | 'human' | NULL (see NE_EXCLUDED)
  *
- * Also writes the CoL vernacular files (vernacular-names.json and the two
- * species-vernacular parquets) via build-vernaculars.
+ * Writes core/taxa.parquet.
  *
- * Writes core/taxa.parquet and the two species-vernacular parquets to core/;
- * vernacular-names.json, which the app reads, to data/.
- *
- * Usage:  npx tsx scripts/sync/core/build-taxa.ts [--out DIR]   (DIR holds both)
+ * Usage:  npx tsx scripts/sync/core/build-taxa.ts [--out DIR]
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
-import { buildVernaculars } from "../outputs/build-vernaculars";
 import { ensureColInputs, type ColInputs } from "../inputs/col";
 import { TAXON_GROUP_CASE, NE_EXCLUDED } from "./taxon-groups";
-import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
+import { CORE_DIR } from "../paths";
+import { lit, openDuckDB } from "../sql";
 
 const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','natio','aberration','infraspecific name','infrasubspecific name')";
 /**
@@ -52,7 +46,6 @@ const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','na
  */
 const BELOW_SPECIES = INFRASPECIFIC.replace("(", "('unranked',");
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const tsv = (p: string) => `read_csv(${lit(p)}, delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)`;
 /** The XR writes a subgenus parenthetical in some names; the binomial is what everything joins on. */
 const CANONICAL = (col: string) => `trim(regexp_replace(regexp_replace(${col}, '\\([^)]*\\)', '', 'g'), '\\s+', ' ', 'g'))`;
@@ -60,18 +53,14 @@ const CANONICAL = (col: string) => `trim(regexp_replace(regexp_replace(${col}, '
 export interface TaxaInputs {
   nameUsage: string;
   reference?: string;
-  vernacularNames?: string;
   checklistNameUsage?: string;
   baseSourceIds: string[];
   /** Defaults to NE_EXCLUDED; tests pass their own. */
   neExcluded?: Record<string, string>;
 }
 
-export async function buildTaxa(
-  conn: DuckDBConnection, inputs: TaxaInputs, coreDir: string, dataDir = coreDir,
-): Promise<string> {
+export async function buildTaxa(conn: DuckDBConnection, inputs: TaxaInputs, coreDir: string): Promise<string> {
   fs.mkdirSync(coreDir, { recursive: true });
-  fs.mkdirSync(dataDir, { recursive: true });
   const out = path.join(coreDir, "taxa.parquet");
 
   await conn.run(`CREATE OR REPLACE TEMP TABLE base_src AS SELECT unnest([${inputs.baseSourceIds.map(lit).join(", ")}]::VARCHAR[]) AS id`);
@@ -184,10 +173,6 @@ export async function buildTaxa(
     throw new Error(`build-taxa: excluded names not accepted species in this release: ${missing.join(", ")}. ` +
       "Check whether CoL lumped them into their wild siblings before changing NE_EXCLUDED.");
   }
-
-  if (inputs.vernacularNames && fs.existsSync(inputs.vernacularNames)) {
-    await buildVernaculars(conn, { vernacularTsv: inputs.vernacularNames, outDir: dataDir, workDir: coreDir, usages: "SELECT col_id, rank, scientific_name FROM nu" });
-  }
   return out;
 }
 
@@ -207,8 +192,8 @@ async function report(conn: DuckDBConnection, out: string): Promise<void> {
 
 export async function run(opts: { out?: string; inputs?: ColInputs } = {}): Promise<string> {
   const inputs = opts.inputs ?? (await ensureColInputs());
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "48GB", temp_directory: DUCKDB_TMP })).connect();
-  const out = await buildTaxa(conn, inputs, opts.out ?? CORE_DIR, opts.out ?? OUT_DIR);
+  const conn = await openDuckDB();
+  const out = await buildTaxa(conn, inputs, opts.out ?? CORE_DIR);
   await report(conn, out);
   return out;
 }

@@ -72,6 +72,7 @@ beforeAll(async () => {
     FROM (VALUES (4, 5), (7, 7)) t(m, n)`, "occurrence_dates.parquet");
   await copy(`SELECT * FROM (VALUES ('N1', 'MX', false, 'HUMAN_OBSERVATION', 5::BIGINT)) t(usage_key, countrycode, georef, basis, n)`,
     "occurrence_countries.parquet");
+  await copy(`SELECT 'N1' AS col_id, 'Some name' AS common_name`, "species-fallback-display-name-col.parquet");
 
   await buildReadModels(conn, { coreDir: core, outDir: out, today: "2026-11-06" });
   for (const r of (await conn.runAndReadAll(`SELECT * FROM read_parquet('${path.join(out, syncPath("assessed.parquet"))}')`)).getRowObjects()) {

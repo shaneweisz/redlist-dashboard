@@ -250,7 +250,7 @@ async function resolveViaSearch(
   }
 }
 
-export async function deriveForTaxon(taxon: Omit<Taxon, "gbif">): Promise<DerivedKey[]> {
+export async function deriveForTaxon(taxon: Taxon): Promise<DerivedKey[]> {
   const kingdom = KINGDOM_NAME[taxon.kingdomKey] ?? "Animalia";
   const out: DerivedKey[] = [];
   for (const query of taxon.redlist) {

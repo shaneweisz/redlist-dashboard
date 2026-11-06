@@ -32,9 +32,9 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { Client } from "pg";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, NARRATIVES_DIR } from "../lib/utils";
+import { connectRedListDb } from "../lib/redlist-db";
 import { indexPostings } from "../../src/lib/redlist/narrative-terms";
 
 /** The narrative fields, in the order the Red List website reads them. */
@@ -84,14 +84,7 @@ export async function run(): Promise<void> {
   const scratch = path.join(NARRATIVES_DIR, "narrative-scratch");
   fs.mkdirSync(scratch, { recursive: true });
 
-  const pg = new Client({
-    host: process.env.DB_HOST || "localhost",
-    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 5433,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  });
-  await pg.connect();
+  const pg = await connectRedListDb();
   console.log("Connected to the IUCN database");
 
   /**

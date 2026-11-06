@@ -1,32 +1,24 @@
 /**
- * build-search-index: the two name-sorted indexes the search bar reads — one over
- * species names, one over higher-rank taxon names — so a typeahead prefix query prunes
- * to a row group or two instead of scanning both species parquets end to end.
+ * build-search-index: the two name-sorted indexes the search bar reads, one over
+ * species names and one over higher-rank taxon names, so a typeahead prefix query
+ * reads a row group or two instead of scanning the species lists (which are sorted
+ * for browsing, by class, order and family).
  *
- * assessed.parquet and unassessed.parquet are written ORDER BY class_name, order_name,
- * family (they're browse-ordered, which is what the species LISTS want), so a name
- * predicate can't prune a single row group: names are scattered across all of them. The
- * search hot path therefore read ~25MB off R2 per keystroke — ~2.2s per uncached query
- * in production, and the reason species-duckdb materializes search_idx in memory at all.
- *
- * This is the same trick synonym-index.parquet already uses (sorted by name, prefix-range
- * query, ~1 row group read) applied to the fast path. Sorted by name_lo, so:
+ * Sorted by name_lo, so
  *
  *   WHERE name_lo >= 'panth' AND name_lo < 'panth' || chr(1114111)
  *
- * touches one row group. ROW_GROUP_SIZE is tuned for that read rather than left at the
- * default: 20k rows puts ~0.97MB in a group (103 of them), so a prefix query pulls about
- * a megabyte where the old path pulled ~25MB — and unlike the in-memory index it needs no
- * warm container to be fast. Measured locally: 9-13ms per query.
+ * touches one row group. ROW_GROUP_SIZE is tuned for that read: 20k rows puts
+ * about a megabyte in a group, so a prefix query reads about a megabyte (measured
+ * locally at 9-13 ms) and needs no warm container to be fast.
  *
  * One row per SEARCHABLE NAME, not per species — a species contributes its scientific
  * name, its common name, and its epithet, so "panthera", "lion" and "leo" all reach
  * Panthera leo by prefix. name_kind carries which, because the dropdown's ranking is
  * defined in those terms (exact common name > common-name prefix > scientific prefix).
  *
- * Rows carry the whole SearchResult payload, including the col_id the NE list keys on —
- * so a hit needs no join back to the species parquets and no species_link lookup, which
- * on the old path was another R2 read per search.
+ * Rows carry the whole SearchResult payload, including the col_id the NE list keys on,
+ * so a hit needs no join back to the species parquets and no species_link lookup.
  *
  * Covers the fast path only (assessed ∪ GBIF-observed). The CoL-only and synonym tiers
  * are reached solely when nothing here matches, and they already have their own answer:
@@ -38,17 +30,19 @@
  * scans of both parquets. Pre-aggregating here rather than at query time is also what
  * makes the answer deterministic — see the comment on the struct min below.
  *
- * Input: data/assessed.parquet, data/unassessed.parquet, data/species_link.parquet.
- * Output: data/name-index.parquet, data/rank-index.parquet.
+ * Input: assessed, ne and species_link from data/; the CoL common names from core/;
+ * iNaturalist's names. Output: search/name-index.parquet, search/rank-index.parquet.
  *
  *   npx tsx scripts/sync/outputs/build-search-index.ts
  */
 import * as fs from "fs";
 import * as path from "path";
-import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
+import { ensureInatNames, inatKingdomSql } from "../inputs/inat-names";
+import { type DuckDBConnection } from "@duckdb/node-api";
+import { loadEnvFiles } from "../../lib/utils";
+import { CORE_DIR, OUT_DIR, requireFiles } from "../paths";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import { openDuckDB } from "../sql";
 
 /** Ranks in the order suggestTaxa prefers them; the index is the priority it sorts on.
  *  Mirrors SUGGEST_RANKS in src/lib/data/species-duckdb.ts — keep the two in step. */
@@ -64,23 +58,22 @@ const RANK_TO_MATCH_SQL: Record<(typeof SUGGEST_RANKS)[number], string> = {
 export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3, altCommon: 4, altCommonWord: 5 } as const;
 
 /**
- * @param coreDir where the vernacular parquets are (the sync's core/); given, they are required
- * @param inatNames iNaturalist's names (inputs/inat.ts); given, required
+ * @param coreDir where species-common-names-col.parquet is (the sync's core/)
+ * @param inatNames iNaturalist's names (inputs/inat-names.ts)
  */
-export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?: string } = {}): Promise<void> {
-  const dir = opts.dataDir || DATA_DIR;
-  for (const f of [opts.coreDir && path.join(opts.coreDir, "species-vernacular-names.parquet"), opts.inatNames]) {
-    if (f && !fs.existsSync(f)) throw new Error(`build-search-index: ${f} is missing; every alternative common name would silently stop matching`);
-  }
+export async function run(opts: { dataDir: string; coreDir: string; inatNames: string }): Promise<void> {
+  const dir = opts.dataDir;
   const assessed = path.join(dir, syncPath("assessed.parquet"));
   const ne = path.join(dir, syncPath("ne.parquet"));
   const link = path.join(dir, syncPath("species_link.parquet"));
-  for (const f of [assessed, ne, link]) {
-    if (!fs.existsSync(f)) throw new Error(`build-search-index: ${f} not found (run build-parquet + build-matching first)`);
-  }
+  // Every alternative common name comes from the last two; without them, they would silently stop matching.
+  const altNames = path.join(opts.coreDir, "species-common-names-col.parquet");
+  const inatNames = opts.inatNames;
+  const vernFile = path.join(dir, syncPath("vernacular-names.json"));
+  requireFiles("build-search-index", assessed, ne, link, vernFile, altNames, inatNames);
   const out = path.join(dir, syncPath("name-index.parquet"));
 
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
 
   // The per-species payload, unioned once and then exploded into name rows below.
   // col_id is NULL for assessed rows on purpose: their row key is the SIS id, and
@@ -112,26 +105,18 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
     gbif_georeferenced_records_count, assessment_id, assessment_date, countries,
     class_name, order_name, family, assessed, col_id`;
 
-  // Every other English common name CoL gives the species (build-vernaculars), so
+  // Every other English common name CoL gives the species (build-common-names), so
   // "baobab" finds Adansonia digitata through "African baobab" even though its display
   // name is a different one — and an assessed species with no IUCN common name is still
-  // findable by its CoL names. Absent on syncs built before that file existed.
-  const altNames = path.join(opts.coreDir ?? dir, "species-vernacular-names.parquet");
-  // …and every English name iNaturalist gives it (fetch-inat-vernaculars), matched by
+  // findable by its CoL names; and every English name iNaturalist gives it, matched by
   // scientific name within a kingdom. One row per (species, name, case-insensitive).
-  const inatNames = opts.inatNames ?? path.join(dir, "inat-vernaculars.parquet");
   const sources = [
-    fs.existsSync(altNames)
-      ? `SELECT s.*, v.name AS alt_name FROM species s JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id`
-      : null,
-    fs.existsSync(inatNames)
-      ? `SELECT s.*, n.name AS alt_name FROM species s
-         JOIN (SELECT scientific_name, kingdom, unnest(names) AS name FROM read_parquet('${inatNames}')) n
-           ON n.scientific_name = s.scientific_name AND n.kingdom = ${inatKingdomSql("s.taxon_group")}`
-      : null,
-  ].filter(Boolean);
-  await conn.run(sources.length
-    ? `CREATE TEMP TABLE alt_names AS
+    `SELECT s.*, v.name AS alt_name FROM species s JOIN read_parquet('${altNames}') v ON v.col_id = s.name_col_id`,
+    `SELECT s.*, n.name AS alt_name FROM species s
+     JOIN (SELECT scientific_name, kingdom, unnest(names) AS name FROM read_parquet('${inatNames}')) n
+       ON n.scientific_name = s.scientific_name AND n.kingdom = ${inatKingdomSql("s.taxon_group")}`,
+  ];
+  await conn.run(`CREATE TEMP TABLE alt_names AS
          SELECT * EXCLUDE (k) FROM (
            -- One row per species and name. A species is its SIS id when assessed, its
            -- col_id when not: id alone is NULL for every NE row, which once put all NE
@@ -139,8 +124,7 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
            SELECT *, row_number() OVER (PARTITION BY assessed, coalesce(CAST(id AS VARCHAR), col_id), lower(alt_name) ORDER BY alt_name) AS k
            FROM (${sources.join(" UNION ALL ")})
            WHERE lower(alt_name) <> lower(coalesce(common_name, ''))
-         ) WHERE k = 1`
-    : `CREATE TEMP TABLE alt_names AS SELECT *, CAST(NULL AS VARCHAR) AS alt_name FROM species WHERE false`);
+         ) WHERE k = 1`);
 
   await conn.run(`
     COPY (
@@ -240,7 +224,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
   // name is left out (the scientific row wins), and one shared by several taxa goes to
   // the coarsest rank, then the alphabetically first taxon — the same struct-min rule.
   const vernFile = path.join(dir, syncPath("vernacular-names.json"));
-  const vern: Record<string, string> = fs.existsSync(vernFile) ? JSON.parse(fs.readFileSync(vernFile, "utf-8")) : {};
+  const vern: Record<string, string> = JSON.parse(fs.readFileSync(vernFile, "utf-8"));
   const tmp = path.join(dir, ".rank-vernaculars.ndjson");
   fs.writeFileSync(tmp, Object.entries(vern).map(([sci, common]) => JSON.stringify({ sci, common })).join("\n"));
   await conn.run(`CREATE TEMP TABLE rank_vern AS SELECT * FROM read_json('${tmp}', format='newline_delimited', columns={sci: 'VARCHAR', common: 'VARCHAR'})`);
@@ -271,5 +255,7 @@ async function buildRankIndex(conn: DuckDBConnection, dir: string): Promise<void
 const isDirectRun = process.argv[1]?.endsWith("outputs/build-search-index.ts") || process.argv[1]?.endsWith("outputs/build-search-index.js");
 if (isDirectRun) {
   loadEnvFiles();
-  run().catch((e) => { console.error(e); process.exit(1); });
+  ensureInatNames()
+    .then((inatNames) => run({ dataDir: OUT_DIR, coreDir: CORE_DIR, inatNames }))
+    .catch((e) => { console.error(e); process.exit(1); });
 }

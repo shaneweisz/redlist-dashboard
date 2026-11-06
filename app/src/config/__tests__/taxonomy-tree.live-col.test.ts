@@ -20,24 +20,12 @@ import path from "path";
 import { describe, it, expect, beforeAll } from "vitest";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { NODE_INDEX, speciesMatchesNode } from "@/lib/taxonomy-utils";
-import { COL_DOMESTIC_EXCLUDE_NAMES } from "../col-described-overrides";
 import { DATA_DIR } from "../../../scripts/lib/utils";
 import { syncPath } from "@/lib/data/sync-layout";
 
-// Domestic/feral forms (Bos taurus, Felis catus, etc.) are deliberately unmatched by
-// every node — speciesMatchesNode excludes them unconditionally (see
-// COL_EXCLUDE_ALL_NODES's usage in matchesFilter) since each has a wild sibling
-// species already counted separately. Expected, not a gap — excluded from this
-// check rather than asserted on, so the real signal (a genuinely missed genus, a
-// real double-count) doesn't get lost in 10 permanently-expected "failures".
-const EXPECTED_UNMATCHED = new Set(COL_DOMESTIC_EXCLUDE_NAMES.map((n) => n.toLowerCase()));
-
 const SPECIES_GLOB = path.join(DATA_DIR, syncPath("species"), "**", "*.parquet");
-const LINK = path.join(DATA_DIR, syncPath("species_link.parquet"));
-const ASSESSED = path.join(DATA_DIR, syncPath("assessed.parquet"));
 
-const DATA_AVAILABLE =
-  fs.existsSync(path.join(DATA_DIR, syncPath("species"))) && fs.existsSync(LINK) && fs.existsSync(ASSESSED);
+const DATA_AVAILABLE = fs.existsSync(path.join(DATA_DIR, syncPath("species")));
 
 // All 6 "ssc-*-groups" wrapper nodes, found generically rather than hardcoded — stays
 // in sync automatically if a taxon's SSC pilot is ever added or removed.
@@ -47,26 +35,14 @@ const SSC_WRAPPER_IDS = [...NODE_INDEX.keys()].filter(
 
 type ColRow = { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; taxon_group: string };
 
-// Same "extant, or CoL-extinct but IUCN-confirmed EX/EW" + Homo sapiens exclusion
-// scripts/sync/outputs/build-taxa-summary.ts uses for every other CoL-derived count in this app —
-// mirrored here (not imported) since that logic lives inside non-exported functions.
+// The described species, as every CoL-derived count in the app reads them.
 async function fetchColUniverse(taxonGroups: string[]): Promise<ColRow[]> {
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
-  await conn.run(`
-    CREATE TABLE ex_ew_assessed AS
-    SELECT DISTINCT l.col_id
-    FROM read_parquet('${LINK}') l
-    JOIN read_parquet('${ASSESSED}') a ON a.id = l.id
-    WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')
-  `);
   const groupList = taxonGroups.map((g) => `'${g}'`).join(", ");
   const result = await conn.run(`
     SELECT scientific_name, class_name, order_name, family, taxon_group
     FROM read_parquet('${SPECIES_GLOB}', hive_partitioning=true)
-    WHERE taxon_group IN (${groupList})
-      AND in_base
-      AND (extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_assessed))
-      AND col_id NOT IN ('6MB3T')
+    WHERE taxon_group IN (${groupList}) AND described
   `);
   return (await result.getRowObjects()) as unknown as ColRow[];
 }
@@ -95,7 +71,6 @@ describe.skipIf(!DATA_AVAILABLE)("SSC Specialist Group filters vs. the live Cata
         const species = { ...row, order_name: row.order_name ?? "" };
         const matches = children.filter((c) => speciesMatchesNode(species, c.id));
         if (matches.length === 0) {
-          if (EXPECTED_UNMATCHED.has(row.scientific_name.toLowerCase())) continue;
           if (unmatched.length < 20) unmatched.push(`${row.scientific_name} (${row.class_name}/${row.order_name}/${row.family})`);
         } else if (matches.length > 1) {
           if (doubleMatched.length < 20) doubleMatched.push(`${row.scientific_name} -> ${matches.map((m) => m.id).join(", ")}`);
