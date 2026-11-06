@@ -77,7 +77,29 @@ const nextConfig: NextConfig = {
   // so a link someone saved or sent keeps working and search engines move with
   // it; the query string (a shared search's ?lat=&lng=&r=) is carried across.
   async redirects() {
-    return [{ source: "/near-me", destination: "/mapping", permanent: true }];
+    return [
+      // dashforlife.org is the one canonical domain; every other host the
+      // production deployment answers on sends visitors there, path and query
+      // string intact. red.cst.cam.ac.uk and en.ki never appear here by name:
+      // the Caddy proxy in front of them rewrites Host to
+      // red-list-dashboard.vercel.app (see src/config/public-origin.ts), so
+      // matching that host catches them too. Next anchors `has` values as a
+      // full-string regex. Preview deployments use other hostnames and are
+      // untouched.
+      {
+        source: "/:path*",
+        has: [
+          {
+            type: "host",
+            value:
+              "(?:www\\.)?dashoflife\\.org|www\\.dashforlife\\.org|red-list-dashboard\\.vercel\\.app",
+          },
+        ],
+        destination: "https://dashforlife.org/:path*",
+        permanent: true,
+      },
+      { source: "/near-me", destination: "/mapping", permanent: true },
+    ];
   },
   // PostHog's API relies on trailing slashes; without this Next.js redirects them
   // and breaks event capture through the proxy.
