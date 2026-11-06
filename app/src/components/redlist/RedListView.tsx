@@ -1046,11 +1046,13 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
   onViewModeChange?: (mode: "reassessments" | "new-assessments") => void;
-  // The page renders its own Reassessments / New Assessments header tabs, so
-  // the inline Assessed/Not Evaluated toggle is hidden and the mode is a
-  // persistent tab: browsing to another taxon keeps it rather than resetting
-  // to Assessed. (/compare leaves this off: each panel keeps its inline toggle.)
-  viewModeTabsInHeader?: boolean;
+  // Show the view switch as a full-width Reassessments / First Assessments
+  // toggle above the filter charts, in place of the small inline Assessed/Not
+  // Evaluated one beside the species count. Being that prominent, the mode is
+  // a persistent choice: browsing to another taxon keeps it rather than
+  // resetting to Assessed. (/compare leaves this off: its two panels are too
+  // narrow for it, so each keeps the inline toggle and the reset.)
+  wideViewModeToggle?: boolean;
   sharedTaxa?: Set<string>;
   sharedSubgroups?: Set<string>;
   onTaxaChange?: (taxa: Set<string>) => void;
@@ -1061,7 +1063,7 @@ interface RedListViewProps {
   paramSuffix?: string;
 }
 
-export default function RedListView({ viewMode = "reassessments", onViewModeChange, viewModeTabsInHeader = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
+export default function RedListView({ viewMode = "reassessments", onViewModeChange, wideViewModeToggle = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
 
   // The ">10 yrs old" outdated threshold is computed against this everywhere
@@ -1217,8 +1219,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // brand-new taxon already in NE mode from browsing a previous one, with no
   // visual cue you're not seeing its Assessed data). Skips the very first
   // render so a shared link's own ?view=new-assessments still works. Not done
-  // when the page shows header tabs (viewModeTabsInHeader): there the mode is
-  // always visible, so it's a tab you browse within, not a per-taxon opt-in.
+  // with the wide toggle (wideViewModeToggle): there the mode is always in
+  // plain view, so it's a choice you browse within, not a per-taxon opt-in.
   const prevSelectionRef = useRef<{ taxa: Set<string>; subgroups: Set<string> } | null>(null);
   useEffect(() => {
     const prev = prevSelectionRef.current;
@@ -1236,8 +1238,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (prev.taxa.size === 0 && prev.subgroups.size === 0) return;
     const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((v) => b.has(v));
     const changed = !setsEqual(prev.taxa, selectedTaxa) || !setsEqual(prev.subgroups, selectedSubgroups);
-    if (changed && isNewAssessments && !viewModeTabsInHeader) onViewModeChange?.("reassessments");
-  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, viewModeTabsInHeader]);
+    if (changed && isNewAssessments && !wideViewModeToggle) onViewModeChange?.("reassessments");
+  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, wideViewModeToggle]);
 
   // Reset mode-specific filter state when switching between reassessments and
   // new-assessments. The shared species cache (SpeciesCacheContext) is NOT cleared
@@ -4642,6 +4644,33 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
+      {/* Wide view-mode toggle, directly above the filter charts it switches.
+          Same visibility as the charts block below, and outside its "too large"
+          branch so you can still switch back from that prompt. */}
+      {wideViewModeToggle && onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (
+        <div role="tablist" aria-label="View" className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm mb-4">
+          {([
+            ["reassessments", "Reassessments"],
+            ["new-assessments", "First Assessments"],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={viewMode === mode}
+              onClick={() => onViewModeChange(mode)}
+              className={`flex-1 px-3 py-2 font-medium whitespace-nowrap transition-colors ${
+                viewMode === mode
+                  ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                  : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Charts, search, and species table - only visible after a taxon is selected.
           Hidden in the scope views too: TaxaSummary's own countryModeContent (the
           promoted WorldMap) is the entire page in country mode, and selectedTaxa is
@@ -5859,7 +5888,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
                 dataset entirely), moved here from the old dedicated stat-card
                 row now that there isn't one. */}
-            {onViewModeChange && !viewModeTabsInHeader && (
+            {onViewModeChange && !wideViewModeToggle && (
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0">
                 <button
                   type="button"
