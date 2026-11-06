@@ -29,9 +29,8 @@ import * as path from "path";
 import { execFileSync, spawnSync } from "child_process";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../lib/utils";
-import { writeReleaseMetadata } from "./inputs/fetch-col-xr";
-import { ensureColInputs } from "./inputs/col";
-import { ensureInatNames } from "./inputs/inat";
+import { ensureColInputs, writeColReleasePin } from "./inputs/col";
+import { ensureInatNames } from "./inputs/inat-names";
 import { run as buildTaxa } from "./core/build-taxa";
 import { run as buildAssessments } from "./core/build-assessments";
 import { run as buildOccurrences } from "./core/build-occurrences";
@@ -150,7 +149,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   await buildSynonymIndex({ dataDir: OUT_DIR });
   await buildSearchIndex({ dataDir: OUT_DIR, coreDir: CORE_DIR, inatNames: inat });
   await buildColTaxonIds({ taxaPath: path.join(OUT_DIR, syncPath("taxa.parquet")) });
-  writeReleaseMetadata(col.xr, col.checklist);
+  writeColReleasePin(col.xr, col.checklist);
   done();
 
   done = step("checks");

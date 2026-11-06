@@ -35,9 +35,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
-import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
 import { usageCountsSql } from "../core/counts";
-import { ensureInatNames } from "../inputs/inat";
+import { ensureInatNames, inatKingdomSql } from "../inputs/inat-names";
 import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
 import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
 

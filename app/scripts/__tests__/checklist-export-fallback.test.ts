@@ -1,13 +1,12 @@
 /**
- * Phase 3 surviving the monthly window where `3LR` names a release nobody can
+ * The sync surviving the monthly window where `3LR` names a release nobody can
  * download yet.
  *
  * ChecklistBank points `3LR` at a new curated release the day CoL publishes it,
  * but building that release's ColDP export is a separate job on its own schedule
  * — one day behind for COL26.8, three for COL26.7, and still nothing four days
- * after COL26.9, which failed the 2026-09-13 weekly sync on a bare 404. Phase 3
- * runs before the GBIF phases, so the abort took the whole sync with it over a
- * file CoL simply had not written yet.
+ * after COL26.9, which failed the 2026-09-13 sync on a bare 404, over a file
+ * CoL simply had not written yet.
  *
  * So resolveChecklistDataset() probes the archive and steps back to the newest
  * release that has one. These cover the stepping-back, the guards on how far it
@@ -22,7 +21,7 @@ import * as path from "path";
 const { execFileSyncMock } = vi.hoisted(() => ({ execFileSyncMock: vi.fn() }));
 vi.mock("child_process", () => ({ execFileSync: execFileSyncMock }));
 
-import { resolveChecklistDataset, run } from "../sync/inputs/fetch-col-checklist";
+import { resolveChecklistDataset, fetchChecklist } from "../sync/inputs/col-checklist";
 
 /** The curated releases, newest first — as ChecklistBank listed them on 2026-09-14. */
 const RELEASES = [
@@ -106,7 +105,7 @@ describe("resolveChecklistDataset", () => {
 
   it("only ever considers curated releases, never an XR", async () => {
     // An XR is the unreconciled taxonomy this overlay exists to CORRECT, so
-    // falling back onto one would demote nothing and silently turn phase 3 into a
+    // falling back onto one would demote nothing and silently turn the overlay into a
     // no-op. origin=release is what keeps them out of the candidate list.
     stubChecklistBank([316115]);
     await resolveChecklistDataset();
@@ -119,13 +118,13 @@ describe("resolveChecklistDataset", () => {
     // than a red run: the gap has never exceeded days, so a longer one is a CoL
     // problem to look at, not one to paper over.
     stubChecklistBank([]);
-    await expect(resolveChecklistDataset()).rejects.toThrow(/no ColDP archive/);
+    await expect(resolveChecklistDataset()).rejects.toThrow(/no archive/);
     // Three candidates probed after the alias's own release, and no further.
     expect(requested.filter((r) => r.includes("/export.zip"))).toHaveLength(4);
   });
 });
 
-describe("run", () => {
+describe("fetchChecklist", () => {
   it("downloads the release it was handed, not the alias", async () => {
     // The fallback is only worth anything if the download follows it. Re-resolving
     // `3LR` here would land straight back on the release the resolver stepped away
@@ -138,7 +137,7 @@ describe("run", () => {
     });
     try {
       const dataset = await resolveChecklistDataset();
-      await run({ destDir, dataset });
+      fetchChecklist(dataset, destDir);
       const curl = execFileSyncMock.mock.calls.find(([cmd]) => cmd === "curl")!;
       expect(curl[1].join(" ")).toContain("/dataset/316115/export.zip");
       expect(curl[1].join(" ")).not.toContain("3LR");

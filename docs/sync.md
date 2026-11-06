@@ -51,7 +51,7 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 | **CoL curated checklist** | what catalogueoflife.org shows; used to *demote* XR species the curators treat as synonyms | newest release | `inputs/col.ts` |
 | **IUCN Red List Postgres** | every global assessment, taxonomy, synonyms, credits | the database named by `DB_NAME` | `build-assessments.ts` |
 | **GBIF monthly snapshot** | every occurrence record, as parquet, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `build-occurrences.ts` |
-| iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat.ts` |
+| iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat-names.ts` |
 | GBIF's name matcher | matching-ws, run locally in Docker against the XR | pinned release (v1.0.12), index built once per XR | `inputs/matcher.ts` |
 
 Two inputs are guarded:

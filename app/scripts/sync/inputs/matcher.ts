@@ -11,7 +11,6 @@
  *   src-<version>/        the matching-ws source at that tag, and its jar (built in a Maven container)
  *   export-<key>/<key>/   the XR's NameUsage as the CSV matching-ws indexes
  *   index-<key>-<version>/ the index (about 13 minutes, 1.5 GB)
- * Each counts only once its .complete marker exists.
  *
  * The server runs in Docker as redlist-matcher-<key> on MATCHER_PORT (8190),
  * and is left running between syncs. It is checked to be serving the right
@@ -25,7 +24,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
-import { CACHE_ROOT } from "../paths";
+import { CACHE_ROOT, cachedDir } from "../paths";
 import { ensureColInputs } from "./col";
 
 export const MATCHER_VERSION = "v1.0.12";
@@ -48,19 +47,9 @@ const sh = (cmd: string, args: string[], opts: { cwd?: string; quiet?: boolean }
   execFileSync(cmd, args, { cwd: opts.cwd, encoding: "utf-8", stdio: opts.quiet ? "pipe" : ["ignore", "inherit", "inherit"] });
 const jarName = () => `matching-ws-${MATCHER_VERSION.replace(/^v/, "")}-exec.jar`;
 
-function once(dir: string, build: () => void): string {
-  const marker = path.join(dir, ".complete");
-  if (fs.existsSync(marker)) return dir;
-  build();
-  fs.writeFileSync(marker, new Date().toISOString() + "\n");
-  return dir;
-}
-
-function ensureJar(): string {
-  const src = path.join(ROOT, `src-${MATCHER_VERSION}`);
-  once(src, () => {
+async function ensureJar(): Promise<string> {
+  const src = await cachedDir(path.join(ROOT, `src-${MATCHER_VERSION}`), (src) => {
     console.log(`   building matching-ws ${MATCHER_VERSION} (a few minutes, once)`);
-    fs.rmSync(src, { recursive: true, force: true });
     sh("git", ["clone", "-q", "--depth", "1", "--branch", MATCHER_VERSION, REPO, src]);
     fs.mkdirSync(path.join(ROOT, "m2"), { recursive: true });
     sh("docker", ["run", "--rm", "-v", `${src}:/build`, "-v", `${path.join(ROOT, "m2")}:/root/.m2`, "-w", "/build",
@@ -72,38 +61,33 @@ function ensureJar(): string {
 
 /** The XR as matching-ws reads a CSV export: $-separated, upper-case enums, BOLD BINs as OTUs. */
 async function ensureExport(xr: { key: string; alias: string }, nameUsage: string): Promise<string> {
+  // matching-ws reads <export root>/<key>/index.csv.
   const exportRoot = path.join(ROOT, `export-${xr.key}`);
-  const dir = path.join(exportRoot, xr.key);
-  if (fs.existsSync(path.join(dir, ".complete"))) return exportRoot;
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
-  const clean = (c: string) => `replace(replace(${c}, '$', ''), '"', '')`;
-  await conn.run(`COPY (
-    SELECT "col:ID" AS id, "col:parentID" AS parentId,
-           ${clean(`regexp_replace("col:scientificName", '[/\\\\]', '', 'g')`)} AS scientificName,
-           ${clean(`"col:authorship"`)} AS authorship,
-           upper(replace("col:status", ' ', '_')) AS status,
-           upper(replace(coalesce("col:rank", 'unranked'), ' ', '_')) AS rank,
-           upper("col:code") AS code,
-           "col:genericName" AS genericName, "col:infragenericEpithet" AS infragenericEpithet,
-           "col:specificEpithet" AS specificEpithet, "col:infraspecificEpithet" AS infraspecificEpithet,
-           CASE WHEN "col:scientificName" LIKE 'BOLD:%' THEN 'OTU' ELSE 'SCIENTIFIC' END AS type,
-           '' AS category, "col:environment" AS environments, '' AS extension
-    FROM read_csv(${lit(nameUsage)}, delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)
-    WHERE "col:ID" IS NOT NULL
-  ) TO ${lit(path.join(dir, "index.csv"))} (DELIMITER '$', HEADER, QUOTE '"')`);
-  fs.writeFileSync(path.join(dir, "metadata.json"), JSON.stringify({ clbKey: Number(xr.key), title: "Catalogue of Life", alias: xr.alias }) + "\n");
-  fs.writeFileSync(path.join(dir, ".complete"), new Date().toISOString() + "\n");
+  await cachedDir(path.join(exportRoot, xr.key), async (dir) => {
+    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const clean = (c: string) => `replace(replace(${c}, '$', ''), '"', '')`;
+    await conn.run(`COPY (
+      SELECT "col:ID" AS id, "col:parentID" AS parentId,
+             ${clean(`regexp_replace("col:scientificName", '[/\\\\]', '', 'g')`)} AS scientificName,
+             ${clean(`"col:authorship"`)} AS authorship,
+             upper(replace("col:status", ' ', '_')) AS status,
+             upper(replace(coalesce("col:rank", 'unranked'), ' ', '_')) AS rank,
+             upper("col:code") AS code,
+             "col:genericName" AS genericName, "col:infragenericEpithet" AS infragenericEpithet,
+             "col:specificEpithet" AS specificEpithet, "col:infraspecificEpithet" AS infraspecificEpithet,
+             CASE WHEN "col:scientificName" LIKE 'BOLD:%' THEN 'OTU' ELSE 'SCIENTIFIC' END AS type,
+             '' AS category, "col:environment" AS environments, '' AS extension
+      FROM read_csv(${lit(nameUsage)}, delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)
+      WHERE "col:ID" IS NOT NULL
+    ) TO ${lit(path.join(dir, "index.csv"))} (DELIMITER '$', HEADER, QUOTE '"')`);
+    fs.writeFileSync(path.join(dir, "metadata.json"), JSON.stringify({ clbKey: Number(xr.key), title: "Catalogue of Life", alias: xr.alias }) + "\n");
+  });
   return exportRoot;
 }
 
-function ensureIndex(xrKey: string, jarDir: string, exportRoot: string): string {
-  const dir = path.join(ROOT, `index-${xrKey}-${MATCHER_VERSION}`);
-  return once(dir, () => {
+function ensureIndex(xrKey: string, jarDir: string, exportRoot: string): Promise<string> {
+  return cachedDir(path.join(ROOT, `index-${xrKey}-${MATCHER_VERSION}`), (dir) => {
     console.log(`   indexing XR ${xrKey} with matching-ws (about 15 minutes, once per release)`);
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
     sh("docker", ["run", "--rm", "--name", `redlist-matcher-index-${xrKey}`,
       "-v", `${jarDir}:/app`, "-v", `${exportRoot}:/export`, "-v", `${dir}:/index`, RUN_IMAGE,
       "java", "-Xmx48g", "--enable-native-access=ALL-UNNAMED", "-jar", `/app/${jarName()}`,
@@ -152,9 +136,9 @@ async function serve(xrKey: string, jarDir: string, index: string): Promise<Matc
 }
 
 export async function ensureMatcher(xr: { key: string; alias: string }, nameUsage: string): Promise<Matcher> {
-  const jarDir = ensureJar();
+  const jarDir = await ensureJar();
   const exportRoot = await ensureExport(xr, nameUsage);
-  const index = ensureIndex(xr.key, jarDir, exportRoot);
+  const index = await ensureIndex(xr.key, jarDir, exportRoot);
   return serve(xr.key, jarDir, index);
 }
 

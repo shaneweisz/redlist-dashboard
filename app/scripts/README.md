@@ -23,8 +23,8 @@ The monthly data release. `sync.ts` runs the steps in order; each also runs alon
 | `publish.ts`, `upload-data-to-r2.ts` | copy a finished build into `app/data/sync/` and upload it as a new sync |
 | `paths.ts` | where the cache and the build live (`~/.cache/redlist-dashboard/`) |
 | **`inputs/`** | what a sync is built from, each cached by version |
-| `col.ts`, `fetch-col-xr.ts`, `fetch-col-checklist.ts` | Catalogue of Life: the XR GBIF indexes, the curated checklist, Base sources |
-| `inat.ts`, `fetch-inat-vernaculars.ts` | iNaturalist's English common names |
+| `col.ts`, `col-xr.ts`, `col-checklist.ts` | Catalogue of Life: the XR GBIF indexes, the curated checklist, Base sources |
+| `inat-names.ts` | iNaturalist's English common names |
 | `matcher.ts` | GBIF's name matcher (matching-ws), built and served in Docker |
 | **`core/`** | the four source-of-truth tables, and the rules that make them |
 | `build-taxa.ts`, `build-assessments.ts`, `build-occurrences.ts` | CoL usages, Red List assessments, GBIF record counts |
