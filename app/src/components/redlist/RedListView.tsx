@@ -1,6 +1,7 @@
 "use client";
 
 import { loadAssessment } from "@/lib/redlist/assessment";
+import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
@@ -3174,15 +3175,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     async function fetchLightweightDetails() {
       const promises = speciesToFetch.map(async (s) => {
         try {
-          // Build parallel fetch list: iNat image + GBIF match check for species not in CSV
-          const fetchPromises: [Promise<Response>, Promise<Response | null>] = [
-            // Proxied through our own API route (not called directly against
-            // iNaturalist) so the edge cache is shared across visitors
-            // instead of every browser re-fetching the same species fresh.
-            fetch(
-              `/api/inat/thumbnail?name=${encodeURIComponent(s.scientific_name)}`,
-              { signal }
-            ),
+          // In parallel: iNat image + GBIF match check for species not in CSV
+          const fetchPromises: [Promise<InatDefaultImage | null>, Promise<Response | null>] = [
+            // Through the shared loader (lib/redlist/inat-thumbnail): our own
+            // proxy route, so the edge cache is shared across visitors, at most
+            // four in flight, and one request per name for the whole page. A
+            // page of rows used to fire every thumbnail at once, which Sentry
+            // flagged as an N+1. Not batched into one request on purpose: the
+            // edge cache is per name, and a batch of names would rarely repeat.
+            loadThumbnail(s.scientific_name),
             // Check GBIF match status for species missing from CSV
             !s.gbif_species_key
               ? fetch(
@@ -3201,13 +3202,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               : Promise.resolve(null),
           ];
 
-          const [inatRes, gbifMatchRes] = await Promise.all(fetchPromises);
-
-          let inatDefaultImage: InatDefaultImage | null = null;
-          if (inatRes.ok) {
-            const inatData = await inatRes.json();
-            inatDefaultImage = inatData.inatDefaultImage || null;
-          }
+          const [inatDefaultImage, gbifMatchRes] = await Promise.all(fetchPromises);
 
           let gbifMatchStatus: GbifMatchStatus | null = null;
           if (gbifMatchRes?.ok) {

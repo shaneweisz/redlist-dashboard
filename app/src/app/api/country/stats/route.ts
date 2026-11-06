@@ -5,6 +5,7 @@ import {
   gbifTaxonKeysForGroup,
   taxonGroupCountsPreservedSpecimens,
 } from "@/lib/gbif";
+import { gbifJson } from "@/lib/gbif-fetch";
 
 interface CountryStats {
   [countryCode: string]: {
@@ -13,16 +14,26 @@ interface CountryStats {
   };
 }
 
-// Cache the results for 1 hour, keyed by taxon
+interface GbifFacetResponse {
+  facets?: { field: string; counts?: { name: string; count: number }[] }[];
+}
+
+// Cache the results for 1 hour, keyed by the (sorted) taxon list
 const cachedStats: Record<string, CountryStats> = {};
 const cacheTime: Record<string, number> = {};
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
 
+/**
+ * GBIF occurrence counts per country for one or more dashboard groups
+ * (`?taxon=birds` or `?taxon=birds,mammals,…`), summed into one map.
+ */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const taxonId = searchParams.get("taxon") || "plantae";
+  const taxonIds = [...new Set(
+    (searchParams.get("taxon") || "plantae").split(",").map((t) => t.trim()).filter(Boolean),
+  )].sort();
 
-  const cacheKey = taxonId;
+  const cacheKey = taxonIds.join(",");
 
   // Return cached data if still valid
   if (cachedStats[cacheKey] && Date.now() - (cacheTime[cacheKey] || 0) < CACHE_DURATION) {
@@ -30,52 +41,49 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // One query per GBIF taxon key making up this group, combined by country.
+    // GBIF ORs repeated taxonKey parameters, so every key of every requested group
+    // goes into one query per basisOfRecord set — at most two (plants and fungi
+    // count herbarium/fungarium material, matching the totals the sync writes;
+    // animals don't). This used to be one query per key: 49 for invertebrates
+    // alone, the slowest taking 24s, and Sentry flagging the fan-out as an N+1.
+    // The groups' keys are disjoint, so one faceted query returns exactly what
+    // summing the per-key queries did (checked against the live API: fishes' five
+    // keys gave 5,353,556 GB records either way).
     //
-    // The keys come from the generated config, which is derived from the Red List
-    // group definitions. They used to be a hand-kept list of backbone integers in
-    // src/config/taxa.ts; that list did not move when the pipeline moved to
-    // Catalogue of Life, so every request here named the CoL checklist while
-    // sending a backbone key and GBIF returned an empty result set for all of
-    // them — a blank occurrence layer on the world map, with nothing raised.
-    //
-    // This also removed a second bug: the old branching fell through to querying
-    // an entire kingdom for any group defined by order keys, which is what Fishes
-    // was doing.
-    const taxonKeys = gbifTaxonKeysForGroup(taxonId);
-    const stats: CountryStats = {};
-    // Plants and fungi count herbarium/fungarium material, matching the totals
-    // the sync writes — otherwise the map's per-country occurrence layer
-    // disagrees with every plant count shown next to it.
-    const includePreservedSpecimens = taxonGroupCountsPreservedSpecimens(taxonId);
+    // The keys come from the generated config, derived from the Red List group
+    // definitions — a hand-kept list of backbone integers once went stale when the
+    // pipeline moved to Catalogue of Life, and GBIF quietly returned nothing.
+    const keysByBasis = new Map<boolean, Set<string>>();
+    for (const taxonId of taxonIds) {
+      const preserved = taxonGroupCountsPreservedSpecimens(taxonId);
+      const keys = keysByBasis.get(preserved) ?? new Set<string>();
+      for (const key of gbifTaxonKeysForGroup(taxonId)) keys.add(key);
+      keysByBasis.set(preserved, keys);
+    }
 
+    // gbifJson identifies us to GBIF and retries 429/5xx; anything it still can't
+    // get throws, so a failed query is a 502 rather than a group silently missing
+    // from the map (and cached that way for an hour).
     const results = await Promise.all(
-      taxonKeys.map(async (taxonKey) => {
-        const params = gbifOccurrenceParams({
-          taxonKey,
-          facet: "country",
-          facetLimit: "300",
-          limit: "0",
-        }, { includePreservedSpecimens });
-        const response = await fetch(`https://api.gbif.org/v1/occurrence/search?${params}`);
-        if (!response.ok) return null;
-        return response.json();
-      })
+      [...keysByBasis].filter(([, keys]) => keys.size > 0).map(([includePreservedSpecimens, keys]) => {
+        const params = gbifOccurrenceParams(
+          { facet: "country", facetLimit: "300", limit: "0" },
+          { includePreservedSpecimens },
+        );
+        for (const key of keys) params.append("taxonKey", key);
+        return gbifJson(`https://api.gbif.org/v1/occurrence/search?${params}`) as Promise<GbifFacetResponse>;
+      }),
     );
 
+    const stats: CountryStats = {};
     for (const result of results) {
-      if (!result) continue;
-      const countryFacets = result.facets?.find(
-        (f: { field: string }) => f.field === "COUNTRY"
-      );
-      if (!countryFacets?.counts) continue;
-      for (const facet of countryFacets.counts) {
+      const countryFacets = result.facets?.find((f) => f.field === "COUNTRY");
+      for (const facet of countryFacets?.counts ?? []) {
         if (!stats[facet.name]) stats[facet.name] = { occurrences: 0, species: 0 };
         stats[facet.name].occurrences += facet.count;
       }
     }
 
-    // Cache the results by taxon
     cachedStats[cacheKey] = stats;
     cacheTime[cacheKey] = Date.now();
 
@@ -84,7 +92,7 @@ export async function GET(request: NextRequest) {
     console.error("Error fetching country stats:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { status: 502 }
     );
   }
 }
