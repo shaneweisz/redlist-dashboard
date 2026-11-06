@@ -558,9 +558,7 @@ const SPECIES_TH_SORTABLE = "cursor-pointer hover:text-zinc-900 dark:hover:text-
 // two lines it should break into, measured at this size and weight:
 //
 //   Assessment / Date               84   ("Assessment" 83)
-//   Total / Records                 58   ("Records" 57; under the GBIF heading)
-//   New Records / Since Assessment  124  ("Since Assessment" 124)
-//   % New Records / Since Assessment 124 (likewise)
+//   Total / New / % New           one line each, under the GBIF Records heading
 //   Year Described                  104  (one line, 102 — new-assessments has the room)
 //   GBIF Records                    96   (one line, 94 — likewise)
 //
@@ -1079,7 +1077,7 @@ function GbifInfoTooltip({ mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecor
               <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
             </>
           )}
-          <div className="text-zinc-400 mt-1">Since assessment: records dated after the assessment date.</div>
+          <div className="text-zinc-400 mt-1">New: records dated after the assessment date. % New: New as a share of Total.</div>
           <div className="font-medium text-zinc-100 mt-1">Included:</div>
           <ul className="text-zinc-300 list-disc list-inside">
             <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
@@ -6065,7 +6063,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("totalGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} ${isNewAssessments ? "w-[96px]" : "w-[58px]"}`}>{isNewAssessments ? "GBIF Records" : "Total Records"}</span>
+                    <span className={isNewAssessments ? `${SPECIES_TH_LABEL} w-[96px]` : SPECIES_TH_NOWRAP}>{isNewAssessments ? "GBIF Records" : "Total"}</span>
                     {isNewAssessments && <GbifInfoTooltip mode={gbifRecordMode} />}
                     <SortIndicator field="totalGbif" />
                   </span>
@@ -6076,8 +6074,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("newGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>New Records Since Assessment</span>
-                    <HoverTooltip text="Records dated after the assessment date. A record dated only to a month or a year counts when that month or year is later than the assessment's; one dated only to the assessment's own month or year can't be placed, and is left out.">
+                    <span className={SPECIES_TH_NOWRAP}>New</span>
+                    <HoverTooltip text="Records dated after the assessment date. One dated only to a month counts if that month and year are after the assessment; one dated only to a year, if the year is after it. Otherwise it is left out.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
@@ -6093,8 +6091,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("pctNewGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={`${SPECIES_TH_LABEL} w-[124px]`}>% New Records Since Assessment</span>
-                    <HoverTooltip text="New records since the assessment, as a share of all the species' records (in the same record mode).">
+                    <span className={SPECIES_TH_NOWRAP}>% New</span>
+                    <HoverTooltip text="New records as a share of Total.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
@@ -6156,7 +6154,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     the mode is said once here, not under every column. */}
                 <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
-                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF <GbifInfoTooltip mode={gbifRecordMode} /></span>
+                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records <GbifInfoTooltip mode={gbifRecordMode} /></span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
