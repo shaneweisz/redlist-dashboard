@@ -128,10 +128,6 @@ const nextConfig: NextConfig = {
     "/api/search/warm": DUCKDB_TRACE,
     "/api/taxa/species": DUCKDB_TRACE,
     "/api/redlist/synonyms": DUCKDB_TRACE,
-    // /browse runs querySpecies/searchSpecies (DuckDB over R2) at request time.
-    "/browse": DUCKDB_TRACE,
-    // /api/mcp runs the same query layer for the MCP tools.
-    "/api/mcp": DUCKDB_TRACE,
     // The standalone mapping page resolves its species server-side with the
     // same DuckDB-over-R2 query (getSpeciesByGbifKey), so it needs the addon's
     // dlopen'd .so and the sync pointer like every route above. Written with a
@@ -230,12 +226,6 @@ const nextConfig: NextConfig = {
     // straight past Vercel's cap, and flip USE_R2 off into the bargain.
     "/api/narrative-search": ["**/data/**"],
     "/api/narrative-search/[assessmentId]": ["**/data/**"],
-    // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
-    // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
-    // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.
-    "/browse": ONLY_SMALL_SUMMARIES,
-    "/api/mcp": ONLY_SMALL_SUMMARIES,
-    "/llms.txt": ["**/data/**"],
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.
     // Without this the shared species-store import drags the whole sync —

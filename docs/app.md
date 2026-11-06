@@ -45,8 +45,6 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 | Route | Reads | Called by |
 |---|---|---|
 | `/api/search`, `/api/search/warm` | parquet: name-index, rank-index, synonym-index, assessed, ne, species/ | the search bar, **after the prebuilt shards** (substring, CoL-only and old-name queries); warm primes it |
-| `/api/mcp`, `/browse` | the same queries, in-process (`src/lib/browse-query.ts`) | AI agents; `/browse` is linked from `/llms.txt` |
-| `/llms.txt` | the filter vocabulary in code | agents |
 | `/api/narrative-search`, `/[assessmentId]` | narratives parquets (R2 `narratives/<release>/`, per Red List release) | the narrative search page |
 
 ### Live data in the detail panel and maps
@@ -83,7 +81,7 @@ Found while mapping the routes, checked against the code. Nothing here is change
 - `/api/species/[key]/breakdown` makes a third GBIF request for recent iNat observations (`recentInatObservations`), which no component reads.
 - `/api/species/[key]/inat-top-observers` has a GBIF name lookup for when no name is passed, but its one caller always passes the name, and `[key]` is always 0.
 
-**Fallbacks the prebuilt files now mostly answer.** `/api/redlist/species`, `/api/search` (and `/warm`, which primes it) and unscoped `/api/redlist/taxa-subgroups` sit behind the prebuilt files. They are still needed for what the files don't cover (arbitrary ranks, substring search, country scopes), and by `/browse` and MCP; but `/warm` now primes a path few searches reach.
+**Fallbacks the prebuilt files now mostly answer.** `/api/redlist/species`, `/api/search` (and `/warm`, which primes it) and unscoped `/api/redlist/taxa-subgroups` sit behind the prebuilt files. They are still needed for what the files don't cover (arbitrary ranks, substring search, country scopes),; but `/warm` now primes a path few searches reach.
 
 **Thin wrappers.** `/api/data-sync-date` returns `latest-sync.txt`, which the client bundle already carries (`NEXT_PUBLIC_SPECIES_LISTS_SYNC`). `/api/redlist/country-stats` returns a static JSON file.
 

@@ -1,7 +1,7 @@
 /**
  * Shared "is this assessment outdated" logic. Has zero server-only imports
- * (no fs/path) so it's safe to use from both server code (species-store.ts,
- * browse-query.ts) and client components (RedListView.tsx).
+ * (no fs/path) so it's safe to use from both server code (species-store.ts)
+ * and client components (RedListView.tsx).
  */
 
 const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;

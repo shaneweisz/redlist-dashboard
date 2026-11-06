@@ -1,6 +1,6 @@
 /**
  * The country lookup tables used to exist twice — once in WorldMap.tsx for the
- * choropleth and once here for server-side callers (/browse, filter-vocab) —
+ * choropleth and once here for other callers —
  * and they drifted: the map learned about Curaçao, Hong Kong, Aruba and ~40
  * other territories, and learned that the 50m shapes spell it "Macedonia", while
  * the server-side copy kept the older, thinner list. So `?country=Curaçao`

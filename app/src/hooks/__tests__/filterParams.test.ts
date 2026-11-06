@@ -206,24 +206,21 @@ describe("parseParams", () => {
     expect(result.tab).toBe(null);
   });
 
-  it("parses the exact URL-only filters", () => {
-    const result = parseParams(
-      "?outdated=yes&minObs=100&maxObs=5000&minAssessmentYear=2010&maxAssessmentYear=2020&minDescribedYear=1990&maxDescribedYear=2000"
-    );
-    expect(result.outdated).toBe("yes");
-    expect(result.minObs).toBe(100);
-    expect(result.maxObs).toBe(5000);
-    expect(result.minAssessmentYear).toBe(2010);
-    expect(result.maxAssessmentYear).toBe(2020);
-    expect(result.minDescribedYear).toBe(1990);
-    expect(result.maxDescribedYear).toBe(2000);
+  it("parses the Outdated filter", () => {
+    expect(parseParams("?outdated=yes").outdated).toBe("yes");
+    expect(parseParams("?outdated=no").outdated).toBe("no");
   });
 
-  it("defaults exact filters to null when absent / invalid", () => {
-    const result = parseParams("?outdated=maybe&minObs=abc");
-    expect(result.outdated).toBe(null);
-    expect(result.minObs).toBe(null);
-    expect(result.maxObs).toBe(null);
+  it("defaults the Outdated filter to null when absent / invalid", () => {
+    expect(parseParams("").outdated).toBe(null);
+    expect(parseParams("?outdated=maybe").outdated).toBe(null);
+  });
+
+  // The agent-link bounds were removed; an old link carrying them still opens.
+  it("ignores the retired minObs/minAssessmentYear-style bounds", () => {
+    const result = parseParams("?taxa=mammals&minObs=100&maxAssessmentYear=2020");
+    expect(result.taxa).toEqual(new Set(["mammals"]));
+    expect("minObs" in result).toBe(false);
   });
 
   // The Threats chart's scope: threatened-only is the DEFAULT (IUCN's threat
@@ -513,39 +510,18 @@ describe("buildQs", () => {
     expect(params.has("tab")).toBe(false);
   });
 
-  it("includes the exact URL-only filters when set", () => {
-    const qs = buildQs({
-      ...emptyState,
-      outdated: "yes", minObs: 100, maxObs: 5000,
-      minAssessmentYear: 2010, maxAssessmentYear: 2020,
-      minDescribedYear: 1990, maxDescribedYear: 2000,
-    });
-    const p = new URLSearchParams(qs);
-    expect(p.get("outdated")).toBe("yes");
-    expect(p.get("minObs")).toBe("100");
-    expect(p.get("maxObs")).toBe("5000");
-    expect(p.get("minAssessmentYear")).toBe("2010");
-    expect(p.get("maxAssessmentYear")).toBe("2020");
-    expect(p.get("minDescribedYear")).toBe("1990");
-    expect(p.get("maxDescribedYear")).toBe("2000");
+  it("includes the Outdated filter when set", () => {
+    const qs = buildQs({ ...emptyState, outdated: "yes" });
+    expect(new URLSearchParams(qs).get("outdated")).toBe("yes");
   });
 
-  it("omits exact filters when null/absent", () => {
-    const qs = buildQs({ ...emptyState, outdated: null, minObs: null });
-    expect(qs).toBe("");
+  it("omits the Outdated filter when null", () => {
+    expect(buildQs({ ...emptyState, outdated: null })).toBe("");
   });
 
-  it("round-trips the exact filters through parseParams", () => {
-    const qs = buildQs({
-      ...emptyState,
-      taxa: new Set(["mammals"]),
-      outdated: "no", minObs: 1, maxObs: 9, minAssessmentYear: 2000,
-    });
-    const parsed = parseParams(qs);
-    expect(parsed.outdated).toBe("no");
-    expect(parsed.minObs).toBe(1);
-    expect(parsed.maxObs).toBe(9);
-    expect(parsed.minAssessmentYear).toBe(2000);
+  it("round-trips the Outdated filter through parseParams", () => {
+    const qs = buildQs({ ...emptyState, taxa: new Set(["mammals"]), outdated: "no" });
+    expect(parseParams(qs).outdated).toBe("no");
   });
 });
 
@@ -995,12 +971,6 @@ describe("OWN_PARAM_NAMES stays in sync with buildQs", () => {
       institutions: new Set<string>(),
       search: "shrew",
       outdated: "yes" as const,
-      minObs: 1,
-      maxObs: 9,
-      minAssessmentYear: 2000,
-      maxAssessmentYear: 2020,
-      minDescribedYear: 1990,
-      maxDescribedYear: 2010,
       sortField: "category" as const,
       sortDirection: "asc" as const,
       sortField2: "newGbif" as const,

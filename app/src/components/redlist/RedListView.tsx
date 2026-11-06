@@ -1808,37 +1808,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return speciesListFetched || neTooLarge || error ? null : undefined;
   };
 
-  // Exact URL-only base filters (obs / assessment-year / described-year bounds —
-  // outdated is applied separately below, not here). Applied here on the base set
-  // so every chart AND the table inherit them — and identically to the bucket-free
-  // /browse + MCP query, which is what makes an agent's dashboard link reproduce
-  // the same species set. Mirrors species-filter numeric bounds.
-  const taxaFilteredSpeciesExceptOutdated = useMemo(() => {
-    let filtered = taxaFilteredSpeciesBase;
-    const { minObs, maxObs, minAssessmentYear, maxAssessmentYear, minDescribedYear, maxDescribedYear } = exactFilters;
-    if (minObs != null || maxObs != null) {
-      filtered = filtered.filter(s => {
-        const obs = s.gbif_records ?? 0;
-        return (minObs == null || obs >= minObs) && (maxObs == null || obs <= maxObs);
-      });
-    }
-    if (minAssessmentYear != null || maxAssessmentYear != null) {
-      filtered = filtered.filter(s => {
-        const y = s.assessment_date ? parseInt(s.assessment_date.slice(0, 4), 10) : NaN;
-        if (Number.isNaN(y)) return false;
-        return (minAssessmentYear == null || y >= minAssessmentYear) && (maxAssessmentYear == null || y <= maxAssessmentYear);
-      });
-    }
-    if (minDescribedYear != null || maxDescribedYear != null) {
-      filtered = filtered.filter(s =>
-        s.described_year != null
-        && (minDescribedYear == null || s.described_year >= minDescribedYear)
-        && (maxDescribedYear == null || s.described_year <= maxDescribedYear));
-    }
-    return filtered;
-  }, [taxaFilteredSpeciesBase, exactFilters]);
 
-  // Outdated is excluded from taxaFilteredSpeciesExceptOutdated (above) so the
+  // Outdated is left out of taxaFilteredSpeciesBase (above) so the
   // Range/Year chart (which shares this same "when was this species assessed"
   // dimension) can show the full distribution and mute — not remove — bars that
   // don't match the Outdated toggle, mirroring how the Conservation Status chart
@@ -1846,10 +1817,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // memo/the table uses this outdated-filtered version, so the Outdated button
   // behaves like a real, dashboard-wide filter everywhere except its own chart.
   const taxaFilteredSpeciesNoPreview = useMemo(() => {
-    if (!exactFilters.outdated) return taxaFilteredSpeciesExceptOutdated;
+    if (!exactFilters.outdated) return taxaFilteredSpeciesBase;
     const wantOutdated = exactFilters.outdated === "yes";
-    return taxaFilteredSpeciesExceptOutdated.filter(s => isOutdated(s.assessment_date, dataAsOf) === wantOutdated);
-  }, [taxaFilteredSpeciesExceptOutdated, exactFilters.outdated, dataAsOf]);
+    return taxaFilteredSpeciesBase.filter(s => isOutdated(s.assessment_date, dataAsOf) === wantOutdated);
+  }, [taxaFilteredSpeciesBase, exactFilters.outdated, dataAsOf]);
 
   // Helper to check if species matches year range filter
   const matchesYearRangeFilter = useCallback((assessmentDate: string | null, yearRanges: Set<string> = selectedYearRanges): boolean => {
@@ -1942,8 +1913,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return parseAssessors(s.latest_contributors);
   }, []);
 
-  // Institutions are organisations, not people — see parseInstitutions, which
-  // the /browse + MCP filter shares so both surfaces split a line the same way.
+  // Institutions are organisations, not people — see parseInstitutions.
   const getSpeciesInstitutions = useCallback((s: Species): string[] => {
     return parseInstitutions(s.latest_institutions);
   }, []);
@@ -1953,26 +1923,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const [yearsChartMode, setYearsChartMode] = useState<"range" | "year">(
     () => (selectedAssessmentYears.size > 0 ? "year" : "range")
   );
-  // If the URL hydrates with specific years — or an explicit min/max year range
-  // (still accepted from /browse, the MCP server and hand-built links, though
-  // the UI now selects years by shift+dragging the chart) — surface the year
-  // view, so a shared link opens on the chart its filter applies to.
+  // If the URL hydrates with specific years, surface the year view, so a shared
+  // link opens on the chart its filter applies to.
   useEffect(() => {
-    if (selectedAssessmentYears.size > 0
-      || exactFilters.minAssessmentYear != null
-      || exactFilters.maxAssessmentYear != null) {
-      setYearsChartMode("year");
-    }
-  }, [selectedAssessmentYears, exactFilters.minAssessmentYear, exactFilters.maxAssessmentYear]);
+    if (selectedAssessmentYears.size > 0) setYearsChartMode("year");
+  }, [selectedAssessmentYears]);
 
   // Paginate the by-year chart: show 10 years at a time, defaulting to the most recent
   const YEARS_PAGE_SIZE = 10;
   const [yearsPage, setYearsPage] = useState(0);
 
   // Helper to check if species matches the assessors filter.
-  // Case-insensitive SUBSTRING match — same semantics as the /browse + MCP
-  // `assessors` filter, so an agent's dashboard link reproduces the same set.
-  // (A chart click adds a full name, which substring-matches itself; the only
+  // Case-insensitive SUBSTRING match, so a hand-written ?assessors= link can name
+  // a person without their full spelling. (A chart click adds a full name, which substring-matches itself; the only
   // difference is the rare case where one full name is a substring of another.)
   const matchesAssessorsFilter = useCallback((s: Species): boolean => {
     if (selectedAssessors.size === 0) return true;
@@ -2364,7 +2327,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpecies, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Year chart: apply all filters EXCEPT year range AND outdated (see
-  // taxaFilteredSpeciesExceptOutdated above) — buckets align exactly with the
+  // taxaFilteredSpeciesBase above) — buckets align exactly with the
   // ── One filter predicate for every cross-filter chart ────────────────
   //
   // Each chart shows what WOULD match if you clicked a bar, so each applies
@@ -2423,7 +2386,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       { range: "10-20 years", shortRange: "10-20y", count: 0, minYear: 10 },
       { range: "20+ years", shortRange: ">20y", count: 0, minYear: 20 },
     ];
-    taxaFilteredSpeciesExceptOutdated.forEach(s => {
+    taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
       const yearsSince = (now - new Date(s.assessment_date).getTime()) / msPerYear;
@@ -2438,7 +2401,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       ...r,
       label: `${r.count.toLocaleString()} (${total > 0 ? Math.round((r.count / total) * 100) : 0}%)`,
     }));
-  }, [taxaFilteredSpeciesExceptOutdated, matchesFilters]);
+  }, [taxaFilteredSpeciesBase, matchesFilters]);
 
   // Assessments-by-year chart: apply all filters EXCEPT the year-based ones
   // (selectedYearRanges, selectedAssessmentYears) AND outdated. The Range bucket
@@ -2450,7 +2413,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // isOutdated is excluded from assessmentYearData above.
   const assessmentYearsByYearData = useMemo(() => {
     const counts: Record<string, number> = {};
-    taxaFilteredSpeciesExceptOutdated.forEach(s => {
+    taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
       const year = String(new Date(s.assessment_date).getFullYear());
@@ -2465,7 +2428,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         count,
         label: `${count.toLocaleString()} (${total > 0 ? Math.round((count / total) * 100) : 0}%)`,
       }));
-  }, [taxaFilteredSpeciesExceptOutdated, matchesFilters]);
+  }, [taxaFilteredSpeciesBase, matchesFilters]);
 
   const yearsTotalPages = Math.max(1, Math.ceil(assessmentYearsByYearData.length / YEARS_PAGE_SIZE));
   const paginatedAssessmentYearsData = useMemo(
@@ -5606,7 +5569,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
-            {(selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated || exactFilters.minObs != null || exactFilters.maxObs != null || exactFilters.minAssessmentYear != null || exactFilters.maxAssessmentYear != null || exactFilters.minDescribedYear != null || exactFilters.maxDescribedYear != null) && (
+            {(selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated) && (
               <button
                 onClick={() => {
                   clearAllFiltersAndTaxa();
@@ -6012,29 +5975,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <span className="text-sm shrink-0">×</span>
               </button>
             ))}
-            {/* Exact URL-only filters (typically arrive via an agent/MCP dashboard
-                link). Shown as chips so a human can see and clear them. */}
-            {(() => {
-              const ef = exactFilters;
-              const chips: { key: keyof typeof ef; label: string }[] = [];
-              if (ef.outdated) chips.push({ key: "outdated", label: ef.outdated === "yes" ? "Needs updating (>10 yrs)" : "Current (≤10 yrs)" });
-              if (ef.minObs != null) chips.push({ key: "minObs", label: `≥ ${ef.minObs.toLocaleString()} obs` });
-              if (ef.maxObs != null) chips.push({ key: "maxObs", label: `≤ ${ef.maxObs.toLocaleString()} obs` });
-              if (ef.minAssessmentYear != null) chips.push({ key: "minAssessmentYear", label: `Assessed ≥ ${ef.minAssessmentYear}` });
-              if (ef.maxAssessmentYear != null) chips.push({ key: "maxAssessmentYear", label: `Assessed ≤ ${ef.maxAssessmentYear}` });
-              if (ef.minDescribedYear != null) chips.push({ key: "minDescribedYear", label: `Described ≥ ${ef.minDescribedYear}` });
-              if (ef.maxDescribedYear != null) chips.push({ key: "maxDescribedYear", label: `Described ≤ ${ef.maxDescribedYear}` });
-              return chips.map(c => (
-                <button
-                  key={`ef-${c.key}`}
-                  onClick={() => setExactFilters({ [c.key]: null })}
-                  className="px-3 py-1.5 text-sm font-medium rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300 flex items-center gap-1 hover:opacity-80"
-                >
-                  {c.label}
-                  <span className="text-sm">×</span>
-                </button>
-              ));
-            })()}
+            {exactFilters.outdated && (
+              <button
+                onClick={() => setExactFilters({ outdated: null })}
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300 flex items-center gap-1 hover:opacity-80"
+              >
+                {exactFilters.outdated === "yes" ? "Needs updating (>10 yrs)" : "Current (≤10 yrs)"}
+                <span className="text-sm">×</span>
+              </button>
+            )}
             <span className="ml-auto text-sm md:text-base font-semibold text-zinc-700 dark:text-zinc-300 tabular-nums flex items-center gap-2">
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />

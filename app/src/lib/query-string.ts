@@ -19,9 +19,8 @@
  * reason. Reading needs no counterpart: URLSearchParams already parses bare `~`,
  * `:` and `,` correctly, so links written before this change are unaffected.
  *
- * Lives here rather than in useFilterParams because that file is "use client" and
- * the server-side dashboard-link builder (dashboard-url, behind /browse and
- * /api/mcp) needs it too.
+ * Lives here rather than in useFilterParams because page.tsx and TaxaSummary
+ * build URLs of their own and need the same treatment.
  */
 const QS_BARE_ESCAPES: Record<string, string> = { "%7E": "~", "%3A": ":", "%2C": "," };
 const QS_BARE_ESCAPE_RE = new RegExp(Object.keys(QS_BARE_ESCAPES).join("|"), "gi");

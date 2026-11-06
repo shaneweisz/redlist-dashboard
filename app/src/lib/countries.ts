@@ -1,6 +1,6 @@
 // ISO 3166-1 alpha-2 country code mappings.
-// Extracted from WorldMap.tsx so server-side code (e.g. /browse) can import
-// these maps without pulling in the client-only map rendering deps.
+// Extracted from WorldMap.tsx so other code can import these maps without
+// pulling in the client-only map rendering deps.
 
 // Country name (from TopoJSON) to ISO 3166-1 alpha-2 mapping for GBIF
 export const NAME_TO_ALPHA2: Record<string, string> = {

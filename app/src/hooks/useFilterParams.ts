@@ -61,30 +61,15 @@ export type DetailTabParam = "gbif" | "literature" | "redlist" | "wikipedia" | "
 export type MapViewMode = "map" | "list";
 export type MapSortKey = "name" | "species" | "outdated" | "percentOutdated";
 
-// Exact, URL-only base filters (no on-screen control — the charts use coarse
-// buckets). They let an agent/MCP dashboard link reproduce the exact /browse
-// query; each feeds the same predicate the dashboard already runs.
+// The Outdated toggle (`outdated=yes`), kept apart from the bucketed year
+// filters because it's a single cutoff rather than a set of buckets. `no` (only
+// species assessed within 10 years) has no control but a link can carry it.
 export interface ExactFilters {
   outdated: "yes" | "no" | null;
-  minObs: number | null;
-  maxObs: number | null;
-  minAssessmentYear: number | null;
-  maxAssessmentYear: number | null;
-  minDescribedYear: number | null;
-  maxDescribedYear: number | null;
 }
 
 export const EMPTY_EXACT_FILTERS: ExactFilters = {
-  outdated: null, minObs: null, maxObs: null,
-  minAssessmentYear: null, maxAssessmentYear: null,
-  minDescribedYear: null, maxDescribedYear: null,
-};
-
-const numParam = (p: URLSearchParams, key: string): number | null => {
-  const v = p.get(key);
-  if (v == null) return null;
-  const n = parseInt(v, 10);
-  return Number.isNaN(n) ? null : n;
+  outdated: null,
 };
 
 const FILTER_RANKS: FilterRank[] = ["class", "order", "family", "genus", "species"];
@@ -104,8 +89,7 @@ export const OWN_PARAM_NAMES = [
   "habitatImportance", "habitatSeasons", "habitatSuitability", "bd", "endemics", "growthForms",
   "colMatch", "colReasons",
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
-  "search", "outdated", "minObs", "maxObs",
-  "minAssessmentYear", "maxAssessmentYear", "minDescribedYear", "maxDescribedYear",
+  "search", "outdated",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
   GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
   ...Object.values(GBIF_RANGE_PARAM),
@@ -351,14 +335,8 @@ export function parseParams(search: string) {
       ? new Set(p.get("institutions")!.split("|").filter(Boolean))
       : new Set<string>(),
     search: p.get("search") || "",
-    // Exact URL-only base filters (see ExactFilters).
+    // The Outdated toggle (see ExactFilters).
     outdated: (p.get("outdated") === "yes" ? "yes" : p.get("outdated") === "no" ? "no" : null) as "yes" | "no" | null,
-    minObs: numParam(p, "minObs"),
-    maxObs: numParam(p, "maxObs"),
-    minAssessmentYear: numParam(p, "minAssessmentYear"),
-    maxAssessmentYear: numParam(p, "maxAssessmentYear"),
-    minDescribedYear: numParam(p, "minDescribedYear"),
-    maxDescribedYear: numParam(p, "maxDescribedYear"),
     sortField: parseSortField(sortParam),
     sortDirection: (p.get("dir") === "asc" ? "asc" : "desc") as "asc" | "desc",
     // Secondary sort — applied within ties on the primary (shift/cmd-click a
@@ -451,12 +429,6 @@ export function buildQs(state: {
   institutions: Set<string>;
   search: string;
   outdated?: "yes" | "no" | null;
-  minObs?: number | null;
-  maxObs?: number | null;
-  minAssessmentYear?: number | null;
-  maxAssessmentYear?: number | null;
-  minDescribedYear?: number | null;
-  maxDescribedYear?: number | null;
   sortField: SortField | null;
   sortDirection: "asc" | "desc";
   sortField2: SortField | null;
@@ -515,12 +487,6 @@ export function buildQs(state: {
   if (state.institutions.size > 0) p.set("institutions", [...state.institutions].join("|"));
   if (state.search) p.set("search", state.search);
   if (state.outdated) p.set("outdated", state.outdated);
-  if (state.minObs != null) p.set("minObs", String(state.minObs));
-  if (state.maxObs != null) p.set("maxObs", String(state.maxObs));
-  if (state.minAssessmentYear != null) p.set("minAssessmentYear", String(state.minAssessmentYear));
-  if (state.maxAssessmentYear != null) p.set("maxAssessmentYear", String(state.maxAssessmentYear));
-  if (state.minDescribedYear != null) p.set("minDescribedYear", String(state.minDescribedYear));
-  if (state.maxDescribedYear != null) p.set("maxDescribedYear", String(state.maxDescribedYear));
   if (state.species != null) p.set("species", state.species);
   if (state.species != null && state.tab && state.tab !== "gbif") p.set("tab", state.tab);
   // null / "year" desc is the default — only write non-default sort to URL
@@ -1112,13 +1078,7 @@ export function useFilterParams() {
   // memo/effect dep without recomputing every render.
   const exactFilters = useMemo<ExactFilters>(() => ({
     outdated: state.outdated,
-    minObs: state.minObs,
-    maxObs: state.maxObs,
-    minAssessmentYear: state.minAssessmentYear,
-    maxAssessmentYear: state.maxAssessmentYear,
-    minDescribedYear: state.minDescribedYear,
-    maxDescribedYear: state.maxDescribedYear,
-  }), [state.outdated, state.minObs, state.maxObs, state.minAssessmentYear, state.maxAssessmentYear, state.minDescribedYear, state.maxDescribedYear]);
+  }), [state.outdated]);
 
   // Patch one or more exact URL-only filters (outdated / obs / year bounds).
   const setExactFilters = useCallback(
