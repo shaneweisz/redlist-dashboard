@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMap } from "react-map-gl/maplibre";
 import LinkifiedText from "./LinkifiedText";
+import { gbifImageCredit } from "@/lib/image-credit";
 
 interface MapOccurrenceTooltipProps {
   lat: number;
@@ -275,8 +276,10 @@ export default function MapOccurrenceTooltip(props: MapOccurrenceTooltipProps) {
                 setBrokenImages((prev) => (prev.includes(image.url) ? prev : [...prev, image.url]));
               }}
             />
-            <span className="block px-1.5 py-1 text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
-              {image.creator ? `© ${image.creator} · ` : ""}
+            <span className="block px-1.5 py-1 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+              {/* Its own wrapping line: the licence requires the credit, so it
+                  must not be truncated away. */}
+              {gbifImageCredit(image) && <span className="block">{gbifImageCredit(image)}</span>}
               Click to open the full image
             </span>
           </span>

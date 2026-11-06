@@ -7,7 +7,8 @@
  * client-side half of that: the same name asked for twice — two lists, or one
  * list scrolled away and back — makes one request.
  */
-export type InatThumbnail = { squareUrl: string | null; mediumUrl: string | null } | null;
+/** attribution: iNaturalist's credit line for the photo, licence included. */
+export type InatThumbnail = { squareUrl: string | null; mediumUrl: string | null; attribution?: string | null } | null;
 
 const cache = new Map<string, InatThumbnail>();
 const inFlight = new Map<string, Promise<InatThumbnail>>();

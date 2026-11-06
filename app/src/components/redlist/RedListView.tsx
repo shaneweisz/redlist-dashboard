@@ -407,6 +407,8 @@ const HABITAT_SUITABILITY_OPTIONS: { value: string; short: string }[] = [
 interface InatDefaultImage {
   squareUrl: string | null;
   mediumUrl: string | null;
+  /** iNaturalist's credit line, licence included. */
+  attribution?: string | null;
 }
 
 interface GbifMatchStatus {
@@ -619,6 +621,30 @@ function explainCriteria(criteria: string): string {
   if (criteria.startsWith("E") || criteria.includes("+E")) explanations.push("extinction probability analysis");
 
   return explanations.length > 0 ? ` (${explanations.join("; ")})` : "";
+}
+
+// The shared enlarged-photo preview (#image-preview, rendered once at the
+// bottom of RedListView): the photo, plus its credit line underneath, which
+// the photo's licence requires wherever it's shown. Placed above the anchor,
+// or below it when preferBelow and there's room.
+function showImagePreview(anchor: DOMRect, src: string, credit: string | null | undefined, preferBelow = false) {
+  const box = document.getElementById("image-preview");
+  const img = box?.querySelector("img");
+  const cap = box?.querySelector<HTMLElement>("[data-credit]");
+  if (!box || !img || !cap) return;
+  img.src = src;
+  cap.textContent = credit ?? "";
+  cap.style.display = credit ? "block" : "none";
+  box.style.display = "block";
+  box.style.left = `${anchor.left}px`;
+  const h = box.offsetHeight;
+  const below = preferBelow && anchor.bottom + h + 8 < window.innerHeight;
+  box.style.top = below ? `${anchor.bottom + 8}px` : `${Math.max(8, anchor.top - h - 8)}px`;
+}
+
+function hideImagePreview() {
+  const box = document.getElementById("image-preview");
+  if (box) box.style.display = "none";
 }
 
 // Quick hover tooltip using portal
@@ -1766,7 +1792,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Lookups cached by what was asked ("any:Primates", "sp:Macaca fascicularis"),
   // so a stale result never shows for a new taxon and a photo already showing
   // never flips back to the spinner. undefined = not answered yet, null = none.
-  const [photoResults, setPhotoResults] = useState<Record<string, string | null>>({});
+  const [photoResults, setPhotoResults] = useState<Record<string, { url: string; credit: string | null } | null>>({});
   const ownKey = taxonRank ? `any:${taxonRank.name}` : null;
   const spKey = repSpecies ? `sp:${repSpecies}` : null;
   const ownPhoto = ownKey ? photoResults[ownKey] : null;
@@ -1778,21 +1804,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (needSpecies && spKey && !(spKey in photoResults)) wanted.push([spKey, repSpecies!, false]);
     for (const [key, name, anyRank] of wanted) {
       loadThumbnail(name, { anyRank }).then((img) => {
-        setPhotoResults((prev) => ({ ...prev, [key]: img?.mediumUrl ?? img?.squareUrl ?? null }));
+        const url = img?.mediumUrl ?? img?.squareUrl ?? null;
+        setPhotoResults((prev) => ({ ...prev, [key]: url ? { url, credit: img?.attribution ?? null } : null }));
       });
     }
   }, [wideViewModeToggle, ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
   // Called from the header's render (below neTooLarge's declaration).
-  const resolveTaxonPhoto = (): { url: string; title: string } | null | undefined => {
+  const resolveTaxonPhoto = (): { url: string; title: string; credit: string | null } | null | undefined => {
     if (!selectedRow) return null;
     if (ownKey) {
       if (ownPhoto === undefined) return undefined;
-      if (ownPhoto) return { url: ownPhoto, title: `${taxonRank!.name} (iNaturalist)` };
+      if (ownPhoto) return { url: ownPhoto.url, title: `${taxonRank!.name} (iNaturalist)`, credit: ownPhoto.credit };
     }
     if (spKey) {
       const sp = photoResults[spKey];
       if (sp === undefined) return undefined;
-      return sp ? { url: sp, title: `${repSpecies}, the most-recorded species in ${selectedRow.name}` } : null;
+      return sp ? { url: sp.url, title: `${repSpecies}, the most-recorded species in ${selectedRow.name}`, credit: sp.credit } : null;
     }
     // No species picked: the list isn't in yet, or it's empty / too large to load.
     return speciesListFetched || neTooLarge || error ? null : undefined;
@@ -4848,23 +4875,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <img
                   src={taxonPhoto.url}
                   alt=""
-                  title={taxonPhoto.title}
+                  title={taxonPhoto.credit ? `${taxonPhoto.title}\n${taxonPhoto.credit}` : taxonPhoto.title}
                   className="w-20 h-20 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-zinc-400"
                   // Same enlarged hover preview as the species header's photo.
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const preview = document.getElementById("image-preview") as HTMLImageElement | null;
-                    if (preview) {
-                      preview.src = taxonPhoto.url;
-                      preview.style.display = "block";
-                      preview.style.top = `${rect.top - 192 - 8}px`;
-                      preview.style.left = `${rect.left}px`;
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    const preview = document.getElementById("image-preview");
-                    if (preview) preview.style.display = "none";
-                  }}
+                  onMouseEnter={(e) => showImagePreview(e.currentTarget.getBoundingClientRect(), taxonPhoto.url, taxonPhoto.credit)}
+                  onMouseLeave={hideImagePreview}
                 />
               ) : (
                 <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
@@ -4878,6 +4893,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="min-w-0">
                 <div className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</div>
                 {rankLine && <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{rankLine}</div>}
+                {/* Visible, not only on hover: the photo's licence requires
+                    the credit wherever it's shown, touchscreens included. */}
+                {taxonPhoto?.credit && <div className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate" title={taxonPhoto.credit}>Photo: {taxonPhoto.credit}</div>}
               </div>
             </div>
             {toggle}
@@ -4934,20 +4952,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
                     alt=""
                     className="w-24 h-24 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                    onMouseEnter={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const preview = document.getElementById('image-preview');
-                      if (preview) {
-                        (preview as HTMLImageElement).src = details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || '';
-                        preview.style.display = 'block';
-                        preview.style.top = `${rect.top - 192 - 8}px`;
-                        preview.style.left = `${rect.left}px`;
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      const preview = document.getElementById('image-preview');
-                      if (preview) preview.style.display = 'none';
-                    }}
+                    title={details.inatDefaultImage.attribution ?? undefined}
+                    onMouseEnter={(e) => showImagePreview(
+                      e.currentTarget.getBoundingClientRect(),
+                      details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
+                      details.inatDefaultImage?.attribution,
+                    )}
+                    onMouseLeave={hideImagePreview}
                   />
                 ) : (
                   <div className="w-24 h-24 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
@@ -4961,6 +4972,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {singleSpecies.common_name && (
                     <div className="text-zinc-500 dark:text-zinc-400 text-sm">
                       {singleSpecies.common_name}
+                    </div>
+                  )}
+                  {/* The photo's credit, visible (its licence requires it). */}
+                  {details?.inatDefaultImage?.squareUrl && details.inatDefaultImage.attribution && (
+                    <div className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate" title={details.inatDefaultImage.attribution}>
+                      Photo: {details.inatDefaultImage.attribution}
                     </div>
                   )}
                 </div>
@@ -6342,24 +6359,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             src={details.inatDefaultImage.squareUrl}
                             alt=""
                             className="w-8 h-8 md:w-10 md:h-10 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                            onMouseEnter={(e) => {
-                              const img = e.currentTarget;
-                              const rect = img.getBoundingClientRect();
-                              const preview = document.getElementById('image-preview');
-                              if (preview) {
-                                (preview as HTMLImageElement).src = details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || '';
-                                preview.style.display = 'block';
-                                const showBelow = rect.bottom + 192 + 8 < window.innerHeight;
-                                preview.style.top = showBelow ? `${rect.bottom + 8}px` : `${rect.top - 192 - 8}px`;
-                                preview.style.left = `${rect.left}px`;
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              const preview = document.getElementById('image-preview');
-                              if (preview) {
-                                preview.style.display = 'none';
-                              }
-                            }}
+                            title={details.inatDefaultImage.attribution ?? undefined}
+                            onMouseEnter={(e) => showImagePreview(
+                              e.currentTarget.getBoundingClientRect(),
+                              details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
+                              details.inatDefaultImage?.attribution,
+                              true,
+                            )}
+                            onMouseLeave={hideImagePreview}
                           />
                         ) : (
                           <div className="w-8 h-8 md:w-10 md:h-10 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
@@ -6842,12 +6849,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       ))}
 
       {/* Fixed image preview portal */}
-      <img
+      <div
         id="image-preview"
-        alt=""
-        className="fixed z-[9999] w-48 h-48 object-cover rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none"
+        className="fixed z-[9999] w-48 rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none overflow-hidden"
         style={{ display: 'none' }}
-      />
+      >
+        <img alt="" className="block w-48 h-48 object-cover" />
+        {/* Filled by showImagePreview: the photo's credit line. */}
+        <span data-credit className="block px-1.5 py-1 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400" />
+      </div>
     </div>
   );
 }

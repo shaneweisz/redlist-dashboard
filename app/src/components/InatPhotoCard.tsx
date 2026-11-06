@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { formatLicense } from "@/lib/image-credit";
 
 export interface InatObservation {
   url: string;
@@ -18,12 +19,8 @@ export interface InatObservation {
   rightsHolder?: string | null;
 }
 
-/** Format CC license URL to short label, e.g. ".../by-nc/4.0/legalcode" -> "CC BY-NC 4.0" */
-export function formatLicense(url: string): string {
-  const match = url.match(/creativecommons\.org\/licenses\/([^/]+)\/([^/]+)/);
-  if (!match) return url;
-  return `CC ${match[1].toUpperCase()} ${match[2]}`;
-}
+// Moved to lib/image-credit so the GBIF image credits can share it.
+export { formatLicense };
 
 // Convert iNaturalist photo URLs to a smaller size for thumbnails
 // e.g. .../photos/123/original.jpeg -> .../photos/123/small.jpeg (240px)

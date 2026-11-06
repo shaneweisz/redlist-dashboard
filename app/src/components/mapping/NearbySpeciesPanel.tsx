@@ -526,7 +526,7 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
         <img
           src={image.squareUrl}
           alt=""
-          title={name}
+          title={image.attribution ? `${name}\n${image.attribution}` : name}
           onMouseEnter={show}
           onMouseLeave={() => setPreview(null)}
           className="h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
@@ -546,6 +546,12 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
               <span className="block max-w-40 truncate pt-0.5 text-center text-[10px] italic text-zinc-500 dark:text-zinc-400">
                 {name}
               </span>
+              {/* The photo's credit (its licence requires it). */}
+              {image.attribution && (
+                <span className="block max-w-40 pt-0.5 text-center text-[9px] leading-snug text-zinc-400 dark:text-zinc-500">
+                  {image.attribution}
+                </span>
+              )}
             </span>,
             document.body
           )}

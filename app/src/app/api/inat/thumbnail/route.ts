@@ -9,6 +9,10 @@ import { CACHE_1H } from "@/lib/cache-headers";
 interface InatDefaultImage {
   squareUrl: string | null;
   mediumUrl: string | null;
+  // iNaturalist's own credit line for the photo, licence included, e.g.
+  // "(c) Greg Lasley, some rights reserved (CC BY-NC)". CC licences require
+  // showing it wherever the photo appears.
+  attribution: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -53,6 +57,7 @@ export async function GET(request: NextRequest) {
       ? {
           squareUrl: defaultPhoto.square_url || defaultPhoto.url || null,
           mediumUrl: defaultPhoto.medium_url || defaultPhoto.url || null,
+          attribution: defaultPhoto.attribution || null,
         }
       : null;
 
