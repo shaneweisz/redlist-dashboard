@@ -1810,16 +1810,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
   }, [wideViewModeToggle, ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
   // Called from the header's render (below neTooLarge's declaration).
-  const resolveTaxonPhoto = (): { url: string; title: string; credit: string | null } | null | undefined => {
+  const resolveTaxonPhoto = (): { url: string; credit: string | null } | null | undefined => {
     if (!selectedRow) return null;
     if (ownKey) {
       if (ownPhoto === undefined) return undefined;
-      if (ownPhoto) return { url: ownPhoto.url, title: `${taxonRank!.name} (iNaturalist)`, credit: ownPhoto.credit };
+      if (ownPhoto) return { url: ownPhoto.url, credit: ownPhoto.credit };
     }
     if (spKey) {
       const sp = photoResults[spKey];
       if (sp === undefined) return undefined;
-      return sp ? { url: sp.url, title: `${repSpecies}, the most-recorded species in ${selectedRow.name}`, credit: sp.credit } : null;
+      return sp ? { url: sp.url, credit: sp.credit } : null;
     }
     // No species picked: the list isn't in yet, or it's empty / too large to load.
     return speciesListFetched || neTooLarge || error ? null : undefined;
@@ -4875,7 +4875,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <img
                   src={taxonPhoto.url}
                   alt=""
-                  title={taxonPhoto.credit ? `${taxonPhoto.title}\n${taxonPhoto.credit}` : taxonPhoto.title}
                   className="w-20 h-20 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-zinc-400"
                   // Same enlarged hover preview as the species header's photo.
                   onMouseEnter={(e) => showImagePreview(e.currentTarget.getBoundingClientRect(), taxonPhoto.url, taxonPhoto.credit)}
@@ -4893,9 +4892,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="min-w-0">
                 <div className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</div>
                 {rankLine && <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{rankLine}</div>}
-                {/* Visible, not only on hover: the photo's licence requires
-                    the credit wherever it's shown, touchscreens included. */}
-                {taxonPhoto?.credit && <div className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate" title={taxonPhoto.credit}>Photo: {taxonPhoto.credit}</div>}
               </div>
             </div>
             {toggle}
@@ -4952,7 +4948,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
                     alt=""
                     className="w-24 h-24 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                    title={details.inatDefaultImage.attribution ?? undefined}
                     onMouseEnter={(e) => showImagePreview(
                       e.currentTarget.getBoundingClientRect(),
                       details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
@@ -4972,12 +4967,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {singleSpecies.common_name && (
                     <div className="text-zinc-500 dark:text-zinc-400 text-sm">
                       {singleSpecies.common_name}
-                    </div>
-                  )}
-                  {/* The photo's credit, visible (its licence requires it). */}
-                  {details?.inatDefaultImage?.squareUrl && details.inatDefaultImage.attribution && (
-                    <div className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate" title={details.inatDefaultImage.attribution}>
-                      Photo: {details.inatDefaultImage.attribution}
                     </div>
                   )}
                 </div>
@@ -6359,7 +6348,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             src={details.inatDefaultImage.squareUrl}
                             alt=""
                             className="w-8 h-8 md:w-10 md:h-10 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                            title={details.inatDefaultImage.attribution ?? undefined}
                             onMouseEnter={(e) => showImagePreview(
                               e.currentTarget.getBoundingClientRect(),
                               details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",

@@ -526,7 +526,7 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
         <img
           src={image.squareUrl}
           alt=""
-          title={image.attribution ? `${name}\n${image.attribution}` : name}
+          title={name}
           onMouseEnter={show}
           onMouseLeave={() => setPreview(null)}
           className="h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
