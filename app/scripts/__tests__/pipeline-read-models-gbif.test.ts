@@ -28,7 +28,8 @@ beforeAll(async () => {
   await copy(`SELECT col_id, NULL::VARCHAR AS parent_id, col_id AS species_id, 'animalia' AS kingdom, 'species' AS rank,
       'accepted' AS status, false AS demoted, true AS in_base, false AS extinct, NULL::VARCHAR AS ne_excluded,
       'birds' AS taxon_group, name AS scientific_name, NULL::VARCHAR AS authorship, NULL::INTEGER AS described_year,
-      'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus
+      'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus,
+      true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
     FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, "taxa.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
       usage_id AS col_id, 'exact' AS method

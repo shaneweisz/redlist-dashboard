@@ -25,7 +25,7 @@
 export const SYNC_LAYOUT = {
   lists: ["assessed.parquet", "assessments.parquet", "ne.parquet", "species"],
   taxonomy: [
-    "taxa.parquet", "species_link.parquet", "assessment_link.parquet",
+    "taxa.parquet", "assessment_link.parquet",
     "col-split-candidates.parquet", "col-synonym-assessed.parquet", "col-to-assessed.parquet",
     "col-revisions.json", "vernacular-names.json",
   ],

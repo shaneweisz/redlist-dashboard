@@ -88,7 +88,7 @@ export interface BreakdownEntry {
 //    matched at all, or what matched sits at genus rank or above, which is not
 //    a species record however real it is (Amazona violacea matches the GENUS
 //    Amazona; reporting that as a demotion would read "a subspecies of
-//    Psittacidae"). Named for species_link's own match_method rather than for
+//    Psittacidae"). Named for the link's own method rather than for
 //    the absent row, and distinct from the family of reasons that all mean "no
 //    1:1 match" — this is the one where CoL has nothing to point at.
 //  - infraspecific: its linked col_id IS in the current backbone, but at a rank
@@ -164,7 +164,7 @@ export function classifyNoMatch(row: Record<string, unknown>): NoMatchDetail {
   const colGroupOuter = familyDiffers && orderDiffers ? ` (${colOrder})` : "";
   const colGroup = colGroupName ? `${colGroupName}${colGroupOuter}` : undefined;
   if (!linkedColId) {
-    // Nothing in species_link — but CoL may still hold the name, just not as an
+    // Nothing in assessment_link — but CoL may still hold the name, just not as an
     // accepted species: build-matching only links accepted names, so a
     // provisionally-accepted record (134 species) never gets linked and would
     // otherwise be reported as "no CoL name at all", which is plainly wrong to
@@ -375,14 +375,14 @@ export const SYNONYM_ASSESSED_SQL = (bb: string, assessedPath: string, assessedC
 export const COL_TO_ASSESSED_SQL = (link: string, assessedPath: string) => `
   CREATE TEMP TABLE col_to_assessed AS
   WITH links AS (
-    SELECT l.col_id AS col_id, l.id AS assessed_id, a.scientific_name AS assessed_name,
+    SELECT l.col_id AS col_id, l.sis_taxon_id AS assessed_id, a.scientific_name AS assessed_name,
            row_number() OVER (
              PARTITION BY l.col_id
-             ORDER BY (CASE WHEN l.match_method IN ('accepted', 'accepted_homonym') THEN 0 ELSE 1 END), l.id
+             ORDER BY (CASE WHEN l.method = 'accepted' THEN 0 ELSE 1 END), l.sis_taxon_id
            ) AS rn
     FROM read_parquet('${link}') l
-    JOIN read_parquet('${assessedPath}') a ON a.id = l.id
-    WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
+    JOIN read_parquet('${assessedPath}') a ON a.id = l.sis_taxon_id
+    WHERE l.col_id IS NOT NULL AND l.role = 'primary'
   )
   SELECT col_id, assessed_id, assessed_name FROM links WHERE rn = 1`;
 
@@ -460,15 +460,15 @@ export async function computeNoMatchDetails(
       -- second CoL name, not a real "this species also equals a second col_id"
       -- claim). Without this, an id with both a primary and a covered link would
       -- win TWO col_id partitions and inflate the apparent match count.
-      SELECT ma.id AS id, ma.scientific_name AS name, l.col_id AS col_id, l.match_method AS match_method
+      SELECT ma.id AS id, ma.scientific_name AS name, l.col_id AS col_id, l.method AS match_method
       FROM matched_assessed ma
-      JOIN read_parquet('${linkPath}') l ON l.id = ma.id AND l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
+      JOIN read_parquet('${linkPath}') l ON l.sis_taxon_id = ma.id AND l.col_id IS NOT NULL AND l.role = 'primary'
     ),
     candidate_links AS (
       SELECT id, name, col_id,
              row_number() OVER (
                PARTITION BY col_id
-               ORDER BY (CASE WHEN match_method IN ('accepted', 'accepted_homonym') THEN 0 ELSE 1 END), id
+               ORDER BY (CASE WHEN match_method = 'accepted' THEN 0 ELSE 1 END), id
              ) AS rn
       FROM primary_links
       WHERE col_id IN (SELECT col_id FROM matched_species)

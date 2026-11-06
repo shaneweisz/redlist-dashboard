@@ -72,13 +72,13 @@ function median(values: number[]): number | null {
 // assessed. species/ is partitioned by taxon_group, so this is one grouped scan.
 async function colCountsByGroup(conn: DuckDBConnection, dataDir: string): Promise<Map<string, { col_described: number; col_ne: number }>> {
   const out = new Map<string, { col_described: number; col_ne: number }>();
-  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const link = path.join(dataDir, syncPath("assessment_link.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const rows = await (await conn.run(`
     SELECT taxon_group,
            count(*) FILTER (described) AS col_described,
            count(*) FILTER (described AND col_id NOT IN (
-             SELECT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL
+             SELECT col_id FROM read_parquet('${link}') WHERE col_id IS NOT NULL
            )) AS col_ne
     FROM read_parquet('${speciesGlob}', hive_partitioning=true)
     GROUP BY taxon_group`)).getRowObjects();
@@ -109,12 +109,12 @@ function primaryDimension(filter: NodeFilter): PrimaryDim | null {
 // domestic-form exclusion or an overlapping node's excludeGenera still applies),
 // which is why the entries sum to exactly colDescribed.
 async function attachColCounts(conn: DuckDBConnection, summaries: Record<string, NodeSummary[]>, dataDir: string): Promise<void> {
-  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const link = path.join(dataDir, syncPath("assessment_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
   await conn.run(
-    `CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
+    `CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE col_id IS NOT NULL`
   );
   await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
   await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
@@ -236,7 +236,7 @@ async function loadGroups(conn: DuckDBConnection, dataDir: string): Promise<{ re
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dataDir = opts.dataDir ?? DATA_DIR;
-  requireFiles("build-taxa-summary", ...["species", "species_link.parquet", "assessed.parquet", "ne.parquet", "taxa.parquet"]
+  requireFiles("build-taxa-summary", ...["species", "assessment_link.parquet", "assessed.parquet", "ne.parquet", "taxa.parquet"]
     .map((f) => path.join(dataDir, syncPath(f))));
   const conn = await openDuckDB();
   const groups = await loadGroups(conn, dataDir);

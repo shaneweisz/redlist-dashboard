@@ -16,7 +16,7 @@ const DUCKDB_TRACE = [
 // bundle: every sync parquet (read from R2 over httpfs; and bundling one flips
 // USE_R2 off, since species-duckdb keys it on assessed.parquet NOT existing
 // locally), the species/ partitions, the narratives and the map overlays.
-// taxa.parquet alone is ~160MB against Vercel's 250MB function cap.
+// taxa.parquet alone is ~130MB against Vercel's 250MB function cap.
 const ONLY_SUMMARIES = ["**/data/sync/**/*.parquet", "**/data/sync/lists/species/**", "**/data/sync/sync.log", "**/data/narratives/**", "**/data/overlays/**"];
 // …and, for routes that never open them, the two children summaries (~2.5MB).
 const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
@@ -164,7 +164,7 @@ const nextConfig: NextConfig = {
     "/api/narrative-search": DUCKDB_TRACE,
     "/api/narrative-search/[assessmentId]": DUCKDB_TRACE,
     // Live no-match diagnostic breakdown for dynamic taxonomic-drilldown nodes
-    // (live-breakdown.ts) — queries assessed/species_link/species/backbone
+    // (live-breakdown.ts) — queries assessed/assessment_link/species/taxa
     // parquets in R2 via the same DuckDB connection, needs the same trace.
     "/api/redlist/taxa-breakdown-live": DUCKDB_TRACE,
     // Live CoL-taxon-id lookup for a dynamic node's ancestor chain
@@ -193,7 +193,7 @@ const nextConfig: NextConfig = {
     // taxa-summary.json for the instant tooLarge check.
     "/api/redlist/species": ONLY_SMALL_SUMMARIES,
     "/api/redlist/species/history": ["**/data/**"],
-    // Queries taxa.parquet + species_link in R2 (httpfs) — no local data.
+    // Queries taxa.parquet + assessment_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning
     // and the function balloons to the whole dataset (the credit lines' merge
@@ -218,7 +218,7 @@ const nextConfig: NextConfig = {
     "/api/redlist/country-stats": ONLY_SMALL_SUMMARIES,
     // Backbone tree navigation queries taxa.parquet in R2 (httpfs) — no local data.
     "/api/taxa/species": ["**/data/**"],
-    // Reads assessed/species_link/species/backbone entirely from R2 (httpfs) — no
+    // Reads assessed/assessment_link/species/taxa entirely from R2 (httpfs) — no
     // local data, same as /api/redlist/synonyms and /api/taxa/species above.
     "/api/redlist/taxa-breakdown-live": ["**/data/**"],
     // Reads only taxa.parquet, entirely from R2 (httpfs) — no local data,
@@ -248,7 +248,7 @@ const nextConfig: NextConfig = {
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.
     // Without this the shared species-store import drags the whole sync —
-    // taxa.parquet alone is ~170MB — into the page's function and the
+    // taxa.parquet alone is ~130MB — into the page's function and the
     // deployment fails the 250MB uncompressed limit. It builds fine locally,
     // where no such limit applies, so the only symptom is a failed deploy.
     // Wildcard, not "[key]" — see the note on the include above.

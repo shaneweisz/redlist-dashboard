@@ -209,7 +209,7 @@ def files():
     heading(0, -190, "A sync, step by step: every file it reads and writes, and where it lands", 34)
     heading(0, -140, "npm run sync (scripts/sync/sync.ts), top to bottom in the order it runs. Paths under ~/.cache/redlist-dashboard/. "
             "build/data/ is what sync:publish uploads to syncs/<timestamp>/ in R2 and copies to app/data/sync/.", 17, "#495057")
-    heading(0, -110, "Dashed: unused, or could be simpler (docs/sync.md). sync.log is written throughout.", 17, "#495057")
+    heading(0, -110, "sync.log is written throughout.", 17, "#495057")
     cols = [("inputs and caches", 0.0, 290, "#495057"), ("step", 1.05, 250, "#5f3dc4"),
             ("build/core/  (working, not published)", 2.0, 320, "#2b8a3e"),
             ("build/data/  (published)", 3.15, 340, "#d9480f"), ("elsewhere", 4.4, 300, "#1e1e1e")]
@@ -240,8 +240,8 @@ def files():
             2: [("species-common-names-col\n.parquet  (for search)", False), ("species-fallback-display-\nname-col.parquet", False),
                 ("count_components.parquet\nwhat each count is made of", False)],
             3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False), ("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
-                ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", True),
-                ("taxonomy/species_link.parquet  3 MB", True), ("taxonomy/taxa.parquet  152 MB (copy)", True),
+                ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", False),
+                ("taxonomy/taxa.parquet  127 MB\n(9 columns)", False),
                 ("taxonomy/assessment_link (copy)", False)]}),
         ("8  summaries, indexes\noutputs/build-taxa-summary,\n-col-revisions, -synonym-\nindex, -search-index", {
             3: [("summaries/  5 JSON, 2.4 MB", False), ("taxonomy/col-*.parquet  3 files", False),
@@ -311,7 +311,7 @@ def build():
                  ("duck", "s_ext"), ("s_ext", "f_ext"), ("f_ext", "s_next"), ("s_next", "f_fn"), ("f_fn", "r_fn")]:
         arrow(S[a], S[b])
     heading(3 * COL_W, 0.2 * ROW_H, "public/prebuilt/<sync>/, served from the CDN:\n"
-            "species-lists: assessed, ne, species/, species_link, col-revisions\n"
+            "species-lists: assessed, ne, species/, assessment_link, col-revisions\n"
             "search-shards: name-index, rank-index\n"
             "tree: assessed, species/", 15, "#495057")
     legend(0, 7.0 * ROW_H, [("source", "input"), ("step", "build step"), ("out", "what it writes"), ("app", "reader")])

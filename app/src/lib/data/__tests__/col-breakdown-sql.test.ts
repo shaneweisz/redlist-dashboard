@@ -92,29 +92,29 @@ beforeAll(async () => {
     ) v(id, scientific_name, iucn_category, family, order_name)`, "assessed.parquet");
 
   await copy(`SELECT * FROM (VALUES
-      ('redlist', 1::BIGINT, 'Clean species', 'IN1', 'accepted'),
-      ('redlist', 2::BIGINT, 'Xr onlyus', 'XR1', 'accepted'),
-      ('redlist', 3::BIGINT, 'Renamed away', 'XR1', 'accepted'),
-      ('redlist', 4::BIGINT, 'Demoted one', 'SUB1', 'accepted'),
-      ('redlist', 5::BIGINT, 'Lump winner', 'LUMP', 'accepted'),
-      ('redlist', 6::BIGINT, 'Lump loser', 'LUMP', 'synonym'),
-      ('redlist', 7::BIGINT, 'Nothing at all', NULL, 'unmatched'),
-      ('redlist', 8::BIGINT, 'Anselli test', 'ANS', 'accepted'),
-      ('redlist', 9::BIGINT, 'Ambiguous target', 'AMBX', 'accepted'),
-      ('redlist', 10::BIGINT, 'Spelling case', 'XR1', 'accepted')
-    ) v(src, id, scientific_name, col_id, match_method)`, "species_link.parquet");
+      (1::BIGINT, 'primary', 'IN1', 'accepted'),
+      (2::BIGINT, 'primary', 'XR1', 'accepted'),
+      (3::BIGINT, 'primary', 'XR1', 'accepted'),
+      (4::BIGINT, 'primary', 'SUB1', 'accepted'),
+      (5::BIGINT, 'primary', 'LUMP', 'accepted'),
+      (6::BIGINT, 'primary', 'LUMP', 'synonym'),
+      (7::BIGINT, 'primary', NULL, 'unmatched'),
+      (8::BIGINT, 'primary', 'ANS', 'accepted'),
+      (9::BIGINT, 'primary', 'AMBX', 'accepted'),
+      (10::BIGINT, 'primary', 'XR1', 'accepted')
+    ) v(sis_taxon_id, role, col_id, method)`, "assessment_link.parquet");
 
   // The same temp tables the real caller builds before running the diagnostic.
-  await conn.run(COL_TO_ASSESSED_SQL(path.join(tmp, "species_link.parquet"), path.join(tmp, "assessed.parquet")));
+  await conn.run(COL_TO_ASSESSED_SQL(path.join(tmp, "assessment_link.parquet"), path.join(tmp, "assessed.parquet")));
   await conn.run(`CREATE TEMP TABLE assessed_cids AS
-    SELECT DISTINCT col_id FROM read_parquet('${path.join(tmp, "species_link.parquet")}')
+    SELECT DISTINCT col_id FROM read_parquet('${path.join(tmp, "assessment_link.parquet")}')
     WHERE col_id IS NOT NULL`);
 
   ctx = {
     conn,
     speciesGlob: path.join(tmp, "species", "**", "*.parquet"),
     assessedPath: path.join(tmp, "assessed.parquet"),
-    linkPath: path.join(tmp, "species_link.parquet"),
+    linkPath: path.join(tmp, "assessment_link.parquet"),
     taxaPath: path.join(tmp, "taxa.parquet"),
     hasTaxa: true,
     assessedCidsTable: "assessed_cids",

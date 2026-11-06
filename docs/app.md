@@ -23,9 +23,9 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 
 | Route | Reads | Called by |
 |---|---|---|
-| `/api/redlist/species` | parquet: assessed, species/, ne, species_link; JSON: taxa-summary, col-revisions | the species table, through `SpeciesCacheContext`, **only when the prebuilt species list can't answer** (an arbitrary rank, or a failed file load) |
+| `/api/redlist/species` | parquet: assessed, species/, ne, assessment_link; JSON: taxa-summary, col-revisions | the species table, through `SpeciesCacheContext`, **only when the prebuilt species list can't answer** (an arbitrary rank, or a failed file load) |
 | `/api/redlist/species/history` | parquet: assessments | the detail panel's history |
-| `/api/redlist/synonyms` | parquet: species_link, taxa | the detail panel's CoL tab |
+| `/api/redlist/synonyms` | parquet: assessment_link, taxa | the detail panel's CoL tab |
 | `/api/redlist/taxa-summary` | JSON: taxa-summary; parquet (assessed) when scoped to a country or realm | the summary table |
 | `/api/redlist/taxa-subgroups` | JSON: the children summaries; parquet when scoped, or for live drill-down | the summary table's expands, **when the prebuilt tree can't** (a country or realm scope) |
 | `/api/redlist/country-stats`, `/realm-stats` | JSON: country-stats, realm-stats | the country and realm views |
@@ -36,7 +36,7 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 
 | Route | Reads | Called by |
 |---|---|---|
-| `/api/redlist/taxa-breakdown-live` | parquet: the three col-*, species/, assessed, species_link, taxa | the breakdown popover on a live drill-down node |
+| `/api/redlist/taxa-breakdown-live` | parquet: the three col-*, species/, assessed, assessment_link, taxa | the breakdown popover on a live drill-down node |
 | `/api/redlist/col-taxon-ids-live` | parquet: taxa | the popover's CoL links (split out so the breakdown doesn't wait on it) |
 | `/api/col/provenance` | ChecklistBank | a species' CoL source line |
 

@@ -4,13 +4,13 @@
  *
  * taxa.parquet has ~3.8M synonyms (status='synonym', parent_id → the accepted taxon).
  * We keep only those whose accepted name is a described species (species/: described), and carry whether that accepted species is IUCN-assessed (sis_id via
- * species_link) + its category — so a synonym hit routes to reassessments (assessed) or
+ * assessment_link) + its category — so a synonym hit routes to reassessments (assessed) or
  * new-assessments/leaf-node (NE), exactly like a direct hit.
  *
  * Sorted by synonym_name_lower so searchSpecies' prefix-range query prunes to ~1 row group
  * (fast even cold).
  *
- * Input: taxa.parquet, species/, species_link.parquet, assessed.parquet.
+ * Input: taxa.parquet, species/, assessment_link.parquet, assessed.parquet.
  * Output: search/synonym-index.parquet.
  *
  *   npx tsx scripts/sync/outputs/build-synonym-index.ts
@@ -25,7 +25,7 @@ import { openDuckDB } from "../sql";
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
   const bb = path.join(dir, syncPath("taxa.parquet"));
-  const link = path.join(dir, syncPath("species_link.parquet"));
+  const link = path.join(dir, syncPath("assessment_link.parquet"));
   const asd = path.join(dir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dir, syncPath("species"), "**", "*.parquet");
   requireFiles("build-synonym-index", bb, link, asd, path.join(dir, syncPath("species")));
@@ -37,8 +37,8 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       WITH assessed_link AS (
         -- The species whose own link this is, not one merely covering it; the lowest
         -- SIS id if two share it, so a rebuild picks the same one.
-        SELECT col_id, arg_min(id, [CASE WHEN match_method = 'iucn_synonym_covered' THEN 1 ELSE 0 END, id]) AS sis_id
-        FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL GROUP BY col_id
+        SELECT col_id, arg_min(sis_taxon_id, [CASE WHEN role = 'covered' THEN 1 ELSE 0 END, sis_taxon_id]) AS sis_id
+        FROM read_parquet('${link}') WHERE col_id IS NOT NULL GROUP BY col_id
       )
       SELECT
         syn.scientific_name AS synonym_name,
