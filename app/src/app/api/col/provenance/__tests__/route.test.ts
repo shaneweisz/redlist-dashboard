@@ -131,6 +131,15 @@ describe("/api/col/provenance", () => {
     expect(body.sourceTitle).toBe("World Plants");
   });
 
+  it("reads the pinned CoL release, the one the flags were computed from", async () => {
+    // Not "3LR" (CoL's current release): once CoL moves on, that panel would
+    // describe a different version of the record than the sentence above it.
+    const { key } = (await import("@/config/col-release.json")).default;
+    const { calls } = await callRoute(`${URL_BASE}?colId=7FDLW`, happyPath);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const u of calls) expect(u).toContain(`/dataset/${key}/`);
+  });
+
   it("survives a taxon with no sector to resolve", async () => {
     const noSector = async () => json(taxon({ sectorKey: undefined }));
     const { body, calls } = await callRoute(`${URL_BASE}?colId=7FDLW`, noSector);

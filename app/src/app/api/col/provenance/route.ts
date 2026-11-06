@@ -38,9 +38,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import COL_RELEASE from "@/config/col-release.json";
 
-/** The CoL release ChecklistBank serves as the current one. */
-const COL_DATASET = "3LR";
+/** The pinned CoL release — the one every flag was computed from, so the
+ *  source block describes the same record the sentence above it does. Reading
+ *  CoL's current release ("3LR") instead made the tooltip mix two versions of
+ *  CoL in one panel whenever a newer release had moved on. */
+const COL_DATASET = COL_RELEASE.key;
 const API = "https://api.checklistbank.org";
 const TIMEOUT_MS = 6000;
 

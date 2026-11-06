@@ -27,7 +27,8 @@ import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
-import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, type ColRevision } from "@/lib/col-revision";
+import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
+import COL_RELEASE from "@/config/col-release.json";
 import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
@@ -1019,6 +1020,7 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
         ))}
       </div>
       <p className="mt-2 text-[11px] italic leading-snug text-zinc-400">{REVISION_CAVEAT}</p>
+      <p className="mt-1 text-[11px] italic leading-snug text-zinc-400">{colReleaseNote(COL_RELEASE)}</p>
       {flag.colId && <ColProvenanceBlock colId={flag.colId} />}
     </>
   );

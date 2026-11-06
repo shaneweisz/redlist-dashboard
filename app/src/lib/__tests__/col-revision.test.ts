@@ -23,6 +23,7 @@ import {
   flattenLump,
   revisionSentences,
   colTaxonUrl,
+  colReleaseNote,
   type ColRevision,
   newRevisionTally,
   tallyRevision,
@@ -807,5 +808,18 @@ describe("lumping is symmetric", () => {
       .toEqual(["Dasycercus cristicauda", "Dasycercus hillieri"]);
     expect(lumpSentence(hillieri, "Dasycercus hillieri")!.members.map((m) => m.name))
       .toEqual(["Dasycercus hillieri", "Dasycercus cristicauda"]);
+  });
+});
+
+describe("colReleaseNote", () => {
+  it("names the pinned release and its month, and says the live site may differ", () => {
+    const note = colReleaseNote({ alias: "COL26.6 XR", issued: "2026-06-19" });
+    expect(note).toBe("As of COL26.6 XR (June 2026), the Catalogue of Life release this dashboard's GBIF data is matched to. catalogueoflife.org shows the latest release, which may differ.");
+    // Same rule as every other flag sentence: reported, never a verdict.
+    expect(note).not.toMatch(/correct|should be|wrong|actually/i);
+  });
+
+  it("drops the month rather than printing garbage for a malformed date", () => {
+    expect(colReleaseNote({ alias: "COL26.6 XR", issued: "" })).toMatch(/^As of COL26\.6 XR, the/);
   });
 });
