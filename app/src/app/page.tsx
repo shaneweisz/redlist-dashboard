@@ -47,9 +47,9 @@ export default function RedListPage() {
   const [sharedTaxa, setSharedTaxa] = useState<Set<string>>(new Set());
   const [sharedSubgroups, setSharedSubgroups] = useState<Set<string>>(new Set());
 
-  // View-mode switch — previously two header buttons here, now surfaced
-  // instead by RedListView itself (next to its own Assessed/Not Evaluated
-  // stat card, where the mode actually matters), via this callback.
+  // View-mode switch. RedListView renders the control itself (the wide
+  // Reassessments / First Assessments toggle above its filter charts) and
+  // calls back here.
   const handleViewModeChange = (mode: ViewMode) => {
     if (viewMode === mode) return;
     setViewMode(mode);
@@ -97,7 +97,7 @@ export default function RedListPage() {
                 type="button"
                 onClick={() => {
                   // "Go home": drop every filter/selection AND reset back to the
-                  // default Assessed view (dropping any New Assessments choice),
+                  // default Assessed view (dropping any First Assessments choice),
                   // but keep the layout (Standard/Table 1a/SSC/Country) choice —
                   // same fields clearAllFiltersAndTaxa preserves minus `view`,
                   // replicated here via raw URL params since this click lives
@@ -141,6 +141,7 @@ export default function RedListPage() {
             <RedListView
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
+              wideViewModeToggle
               sharedTaxa={sharedTaxa}
               sharedSubgroups={sharedSubgroups}
               onTaxaChange={setSharedTaxa}

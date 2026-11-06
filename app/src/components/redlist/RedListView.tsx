@@ -5,7 +5,9 @@ import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
-import TaxaSummary from "./TaxaSummary";
+import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
+import { taxonRankName } from "@/lib/taxon-rank-name";
+import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
@@ -15,10 +17,12 @@ import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
 import TaxaIcon from "../TaxaIcon";
+import PhotoCredit from "../PhotoCredit";
+import { FaInfoCircle } from "react-icons/fa";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
-import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName } from "@/lib/taxonomy-utils";
+import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
@@ -404,6 +408,8 @@ const HABITAT_SUITABILITY_OPTIONS: { value: string; short: string }[] = [
 interface InatDefaultImage {
   squareUrl: string | null;
   mediumUrl: string | null;
+  /** iNaturalist's credit line, licence included. */
+  attribution?: string | null;
 }
 
 interface GbifMatchStatus {
@@ -616,6 +622,27 @@ function explainCriteria(criteria: string): string {
   if (criteria.startsWith("E") || criteria.includes("+E")) explanations.push("extinction probability analysis");
 
   return explanations.length > 0 ? ` (${explanations.join("; ")})` : "";
+}
+
+// The shared enlarged-photo preview (#image-preview, rendered once at the
+// bottom of RedListView). Placed above the anchor, or below it when
+// preferBelow and there's room. The photo's credit isn't here: it's the ©
+// on the photo itself (PhotoCredit), since this preview can't be clicked.
+function showImagePreview(anchor: DOMRect, src: string, preferBelow = false) {
+  const box = document.getElementById("image-preview");
+  const img = box?.querySelector("img");
+  if (!box || !img) return;
+  img.src = src;
+  box.style.display = "block";
+  box.style.left = `${anchor.left}px`;
+  const h = box.offsetHeight;
+  const below = preferBelow && anchor.bottom + h + 8 < window.innerHeight;
+  box.style.top = below ? `${anchor.bottom + 8}px` : `${Math.max(8, anchor.top - h - 8)}px`;
+}
+
+function hideImagePreview() {
+  const box = document.getElementById("image-preview");
+  if (box) box.style.display = "none";
 }
 
 // Quick hover tooltip using portal
@@ -1046,6 +1073,13 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
   onViewModeChange?: (mode: "reassessments" | "new-assessments") => void;
+  // Show the view switch as a full-width Reassessments / First Assessments
+  // toggle above the filter charts, in place of the small inline Assessed/Not
+  // Evaluated one beside the species count. Being that prominent, the mode is
+  // a persistent choice: browsing to another taxon keeps it rather than
+  // resetting to Assessed. (/compare leaves this off: its two panels are too
+  // narrow for it, so each keeps the inline toggle and the reset.)
+  wideViewModeToggle?: boolean;
   sharedTaxa?: Set<string>;
   sharedSubgroups?: Set<string>;
   onTaxaChange?: (taxa: Set<string>) => void;
@@ -1056,8 +1090,26 @@ interface RedListViewProps {
   paramSuffix?: string;
 }
 
-export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
+// Info note on the toggle's Not Evaluated count.
+const NE_COUNT_NOTE = `According to ${COL_RELEASE_LABEL}. The count could differ under another taxonomy.`;
+
+export default function RedListView({ viewMode = "reassessments", onViewModeChange, wideViewModeToggle = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
+  // The selected taxon row (name + counts), reported by TaxaSummary, for the
+  // taxon header beside the wide toggle.
+  const [selectedRow, setSelectedRow] = useState<SelectedRow | null>(null);
+  // The toggle's ⓘ note, opened by tap; any tap elsewhere closes it.
+  const [neNoteOpen, setNeNoteOpen] = useState(false);
+  const neNoteRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!neNoteOpen) return;
+    const close = (e: PointerEvent) => {
+      if (!neNoteRef.current?.contains(e.target as Node)) setNeNoteOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [neNoteOpen]);
+  const taxonRank = useMemo(() => (selectedRow ? taxonRankName(selectedRow.id) : null), [selectedRow]);
 
   // The ">10 yrs old" outdated threshold is computed against this everywhere
   // in this component (species filtering, the by-year chart, the map, the
@@ -1211,7 +1263,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // silently follow you from one taxon to the next (you'd otherwise land on a
   // brand-new taxon already in NE mode from browsing a previous one, with no
   // visual cue you're not seeing its Assessed data). Skips the very first
-  // render so a shared link's own ?view=new-assessments still works.
+  // render so a shared link's own ?view=new-assessments still works. Not done
+  // with the wide toggle (wideViewModeToggle): there the mode is always in
+  // plain view, so it's a choice you browse within, not a per-taxon opt-in.
   const prevSelectionRef = useRef<{ taxa: Set<string>; subgroups: Set<string> } | null>(null);
   useEffect(() => {
     const prev = prevSelectionRef.current;
@@ -1229,8 +1283,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (prev.taxa.size === 0 && prev.subgroups.size === 0) return;
     const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((v) => b.has(v));
     const changed = !setsEqual(prev.taxa, selectedTaxa) || !setsEqual(prev.subgroups, selectedSubgroups);
-    if (changed && isNewAssessments) onViewModeChange?.("reassessments");
-  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange]);
+    if (changed && isNewAssessments && !wideViewModeToggle) onViewModeChange?.("reassessments");
+  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, wideViewModeToggle]);
 
   // Reset mode-specific filter state when switching between reassessments and
   // new-assessments. The shared species cache (SpeciesCacheContext) is NOT cleared
@@ -1697,6 +1751,77 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return filtered;
   }, [species, selectedTaxa, selectedSubgroups, isNewAssessments, breakdownFilter]);
+
+  // The taxon header's photo. iNaturalist's own default photo for the taxon
+  // when it has one (looked up by the rank name, e.g. "Primates"). Otherwise,
+  // or for a group that isn't one clade (Fishes), the photo of its
+  // most-recorded species (by GBIF records) from its own list, Homo sapiens
+  // excluded. That species is chosen once per taxon, so the fallback photo
+  // doesn't change when the view switches to a different list.
+  // taxonPhoto: undefined while still looking, null when there's none.
+  const [repSpeciesByTaxon, setRepSpeciesByTaxon] = useState<Record<string, string>>({});
+  // Picked in the same render the list arrives (an effect would leave one
+  // render with a list but no pick), then remembered so it sticks.
+  const pickedSpecies = useMemo(() => {
+    let best: string | null = null;
+    let bestN = -1;
+    for (const sp of taxaFilteredSpeciesBase) {
+      if (sp.scientific_name === "Homo sapiens") continue;
+      const n = sp.gbif_all_records_count ?? sp.gbif_georeferenced_records_count ?? 0;
+      if (n > bestN) { best = sp.scientific_name; bestN = n; }
+    }
+    return best;
+  }, [taxaFilteredSpeciesBase]);
+  const repSpecies = selectedRow ? repSpeciesByTaxon[selectedRow.id] ?? pickedSpecies : null;
+  useEffect(() => {
+    if (!wideViewModeToggle || !selectedRow || !pickedSpecies || repSpeciesByTaxon[selectedRow.id]) return;
+    setRepSpeciesByTaxon((prev) => ({ ...prev, [selectedRow.id]: pickedSpecies }));
+  }, [wideViewModeToggle, selectedRow, pickedSpecies, repSpeciesByTaxon]);
+  // Whether the current selection's species list has been fetched at all —
+  // speciesLoading alone is also false in the render before the fetch starts,
+  // which would otherwise read as "no species, show the icon".
+  const speciesListFetched = useMemo(() => {
+    if (selectedTaxa.size === 0) return false;
+    const categoryParam = isNewAssessments ? "&category=NE" : "";
+    if (cache.entries[speciesApiUrl("all", categoryParam)]) return true;
+    const ids = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
+    return ids.every((t) => cache.entries[speciesApiUrl(t, categoryParam)]);
+  }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, speciesApiUrl]);
+  // Lookups cached by what was asked ("any:Primates", "sp:Macaca fascicularis"),
+  // so a stale result never shows for a new taxon and a photo already showing
+  // never flips back to the spinner. undefined = not answered yet, null = none.
+  const [photoResults, setPhotoResults] = useState<Record<string, { url: string; credit: string | null } | null>>({});
+  const ownKey = taxonRank ? `any:${taxonRank.name}` : null;
+  const spKey = repSpecies ? `sp:${repSpecies}` : null;
+  const ownPhoto = ownKey ? photoResults[ownKey] : null;
+  const needSpecies = !ownKey || ownPhoto === null;
+  useEffect(() => {
+    if (!wideViewModeToggle) return;
+    const wanted: [string, string, boolean][] = [];
+    if (ownKey && !(ownKey in photoResults)) wanted.push([ownKey, taxonRank!.name, true]);
+    if (needSpecies && spKey && !(spKey in photoResults)) wanted.push([spKey, repSpecies!, false]);
+    for (const [key, name, anyRank] of wanted) {
+      loadThumbnail(name, { anyRank }).then((img) => {
+        const url = img?.mediumUrl ?? img?.squareUrl ?? null;
+        setPhotoResults((prev) => ({ ...prev, [key]: url ? { url, credit: img?.attribution ?? null } : null }));
+      });
+    }
+  }, [wideViewModeToggle, ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
+  // Called from the header's render (below neTooLarge's declaration).
+  const resolveTaxonPhoto = (): { url: string; credit: string | null } | null | undefined => {
+    if (!selectedRow) return null;
+    if (ownKey) {
+      if (ownPhoto === undefined) return undefined;
+      if (ownPhoto) return { url: ownPhoto.url, credit: ownPhoto.credit };
+    }
+    if (spKey) {
+      const sp = photoResults[spKey];
+      if (sp === undefined) return undefined;
+      return sp ? { url: sp.url, credit: sp.credit } : null;
+    }
+    // No species picked: the list isn't in yet, or it's empty / too large to load.
+    return speciesListFetched || neTooLarge || error ? null : undefined;
+  };
 
   // Exact URL-only base filters (obs / assessment-year / described-year bounds —
   // outdated is applied separately below, not here). Applied here on the base set
@@ -3736,13 +3861,24 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // More Filters (reassessments mode, moved there to keep the primary view
   // focused on Conservation Status / Years Since Assessed / Geospatial GBIF
   // Records; see the More Filters section below).
+  // First Assessments: Not Evaluated species have no assessed range, so
+  // their countries come from GBIF records alone.
+  const countryGbifInfo = (
+    <HoverTooltip text="Based on GBIF records: a species only counts in a country once GBIF has a record of it there, so species that occur in a country but haven't been recorded there in GBIF yet are left out.">
+      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4M12 8h.01" />
+      </svg>
+    </HoverTooltip>
+  );
   const countryMapCard = (
     <div>
       {speciesLoading && assessedSpecies.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 min-h-[320px] flex flex-col">
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+          <div className="flex items-center justify-between mb-1 min-h-[24px]">
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
               Country
+              {isNewAssessments && countryGbifInfo}
             </h2>
           </div>
           {/* The 180px box (not flex-1) is what lines this spinner up with the
@@ -3751,12 +3887,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               height — it reserves 320px for the map — dropped this one ~60px
               lower than the other two. The card keeps its own height; only the
               spinner moves. */}
-          <div style={{ height: 180 }} className="flex items-center justify-center">
-            <Spinner />
+          {/* Same 200px floor as WorldMap's own map area, so the skeleton is
+              the loaded card's height (it reserved 320px, so the whole chart
+              row shrank by ~65px once the map arrived). */}
+          <div className="min-h-[200px]">
+            <div style={{ height: 180 }} className="flex items-center justify-center">
+              <Spinner />
+            </div>
           </div>
         </div>
       ) : (
         <WorldMap
+          titleInfo={isNewAssessments ? countryGbifInfo : undefined}
           gbifRecordMode={gbifRecordMode}
           selectedCountries={selectedCountries}
           onCountrySelect={handleCountrySelect}
@@ -4588,6 +4730,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryScope={countryScope}
         realmModeContent={realmModeContent}
         realmScope={realmScope}
+        onSelectedRow={wideViewModeToggle ? setSelectedRow : undefined}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -4635,6 +4778,126 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
+      {/* Wide view-mode toggle, directly above the filter charts it switches.
+          Same visibility as the charts block below, and outside its "too large"
+          branch so you can still switch back from that prompt. */}
+      {wideViewModeToggle && onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
+        // One taxon selected but its row not reported yet (fresh load): hold
+        // the header card's place with a placeholder rather than showing the
+        // bare bar and swapping the card in. Gives up once the species list is
+        // in, for a selection the summary table never reports a row for.
+        const singleSelection = selectedSubgroups.size === 1 || (selectedSubgroups.size === 0 && selectedTaxa.size === 1);
+        const rowPending = !selectedRow && singleSelection && !speciesListFetched;
+        const inCard = !!selectedRow || rowPending;
+        const toggle = (
+          <div role="tablist" aria-label="View" className={`flex rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
+            {([
+              ["reassessments", "Species Assessed", selectedRow?.assessed],
+              ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
+            ] as const).map(([mode, label, count]) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === mode}
+                onClick={() => onViewModeChange(mode)}
+                className={`flex-1 px-3 py-2 transition-colors first:rounded-l-[7px] last:rounded-r-[7px] ${
+                  viewMode === mode
+                    ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                    : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                }`}
+              >
+                {/* Card-style: a small header, the count big underneath (as
+                    the single-species stat cards do). */}
+                <span className={`flex items-center justify-center gap-1 text-xs font-medium whitespace-nowrap ${viewMode === mode ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {label}
+                  {/* The Not Evaluated count is the CoL backbone's described
+                      species minus those matched to an assessment, so it
+                      depends on CoL's taxonomy. Hover tooltip (not a link or
+                      button: it sits inside the tab button). */}
+                  {mode === "new-assessments" && (
+                    <span
+                      ref={neNoteRef}
+                      className="relative group/info inline-flex p-1 -m-1"
+                      aria-label={NE_COUNT_NOTE}
+                      // Tap opens it on touchscreens, where there's no hover.
+                      // stopPropagation: the icon sits inside the tab button,
+                      // so a tap must not also switch the view.
+                      onClick={(e) => { e.stopPropagation(); setNeNoteOpen((o) => !o); }}
+                    >
+                      <FaInfoCircle size={11} className="opacity-70" aria-hidden="true" />
+                      <span role="tooltip" className={`pointer-events-none absolute bottom-full right-0 mb-2 w-64 rounded-lg bg-zinc-800 dark:bg-zinc-700 px-3 py-2 text-left text-xs font-normal text-white shadow-lg ${neNoteOpen ? "opacity-100" : "opacity-0"} group-hover/info:opacity-100 transition-opacity z-50 whitespace-normal`}>
+                        {NE_COUNT_NOTE}
+                      </span>
+                    </span>
+                  )}
+                </span>
+                {count != null ? (
+                  <span className="block text-2xl sm:text-3xl font-bold tabular-nums leading-tight">
+                    {count.toLocaleString()}
+                  </span>
+                ) : rowPending ? (
+                  // Hold the number line's height until the count arrives.
+                  <span className="block text-2xl sm:text-3xl font-bold leading-tight invisible" aria-hidden="true">0</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        );
+        if (rowPending) {
+          return (
+            <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
+                  <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" aria-label="Loading" />
+                </div>
+                <div className="h-5 w-32 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />
+              </div>
+              {toggle}
+            </div>
+          );
+        }
+        // No single selected row (a multi-select) → just the toggle, full width.
+        if (!selectedRow) return <div className="mb-4">{toggle}</div>;
+        // Taxon header, laid out like the single-species header: photo (or the
+        // taxon's icon) and name on the left, the toggle on the right.
+        const rootId = parseDynamicNodeId(selectedRow.id)?.rootId ?? selectedRow.id;
+        const taxonPhoto = resolveTaxonPhoto();
+        const rankLine = taxonRank
+          ? (selectedRow.name.startsWith(taxonRank.name) ? taxonRank.rank : <>{taxonRank.rank} <i>{taxonRank.name}</i></>)
+          : null;
+        return (
+          <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              {taxonPhoto ? (
+                <PhotoCredit
+                  credit={taxonPhoto.credit}
+                  className="flex-shrink-0"
+                  // Same enlarged hover preview as the species header's photo.
+                  onMouseEnter={(e) => showImagePreview(e.currentTarget.getBoundingClientRect(), taxonPhoto.url)}
+                  onMouseLeave={hideImagePreview}
+                >
+                  <img src={taxonPhoto.url} alt="" className="block w-20 h-20 object-cover rounded cursor-pointer hover:ring-2 hover:ring-zinc-400" />
+                </PhotoCredit>
+              ) : (
+                <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
+                  {taxonPhoto === undefined ? (
+                    <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" aria-label="Loading photo" />
+                  ) : (
+                    <TaxaIcon taxonId={selectedRow.id} size={36} style={{ color: findNode(rootId)?.color }} />
+                  )}
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</div>
+                {rankLine && <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{rankLine}</div>}
+              </div>
+            </div>
+            {toggle}
+          </div>
+        );
+      })()}
+
       {/* Charts, search, and species table - only visible after a taxon is selected.
           Hidden in the scope views too: TaxaSummary's own countryModeContent (the
           promoted WorldMap) is the entire page in country mode, and selectedTaxa is
@@ -4680,25 +4943,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" />
                   </div>
                 ) : details?.inatDefaultImage?.squareUrl ? (
-                  <img
-                    src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
-                    alt=""
-                    className="w-24 h-24 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                    onMouseEnter={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const preview = document.getElementById('image-preview');
-                      if (preview) {
-                        (preview as HTMLImageElement).src = details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || '';
-                        preview.style.display = 'block';
-                        preview.style.top = `${rect.top - 192 - 8}px`;
-                        preview.style.left = `${rect.left}px`;
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      const preview = document.getElementById('image-preview');
-                      if (preview) preview.style.display = 'none';
-                    }}
-                  />
+                  <PhotoCredit
+                    credit={details.inatDefaultImage.attribution}
+                    className="flex-shrink-0"
+                    onMouseEnter={(e) => showImagePreview(
+                      e.currentTarget.getBoundingClientRect(),
+                      details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
+                    )}
+                    onMouseLeave={hideImagePreview}
+                  >
+                    <img
+                      src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
+                      alt=""
+                      className="block w-24 h-24 object-cover rounded cursor-pointer hover:ring-2 hover:ring-red-400"
+                    />
+                  </PhotoCredit>
                 ) : (
                   <div className="w-24 h-24 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
                     <TaxaIcon taxonId={singleSpecies.taxon_id || "all"} size={40} />
@@ -5846,13 +6105,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />
               ) : (
-                <>{totalFiltered.toLocaleString()} species</>
+                // Says which list this is, since the two views share the table.
+                <>{totalFiltered.toLocaleString()} species {isNewAssessments ? "not evaluated" : "assessed"}</>
               )}
             </span>
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
                 dataset entirely), moved here from the old dedicated stat-card
                 row now that there isn't one. */}
-            {onViewModeChange && (
+            {onViewModeChange && !wideViewModeToggle && (
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0">
                 <button
                   type="button"
@@ -6087,29 +6347,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             <span className="inline-block animate-spin h-4 w-4 border-2 border-zinc-400 border-t-transparent rounded-full" />
                           </div>
                         ) : details?.inatDefaultImage?.squareUrl ? (
-                          <img
-                            src={details.inatDefaultImage.squareUrl}
-                            alt=""
-                            className="w-8 h-8 md:w-10 md:h-10 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
-                            onMouseEnter={(e) => {
-                              const img = e.currentTarget;
-                              const rect = img.getBoundingClientRect();
-                              const preview = document.getElementById('image-preview');
-                              if (preview) {
-                                (preview as HTMLImageElement).src = details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || '';
-                                preview.style.display = 'block';
-                                const showBelow = rect.bottom + 192 + 8 < window.innerHeight;
-                                preview.style.top = showBelow ? `${rect.bottom + 8}px` : `${rect.top - 192 - 8}px`;
-                                preview.style.left = `${rect.left}px`;
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              const preview = document.getElementById('image-preview');
-                              if (preview) {
-                                preview.style.display = 'none';
-                              }
-                            }}
-                          />
+                          <PhotoCredit
+                            credit={details.inatDefaultImage.attribution}
+                            className="flex-shrink-0"
+                            iconSize={12}
+                            onMouseEnter={(e) => showImagePreview(
+                              e.currentTarget.getBoundingClientRect(),
+                              details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
+                              true,
+                            )}
+                            onMouseLeave={hideImagePreview}
+                          >
+                            <img
+                              src={details.inatDefaultImage.squareUrl}
+                              alt=""
+                              className="block w-8 h-8 md:w-10 md:h-10 object-cover rounded cursor-pointer hover:ring-2 hover:ring-red-400"
+                            />
+                          </PhotoCredit>
                         ) : (
                           <div className="w-8 h-8 md:w-10 md:h-10 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
                             <TaxaIcon taxonId={s.taxon_id || "all"} size={18} />
@@ -6591,12 +6845,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       ))}
 
       {/* Fixed image preview portal */}
-      <img
+      <div
         id="image-preview"
-        alt=""
-        className="fixed z-[9999] w-48 h-48 object-cover rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none"
+        className="fixed z-[9999] w-48 h-48 rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none overflow-hidden"
         style={{ display: 'none' }}
-      />
+      >
+        <img alt="" className="block w-48 h-48 object-cover" />
+      </div>
     </div>
   );
 }

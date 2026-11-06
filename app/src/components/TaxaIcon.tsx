@@ -8,6 +8,8 @@
 
 import React, { CSSProperties } from "react";
 import { IconBaseProps } from "react-icons";
+import { getAncestors } from "@/lib/taxonomy-utils";
+import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import {
   FaPaw,
   FaDove,
@@ -137,10 +139,58 @@ const ICON_MAP: Record<string, React.ComponentType<IconBaseProps>> = {
   "other-fungi": GiMushrooms,
 };
 
+// Live drill-down nodes are named by their scientific rank value
+// ("mammals~order:primates"), so map the ones that have a curated icon above
+// onto it. Anything not listed takes its nearest ancestor's icon instead.
+const RANK_VALUE_ALIASES: Record<string, string> = {
+  rodentia: "rodents",
+  chiroptera: "bats",
+  eulipotyphla: "eulipotyphla",
+  primates: "primates",
+  diprotodontia: "marsupials",
+  didelphimorphia: "marsupials",
+  dasyuromorphia: "marsupials",
+  peramelemorphia: "marsupials",
+  carnivora: "carnivores",
+  artiodactyla: "artiodactyls",
+  cetartiodactyla: "artiodactyls",
+  lagomorpha: "rabbits-hares",
+  sirenia: "sirenians",
+  perissodactyla: "odd-toed-ungulates",
+  pholidota: "pangolins",
+  squamata: "squamates",
+  testudines: "turtles-tortoises",
+  crocodylia: "crocodilians",
+  rhynchocephalia: "tuataras",
+  anura: "frogs-toads",
+  caudata: "salamanders-newts",
+  gymnophiona: "caecilians",
+  actinopterygii: "ray-finned-fishes",
+  sarcopterygii: "lobe-finned-fishes",
+  chondrichthyes: "sharks-rays",
+  elasmobranchii: "sharks-rays",
+  myxini: "jawless-fish",
+  petromyzonti: "jawless-fish",
+  insecta: "insects",
+  coleoptera: "beetles",
+  lepidoptera: "butterflies-moths",
+  diptera: "flies-mosquitoes",
+  hymenoptera: "bees-wasps-ants",
+  hemiptera: "true-bugs",
+  orthoptera: "grasshoppers-crickets",
+  odonata: "dragonflies-damselflies",
+  arachnida: "arachnids",
+  gastropoda: "molluscs",
+  bivalvia: "molluscs",
+  cephalopoda: "molluscs",
+  malacostraca: "crustaceans",
+  anthozoa: "corals",
+};
+
 // Prefixes applied to subgroup IDs to disambiguate across parent taxa
 const KNOWN_PREFIXES = ["inv-", "pl-", "fu-"];
 
-function resolveIcon(
+function resolveOwnIcon(
   taxonId: string,
 ): React.ComponentType<IconBaseProps> | undefined {
   // Try exact match first
@@ -154,6 +204,34 @@ function resolveIcon(
     }
   }
 
+  return undefined;
+}
+
+/**
+ * The node's own icon, else its nearest ancestor's, so a drill-down row
+ * (Hominidae, Passeriformes) shows its group's icon rather than the generic
+ * leaf. For a live drill-down id the walk is its rank segments, deepest
+ * first, then the root. The "all" globe is never inherited.
+ */
+function resolveIcon(
+  taxonId: string,
+): React.ComponentType<IconBaseProps> | undefined {
+  const own = resolveOwnIcon(taxonId);
+  if (own) return own;
+  const dyn = parseDynamicNodeId(taxonId);
+  if (dyn) {
+    for (const seg of [...dyn.segments].reverse()) {
+      const alias = RANK_VALUE_ALIASES[seg.value.toLowerCase()];
+      if (alias && ICON_MAP[alias]) return ICON_MAP[alias];
+    }
+    const rootIcon = resolveIcon(dyn.rootId);
+    if (rootIcon) return rootIcon;
+  }
+  for (const ancestor of getAncestors(taxonId)) {
+    if (ancestor === "all") continue;
+    const icon = resolveOwnIcon(ancestor);
+    if (icon) return icon;
+  }
   return undefined;
 }
 

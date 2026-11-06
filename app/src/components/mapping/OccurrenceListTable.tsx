@@ -15,6 +15,7 @@ import {
   type Georeference,
   type LocalityNote,
 } from "@/lib/mapping/georeferences";
+import { gbifImageCredit } from "@/lib/image-credit";
 
 /**
  * A single GBIF occurrence, as returned by /api/occurrences. Shared with
@@ -2203,8 +2204,10 @@ export default function OccurrenceListTable({
           className="rounded-lg overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xl"
         >
           <img src={mediaPreview.image.url} alt="" className="w-full max-h-[15rem] object-contain" />
-          <span className="block px-1.5 py-1 text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
-            {mediaPreview.image.creator ? `© ${mediaPreview.image.creator} · ` : ""}
+          <span className="block px-1.5 py-1 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400">
+            {/* Its own wrapping line: the licence requires the credit, so it
+                must not be truncated away. */}
+            {gbifImageCredit(mediaPreview.image) && <span className="block">{gbifImageCredit(mediaPreview.image)}</span>}
             Click to open the full image
           </span>
         </div>,

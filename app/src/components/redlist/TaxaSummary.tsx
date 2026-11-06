@@ -145,6 +145,8 @@ interface SubGroupSummary {
   colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
 }
 
+export interface SelectedRow { id: string; name: string; assessed: number; notEvaluated: number | null }
+
 interface Props {
   onToggleTaxon: (taxonId: string, event: React.MouseEvent) => void;
   selectedTaxa: Set<string>;
@@ -181,6 +183,11 @@ interface Props {
    * countryScope, and like it only actually narrows this table inside its own
    * view (see the scoped/scopeKey derivation below). */
   realmScope?: string[] | null;
+  /** Reports the selected row (id, display name, Red List assessed and Not
+   * Evaluated counts) so RedListView can show it in the taxon header beside
+   * its view toggle. null when there's no single selected row, or it hasn't
+   * loaded yet. notEvaluated is null when the row has no CoL count. */
+  onSelectedRow?: (row: SelectedRow | null) => void;
   /** Which GBIF records the GBIF columns count (src/lib/gbif-records.ts). */
   gbifRecordMode?: GbifRecordMode;
 }
@@ -327,7 +334,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 
 const DISTRIBUTION_BIN_LABELS = ["1", "2–10", "11–100", "101–1K", "1K–10K", "10K–100K", "100K–1M", ">1M"];
 
-type FocusMode = "redlist" | "gbif" | "new-assessments";
+type FocusMode = "redlist" | "gbif";
 
 // "# Described (CoL)" is hidden by default in every focus — the IUCN/CoL toggle on
 // the "# Described" header flips the primary column's source instead. Enable this
@@ -335,44 +342,7 @@ type FocusMode = "redlist" | "gbif" | "new-assessments";
 const FOCUS_HIDDEN: Record<FocusMode, Set<ColumnId>> = {
   redlist: new Set(["colDescribed", "colNe", "gbifUnassessed", "totalGbifObs", "meanGbifObs", "medianGbifObs", "gbifDistribution", "breakdown"]),
   gbif: new Set(["colDescribed", "outdated", "breakdown"]),
-  "new-assessments": new Set(["colDescribed", "outdated", "breakdown", "gbifUnassessed", "totalGbifObs", "meanGbifObs", "medianGbifObs", "gbifDistribution"]),
 };
-
-function DisabledAllTooltip() {
-  const [hovered, setHovered] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (hovered && ref.current) {
-      const rect = ref.current.getBoundingClientRect();
-      setPos({ top: rect.top, left: rect.right + 8 });
-    }
-  }, [hovered]);
-
-  return (
-    <span
-      ref={ref}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="ml-1 text-zinc-400 dark:text-zinc-500 cursor-help"
-    >
-      <svg className="w-3.5 h-3.5 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 16v-4M12 8h.01" />
-      </svg>
-      {hovered && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed z-[99999] px-2 py-1 text-xs bg-zinc-800 text-zinc-200 rounded shadow-lg whitespace-nowrap"
-          style={{ top: pos.top, left: pos.left, transform: 'translateY(-100%)' }}
-        >
-          Unassessed species must be loaded per taxon group. Loading all species at once would require very high memory usage and data transfer.
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
 
 // Builds the URL for a node's full, filterable species list in RedListView (the same
 // destination a table-row click gives) — an escape hatch from SpeciesListPanel's
@@ -1519,7 +1489,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, onSelectedRow, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -1539,21 +1509,46 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     () => Object.fromEntries(Object.entries(rawSubgroupData).map(([k, subs]) => [k, withNeCount(subs, gbifRecordMode)])),
     [rawSubgroupData, gbifRecordMode]);
   const [loadingSubgroups, setLoadingSubgroups] = useState<Set<string>>(new Set());
+
+  // The selected row, for RedListView's taxon header: the one selected
+  // sub-group if there is one, else the one selected taxon. Reported as
+  // primitives so the effect only fires when something actually changes.
+  const selectedRow = useMemo((): SelectedRow | null => {
+    const toRow = (r: { id: string; name: string; totalAssessed: number; colNe?: number }) =>
+      ({ id: r.id, name: r.name, assessed: r.totalAssessed, notEvaluated: r.colNe ?? null });
+    if (selectedSubgroups.size === 1) {
+      const id = [...selectedSubgroups][0];
+      for (const subs of Object.values(subgroupData)) {
+        const sg = subs.find((x) => x.id === id);
+        if (sg) return toRow(sg);
+      }
+      return null;
+    }
+    if (selectedSubgroups.size === 0 && selectedTaxa.size === 1) {
+      const t = taxa.find((x) => x.id === [...selectedTaxa][0]);
+      return t ? toRow(t) : null;
+    }
+    return null;
+  }, [selectedTaxa, selectedSubgroups, subgroupData, taxa]);
+  const selId = selectedRow?.id;
+  const selName = selectedRow?.name;
+  const selAssessed = selectedRow?.assessed;
+  const selNe = selectedRow?.notEvaluated;
+  useEffect(() => {
+    onSelectedRow?.(selId === undefined || selName === undefined || selAssessed === undefined
+      ? null
+      : { id: selId, name: selName, assessed: selAssessed, notEvaluated: selNe ?? null });
+  }, [selId, selName, selAssessed, selNe, onSelectedRow]);
   // Refs to avoid stale closures in toggleExpand
   const subgroupDataRef = useRef(rawSubgroupData);
   subgroupDataRef.current = rawSubgroupData;
   const loadingSubgroupsRef = useRef(loadingSubgroups);
   loadingSubgroupsRef.current = loadingSubgroups;
-  const initialFocus: FocusMode = isNewAssessments ? "new-assessments" : "redlist";
-  const [focusMode, setFocusMode] = useState<FocusMode>(initialFocus);
-  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set(FOCUS_HIDDEN[initialFocus]));
-
-  // Sync focus mode when viewMode changes
-  useEffect(() => {
-    const mode: FocusMode = isNewAssessments ? "new-assessments" : "redlist";
-    setFocusMode(mode);
-    setHiddenColumns(new Set(FOCUS_HIDDEN[mode]));
-  }, [isNewAssessments]);
+  // The same columns in both views (# Red List Assessed, # Needs Updating):
+  // the view switch changes the charts and species list below, not this
+  // table, and the Not Evaluated count is on the taxon header's toggle.
+  const [focusMode, setFocusMode] = useState<FocusMode>("redlist");
+  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set(FOCUS_HIDDEN.redlist));
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -1657,13 +1652,20 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     };
   }, [taxaExpanded]);
 
-  // Auto-scroll to show Assessed column on mobile (skip past # Described)
+  // Auto-scroll the table's horizontal overflow. On mobile, skip past
+  // # Described to show the Assessed column. Wider than that, the table only
+  // overflows when a deep drill-down's indented names widen the first column,
+  // and then it should sit at the right end: the numbers on the right stay
+  // whole, and what's hidden under the sticky name column is the start of
+  // # Described instead.
   const autoScroll = useCallback((el: HTMLDivElement) => {
     if (window.innerWidth < 768) {
       const firstDataTh = el.querySelector('thead th:nth-child(2)') as HTMLElement;
       if (firstDataTh) {
         el.scrollLeft = firstDataTh.offsetWidth;
       }
+    } else {
+      el.scrollLeft = el.scrollWidth - el.clientWidth;
     }
   }, []);
 
@@ -1675,6 +1677,26 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       requestAnimationFrame(() => autoScroll(el));
     }
   }, [taxa, autoScroll]);
+
+  // Drilling down (or a sub-group's rows arriving) changes the table's width
+  // without changing `taxa`, so on wider screens also re-apply whenever the
+  // table's own size changes. Only on a resize, never on the reader's own
+  // scroll, so a deliberate scroll back to the left stays put.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let lastWidth = -1;
+    const ro = new ResizeObserver(() => {
+      if (window.innerWidth < 768 || el.scrollWidth === lastWidth) return;
+      lastWidth = el.scrollWidth;
+      autoScroll(el);
+    });
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => ro.disconnect();
+    // loading: the scroll box only mounts once the first fetch lands.
+    // subgroupData: a drill-down's rows arrive after the selection changes.
+  }, [autoScroll, loading, layoutMode, selectedTaxa, selectedSubgroups, subgroupData]);
 
   // Fetch a node's subgroup data if not already loaded/loading (read from refs to
   // avoid stale closures) — factored out of toggleExpand so the ancestor-breadcrumb
@@ -1790,12 +1812,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         className="text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
       >
         <option value="taxonomic">By Taxonomic Group</option>
-        <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for New Assessments — Not Evaluated species have no location data" : undefined}>
+        <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
         {/* Same reason Country View is disabled here: realm is recorded on the
             assessment, so Not Evaluated species have none. */}
-        <option value="realm" disabled={isNewAssessments} title={isNewAssessments ? "Not available for New Assessments — Not Evaluated species have no realm recorded" : undefined}>
+        <option value="realm" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no realm recorded" : undefined}>
           By Realm
         </option>
         <option value="ssc">By SSC Specialist Group (WIP)</option>
@@ -2402,7 +2424,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             {expandToggle(false, false)}
             <TaxaIcon taxonId={id} size={22} className="flex-shrink-0" style={{ color }} />
             <span className="font-medium text-sm md:text-base text-zinc-900 dark:text-zinc-100">{name}</span>
-            {allDisabled && <DisabledAllTooltip />}
           </div>
         </td>
         {isVisible("described") && (
@@ -3033,8 +3054,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         className="fixed bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-[9999] py-1 min-w-[180px]"
         style={{ top: menuPos.top, left: menuPos.left }}
       >
-        {!isNewAssessments && (
-          <>
+        <>
             <div className="px-3 pt-2 pb-1.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Focus</div>
             <div className="mx-3 mb-1.5 flex rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-600">
               <button
@@ -3051,8 +3071,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               </button>
             </div>
             <div className="border-t border-zinc-100 dark:border-zinc-700" />
-          </>
-        )}
+        </>
         <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Columns</div>
         {(Object.keys(COLUMN_LABELS) as ColumnId[]).map((col) => (
           <label

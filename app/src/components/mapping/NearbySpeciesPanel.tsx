@@ -49,6 +49,7 @@ import {
   type NearbyResult,
   type NearbySpecies,
 } from "@/lib/mapping/nearby-species";
+import PhotoCredit from "@/components/PhotoCredit";
 
 interface Props {
   lat: number;
@@ -523,15 +524,16 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
     <span ref={box} className="flex h-5 w-5 shrink-0 items-center justify-center">
       {image?.squareUrl ? (
         <>
-        <img
-          src={image.squareUrl}
-          alt=""
-          title={name}
-          onMouseEnter={show}
-          onMouseLeave={() => setPreview(null)}
-          className="h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
-          loading="lazy"
-        />
+        {/* The © (bottom-right, on hover) opens the photo's credit. */}
+        <PhotoCredit credit={image.attribution} iconSize={10} onMouseEnter={show} onMouseLeave={() => setPreview(null)}>
+          <img
+            src={image.squareUrl}
+            alt=""
+            title={name}
+            className="block h-5 w-5 cursor-zoom-in rounded object-cover hover:ring-2 hover:ring-blue-400"
+            loading="lazy"
+          />
+        </PhotoCredit>
         {preview &&
           createPortal(
             <span
@@ -546,6 +548,7 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
               <span className="block max-w-40 truncate pt-0.5 text-center text-[10px] italic text-zinc-500 dark:text-zinc-400">
                 {name}
               </span>
+
             </span>,
             document.body
           )}
