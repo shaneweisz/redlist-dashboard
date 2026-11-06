@@ -305,7 +305,9 @@ const renameRows = (await conn.runAndReadAll(`
              b.checklist_parent_id,
              coalesce(b.checklist_name, b.scientific_name) AS self_name
       FROM read_parquet('${assessedPath}') a
-      JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.role = 'primary'
+      -- Every link, covered rows too: a species whose links reach more than one
+      -- accepted name is refused below.
+      JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id
       JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
       WHERE b.rank = 'species'
     ),
