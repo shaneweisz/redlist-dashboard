@@ -11,10 +11,8 @@
  *   <bucket>/
  *     syncs/
  *       2026-05-20T10-30-00Z/
- *         gbif/amphibia.csv
- *         redlist/...
- *         taxa.parquet
- *         ...
+ *         lists/  taxonomy/  search/  summaries/  sync.json
+ *         (the folders in src/lib/data/sync-layout.ts)
  *
  * Active sync pointer lives in app/latest-sync.txt (version-controlled).
  *

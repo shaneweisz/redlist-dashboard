@@ -272,8 +272,7 @@ interface GbifRow { scientific_name: string; class_name: string | null; order_na
 /**
  * Per Table 1a group: its assessed species (by IUCN's group), and the species
  * GBIF has records for (assessed ones in their IUCN group, NE ones in their CoL
- * group, from ne.parquet). Replaces the per-group Red List and GBIF CSVs and
- * mapping.csv; "linked" keys are the assessed species' GBIF keys.
+ * group, from ne.parquet). "Linked" keys are the assessed species' GBIF keys.
  */
 async function loadGroups(): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
   const conn = await (await DuckDBInstance.create(":memory:")).connect();

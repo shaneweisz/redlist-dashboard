@@ -168,8 +168,9 @@ export function isSeparatelyAssessed(
 }
 
 /**
- * What happened to a species when it was matched. Written into mapping.csv so
- * every later phase reads the decision instead of making its own.
+ * What happened to a species when it was matched. build-link records it on
+ * each assessment_link row, so every later step reads the decision instead of
+ * making its own.
  */
 export type Verdict =
   /** GBIF's accepted usage is this species, under this name or a rename of it. */
