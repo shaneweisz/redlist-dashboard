@@ -334,7 +334,7 @@ const COLUMN_LABELS: Record<ColumnId, string> = {
 
 const DISTRIBUTION_BIN_LABELS = ["1", "2–10", "11–100", "101–1K", "1K–10K", "10K–100K", "100K–1M", ">1M"];
 
-type FocusMode = "redlist" | "gbif" | "new-assessments";
+type FocusMode = "redlist" | "gbif";
 
 // "# Described (CoL)" is hidden by default in every focus — the IUCN/CoL toggle on
 // the "# Described" header flips the primary column's source instead. Enable this
@@ -342,44 +342,7 @@ type FocusMode = "redlist" | "gbif" | "new-assessments";
 const FOCUS_HIDDEN: Record<FocusMode, Set<ColumnId>> = {
   redlist: new Set(["colDescribed", "colNe", "gbifUnassessed", "totalGbifObs", "meanGbifObs", "medianGbifObs", "gbifDistribution", "breakdown"]),
   gbif: new Set(["colDescribed", "outdated", "breakdown"]),
-  "new-assessments": new Set(["colDescribed", "outdated", "breakdown", "gbifUnassessed", "totalGbifObs", "meanGbifObs", "medianGbifObs", "gbifDistribution"]),
 };
-
-function DisabledAllTooltip() {
-  const [hovered, setHovered] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (hovered && ref.current) {
-      const rect = ref.current.getBoundingClientRect();
-      setPos({ top: rect.top, left: rect.right + 8 });
-    }
-  }, [hovered]);
-
-  return (
-    <span
-      ref={ref}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="ml-1 text-zinc-400 dark:text-zinc-500 cursor-help"
-    >
-      <svg className="w-3.5 h-3.5 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 16v-4M12 8h.01" />
-      </svg>
-      {hovered && typeof document !== 'undefined' && createPortal(
-        <div
-          className="fixed z-[99999] px-2 py-1 text-xs bg-zinc-800 text-zinc-200 rounded shadow-lg whitespace-nowrap"
-          style={{ top: pos.top, left: pos.left, transform: 'translateY(-100%)' }}
-        >
-          Unassessed species must be loaded per taxon group. Loading all species at once would require very high memory usage and data transfer.
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
 
 // Builds the URL for a node's full, filterable species list in RedListView (the same
 // destination a table-row click gives) — an escape hatch from SpeciesListPanel's
@@ -1581,16 +1544,11 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   subgroupDataRef.current = rawSubgroupData;
   const loadingSubgroupsRef = useRef(loadingSubgroups);
   loadingSubgroupsRef.current = loadingSubgroups;
-  const initialFocus: FocusMode = isNewAssessments ? "new-assessments" : "redlist";
-  const [focusMode, setFocusMode] = useState<FocusMode>(initialFocus);
-  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set(FOCUS_HIDDEN[initialFocus]));
-
-  // Sync focus mode when viewMode changes
-  useEffect(() => {
-    const mode: FocusMode = isNewAssessments ? "new-assessments" : "redlist";
-    setFocusMode(mode);
-    setHiddenColumns(new Set(FOCUS_HIDDEN[mode]));
-  }, [isNewAssessments]);
+  // The same columns in both views (# Red List Assessed, # Needs Updating):
+  // the view switch changes the charts and species list below, not this
+  // table, and the Not Evaluated count is on the taxon header's toggle.
+  const [focusMode, setFocusMode] = useState<FocusMode>("redlist");
+  const [hiddenColumns, setHiddenColumns] = useState<Set<ColumnId>>(new Set(FOCUS_HIDDEN.redlist));
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -2466,7 +2424,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             {expandToggle(false, false)}
             <TaxaIcon taxonId={id} size={22} className="flex-shrink-0" style={{ color }} />
             <span className="font-medium text-sm md:text-base text-zinc-900 dark:text-zinc-100">{name}</span>
-            {allDisabled && <DisabledAllTooltip />}
           </div>
         </td>
         {isVisible("described") && (
@@ -3097,8 +3054,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         className="fixed bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-[9999] py-1 min-w-[180px]"
         style={{ top: menuPos.top, left: menuPos.left }}
       >
-        {!isNewAssessments && (
-          <>
+        <>
             <div className="px-3 pt-2 pb-1.5 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Focus</div>
             <div className="mx-3 mb-1.5 flex rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-600">
               <button
@@ -3115,8 +3071,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               </button>
             </div>
             <div className="border-t border-zinc-100 dark:border-zinc-700" />
-          </>
-        )}
+        </>
         <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Columns</div>
         {(Object.keys(COLUMN_LABELS) as ColumnId[]).map((col) => (
           <label
