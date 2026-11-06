@@ -4,9 +4,9 @@
  *   georeferenced  the records a map can use: coordinates and none of GBIF's
  *                  geospatial issues (hasCoordinate=true&hasGeospatialIssue=false),
  *                  of a type that places the species where it lives wild
- *                  (GEOREFERENCED_BASIS_OF_RECORD). The default.
+ *                  (GEOREFERENCED_BASIS_OF_RECORD).
  *   all            every record GBIF holds for the species, of any type, with
- *                  or without coordinates: the number gbif.org shows.
+ *                  or without coordinates: the number gbif.org shows. The default.
  *
  * Both count the species' own name, synonyms and subspecies the same way
  * (scripts/sync/core/counts.ts). Every GBIF number on the dashboard reads its
@@ -15,8 +15,8 @@
 
 export type GbifRecordMode = "georeferenced" | "all";
 
-export const GBIF_RECORD_MODES: readonly GbifRecordMode[] = ["georeferenced", "all"];
-export const DEFAULT_GBIF_RECORD_MODE: GbifRecordMode = "georeferenced";
+export const GBIF_RECORD_MODES: readonly GbifRecordMode[] = ["all", "georeferenced"];
+export const DEFAULT_GBIF_RECORD_MODE: GbifRecordMode = "all";
 
 /**
  * Record types a georeferenced count keeps, for every kingdom: observations,
@@ -39,7 +39,7 @@ export const GEOREFERENCED_BASIS_OF_RECORD = [
 export const GBIF_RECORDS_PARAM = "records";
 
 export function parseGbifRecordMode(v: string | null | undefined): GbifRecordMode {
-  return v === "all" ? "all" : DEFAULT_GBIF_RECORD_MODE;
+  return v === "georeferenced" ? "georeferenced" : DEFAULT_GBIF_RECORD_MODE;
 }
 
 export const GBIF_RECORD_MODE_LABEL: Record<GbifRecordMode, string> = {
@@ -104,7 +104,7 @@ export function sinceAssessmentStart(assessmentDate: string | null | undefined):
 
 // ── The GBIF Records chart and its filters ───────────────────────────────────
 //
-// The chart shows one metric in one mode at a time (a dropdown), and each of
+// The chart shows one metric in one mode at a time (two toggles), and each of
 // the six keeps its own bucket selection, so they combine the way assessors and
 // reviewers do: "Total (all) 10K+" and "Total (georeferenced) 1K-10K" at once.
 // This is independent of the table's toggle, which only sets what is displayed.
@@ -117,14 +117,14 @@ export const GBIF_RANGE_KEYS: readonly GbifRangeKey[] = [
 ];
 export const DEFAULT_GBIF_CHART_KEY: GbifRangeKey = "total.all";
 
-/** Each selection's URL parameter. obsRanges keeps its old meaning (Total, georeferenced). */
+/** Each selection's URL parameter. */
 export const GBIF_RANGE_PARAM: Record<GbifRangeKey, string> = {
-  "total.georeferenced": "obsRanges",
-  "total.all": "obsRangesAll",
-  "new.georeferenced": "newRanges",
-  "new.all": "newRangesAll",
-  "pctNew.georeferenced": "pctNewRanges",
-  "pctNew.all": "pctNewRangesAll",
+  "total.all": "gbifTotal",
+  "total.georeferenced": "gbifTotalGeo",
+  "new.all": "gbifNew",
+  "new.georeferenced": "gbifNewGeo",
+  "pctNew.all": "gbifPctNew",
+  "pctNew.georeferenced": "gbifPctNewGeo",
 };
 export const GBIF_CHART_PARAM = "gbifChart";
 

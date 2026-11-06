@@ -44,7 +44,7 @@ export interface BrowseInput extends SharedFilterInput {
   institutions?: string[];
   minObs?: number;
   maxObs?: number;
-  /** Which GBIF records minObs/maxObs count: georeferenced (default) or all. */
+  /** Which GBIF records minObs/maxObs count: all (default) or georeferenced. */
   records?: GbifRecordMode;
   minAssessmentYear?: number;
   maxAssessmentYear?: number;
@@ -228,7 +228,7 @@ export async function runBrowseQuery(input: BrowseInput): Promise<BrowseResult> 
   if (facilitators.length) interpreted.push(`Facilitator: ${facilitators.join(", ")}`);
   if (contributors.length) interpreted.push(`Contributor: ${contributors.join(", ")}`);
   if (institutions.length) interpreted.push(`Institution: ${institutions.join(", ")}`);
-  const obsLabel = input.records === "all" ? "GBIF records (all)" : "GBIF georeferenced records";
+  const obsLabel = input.records === "georeferenced" ? "GBIF georeferenced records" : "GBIF records (all)";
   if (minObs != null) interpreted.push(`${obsLabel} ≥ ${minObs.toLocaleString()}`);
   if (maxObs != null) interpreted.push(`${obsLabel} ≤ ${maxObs.toLocaleString()}`);
   if (minAssessmentYear != null) interpreted.push(`Assessed in or after ${minAssessmentYear}`);

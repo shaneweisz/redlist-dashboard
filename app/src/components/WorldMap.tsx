@@ -343,7 +343,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
     setOccurrenceLoading(true);
     const controller = new AbortController();
 
-    fetch(`/api/country/stats?taxon=${taxaToFetch.map(encodeURIComponent).join(",")}${gbifRecordMode === "all" ? `&${GBIF_RECORDS_PARAM}=all` : ""}`, { signal: controller.signal })
+    fetch(`/api/country/stats?taxon=${taxaToFetch.map(encodeURIComponent).join(",")}${gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE ? `&${GBIF_RECORDS_PARAM}=${gbifRecordMode}` : ""}`, { signal: controller.signal })
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (controller.signal.aborted) return;

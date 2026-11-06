@@ -9,7 +9,7 @@ import TaxaSummary from "./TaxaSummary";
 import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
-  GBIF_RANGE_KEYS, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey } from "@/lib/gbif-records";
+  GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
@@ -997,28 +997,37 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
 
 /**
  * Georeferenced / All records: which GBIF records every count on the page
- * counts. Kept in the URL (records=all), so a shared link shows the same numbers.
+ * counts. Kept in the URL (records=georeferenced), so a shared link shows the same numbers.
  */
 /**
- * Which GBIF metric the GBIF Records chart shows: Total, New or % New, each in
- * all records or georeferenced. Each keeps its own selection, so filters made
- * under one stay on while another is shown; an option with a selection in
- * force carries a dot. Independent of the table's toggle.
+ * The GBIF Records chart's two toggles: which records (All records /
+ * Georeferenced) and which metric (Total / New / % New). Each of the six
+ * combinations keeps its own bucket selection, so a filter made under one
+ * stays on while another is shown. Independent of the table's toggle. The Not
+ * Evaluated list has no assessment, so no metric toggle.
  */
-function GbifChartKeySelect({ value, keys, ranges, onChange }: {
-  value: GbifRangeKey; keys: readonly GbifRangeKey[]; ranges: Record<GbifRangeKey, Set<string>>; onChange: (k: GbifRangeKey) => void;
+const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
+function GbifChartControls({ value, onChange, showMetric }: {
+  value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
 }) {
+  const { metric, mode } = gbifKeyParts(value);
+  const seg = (on: boolean) => `px-1.5 py-0.5 transition-colors ${on
+    ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
+    : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`;
   return (
-    <select
-      aria-label="Which GBIF records the chart shows"
-      value={value}
-      onChange={(e) => onChange(e.target.value as GbifRangeKey)}
-      className="text-[11px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5"
-    >
-      {keys.map((k) => (
-        <option key={k} value={k}>{gbifRangeKeyLabel(k)}{ranges[k].size > 0 ? " •" : ""}</option>
-      ))}
-    </select>
+    <div className="flex flex-wrap items-center gap-1.5">
+      <GbifRecordModeToggle mode={mode} onChange={(m) => onChange(`${metric}.${m}`)} />
+      {showMetric && (
+        <div role="radiogroup" aria-label="Which GBIF metric the chart shows"
+          className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-700 overflow-hidden text-[11px]">
+          {GBIF_METRICS.map((m) => (
+            <button key={m} type="button" role="radio" aria-checked={metric === m} onClick={() => onChange(`${m}.${mode}`)} className={seg(metric === m)}>
+              {GBIF_METRIC_LABEL[m]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -5065,8 +5074,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifKeyParts(gbifChartKey).mode} /></span>
-                <GbifChartKeySelect value={gbifChartKey} keys={gbifChartKeys} ranges={gbifRanges} onChange={setGbifChartKey} />
-                              </div>
+              </div>
+              <div className="mb-1">
+                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
+              </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
@@ -5145,7 +5156,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifKeyParts(gbifChartKey).mode} /></span>
-                <GbifChartKeySelect value={gbifChartKey} keys={gbifChartKeys} ranges={gbifRanges} onChange={setGbifChartKey} />
+              </div>
+              <div className="mb-1">
+                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (

@@ -66,7 +66,7 @@ describe("gbifOccurrenceParams", () => {
   });
 
   it("filters to georeferenced record types, the same for every kingdom, and not at all for all records", () => {
-    const geo = gbifOccurrenceParams();
+    const geo = gbifOccurrenceParams({}, { mode: "georeferenced" });
     expect(geo.get("hasCoordinate")).toBe("true");
     expect(geo.getAll("basisOfRecord")).toContain("PRESERVED_SPECIMEN");
     expect(geo.getAll("basisOfRecord")).not.toContain("LIVING_SPECIMEN");

@@ -8,7 +8,7 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
-import { GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
+import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
 // checked" (nothing excluded) rather than "nothing checked" — see
@@ -108,7 +108,7 @@ const paramKey = (name: string, suffix: string): string => (suffix ? `${name}${s
 // sync" test).
 export const OWN_PARAM_NAMES = [
   "view", "layout", "origin", "countries", "region", "taxa", "subgroups",
-  "categories", "years", "assessmentYears", "describedYears", "obsRanges", "assessmentCounts",
+  "categories", "years", "assessmentYears", "describedYears", "assessmentCounts",
   "systems", "trends", "movement", "threats", "threatsScope", "criteria", "habitat", "habitatBreadth",
   "habitatImportance", "habitatSeasons", "habitatSuitability", "bd", "endemics", "growthForms",
   "colMatch", "colReasons",
@@ -117,7 +117,7 @@ export const OWN_PARAM_NAMES = [
   "minAssessmentYear", "maxAssessmentYear", "minDescribedYear", "maxDescribedYear",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
   GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
-  ...Object.values(GBIF_RANGE_PARAM).filter((p) => p !== "obsRanges"),
+  ...Object.values(GBIF_RANGE_PARAM),
 ];
 
 /**
@@ -548,7 +548,7 @@ export function buildQs(state: {
     if (state.sortDirection2 !== "desc") p.set(k("dir2"), state.sortDirection2);
   }
   if (state.mapViewMode === "list") p.set(k("mapview"), "list");
-  if (state.gbifRecordMode === "all") p.set(k(GBIF_RECORDS_PARAM), "all");
+  if (state.gbifRecordMode && state.gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE) p.set(k(GBIF_RECORDS_PARAM), state.gbifRecordMode);
   if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(k(GBIF_CHART_PARAM), state.gbifChartKey);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set(k("mapsort"), state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set(k("mapdir"), "asc");

@@ -18,10 +18,11 @@ describe("gbif record modes", () => {
     expect(gbifRecordCount({}, "all")).toBeNull();
   });
 
-  it("parses anything but 'all' as the default", () => {
+  it("defaults to all records; georeferenced only when asked", () => {
+    expect(parseGbifRecordMode("georeferenced")).toBe("georeferenced");
+    expect(parseGbifRecordMode(null)).toBe("all");
     expect(parseGbifRecordMode("all")).toBe("all");
-    expect(parseGbifRecordMode(null)).toBe("georeferenced");
-    expect(parseGbifRecordMode("ALL")).toBe("georeferenced");
+    expect(parseGbifRecordMode("bogus")).toBe("all");
   });
 
   it("asks GBIF for coordinates and record types only when georeferenced", () => {
@@ -30,7 +31,8 @@ describe("gbif record modes", () => {
     expect(geo.get("hasGeospatialIssue")).toBe("false");
     expect(geo.getAll("basisOfRecord")).toHaveLength(6);
     expect(applyGbifRecordMode(new URLSearchParams(), "all").toString()).toBe("");
-    expect(gbifOccurrenceParams().get("hasCoordinate")).toBe("true");
+    expect(gbifOccurrenceParams({}, { mode: "georeferenced" }).get("hasCoordinate")).toBe("true");
+    expect(gbifOccurrenceParams().has("hasCoordinate")).toBe(false);
   });
 
   it("starts the since window the day after the assessment", () => {

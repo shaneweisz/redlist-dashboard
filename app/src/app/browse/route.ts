@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
     contributors: parseList(sp, "contributors"),
     institutions: parseList(sp, "institutions"),
     minObs: intParam("minObs"), maxObs: intParam("maxObs"),
-    records: sp.get("records") === "all" ? "all" : undefined,
+    records: sp.get("records") === "georeferenced" ? "georeferenced" : undefined,
     minAssessmentYear: intParam("minAssessmentYear"), maxAssessmentYear: intParam("maxAssessmentYear"),
     minDescribedYear: intParam("minDescribedYear"), maxDescribedYear: intParam("maxDescribedYear"),
   };
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
       { headers: { ...CACHE_1H, ...NOINDEX } },
     );
   }
-  return html(resultsHtml(result, input.records === "all" ? "all" : undefined));
+  return html(resultsHtml(result, input.records ?? "all"));
 }
 
 // ─── rendering ─────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ function unresolvedBlock(unresolved: string[]): string {
   return `<p class="warn">Couldn't interpret: ${unresolved.map((u) => `<code>${esc(u)}</code>`).join(", ")}. See <a href="/llms.txt">/llms.txt</a> for valid values.</p>`;
 }
 
-function resultsHtml(r: BrowseResult, records?: "all"): string {
+function resultsHtml(r: BrowseResult, records: "all" | "georeferenced"): string {
   const filterDesc = r.interpreted.length ? esc(r.interpreted.join("; ")) : "no filters";
   const breakdownStr = Object.entries(r.breakdown)
     .sort((x, y) => (CATEGORY_ORDER[x[0]] ?? 99) - (CATEGORY_ORDER[y[0]] ?? 99))
