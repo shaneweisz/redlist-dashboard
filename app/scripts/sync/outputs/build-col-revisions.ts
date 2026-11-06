@@ -32,7 +32,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import {
   computeNoMatchDetails,
@@ -45,6 +44,7 @@ import { SPLIT_REASON, UNFLAGGED_REASONS, GENUS_DIFFERS_REASON, RENAMED_REASON }
 import { orthographicallySame, speciesNameParts, canonicalEpithet } from "../core/name-variants";
 import { syncPath } from "../../../src/lib/data/sync-layout";
 import { requireFiles } from "../paths";
+import { openDuckDB } from "../sql";
 
 // Keep in sync with build-taxa-summary.ts / species-duckdb.ts.
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
@@ -84,7 +84,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 
   requireFiles("build-col-revisions", path.join(dataDir, syncPath("species")), link, assessedPath, taxaPath);
 
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
   await conn.run(
     `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
   );

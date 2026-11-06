@@ -25,11 +25,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { TAXA_DEFINITIONS } from "../../lib/taxa";
 import { CORE_DIR } from "../paths";
-import { lit } from "../sql";
+import { lit, openDuckDB } from "../sql";
 
 /**
  * Mayaheros ericymba's only global assessment is an amendment, which the
@@ -231,7 +231,7 @@ export async function buildAssessments(conn: DuckDBConnection, coreDir: string):
 }
 
 export async function run(opts: { out?: string } = {}): Promise<string> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "8" })).connect();
+  const conn = await openDuckDB();
   await attachRedList(conn);
   const out = await buildAssessments(conn, opts.out ?? CORE_DIR);
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(*) FILTER (is_latest) AS latest,

@@ -51,12 +51,12 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { gbifJson } from "../../../src/lib/gbif-fetch";
 import { GBIF_GEOSPATIAL_ISSUES } from "../../../src/lib/gbif";
-import { CACHE_ROOT, CORE_DIR, DUCKDB_TMP } from "../paths";
-import { lit } from "../sql";
+import { CACHE_ROOT, CORE_DIR } from "../paths";
+import { lit, openDuckDB } from "../sql";
 
 const SNAPSHOT_ROOT = process.env.GBIF_SNAPSHOT_ROOT ?? path.join(os.homedir(), "Data", "gbif");
 /** The earliest snapshot keyed by Catalogue of Life rather than GBIF's old Backbone. */
@@ -232,9 +232,7 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
 export async function run(opts: { out?: string } = {}): Promise<OccurrenceSource> {
   const snap = resolveSnapshot();
   console.log(`build-occurrences: ${snap.date} (${snap.files.length} files) — ${snap.citation}`);
-  const conn = await (await DuckDBInstance.create(":memory:", {
-    threads: "20", memory_limit: "96GB", temp_directory: DUCKDB_TMP, preserve_insertion_order: "false",
-  })).connect();
+  const conn = await openDuckDB({ threads: "20", memory_limit: "96GB", preserve_insertion_order: "false" });
   const source = await buildOccurrences(conn, snap, opts.out ?? CORE_DIR);
   const { sourceRows } = source;
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS rows, sum(n) AS records, sum(n) FILTER (georef) AS georef

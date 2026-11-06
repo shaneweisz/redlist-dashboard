@@ -26,11 +26,12 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { syncPath } from "../../../src/lib/data/sync-layout";
 import { loadEnvFiles } from "../../lib/utils";
 import { ensureColInputs } from "../inputs/col";
 import { CORE_DIR, OUT_DIR } from "../paths";
+import { openDuckDB } from "../sql";
 
 export async function buildCommonNames(
   conn: DuckDBConnection, opts: { vernacularTsv: string; taxa: string; coreDir: string; dataDir: string },
@@ -125,7 +126,7 @@ if (isDirectRun) {
   loadEnvFiles();
   (async () => {
     const col = await ensureColInputs();
-    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const conn = await openDuckDB();
     await buildCommonNames(conn, { vernacularTsv: col.vernacularNames, taxa: path.join(CORE_DIR, "taxa.parquet"), coreDir: CORE_DIR, dataDir: OUT_DIR });
   })().catch((e) => { console.error(e); process.exit(1); });
 }

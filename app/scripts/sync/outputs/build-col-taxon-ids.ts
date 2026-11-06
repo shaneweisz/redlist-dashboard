@@ -20,12 +20,12 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { requireFiles } from "../paths";
 import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "../../../src/config/taxonomy-tree";
 import { COL_DOMESTIC_EXCLUDE_NAMES, COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import { openDuckDB } from "../sql";
 
 type Rank = "class" | "order" | "family" | "genus" | "species";
 
@@ -126,7 +126,7 @@ export async function run(opts: { taxaPath?: string; outPath?: string; aliasesOu
   requireFiles("build-col-taxon-ids", taxaPath);
 
   const names = collectNames();
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
   await conn.run(`CREATE TEMP TABLE names(rank VARCHAR, name VARCHAR);`);
   const values = [...names.entries()].map(([n, r]) => `('${r}', '${n.replace(/'/g, "''")}')`).join(",");
   await conn.run(`INSERT INTO names VALUES ${values};`);

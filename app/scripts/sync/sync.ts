@@ -1,25 +1,27 @@
 /**
- * sync: build a full data release from the three inputs, then check it.
+ * sync: build a full data release from its inputs, then check it.
  *
- * Run monthly, locally, once a new GBIF snapshot is mirrored (see
- * build-occurrences.ts for the `aws s3 sync` line). Nothing is uploaded: the
- * output lands in ~/.cache/redlist-dashboard/build/ and `npm run sync:publish`
- * copies it into app/data and uploads it.
+ * Run monthly, locally, once a new GBIF snapshot is mirrored (docs/sync.md,
+ * "Running it each month"). Nothing is uploaded: the build lands in
+ * ~/.cache/redlist-dashboard/build/ (core/ working tables, data/ what the app
+ * reads), and `npm run sync:publish` copies data/ into app/data/sync and
+ * uploads it. The steps, as the log and docs/sync.md number them:
  *
- *   inputs     CoL XR + curated checklist (cached by dataset key), the Red List
- *              database (read-only), the GBIF snapshot mirror, iNaturalist names
- *   core       taxa → assessments → occurrence_counts → matches → assessment_link
- *   matching   GBIF's matcher (matching-ws, run locally in Docker, pinned to the
- *              XR) answers every Red List name; build-link takes the certain
- *              answers and decisions.tsv for the rest, and writes the species
- *              still waiting for a person to build/match-queue.tsv
- *   outputs    common names and the read models, then the summaries, CoL revisions, synonym
- *              and search indexes and CoL taxon ids built from them
- *   checks     matching fixtures (any failure stops the sync), and the
- *              comparison against the sync production serves, written to
- *              build/compare/ for the PR
- *   sync.json  every input version and check result, published with the data
- *   sync.log   everything the run printed, published with it
+ *   1 inputs        CoL XR, curated checklist and Base sources, iNaturalist names (cached)
+ *   2 taxa          core/taxa.parquet, every CoL usage
+ *   3 assessments   core/assessments.parquet, from the Red List database (read-only)
+ *   4 occurrences   core/occurrence_* from the GBIF snapshot mirror
+ *   5 match names   GBIF's matcher (matching-ws, in Docker) on every Red List name
+ *   6 link          which CoL species each assessed species is; build/match-queue.tsv
+ *                   lists the ones waiting for a person
+ *   7 common names, read models   the lists the app reads
+ *   8 summaries and indexes       summaries, CoL revisions, search and synonym
+ *                   indexes, src/config/col-taxon-ids.json and col-release.json
+ *   9 checks        fixtures and data tests (either stops the sync), then the
+ *                   comparison with production's sync, in build/compare/
+ *
+ * sync.json records every input version and check result, and sync.log
+ * everything the run printed; both are published with the data.
  *
  * Usage:  npm run sync [-- --skip-compare] [-- --baseline <data dir>]
  */
@@ -27,7 +29,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, spawnSync } from "child_process";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../lib/utils";
 import { ensureColInputs, writeColReleasePin } from "./inputs/col";
 import { ensureInatNames } from "./inputs/inat-names";
@@ -48,8 +49,9 @@ import { observe, mismatches } from "./checks/check-fixtures";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
-import { BUILD_DIR, CORE_DIR, DUCKDB_TMP, OUT_DIR } from "./paths";
+import { BUILD_DIR, CORE_DIR, OUT_DIR } from "./paths";
 import { syncPath } from "../../src/lib/data/sync-layout";
+import { openDuckDB } from "./sql";
 
 const APP = path.join(__dirname, "..", "..");
 
@@ -102,31 +104,32 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   teeOutput(path.join(OUT_DIR, syncPath("sync.log")));
   console.log(`sync ${manifest.built_at} at ${String(manifest.commit).slice(0, 8)}${manifest.dirty ? " (uncommitted changes)" : ""}`);
 
-  let done = step("inputs");
+  let done = step("1 inputs");
   const col = await ensureColInputs();
   const inat = await ensureInatNames();
   manifest.col = { xr: col.xr, checklist: col.checklist };
   done();
 
-  done = step("taxa");
+  done = step("2 taxa");
   await buildTaxa({ inputs: col });
   done();
-  done = step("assessments");
+  done = step("3 assessments");
   await buildAssessments();
   done();
-  done = step("occurrences");
+  done = step("4 occurrences");
   manifest.gbif = await buildOccurrences();
   done();
 
-  done = step("match names");
-  // Spills go to the cache, not DuckDB's default ./.tmp inside the repo.
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB", temp_directory: DUCKDB_TMP })).connect();
+  done = step("5 match names");
+  // Each step gets its own connection, so no step can read another's temp tables.
+  let conn = await openDuckDB();
   const matcher = await ensureMatcher(col.xr, col.nameUsage);
   const m = await buildMatches(conn, CORE_DIR, matcher);
   console.log(`   ${m.asked.toLocaleString()} names asked, ${m.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
   done();
 
-  done = step("link + read models");
+  done = step("6 link");
+  conn = await openDuckDB();
   const { queue } = await buildLink(conn, CORE_DIR);
   writeQueue(queue, path.join(BUILD_DIR, "match-queue.tsv"));
   const [basis] = (await conn.runAndReadAll(`SELECT count(*) FILTER (basis = 'matcher') AS matcher, count(*) FILTER (basis = 'decision') AS decision,
@@ -135,6 +138,10 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
     unlinked: Number(basis.unlinked), queue: summariseQueue(queue) };
   console.log(`   ${Number(basis.matcher).toLocaleString()} by the matcher, ${Number(basis.decision).toLocaleString()} by decisions.tsv, ` +
     `${queue.length.toLocaleString()} queued for review (${path.join(BUILD_DIR, "match-queue.tsv")})`);
+  done();
+
+  done = step("7 common names, read models");
+  conn = await openDuckDB();
   await buildCommonNames(conn, { vernacularTsv: col.vernacularNames, taxa: path.join(CORE_DIR, "taxa.parquet"), coreDir: CORE_DIR, dataDir: OUT_DIR });
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames: inat });
   const [rl] = (await conn.runAndReadAll(`SELECT count(*) FILTER (is_latest) AS species, max(year_published) AS newest
@@ -143,7 +150,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   manifest.inat = path.basename(path.dirname(inat));
   done();
 
-  done = step("summaries, CoL revisions, synonym and search indexes");
+  done = step("8 summaries and indexes");
   await buildTaxaSummary({ dataDir: OUT_DIR });
   await buildColRevisions({ dataDir: OUT_DIR });
   await buildSynonymIndex({ dataDir: OUT_DIR });
@@ -152,8 +159,8 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   writeColReleasePin(col.xr, col.checklist);
   done();
 
-  done = step("checks");
-  const fx = await (await DuckDBInstance.create(":memory:")).connect();
+  done = step("9 checks");
+  const fx = await openDuckDB();
   const obs = await observe(fx, OUT_DIR, MATCHING_CASES);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
   manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };

@@ -18,10 +18,10 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { syncPath } from "../../../src/lib/data/sync-layout";
 import { requireFiles } from "../paths";
+import { openDuckDB } from "../sql";
 
 const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens (matches the rest of the pipeline)
 
@@ -34,7 +34,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   requireFiles("build-synonym-index", bb, link, asd, path.join(dir, syncPath("species")));
   const out = path.join(dir, syncPath("synonym-index.parquet"));
 
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
   await conn.run(`
     COPY (
       WITH assessed_link AS (

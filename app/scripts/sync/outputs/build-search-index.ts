@@ -38,10 +38,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import { ensureInatNames, inatKingdomSql } from "../inputs/inat-names";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { CORE_DIR, OUT_DIR, requireFiles } from "../paths";
 import { syncPath } from "../../../src/lib/data/sync-layout";
+import { openDuckDB } from "../sql";
 
 /** Ranks in the order suggestTaxa prefers them; the index is the priority it sorts on.
  *  Mirrors SUGGEST_RANKS in src/lib/data/species-duckdb.ts — keep the two in step. */
@@ -72,7 +73,7 @@ export async function run(opts: { dataDir: string; coreDir: string; inatNames: s
   requireFiles("build-search-index", assessed, ne, link, vernFile, altNames, inatNames);
   const out = path.join(dir, syncPath("name-index.parquet"));
 
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
 
   // The per-species payload, unioned once and then exploded into name rows below.
   // col_id is NULL for assessed rows on purpose: their row key is the SIS id, and

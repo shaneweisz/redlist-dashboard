@@ -19,11 +19,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { loadFacts, inSync } from "./compare/facts";
 import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
-import { lit } from "../sql";
+import { lit, openDuckDB } from "../sql";
 
 export interface Observed {
   assessed: boolean;
@@ -107,7 +107,7 @@ if (isDirectRun) {
   (async () => {
     const dir = path.resolve(process.argv.slice(2).find((a) => !a.startsWith("--")) ?? DATA_DIR);
     if (!fs.existsSync(dir)) throw new Error(`No data directory at ${dir}`);
-    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const conn = await openDuckDB();
     const obs = await observe(conn, dir, MATCHING_CASES);
 
     if (process.argv.includes("--observe")) {

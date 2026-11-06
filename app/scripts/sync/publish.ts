@@ -2,7 +2,7 @@
  * publish: put a built sync into app/data/sync and upload it to R2.
  *
  * Makes app/data/sync exactly the build's data/ (removing what the build
- * doesn't have), then runs upload-data-to-r2, which uploads it to a fresh
+ * doesn't have), then uploadSync (upload-data-to-r2.ts) uploads it to a fresh
  * syncs/<timestamp>/ and bumps latest-sync.txt. Production switches only when
  * that change is merged. The narratives and map overlays are siblings of
  * app/data/sync, so they are neither touched nor uploaded.
@@ -15,9 +15,10 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { DATA_DIR, loadEnvFiles } from "../lib/utils";
 import { OUT_DIR } from "./paths";
+import { uploadSync } from "./upload-data-to-r2";
 import { syncPath } from "../../src/lib/data/sync-layout";
 
-export function publish(opts: { upload?: boolean } = {}): void {
+export async function publish(opts: { upload?: boolean } = {}): Promise<void> {
   if (!fs.existsSync(path.join(OUT_DIR, syncPath("sync.json")))) {
     throw new Error(`publish: no finished build at ${OUT_DIR} (run npm run sync first)`);
   }
@@ -30,9 +31,7 @@ export function publish(opts: { upload?: boolean } = {}): void {
   fs.mkdirSync(appData, { recursive: true });
   execFileSync("rsync", ["-a", "--delete", `${OUT_DIR}/`, `${appData}/`], { stdio: "inherit" });
   console.log(`Copied ${OUT_DIR} → ${appData}`);
-  if (opts.upload !== false) {
-    execFileSync("npx", ["tsx", "scripts/sync/upload-data-to-r2.ts"], { cwd: path.join(__dirname, "..", ".."), stdio: "inherit" });
-  }
+  if (opts.upload !== false) await uploadSync();
   // The sync's data lives in R2 only; git holds the pointer, and the CoL
   // release and taxon-id configs the sync writes into src/config/.
   console.log(`\nStage the data PR with:\n  git add app/latest-sync.txt app/src/config/`);
@@ -41,5 +40,5 @@ export function publish(opts: { upload?: boolean } = {}): void {
 const isDirectRun = process.argv[1]?.endsWith("sync/publish.ts") || process.argv[1]?.endsWith("sync/publish.js");
 if (isDirectRun) {
   loadEnvFiles();
-  try { publish({ upload: !process.argv.includes("--no-upload") }); } catch (e) { console.error(e); process.exit(1); }
+  publish({ upload: !process.argv.includes("--no-upload") }).catch((e) => { console.error(e); process.exit(1); });
 }

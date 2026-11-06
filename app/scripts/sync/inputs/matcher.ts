@@ -22,11 +22,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, cachedDir } from "../paths";
 import { ensureColInputs } from "./col";
-import { lit } from "../sql";
+import { lit, openDuckDB } from "../sql";
 
 export const MATCHER_VERSION = "v1.0.12";
 const REPO = "https://github.com/gbif/matching-ws.git";
@@ -64,7 +63,7 @@ async function ensureExport(xr: { key: string; alias: string }, nameUsage: strin
   // matching-ws reads <export root>/<key>/index.csv.
   const exportRoot = path.join(ROOT, `export-${xr.key}`);
   await cachedDir(path.join(exportRoot, xr.key), async (dir) => {
-    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const conn = await openDuckDB();
     const clean = (c: string) => `replace(replace(${c}, '$', ''), '"', '')`;
     await conn.run(`COPY (
       SELECT "col:ID" AS id, "col:parentID" AS parentId,

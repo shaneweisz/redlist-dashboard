@@ -32,13 +32,13 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { speciesCountsSql, usageCountsSql } from "../core/counts";
 import { ensureInatNames, inatKingdomSql } from "../inputs/inat-names";
-import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
+import { CORE_DIR, OUT_DIR } from "../paths";
 import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
-import { lit } from "../sql";
+import { lit, openDuckDB } from "../sql";
 
 const semicolonList = (col: string) => `CASE WHEN ${col} IS NULL OR len(${col}) = 0 THEN NULL ELSE array_to_string(${col}, ';') END`;
 
@@ -315,7 +315,7 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
 }
 
 export async function run(): Promise<void> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB", temp_directory: DUCKDB_TMP })).connect();
+  const conn = await openDuckDB();
   const inatNames = await ensureInatNames();
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames });
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(gbif_species_key) AS keyed, sum(gbif_georeferenced_records_count) AS georef

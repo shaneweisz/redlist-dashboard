@@ -23,12 +23,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, CORE_DIR } from "../paths";
 import { ensureColInputs } from "../inputs/col";
 import { ensureMatcher, type Matcher } from "../inputs/matcher";
-import { lit, writeTable } from "../sql";
+import { lit, writeTable, openDuckDB } from "../sql";
 
 const THREADS = 16;
 
@@ -134,7 +134,7 @@ export async function buildMatches(conn: DuckDBConnection, coreDir: string, matc
 export async function run(): Promise<void> {
   const col = await ensureColInputs();
   const matcher = await ensureMatcher(col.xr, col.nameUsage);
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+  const conn = await openDuckDB();
   const r = await buildMatches(conn, CORE_DIR, matcher);
   console.log(`Wrote ${r.out}: ${r.asked.toLocaleString()} asked, ${r.cached.toLocaleString()} from cache`);
 }

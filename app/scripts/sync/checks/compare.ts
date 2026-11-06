@@ -18,7 +18,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance } from "@duckdb/node-api";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { ensureBaseline } from "./baseline";
 import { CACHE_ROOT } from "../paths";
@@ -26,6 +26,7 @@ import { loadFacts, snapshotOf } from "./compare/facts";
 import { diffFacts, applyReasons } from "./compare/diff";
 import { REASONS, type ReasonRule } from "./compare/reasons";
 import { buildReport, type CompareSummary } from "./compare/report";
+import { openDuckDB } from "../sql";
 
 export interface CompareOptions {
   baseline: string;
@@ -35,15 +36,13 @@ export interface CompareOptions {
 }
 
 /** What the reason rules can read besides the diff: each side's GBIF snapshot. */
-async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>, baseline: string, candidate: string): Promise<void> {
+async function loadContext(conn: DuckDBConnection, baseline: string, candidate: string): Promise<void> {
   const lit = (v: string | null) => (v === null ? "NULL" : `'${v.replace(/'/g, "''")}'`);
   await conn.run(`CREATE TABLE snapshots AS SELECT ${lit(snapshotOf(baseline))}::VARCHAR AS b, ${lit(snapshotOf(candidate))}::VARCHAR AS a`);
 }
 
 export async function compare(opts: CompareOptions): Promise<CompareSummary> {
-  const tmp = path.join(CACHE_ROOT, "compare", "tmp");
-  fs.mkdirSync(tmp, { recursive: true });
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "8", temp_directory: tmp })).connect();
+  const conn = await openDuckDB();
   await loadFacts(conn, "b", opts.baseline);
   await loadFacts(conn, "a", opts.candidate);
   const notes = await diffFacts(conn);

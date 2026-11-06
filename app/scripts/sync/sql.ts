@@ -2,7 +2,18 @@
  * The small DuckDB helpers every sync step uses.
  */
 
-import type { DuckDBConnection } from "@duckdb/node-api";
+import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { DUCKDB_TMP } from "./paths";
+
+/**
+ * A DuckDB connection the way every sync step opens one: in memory, spilling
+ * to DUCKDB_TMP (left to itself DuckDB spills into ./.tmp, inside the repo),
+ * with 16 threads and 64 GB unless the step needs more.
+ */
+export async function openDuckDB(options: Record<string, string> = {}): Promise<DuckDBConnection> {
+  const instance = await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "64GB", temp_directory: DUCKDB_TMP, ...options });
+  return instance.connect();
+}
 
 /** A SQL string literal. */
 export const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;

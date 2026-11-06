@@ -30,12 +30,12 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { ensureColInputs, type ColInputs } from "../inputs/col";
 import { TAXON_GROUP_CASE, NE_EXCLUDED } from "./taxon-groups";
-import { CORE_DIR, DUCKDB_TMP } from "../paths";
-import { lit } from "../sql";
+import { CORE_DIR } from "../paths";
+import { lit, openDuckDB } from "../sql";
 
 const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','natio','aberration','infraspecific name','infrasubspecific name')";
 /**
@@ -192,7 +192,7 @@ async function report(conn: DuckDBConnection, out: string): Promise<void> {
 
 export async function run(opts: { out?: string; inputs?: ColInputs } = {}): Promise<string> {
   const inputs = opts.inputs ?? (await ensureColInputs());
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "48GB", temp_directory: DUCKDB_TMP })).connect();
+  const conn = await openDuckDB();
   const out = await buildTaxa(conn, inputs, opts.out ?? CORE_DIR);
   await report(conn, out);
   return out;

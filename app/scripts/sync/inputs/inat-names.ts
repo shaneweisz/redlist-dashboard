@@ -18,8 +18,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { DuckDBInstance } from "@duckdb/node-api";
 import { CACHE_ROOT, cachedDir } from "../paths";
+import { openDuckDB } from "../sql";
 
 const EXPORT_URL = "https://www.inaturalist.org/taxa/inaturalist-taxonomy.dwca.zip";
 const FILES = ["taxa.csv", "VernacularNames-english.csv"];
@@ -50,7 +50,7 @@ async function buildNames(out: string): Promise<void> {
       if (!fs.existsSync(path.join(dir, f))) throw new Error(`inat-names: ${f} missing from the export`);
     }
 
-    const conn = await (await DuckDBInstance.create(":memory:")).connect();
+    const conn = await openDuckDB();
     // The CSVs quote with "…" and escape with "" (DuckDB's sniffer guesses wrong on taxa.csv's long URLs).
     const csv = (f: string) => `read_csv('${path.join(dir, f)}', all_varchar=true, header=true, delim=',', quote='"', escape='"')`;
     await conn.run(`

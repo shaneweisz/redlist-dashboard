@@ -20,7 +20,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { allTaxaUnchecked } from "../../lib/taxa";
 import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../../../src/lib/data/taxonomy-constants";
@@ -45,6 +45,7 @@ import {
 import { syncPath } from "../../../src/lib/data/sync-layout";
 import { requireFiles } from "../paths";
 import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-records";
+import { openDuckDB } from "../sql";
 
 // CoL species kept out of the universe (like the domesticated-GBIF exclusion). Homo sapiens
 // — IUCN omits humans from its Red List export. Keep in sync with species-duckdb.ts.
@@ -87,7 +88,7 @@ function median(values: number[]): number | null {
 // Evaluated" that's actually a long-extinct, never-assessed fossil.
 async function createExEwAssessedTable(conn: DuckDBConnection, link: string, assessed: string, tableName: string): Promise<void> {
   await conn.run(`
-    CREATE TEMP TABLE ${tableName} AS
+    CREATE OR REPLACE TEMP TABLE ${tableName} AS
       SELECT DISTINCT l.col_id
       FROM read_parquet('${link}') l
       JOIN read_parquet('${assessed}') a ON a.id = l.id
@@ -102,12 +103,11 @@ function extantUniverseSql(exEwTable: string): string {
 // Per-taxon_group CoL counts: col_described = the extant accepted universe;
 // col_ne = that minus the col_ids IUCN has assessed. species/ is partitioned by
 // taxon_group, so this is a single grouped scan.
-async function colCountsByGroup(dataDir: string): Promise<Map<string, { col_described: number; col_ne: number }>> {
+async function colCountsByGroup(conn: DuckDBConnection, dataDir: string): Promise<Map<string, { col_described: number; col_ne: number }>> {
   const out = new Map<string, { col_described: number; col_ne: number }>();
   const link = path.join(dataDir, syncPath("species_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
   // Same domestic-form exclusion every SSC group's own CoL count already applies (see
@@ -153,14 +153,13 @@ function primaryDimension(filter: NodeFilter): PrimaryDim | null {
 // re-runs filterToSql narrowed to that one name (keeping every other clause, so a
 // domestic-form exclusion or an overlapping node's excludeGenera still applies),
 // which is why the entries sum to exactly colDescribed.
-async function attachColCounts(summaries: Record<string, NodeSummary[]>, dataDir: string): Promise<void> {
+async function attachColCounts(conn: DuckDBConnection, summaries: Record<string, NodeSummary[]>, dataDir: string): Promise<void> {
   const link = path.join(dataDir, syncPath("species_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
   await conn.run(
-    `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
+    `CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
   );
   await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
   const universe = extantUniverseSql("ex_ew_assessed");
@@ -247,8 +246,7 @@ interface GbifRow { scientific_name: string; class_name: string | null; order_na
  * GBIF has records for (assessed ones in their IUCN group, NE ones in their CoL
  * group, from ne.parquet). "Linked" keys are the assessed species' GBIF keys.
  */
-async function loadGroups(dataDir: string): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
+async function loadGroups(conn: DuckDBConnection, dataDir: string): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
   const assessed = (await conn.runAndReadAll(`
     SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
            countries, systems, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
@@ -288,7 +286,8 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dataDir = opts.dataDir ?? DATA_DIR;
   requireFiles("build-taxa-summary", ...["species", "species_link.parquet", "assessed.parquet", "ne.parquet", "taxa.parquet"]
     .map((f) => path.join(dataDir, syncPath(f))));
-  const groups = await loadGroups(dataDir);
+  const conn = await openDuckDB();
+  const groups = await loadGroups(conn, dataDir);
   const summaries: TaxonSummaryRow[] = [];
 
   // Per-country totals across ALL species (unfiltered by taxon) — feeds the
@@ -385,7 +384,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // Catalogue of Life per-group counts: extant universe (col_described) and the
   // not-evaluated slice (col_ne = universe minus assessed col_ids). species/ is
   // partitioned by taxon_group, so this is one grouped scan. 0s if CoL not built yet.
-  const colCounts = await colCountsByGroup(dataDir);
+  const colCounts = await colCountsByGroup(conn, dataDir);
   for (const s of summaries) {
     const c = colCounts.get(s.table1a_taxon_group);
     s.col_described = c?.col_described ?? 0;
@@ -590,7 +589,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
     console.log(`  ${nodeId}: ${childSummaries.length} children`);
   }
 
-  await attachColCounts(nodeChildrenSummaries, dataDir);
+  await attachColCounts(conn, nodeChildrenSummaries, dataDir);
 
   // Two files, split on the "ssc-" id prefix (as TaxaSummary.tsx's SSC_SECTIONS
   // does): Table 1a's rows and the SSC Specialist Groups are unrelated sources.
@@ -609,7 +608,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   console.log(`Wrote ${Object.keys(sscGroupChildrenSummaries).length} SSC group parents (${childCount} total children across both files) → ${sscOutputPath}`);
 
   console.log("\nChecking for new IUCN/CoL class-order alias drift...");
-  await checkTaxonomyAliasDrift(dataDir);
+  await checkTaxonomyAliasDrift(conn, dataDir);
 }
 
 // Warns (does not fail the sync) about any IUCN class/order value with zero
@@ -634,11 +633,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 // taxon/rank combination regardless of relevance (e.g. Gymnosperms' class,
 // which nothing ever groups by) was tried first and buried the few real,
 // actionable mismatches under ~50 lines of noise nobody would keep reading.
-async function checkTaxonomyAliasDrift(dataDir: string): Promise<void> {
+async function checkTaxonomyAliasDrift(conn: DuckDBConnection, dataDir: string): Promise<void> {
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const liveTaxa = allTaxaUnchecked().filter((t) => DYNAMIC_DRILLDOWN_ROOTS.has(t.id));
-  const conn = await (await DuckDBInstance.create(":memory:")).connect();
   const dimensions: { label: "class" | "order"; col: string; taxa: ReturnType<typeof allTaxaUnchecked> }[] = [
     { label: "class", col: canonicalClassColumnSql("class_name"), taxa: liveTaxa.filter((t) => nextDynamicRank(t.id) === "class") },
     { label: "order", col: canonicalOrderColumnSql("order_name", "scientific_name"), taxa: liveTaxa },

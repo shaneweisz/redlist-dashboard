@@ -39,14 +39,14 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, normaliseAuthorship, type Verdict } from "./species-key";
 import { speciesNameParts, canonicalEpithet } from "./name-variants";
 import { acceptMatch, sameAuthors, type MatchAnswer, type QueueReason } from "./accept-match";
 import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";
 import { BUILD_DIR, CORE_DIR } from "../paths";
-import { lit, rows, writeTable } from "../sql";
+import { lit, rows, writeTable, openDuckDB } from "../sql";
 
 const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', 'g'))`;
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
@@ -440,7 +440,7 @@ export function summariseQueue(queue: QueueRow[]): Record<string, number> {
 }
 
 export async function run(): Promise<void> {
-  const conn = await (await DuckDBInstance.create(":memory:", { threads: "16" })).connect();
+  const conn = await openDuckDB();
   const { out, queue } = await buildLink(conn, CORE_DIR);
   writeQueue(queue, path.join(BUILD_DIR, "match-queue.tsv"));
   const summary = await rows<{ role: string; basis: string | null; verdict: string; method: string; n: number }>(conn, `
