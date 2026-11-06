@@ -63,9 +63,9 @@ export async function ensureColInputs(): Promise<ColInputs> {
 }
 
 /** Record the releases a sync was built from, for the app's "Source" link. */
-export function writeColReleasePin(xr: XrDatasetInfo, checklist: ChecklistInfo): void {
-  fs.writeFileSync(PIN, JSON.stringify({ ...xr, checklist }, null, 2) + "\n");
-  console.log(`   wrote ${path.relative(process.cwd(), PIN)} (${xr.alias}; checklist ${checklist.alias})`);
+export function writeColReleasePin(xr: XrDatasetInfo, checklist: ChecklistInfo, file = PIN): void {
+  fs.writeFileSync(file, JSON.stringify({ ...xr, checklist }, null, 2) + "\n");
+  console.log(`   wrote ${path.relative(process.cwd(), file)} (${xr.alias}; checklist ${checklist.alias})`);
 }
 
 /** The XR the last sync was built from, if any. */
