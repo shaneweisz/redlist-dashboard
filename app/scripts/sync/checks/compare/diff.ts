@@ -18,6 +18,7 @@
 
 import type { DuckDBConnection } from "@duckdb/node-api";
 import type { ReasonRule } from "./reasons";
+import { lit } from "../../sql";
 
 export interface SchemaNote {
   kind: string;
@@ -28,7 +29,6 @@ export interface SchemaNote {
 const NUMERIC = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|FLOAT|DOUBLE|DECIMAL.*)$/;
 
 const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 async function columns(conn: DuckDBConnection, schema: string, table: string): Promise<Map<string, string>> {
   const rows = (await conn.runAndReadAll(

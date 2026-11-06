@@ -27,6 +27,7 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { loadFacts, inSync, type Layout } from "./compare/facts";
 import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
+import { lit } from "../sql";
 
 export interface Observed {
   assessed: boolean;
@@ -38,7 +39,6 @@ export interface Observed {
   neListed: Record<string, boolean>;
 }
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** CoL names for ids, from whichever taxonomy file the layout has. */
 function taxonomySql(dir: string, layout: Layout): string {

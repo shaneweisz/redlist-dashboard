@@ -39,9 +39,9 @@ import { usageCountsSql } from "../core/counts";
 import { ensureInatNames, inatKingdomSql } from "../inputs/inat-names";
 import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
 import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
+import { lit } from "../sql";
 
 let CORE_DIR_FOR_COUNTRIES = CORE_DIR;
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const joined = (col: string) => `CASE WHEN ${col} IS NULL OR len(${col}) = 0 THEN NULL ELSE array_to_string(${col}, ';') END`;
 
 export interface ReadModelInputs {

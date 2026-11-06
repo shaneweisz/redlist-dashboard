@@ -8,6 +8,7 @@
 
 import type { DuckDBConnection } from "@duckdb/node-api";
 import type { SchemaNote } from "./diff";
+import { lit } from "../../sql";
 
 export interface CompareSummary {
   total: number;
@@ -17,7 +18,6 @@ export interface CompareSummary {
 
 const EXAMPLES = 8;
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const n = (v: unknown) => Number(v ?? 0);
 const fmt = (v: number) => v.toLocaleString("en-GB");
 const cell = (v: unknown) => (v === null || v === undefined ? "∅" : String(v).replace(/\|/g, "\\|").slice(0, 80));

@@ -34,7 +34,7 @@ import { ensureInatNames } from "./inputs/inat-names";
 import { run as buildTaxa } from "./core/build-taxa";
 import { run as buildAssessments, REDLIST_DB } from "./core/build-assessments";
 import { run as buildOccurrences } from "./core/build-occurrences";
-import { buildLink, summariseQueue } from "./core/build-link";
+import { buildLink, summariseQueue, writeQueue } from "./core/build-link";
 import { buildMatches } from "./core/build-matches";
 import { ensureMatcher } from "./inputs/matcher";
 import { buildCommonNames } from "./outputs/build-common-names";
@@ -128,8 +128,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
 
   done = step("link + read models");
   const { queue } = await buildLink(conn, CORE_DIR);
-  await conn.run(`COPY (SELECT * FROM read_parquet('${path.join(CORE_DIR, "match_queue.parquet")}'))
-    TO '${path.join(BUILD_DIR, "match-queue.tsv")}' (DELIMITER '\t', HEADER)`);
+  writeQueue(queue, path.join(BUILD_DIR, "match-queue.tsv"));
   const [basis] = (await conn.runAndReadAll(`SELECT count(*) FILTER (basis = 'matcher') AS matcher, count(*) FILTER (basis = 'decision') AS decision,
       count(*) FILTER (basis IS NULL) AS unlinked FROM read_parquet('${path.join(CORE_DIR, "assessment_link.parquet")}') WHERE role = 'primary'`)).getRowObjects();
   manifest.matching = { matcher: matcher.version, xr: matcher.datasetKey, by_matcher: Number(basis.matcher), by_decision: Number(basis.decision),

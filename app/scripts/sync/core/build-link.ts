@@ -7,7 +7,7 @@
  *      a decision in decisions.tsv, if there is one and it still resolves;
  *      else GBIF's matcher's answer (build-matches.ts), when accept-match.ts
  *      takes it without review;
- *      else nothing yet: the species is queued (core/match_queue.parquet) and
+ *      else nothing yet: the species is queued (build/match-queue.tsv) and
  *      counts no records until someone decides.
  *    The matcher is the one GBIF files occurrence records with, so a name
  *    matched here is where GBIF put that name's records.
@@ -32,7 +32,7 @@
  *   usage_id (where its records start: the species for own, its own usage for
  *   lumped, NULL when nothing counts), verdict, method (what kind of usage the
  *   name is), basis (matcher | decision | rule), decided_by, reason, counted
- * and core/match_queue.parquet, the species waiting for a person.
+ * and the species waiting for a person (writeQueue: build/match-queue.tsv).
  *
  * Usage:  npx tsx scripts/sync/core/build-link.ts
  */
@@ -45,11 +45,9 @@ import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, normali
 import { speciesNameParts, canonicalEpithet } from "./name-variants";
 import { acceptMatch, sameAuthors, type MatchAnswer, type QueueReason } from "./accept-match";
 import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";
-import { CORE_DIR } from "../paths";
+import { BUILD_DIR, CORE_DIR } from "../paths";
+import { lit, rows, writeTable } from "../sql";
 
-export { sameAuthors };
-
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', 'g'))`;
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
@@ -85,31 +83,27 @@ export interface QueueRow {
   decided_by: string | null;
 }
 
-async function rows<T>(conn: DuckDBConnection, sql: string): Promise<T[]> {
-  return (await conn.runAndReadAll(sql)).getRowObjects() as unknown as T[];
-}
-
 export async function buildLink(
   conn: DuckDBConnection, coreDir: string, opts: { decisions?: Map<number, Decision> } = {},
 ): Promise<{ out: string; queue: QueueRow[] }> {
-  const taxa = lit(path.join(coreDir, "taxa.parquet"));
+  const taxaFile = lit(path.join(coreDir, "taxa.parquet"));
   const assessments = lit(path.join(coreDir, "assessments.parquet"));
   const matches = lit(path.join(coreDir, "matches.parquet"));
   const out = path.join(coreDir, "assessment_link.parquet");
   const decisions = opts.decisions ?? readDecisions();
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE rl AS
-    SELECT sis_taxon_id::INTEGER AS sis, scientific_name AS name, ${NAME("scientific_name")} AS nm, authority,
+  await conn.run(`CREATE OR REPLACE TEMP TABLE redlist_species AS
+    SELECT sis_taxon_id::INTEGER AS sis, scientific_name AS name, ${NAME("scientific_name")} AS name_key, authority,
            family, class_name, phylum_name AS phylum, kingdom_name AS kingdom, synonyms
     FROM read_parquet(${assessments}) WHERE is_latest`);
-  await conn.run(`CREATE OR REPLACE TEMP TABLE tx AS
+  await conn.run(`CREATE OR REPLACE TEMP TABLE col_usages AS
     SELECT col_id, parent_id, status, rank, scientific_name, authorship, family, class_name, phylum, kingdom, species_id, demoted,
-           checklist_parent_id, ${NAME("scientific_name")} AS nm
-    FROM read_parquet(${taxa})`);
+           checklist_parent_id, ${NAME("scientific_name")} AS name_key
+    FROM read_parquet(${taxaFile})`);
 
   // IUCN and CoL name one phylum differently (the brown algae); unknown lineage is no evidence.
-  const sameLineage = `(r.kingdom IS NULL OR tt.kingdom IS NULL OR (r.kingdom = tt.kingdom AND (r.phylum IS NULL OR tt.phylum IS NULL
-    OR replace(r.phylum, 'heterokontophyta', 'ochrophyta') = tt.phylum)))`;
+  const sameLineage = `(r.kingdom IS NULL OR target.kingdom IS NULL OR (r.kingdom = target.kingdom AND (r.phylum IS NULL OR target.phylum IS NULL
+    OR replace(r.phylum, 'heterokontophyta', 'ochrophyta') = target.phylum)))`;
 
   // ── 1. Name ────────────────────────────────────────────────────────────────
   const answers = new Map((await rows<Omit<MatchAnswer, "alternatives"> & { sis_taxon_id: number; alts: string | null }>(conn, `
@@ -119,19 +113,19 @@ export async function buildLink(
   const speciesOf = new Map((await rows<{ col_id: string; species_id: string | null }>(conn, `
     WITH ids AS (SELECT usage_id AS id FROM read_parquet(${matches}) UNION
                  SELECT unnest(list_transform(alternatives, a -> a.usage_id)) FROM read_parquet(${matches}))
-    SELECT t.col_id, t.species_id FROM ids JOIN tx t ON t.col_id = ids.id`)).map((r) => [r.col_id, r.species_id]));
+    SELECT t.col_id, t.species_id FROM ids JOIN col_usages t ON t.col_id = ids.id`)).map((r) => [r.col_id, r.species_id]));
   const decidedNames = [...new Set([...decisions.values()].flatMap((d) => (d.colName ? [norm(d.colName)] : [])))];
   const candidates = new Map<string, Candidate[]>();
   if (decidedNames.length > 0) {
-    await conn.run(`CREATE OR REPLACE TEMP TABLE decided_names AS SELECT unnest([${decidedNames.map(lit).join(", ")}]::VARCHAR[]) AS nm`);
-    for (const c of await rows<Candidate & { nm: string }>(conn, `
-        SELECT t.nm, t.col_id, t.scientific_name, t.authorship, t.status FROM tx t JOIN decided_names USING (nm) WHERE t.rank = 'species'`)) {
-      candidates.set(c.nm, [...(candidates.get(c.nm) ?? []), c]);
+    await conn.run(`CREATE OR REPLACE TEMP TABLE decided_names AS SELECT unnest([${decidedNames.map(lit).join(", ")}]::VARCHAR[]) AS name_key`);
+    for (const c of await rows<Candidate & { name_key: string }>(conn, `
+        SELECT t.name_key, t.col_id, t.scientific_name, t.authorship, t.status FROM col_usages t JOIN decided_names USING (name_key) WHERE t.rank = 'species'`)) {
+      candidates.set(c.name_key, [...(candidates.get(c.name_key) ?? []), c]);
     }
   }
 
-  const species = await rows<{ sis: number; name: string; authority: string | null }>(conn, `SELECT sis, name, authority FROM rl ORDER BY sis`);
-  const picks: { sis: number; usage: string; basis: "matcher" | "decision"; by: string | null }[] = [];
+  const species = await rows<{ sis: number; name: string; authority: string | null }>(conn, `SELECT sis, name, authority FROM redlist_species ORDER BY sis`);
+  const picks: { sis: number; usage_id: string; basis: "matcher" | "decision"; by_: string | null }[] = [];
   const queue: QueueRow[] = [];
   const unlinkedReason = new Map<number, string>();
   for (const s of species) {
@@ -147,17 +141,17 @@ export async function buildLink(
       const res = resolveDecision(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : []);
       if (res.kind !== "stale") {
         if (!d.reviewed) enqueue("proposed", acc.accepted ? "the matcher would take its answer" : acc.reason, d.by);
-        if (res.kind === "usage") picks.push({ sis: s.sis, usage: res.colId, basis: "decision", by: d.by });
+        if (res.kind === "usage") picks.push({ sis: s.sis, usage_id: res.colId, basis: "decision", by_: d.by });
         else unlinkedReason.set(s.sis, `not in CoL (decided by ${d.by})`);
         continue;
       }
       // A decision that no longer resolves is asked again; meanwhile the matcher's answer stands if it is certain.
       enqueue("stale", res.why, d.by);
-      if (acc.accepted) picks.push({ sis: s.sis, usage: m!.usage_id!, basis: "matcher", by: null });
+      if (acc.accepted) picks.push({ sis: s.sis, usage_id: m!.usage_id!, basis: "matcher", by_: null });
       else unlinkedReason.set(s.sis, `waiting for a decision: ${res.why}`);
       continue;
     }
-    if (acc.accepted) { picks.push({ sis: s.sis, usage: m!.usage_id!, basis: "matcher", by: null }); continue; }
+    if (acc.accepted) { picks.push({ sis: s.sis, usage_id: m!.usage_id!, basis: "matcher", by_: null }); continue; }
     enqueue("undecided", acc.reason);
     unlinkedReason.set(s.sis, `waiting for a decision: ${acc.reason}`);
   }
@@ -165,14 +159,7 @@ export async function buildLink(
   const orphaned = [...decisions.keys()].filter((k) => !rlSis.has(k));
   if (orphaned.length > 0) console.log(`  ${orphaned.length} decisions name species no longer assessed (SIS ${orphaned.slice(0, 5).join(", ")}${orphaned.length > 5 ? ", ..." : ""})`);
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE picks (sis INTEGER, usage_id VARCHAR, basis VARCHAR, by_ VARCHAR)`);
-  const pickAp = await conn.createAppender("picks");
-  for (const p of picks) {
-    pickAp.appendInteger(p.sis); pickAp.appendVarchar(p.usage); pickAp.appendVarchar(p.basis);
-    if (p.by === null) pickAp.appendNull(); else pickAp.appendVarchar(p.by);
-    pickAp.endRow();
-  }
-  pickAp.closeSync();
+  await writeTable(conn, "picks", { sis: "INTEGER", usage_id: "VARCHAR", basis: "VARCHAR", by_: "VARCHAR" }, picks);
 
   // ── 2. Concept ─────────────────────────────────────────────────────────────
   // The species each usage makes it: itself if accepted, a synonym's species,
@@ -181,32 +168,38 @@ export async function buildLink(
   // that resolves to Sparus aurata, another fish).
   const primary = await rows<{
     sis: number; name: string; authority: string | null; basis: "matcher" | "decision"; by_: string | null; method: string;
-    u_id: string; u_name: string; u_auth: string | null; u_status: string; u_parent: string | null; u_parent_rank: string | null; u_parent_name: string | null;
-    t_id: string | null; t_name: string | null; t_auth: string | null;
+    usage_id: string; usage_name: string; usage_authorship: string | null; usage_status: string;
+    usage_parent: string | null; usage_parent_rank: string | null; usage_parent_name: string | null;
+    target_id: string | null; target_name: string | null; target_authorship: string | null;
   }>(conn, `
-    WITH p AS (
-      SELECT p.sis, p.basis, p.by_, u.*,
-             CASE WHEN u.demoted THEN 'checklist_synonym' WHEN u.status = 'accepted' THEN 'accepted'
-                  WHEN u.status = 'provisionally accepted' THEN 'provisional' WHEN u.status = 'synonym' THEN 'synonym'
-                  WHEN u.status = 'ambiguous synonym' THEN 'ambiguous_synonym' ELSE replace(u.status, ' ', '_') END AS method,
-             CASE WHEN u.status IN ('accepted', 'provisionally accepted') THEN
-                    CASE WHEN u.demoted AND cp.status = 'accepted' AND cp.rank = 'species' AND NOT cp.demoted THEN cp.col_id ELSE u.col_id END
-                  WHEN u.status IN ('synonym', 'ambiguous synonym') THEN u.species_id END AS target
-      FROM picks p JOIN tx u ON u.col_id = p.usage_id LEFT JOIN tx cp ON cp.col_id = u.checklist_parent_id)
-    SELECT r.sis, r.name, r.authority, p.basis, p.by_, p.method,
-           p.col_id AS u_id, p.scientific_name AS u_name, p.authorship AS u_auth, p.status AS u_status,
-           p.parent_id AS u_parent, up.rank AS u_parent_rank, up.scientific_name AS u_parent_name,
-           tt.col_id AS t_id, tt.scientific_name AS t_name, tt.authorship AS t_auth
-    FROM p JOIN rl r ON r.sis = p.sis LEFT JOIN tx tt ON tt.col_id = p.target LEFT JOIN tx up ON up.col_id = p.parent_id`);
+    WITH picked AS (
+      SELECT pick.sis, pick.basis, pick.by_, usage.*,
+             CASE WHEN usage.demoted THEN 'checklist_synonym' WHEN usage.status = 'accepted' THEN 'accepted'
+                  WHEN usage.status = 'provisionally accepted' THEN 'provisional' WHEN usage.status = 'synonym' THEN 'synonym'
+                  WHEN usage.status = 'ambiguous synonym' THEN 'ambiguous_synonym' ELSE replace(usage.status, ' ', '_') END AS method,
+             CASE WHEN usage.status IN ('accepted', 'provisionally accepted') THEN
+                    CASE WHEN usage.demoted AND checklist_parent.status = 'accepted' AND checklist_parent.rank = 'species'
+                              AND NOT checklist_parent.demoted THEN checklist_parent.col_id ELSE usage.col_id END
+                  WHEN usage.status IN ('synonym', 'ambiguous synonym') THEN usage.species_id END AS target_col_id
+      FROM picks pick JOIN col_usages usage ON usage.col_id = pick.usage_id
+      LEFT JOIN col_usages checklist_parent ON checklist_parent.col_id = usage.checklist_parent_id)
+    SELECT r.sis, r.name, r.authority, picked.basis, picked.by_, picked.method,
+           picked.col_id AS usage_id, picked.scientific_name AS usage_name, picked.authorship AS usage_authorship,
+           picked.status AS usage_status, picked.parent_id AS usage_parent,
+           usage_parent.rank AS usage_parent_rank, usage_parent.scientific_name AS usage_parent_name,
+           target.col_id AS target_id, target.scientific_name AS target_name, target.authorship AS target_authorship
+    FROM picked JOIN redlist_species r ON r.sis = picked.sis
+    LEFT JOIN col_usages target ON target.col_id = picked.target_col_id
+    LEFT JOIN col_usages usage_parent ON usage_parent.col_id = picked.parent_id`);
 
-  const assessedNames = new Set((await rows<{ nm: string }>(conn, `SELECT nm FROM rl`)).map((r) => r.nm));
+  const assessedNames = new Set((await rows<{ name_key: string }>(conn, `SELECT name_key FROM redlist_species`)).map((r) => r.name_key));
   // Every CoL synonym carrying a species' own name, with the species it leads
   // to: CoL can hold one name several times under different citations
   // (Clithon oualaniensis, three times), and any one may be the respelling.
   await conn.run(`CREATE OR REPLACE TEMP TABLE own_syn AS
-    SELECT r.sis, tt.col_id AS target_id, u.scientific_name AS name, u.authorship
-    FROM rl r JOIN tx u ON u.nm = r.nm AND u.rank = 'species' AND u.status = 'synonym' AND u.species_id IS NOT NULL
-    JOIN tx tt ON tt.col_id = u.species_id AND ${sameLineage}`);
+    SELECT r.sis, target.col_id AS target_id, u.scientific_name AS name, u.authorship
+    FROM redlist_species r JOIN col_usages u ON u.name_key = r.name_key AND u.rank = 'species' AND u.status = 'synonym' AND u.species_id IS NOT NULL
+    JOIN col_usages target ON target.col_id = u.species_id AND ${sameLineage}`);
   const ownNameSynonyms = new Map<string, { name: string; authorship: string | null }[]>();
   for (const r of await rows<{ sis: number; target_id: string; name: string; authorship: string | null }>(conn, `SELECT * FROM own_syn`)) {
     const k = `${r.sis}|${r.target_id}`;
@@ -215,26 +208,26 @@ export async function buildLink(
 
   const links: LinkRow[] = [];
   for (const p of primary) {
-    if (!p.t_id || !p.t_name) { unlinkedReason.set(p.sis, `${p.u_name} leads to no accepted species`); continue; }
+    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, `${p.usage_name} leads to no accepted species`); continue; }
     // A decision says the Red List name IS this CoL name, however spelled, so
     // decideKey may be asked about either spelling: the author comparison
     // can't undo what the decision settled.
     const asListed = { scientificName: p.name, authorship: p.authority ?? undefined };
-    const asDecided = { scientificName: p.u_name, authorship: p.u_auth ?? undefined };
-    const usage = { key: p.u_id, scientificName: p.u_name, authorship: p.u_auth ?? undefined };
-    const target = { key: p.t_id, scientificName: p.t_name, authorship: p.t_auth ?? undefined };
+    const asDecided = { scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
+    const usage = { key: p.usage_id, scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
+    const target = { key: p.target_id, scientificName: p.target_name, authorship: p.target_authorship ?? undefined };
     // Its own name is a CoL synonym that CoL marks as a respelling of the
     // accepted name (same citation): the same species, whatever the Red List's
     // citation says (Meandrina danae / danai).
     const respelled = p.basis === "matcher" && p.method === "synonym"
-      && (ownNameSynonyms.get(`${p.sis}|${p.t_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
-      && !isSeparatelyAssessed(p.t_name, p.name, assessedNames);
+      && (ownNameSynonyms.get(`${p.sis}|${p.target_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
+      && !isSeparatelyAssessed(p.target_name, p.name, assessedNames);
     const d = p.method === "ambiguous_synonym"
-      ? { verdict: "lumped" as const, reason: `CoL lists ${p.u_name} as an ambiguous synonym of ${p.t_name}; counting only records under this name` }
+      ? { verdict: "lumped" as const, reason: `CoL lists ${p.usage_name} as an ambiguous synonym of ${p.target_name}; counting only records under this name` }
       : respelled
-      ? { verdict: "own" as const, reason: `CoL spells it ${p.t_name} (${p.u_name} is its orthographic variant, same citation)` }
+      ? { verdict: "own" as const, reason: `CoL spells it ${p.target_name} (${p.usage_name} is its orthographic variant, same citation)` }
       : (() => {
-          const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.t_id !== p.u_id ? target : undefined, assessedNames });
+          const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.target_id !== p.usage_id ? target : undefined, assessedNames });
           const listed = ask(asListed);
           return p.basis === "decision" && listed.verdict !== "own" ? ask(asDecided) : listed;
         })();
@@ -242,12 +235,12 @@ export async function buildLink(
     // CoL files that synonym under (Fringilla polatzeki → F. teydea polatzeki).
     // Not a nominate infraspecific (Rosa villosa subsp. villosa): that is the
     // species' core, whose records are the accepted species', not this one's.
-    const nominate = p.u_parent_name ? (() => { const w = p.u_parent_name.toLowerCase().split(/\s+/); return w.length > 2 && w[w.length - 1] === w[1]; })() : false;
-    const lumpRoot = p.u_status === "synonym" && p.u_parent && p.u_parent_rank && p.u_parent_rank !== "species" && p.u_parent !== p.t_id && !nominate
-      ? p.u_parent : p.u_id;
+    const nominate = p.usage_parent_name ? (() => { const w = p.usage_parent_name.toLowerCase().split(/\s+/); return w.length > 2 && w[w.length - 1] === w[1]; })() : false;
+    const lumpRoot = p.usage_status === "synonym" && p.usage_parent && p.usage_parent_rank && p.usage_parent_rank !== "species" && p.usage_parent !== p.target_id && !nominate
+      ? p.usage_parent : p.usage_id;
     links.push({
-      sis_taxon_id: p.sis, role: "primary", col_id: p.t_id,
-      usage_id: d.verdict === "own" ? p.t_id : d.verdict === "lumped" ? lumpRoot : null,
+      sis_taxon_id: p.sis, role: "primary", col_id: p.target_id,
+      usage_id: d.verdict === "own" ? p.target_id : d.verdict === "lumped" ? lumpRoot : null,
       verdict: d.verdict, method: p.method, basis: p.basis, decided_by: p.by_, reason: d.reason, counted: d.verdict === "own" || d.verdict === "lumped",
     });
   }
@@ -274,20 +267,20 @@ export async function buildLink(
   //     fruticosus is filed under three parents)
   // What an IUCN synonym can name: an accepted species (kind 0), a strict
   // synonym's species (1), or a demoted XR species' checklist species (2).
-  const covered = await rows<{ sis: number; name: string; authority: string | null; t_id: string; t_name: string; t_auth: string | null; kind: number; src: string }>(conn, `
+  const covered = await rows<{ sis: number; name: string; authority: string | null; target_id: string; target_name: string; target_authorship: string | null; kind: number; src: string }>(conn, `
     WITH offer AS (
-      SELECT nm, col_id AS target_id, 0 AS kind FROM tx WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
+      SELECT name_key, col_id AS target_id, 0 AS kind FROM col_usages WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
       UNION ALL
-      SELECT nm, species_id, 1 FROM tx WHERE rank = 'species' AND status = 'synonym' AND species_id IS NOT NULL
+      SELECT name_key, species_id, 1 FROM col_usages WHERE rank = 'species' AND status = 'synonym' AND species_id IS NOT NULL
       UNION ALL
-      SELECT t.nm, CASE WHEN p.status = 'accepted' AND p.rank = 'species' AND NOT p.demoted THEN p.col_id ELSE t.col_id END, 2
-      FROM tx t LEFT JOIN tx p ON p.col_id = t.checklist_parent_id WHERE t.demoted),
-    syn AS (SELECT sis, name, authority, kingdom, phylum, ${NAME("s.name")} AS snm FROM rl, unnest(synonyms) AS u(s))
-    SELECT DISTINCT r.sis, r.name, r.authority, tt.col_id AS t_id, tt.scientific_name AS t_name, tt.authorship AS t_auth, o.kind, 'iucn' AS src
-    FROM syn r JOIN offer o ON o.nm = r.snm JOIN tx tt ON tt.col_id = o.target_id AND ${sameLineage}
+      SELECT t.name_key, CASE WHEN p.status = 'accepted' AND p.rank = 'species' AND NOT p.demoted THEN p.col_id ELSE t.col_id END, 2
+      FROM col_usages t LEFT JOIN col_usages p ON p.col_id = t.checklist_parent_id WHERE t.demoted),
+    syn AS (SELECT sis, name, authority, kingdom, phylum, ${NAME("s.name")} AS synonym_name_key FROM redlist_species, unnest(synonyms) AS u(s))
+    SELECT DISTINCT r.sis, r.name, r.authority, target.col_id AS target_id, target.scientific_name AS target_name, target.authorship AS target_authorship, o.kind, 'iucn' AS src
+    FROM syn r JOIN offer o ON o.name_key = r.synonym_name_key JOIN col_usages target ON target.col_id = o.target_id AND ${sameLineage}
     UNION
     SELECT DISTINCT o.sis, r.name, r.authority, t.col_id, t.scientific_name, t.authorship, 0, 'own_name_synonym'
-    FROM own_syn o JOIN rl r ON r.sis = o.sis JOIN tx t ON t.col_id = o.target_id`);
+    FROM own_syn o JOIN redlist_species r ON r.sis = o.sis JOIN col_usages t ON t.col_id = o.target_id`);
   const primaryTarget = new Map(links.map((l) => [l.sis_taxon_id, l.col_id]));
   const seenCover = new Set<string>();
   const cover = (row: Omit<LinkRow, "basis" | "decided_by">) => {
@@ -302,22 +295,22 @@ export async function buildLink(
     // agree too: Himantopus leucocephalus Gould, 1837 is the pied stilt, not the
     // banded stilt Cladorhynchus leucocephalus (Vieillot, 1816), whose IUCN
     // synonyms name it. Where either citation is missing there is nothing to check.
-    const otherGenus = c.name.split(" ")[0].toLowerCase() !== c.t_name.split(" ")[0].toLowerCase();
-    const authorsAgree = !c.authority || !c.t_auth || sameAuthors(c.authority, c.t_auth);
+    const otherGenus = c.name.split(" ")[0].toLowerCase() !== c.target_name.split(" ")[0].toLowerCase();
+    const authorsAgree = !c.authority || !c.target_authorship || sameAuthors(c.authority, c.target_authorship);
     const same = (c.kind === 0 || c.src === "own_name_synonym")
-      && sameOrganism({ scientificName: c.name, authorship: c.authority ?? undefined }, { scientificName: c.t_name, authorship: c.t_auth ?? undefined })
+      && sameOrganism({ scientificName: c.name, authorship: c.authority ?? undefined }, { scientificName: c.target_name, authorship: c.target_authorship ?? undefined })
       && (!otherGenus || authorsAgree)
-      && !isSeparatelyAssessed(c.t_name, c.name, assessedNames);
+      && !isSeparatelyAssessed(c.target_name, c.name, assessedNames);
     cover({
-      sis_taxon_id: c.sis, role: "covered", col_id: c.t_id, usage_id: same ? c.t_id : null, verdict: same ? "own" : "refused",
-      method: "iucn_synonym_covered", reason: same ? `${c.t_name} is the same organism under another accepted name` : `${c.t_name} is named as a synonym; kept out of the Not Evaluated list only`,
+      sis_taxon_id: c.sis, role: "covered", col_id: c.target_id, usage_id: same ? c.target_id : null, verdict: same ? "own" : "refused",
+      method: "iucn_synonym_covered", reason: same ? `${c.target_name} is the same organism under another accepted name` : `${c.target_name} is named as a synonym; kept out of the Not Evaluated list only`,
       counted: same,
     });
   }
 
   // Twins and duplicate concepts of each species' own target.
   const accepted = await rows<{ col_id: string; scientific_name: string; authorship: string | null; family: string | null; class_name: string | null }>(conn, `
-    SELECT col_id, scientific_name, authorship, family, class_name FROM tx
+    SELECT col_id, scientific_name, authorship, family, class_name FROM col_usages
     WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND NOT demoted`);
   const byId = new Map(accepted.map((x) => [x.col_id, x]));
   // A twin: the identical name (a hybrid sign aside: Utricularia × ochroleuca)
@@ -372,15 +365,15 @@ export async function buildLink(
   for (const l of [...links]) {
     if (l.role !== "primary" || l.verdict !== "own" || l.method !== "checklist_synonym") continue;
     const p = pickedUsage.get(l.sis_taxon_id);
-    if (!p || p.u_id === p.t_id) continue;
-    cover({ sis_taxon_id: l.sis_taxon_id, role: "covered", col_id: p.u_id, usage_id: p.u_id, verdict: "own", method: "checklist_demoted",
-      reason: `${p.u_name} is the XR species the checklist folds into ${p.t_name}; GBIF files its records there`, counted: true });
+    if (!p || p.usage_id === p.target_id) continue;
+    cover({ sis_taxon_id: l.sis_taxon_id, role: "covered", col_id: p.usage_id, usage_id: p.usage_id, verdict: "own", method: "checklist_demoted",
+      reason: `${p.usage_name} is the XR species the checklist folds into ${p.target_name}; GBIF files its records there`, counted: true });
   }
 
   // A lumped species owns every synonym usage carrying its exact name.
   const sameNameSyn = await rows<{ sis: number; usage: string; target: string }>(conn, `
-    SELECT r.sis, t.col_id AS usage, t.species_id AS target FROM rl r
-    JOIN tx t ON t.nm = r.nm AND t.rank = 'species' AND t.status IN ('synonym', 'ambiguous synonym') AND t.species_id IS NOT NULL`);
+    SELECT r.sis, t.col_id AS usage, t.species_id AS target FROM redlist_species r
+    JOIN col_usages t ON t.name_key = r.name_key AND t.rank = 'species' AND t.status IN ('synonym', 'ambiguous synonym') AND t.species_id IS NOT NULL`);
   const lumpedPrimary = new Map(links.filter((l) => l.role === "primary" && l.verdict === "lumped" && ["synonym", "ambiguous_synonym"].includes(l.method)).map((l) => [l.sis_taxon_id, l]));
   for (const x of sameNameSyn) {
     const l = lumpedPrimary.get(x.sis);
@@ -392,12 +385,10 @@ export async function buildLink(
   // Never across phyla, however a row was made: old genus names are homonyms
   // across kingdoms (the surgeonfish Acanthurus lineatus and the crab Hepatus
   // lineatus), and twins and lumps are found by name alone.
-  await conn.run(`CREATE OR REPLACE TEMP TABLE linked_pairs (sis INTEGER, col_id VARCHAR)`);
-  const pairAp = await conn.createAppender("linked_pairs");
-  for (const l of links) if (l.col_id) { pairAp.appendInteger(l.sis_taxon_id); pairAp.appendVarchar(l.col_id); pairAp.endRow(); }
-  pairAp.closeSync();
+  await writeTable(conn, "linked_pairs", { sis: "INTEGER", col_id: "VARCHAR" },
+    links.filter((l) => l.col_id).map((l) => ({ sis: l.sis_taxon_id, col_id: l.col_id })));
   const crossing = new Set((await rows<{ k: string }>(conn, `
-    SELECT DISTINCT r.sis || '|' || tt.col_id AS k FROM linked_pairs i JOIN rl r ON r.sis = i.sis JOIN tx tt ON tt.col_id = i.col_id
+    SELECT DISTINCT r.sis || '|' || target.col_id AS k FROM linked_pairs i JOIN redlist_species r ON r.sis = i.sis JOIN col_usages target ON target.col_id = i.col_id
     WHERE NOT ${sameLineage}`)).map((x) => x.k));
   for (let i = links.length - 1; i >= 0; i--) {
     const l = links[i];
@@ -424,33 +415,21 @@ export async function buildLink(
     if (l.role === "primary") { l.verdict = "duplicate"; l.reason = `its records belong to SIS ${prev}, matched first`; l.usage_id = null; }
   }
 
-  await conn.run(`CREATE OR REPLACE TEMP TABLE link_rows (sis_taxon_id BIGINT, role VARCHAR, col_id VARCHAR, usage_id VARCHAR,
-    verdict VARCHAR, method VARCHAR, basis VARCHAR, decided_by VARCHAR, reason VARCHAR, counted BOOLEAN)`);
-  const ap = await conn.createAppender("link_rows");
-  const opt = (v: string | null) => (v === null ? ap.appendNull() : ap.appendVarchar(v));
-  for (const l of links) {
-    ap.appendBigInt(BigInt(l.sis_taxon_id)); ap.appendVarchar(l.role); opt(l.col_id); opt(l.usage_id);
-    ap.appendVarchar(l.verdict); ap.appendVarchar(l.method); opt(l.basis); opt(l.decided_by); ap.appendVarchar(l.reason); ap.appendBoolean(l.counted);
-    ap.endRow();
-  }
-  ap.closeSync();
+  await writeTable<LinkRow>(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_id: "VARCHAR", usage_id: "VARCHAR",
+    verdict: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", reason: "VARCHAR", counted: "BOOLEAN" }, links);
   fs.mkdirSync(coreDir, { recursive: true });
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_id) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
-
-  await conn.run(`CREATE OR REPLACE TEMP TABLE queue_rows (sis_taxon_id BIGINT, name VARCHAR, authority VARCHAR, status VARCHAR, reason VARCHAR,
-    matcher_usage_id VARCHAR, matcher_name VARCHAR, matcher_authorship VARCHAR, match_type VARCHAR, confidence INTEGER, decided_by VARCHAR)`);
-  const qa = await conn.createAppender("queue_rows");
-  const qopt = (v: string | null) => (v === null ? qa.appendNull() : qa.appendVarchar(v));
-  for (const q of queue) {
-    qa.appendBigInt(BigInt(q.sis_taxon_id)); qa.appendVarchar(q.name); qopt(q.authority); qa.appendVarchar(q.status); qa.appendVarchar(q.reason);
-    qopt(q.matcher_usage_id); qopt(q.matcher_name); qopt(q.matcher_authorship); qopt(q.match_type);
-    if (q.confidence === null) qa.appendNull(); else qa.appendInteger(q.confidence);
-    qopt(q.decided_by);
-    qa.endRow();
-  }
-  qa.closeSync();
-  await conn.run(`COPY (SELECT * FROM queue_rows ORDER BY status, reason, sis_taxon_id) TO ${lit(path.join(coreDir, "match_queue.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
   return { out, queue };
+}
+
+/** The queue as the TSV a person works through: by status, then reason, then SIS id. */
+export function writeQueue(queue: QueueRow[], file: string): void {
+  const cols = Object.keys({ sis_taxon_id: 0, name: 0, authority: 0, status: 0, reason: 0, matcher_usage_id: 0, matcher_name: 0,
+    matcher_authorship: 0, match_type: 0, confidence: 0, decided_by: 0 } satisfies Record<keyof QueueRow, 0>) as (keyof QueueRow)[];
+  const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  const sorted = [...queue].sort((a, b) => cmp(a.status, b.status) || cmp(a.reason, b.reason) || a.sis_taxon_id - b.sis_taxon_id);
+  const cell = (v: unknown) => (v === null || v === undefined ? "" : String(v).replace(/[\t\n]/g, " "));
+  fs.writeFileSync(file, [cols.join("\t"), ...sorted.map((q) => cols.map((c) => cell(q[c])).join("\t"))].join("\n") + "\n");
 }
 
 /** Queued species by status and reason, for the sync log and sync.json. */
@@ -463,6 +442,7 @@ export function summariseQueue(queue: QueueRow[]): Record<string, number> {
 export async function run(): Promise<void> {
   const conn = await (await DuckDBInstance.create(":memory:", { threads: "16" })).connect();
   const { out, queue } = await buildLink(conn, CORE_DIR);
+  writeQueue(queue, path.join(BUILD_DIR, "match-queue.tsv"));
   const summary = await rows<{ role: string; basis: string | null; verdict: string; method: string; n: number }>(conn, `
     SELECT role, basis, verdict, method, count(*)::INT AS n FROM read_parquet(${lit(out)}) GROUP BY ALL ORDER BY role DESC, n DESC`);
   console.log(`Wrote ${out}`);

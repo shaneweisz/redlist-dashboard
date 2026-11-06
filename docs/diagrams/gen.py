@@ -217,12 +217,10 @@ def files():
         heading(x * COL_W, -55, title, 18, color)
     kinds = {0: "source", 2: "core", 3: "out", 4: "app"}
     steps = [
-        ("1  inputs\ninputs/col.ts, inat.ts", {
-            0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat/<month>/\niNaturalist names", False)]}),
+        ("1  inputs\ninputs/col.ts, inat-names.ts", {
+            0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat-names-<month>/\niNaturalist names", False)]}),
         ("2  taxa\ncore/build-taxa.ts", {
-            2: [("taxa.parquet  159 MB\nevery CoL usage", False), ("species-fallback-display-\nname-col.parquet", False),
-                ("species-common-names-col\n.parquet  (for search)", False)],
-            3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False)]}),
+            2: [("taxa.parquet  159 MB\nevery CoL usage", False)]}),
         ("3  assessments\ncore/build-assessments.ts", {
             0: [("Red List Postgres\n(read-only, not cached)", False)],
             2: [("assessments.parquet  12 MB\nevery assessment", False)]}),
@@ -230,19 +228,18 @@ def files():
             0: [("~/Data/gbif/<date>/\nthe snapshot mirror", False), ("occurrences/<date>/parts/\nresumable aggregate", False)],
             2: [("occurrence_counts  135 MB\nusage x year x georef x type", False),
                 ("occurrence_dates  943 MB\n... x month x day", False),
-                ("occurrence_countries  58 MB", False),
-                ("occurrence_species_keys  23 MB\nnothing reads it", True),
-                ("occurrences.json\nsnapshot, citation, rows", False)]}),
+                ("occurrence_countries  58 MB", False)]}),
         ("5  match names\ncore/build-matches.ts", {
             0: [("matching-ws/export-<xr>/\nthe matcher's index (Docker)", False)],
-            2: [("matches.parquet  6 MB\nthe matcher's answers", False), ("matches.json\nnothing reads it", True)]}),
+            2: [("matches.parquet  6 MB\nthe matcher's answers", False)]}),
         ("6  link\ncore/build-link.ts", {
             0: [("core/decisions.tsv\n(in the repo)", False)],
-            2: [("assessment_link.parquet\nSIS id -> CoL species", False), ("match_queue.parquet\nwaiting for a decision", False)],
+            2: [("assessment_link.parquet\nSIS id -> CoL species", False)],
             4: [("build/match-queue.tsv\nthe queue, to review", False)]}),
-        ("7  read models\noutputs/build-read-models.ts", {
-            2: [("count_components.parquet\nwhat each count is made of", False)],
-            3: [("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
+        ("7  common names, read models\noutputs/build-common-names.ts,\nbuild-read-models.ts", {
+            2: [("species-common-names-col\n.parquet  (for search)", False), ("species-fallback-display-\nname-col.parquet", False),
+                ("count_components.parquet\nwhat each count is made of", False)],
+            3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False), ("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
                 ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", True),
                 ("taxonomy/species_link.parquet  3 MB", True), ("taxonomy/taxa.parquet  152 MB (copy)", True),
                 ("taxonomy/assessment_link (copy)", False)]}),

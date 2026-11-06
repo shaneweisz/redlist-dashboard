@@ -230,8 +230,6 @@ Every published file has a reader, but three could be simpler (dashed in the dia
 - **`species_link.parquet` is `assessment_link.parquet` in the old shape** the app read before the sync rewrite. Pointing its readers at `assessment_link` would drop the file and the reshaping.
 - **`ne.parquet` is joined onto `species/` wherever it is read** (the Not Evaluated list, the build, the summaries). Its GBIF columns could live on the species rows.
 
-Two working files in `build/core/` have no reader at all: `occurrence_species_keys.parquet` (23 MB, GBIF's own species key per usage, kept to check `species_id` against and never read since) and `matches.json` (the matcher's version and name counts, which could go in `sync.json` as `occurrences.json`'s snapshot details already do).
-
 Not sync data, and siblings of `app/data/sync/`: `app/data/narratives/` (per Red List release, from `narratives/<release>/` in R2 or built locally) and `app/data/overlays/` (map layers, from the maps bucket or built locally).
 
 An assessed species' GBIF key is its counted usage with the most records, an *own* row before a *lumped* one. That is how *Hylatomus pileatus* links to *Dryocopus pileatus*'s page rather than its own 156 records. "Outdated" (assessed more than ten years ago) is measured from the sync date, not today's, so a page's numbers don't drift between syncs.

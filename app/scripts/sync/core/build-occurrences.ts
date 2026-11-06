@@ -56,13 +56,13 @@ import { loadEnvFiles } from "../../lib/utils";
 import { gbifJson } from "../../../src/lib/gbif-fetch";
 import { GBIF_GEOSPATIAL_ISSUES } from "../../../src/lib/gbif";
 import { CACHE_ROOT, CORE_DIR, DUCKDB_TMP } from "../paths";
+import { lit } from "../sql";
 
 const SNAPSHOT_ROOT = process.env.GBIF_SNAPSHOT_ROOT ?? path.join(os.homedir(), "Data", "gbif");
 /** The earliest snapshot keyed by Catalogue of Life rather than GBIF's old Backbone. */
 const FIRST_COL_SNAPSHOT = "2026-10-01";
 const FILES_PER_BATCH = 400;
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 export interface Snapshot {
   date: string;

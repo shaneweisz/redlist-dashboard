@@ -26,6 +26,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, cachedDir } from "../paths";
 import { ensureColInputs } from "./col";
+import { lit } from "../sql";
 
 export const MATCHER_VERSION = "v1.0.12";
 const REPO = "https://github.com/gbif/matching-ws.git";
@@ -42,7 +43,6 @@ export interface Matcher {
   nameUsages: number;
 }
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const sh = (cmd: string, args: string[], opts: { cwd?: string; quiet?: boolean } = {}) =>
   execFileSync(cmd, args, { cwd: opts.cwd, encoding: "utf-8", stdio: opts.quiet ? "pipe" : ["ignore", "inherit", "inherit"] });
 const jarName = () => `matching-ws-${MATCHER_VERSION.replace(/^v/, "")}-exec.jar`;

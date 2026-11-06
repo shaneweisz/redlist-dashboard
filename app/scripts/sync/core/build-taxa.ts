@@ -35,6 +35,7 @@ import { loadEnvFiles } from "../../lib/utils";
 import { ensureColInputs, type ColInputs } from "../inputs/col";
 import { TAXON_GROUP_CASE, NE_EXCLUDED } from "./taxon-groups";
 import { CORE_DIR, DUCKDB_TMP } from "../paths";
+import { lit } from "../sql";
 
 const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','natio','aberration','infraspecific name','infrasubspecific name')";
 /**
@@ -45,7 +46,6 @@ const INFRASPECIFIC = "('subspecies','variety','form','subvariety','subform','na
  */
 const BELOW_SPECIES = INFRASPECIFIC.replace("(", "('unranked',");
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const tsv = (p: string) => `read_csv(${lit(p)}, delim='\t', header=true, quote='', ignore_errors=true, all_varchar=true)`;
 /** The XR writes a subgenus parenthetical in some names; the binomial is what everything joins on. */
 const CANONICAL = (col: string) => `trim(regexp_replace(regexp_replace(${col}, '\\([^)]*\\)', '', 'g'), '\\s+', ' ', 'g'))`;

@@ -29,6 +29,7 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { TAXA_DEFINITIONS } from "../../lib/taxa";
 import { CORE_DIR } from "../paths";
+import { lit } from "../sql";
 
 /**
  * Mayaheros ericymba's only global assessment is an amendment, which the
@@ -43,7 +44,6 @@ export const REDLIST_DB = process.env.DB_NAME ?? "redlist_2026_1";
 /** assessment_credits.credit_type_id → the column it fills. */
 const CREDIT_TYPES = { 1: "assessors", 2: "reviewers", 3: "contributors", 4: "facilitators", 5: "institutions" } as const;
 
-const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 /** A query run inside Postgres; DuckDB only sees its result. */
 const pg = (sql: string) => `postgres_query('pg', ${lit(sql)})`;
 

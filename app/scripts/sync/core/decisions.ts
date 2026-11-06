@@ -11,7 +11,8 @@
  *   col_authorship  that name's CoL authorship, to tell homonyms apart
  *   col_id          the usage's id in the release decided against (a hint: ids move)
  *   by              who decided: a GitHub handle, "agent:<model>", or
- *                   "heuristic" for answers carried over from the old matching passes
+ *                   "heuristic" for answers carried over from the name-matching
+ *                   passes used before matching-ws (#593)
  *   reviewed        yes once a person has checked it
  *   date            YYYY-MM-DD
  *   note            the evidence, in a sentence
