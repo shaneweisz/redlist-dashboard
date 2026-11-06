@@ -28,6 +28,9 @@ const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
 const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
 
 const nextConfig: NextConfig = {
+  // CI's typecheck job checks the types on every PR,
+  // so the deploy build doesn't check them again (24 of its 41 seconds).
+  typescript: { ignoreBuildErrors: true },
   env: {
     NEXT_PUBLIC_SPECIES_LISTS_SYNC: SPECIES_LISTS_SYNC,
   },

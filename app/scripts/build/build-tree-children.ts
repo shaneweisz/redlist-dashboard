@@ -10,8 +10,9 @@
  * took 2-22s each (minutes for molluscs) until the edge cache filled.
  *
  * Runs in prebuild after build-species-lists (which clears public/prebuilt/), at
- * build time for the same reason: display names and `outdated` come from code and the
- * build date, so the files stay in step with the deployed code. Country/realm-scoped
+ * build time for the same reason: display names come from code, so the files stay in
+ * step with the deployed code. `outdated` is as of the sync's date (getDataSyncDate),
+ * not the build's, which is what lets build-prebuilt reuse the files across deploys. Country/realm-scoped
  * expands are not pre-built; they keep using the live route.
  *
  * Usage: npx tsx scripts/build/build-tree-children.ts
