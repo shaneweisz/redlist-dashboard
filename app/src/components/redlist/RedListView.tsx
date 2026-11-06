@@ -4871,7 +4871,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {taxonPhoto === undefined ? (
                     <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" aria-label="Loading photo" />
                   ) : (
-                    <TaxaIcon taxonId={rootId} size={36} style={{ color: findNode(rootId)?.color }} />
+                    <TaxaIcon taxonId={selectedRow.id} size={36} style={{ color: findNode(rootId)?.color }} />
                   )}
                 </div>
               )}
