@@ -64,12 +64,12 @@ const RANK_TO_MATCH_SQL: Record<(typeof SUGGEST_RANKS)[number], string> = {
 export const NAME_KIND = { scientific: 0, common: 1, epithet: 2, commonWord: 3, altCommon: 4, altCommonWord: 5 } as const;
 
 /**
- * @param coreDir where the vernacular parquets are (the sync's core/); given, they are required
+ * @param coreDir where the common-name parquets are (the sync's core/); given, they are required
  * @param inatNames iNaturalist's names (inputs/inat-names.ts); given, required
  */
 export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?: string } = {}): Promise<void> {
   const dir = opts.dataDir || DATA_DIR;
-  for (const f of [opts.coreDir && path.join(opts.coreDir, "species-vernacular-names.parquet"), opts.inatNames]) {
+  for (const f of [opts.coreDir && path.join(opts.coreDir, "species-common-names-col.parquet"), opts.inatNames]) {
     if (f && !fs.existsSync(f)) throw new Error(`build-search-index: ${f} is missing; every alternative common name would silently stop matching`);
   }
   const assessed = path.join(dir, syncPath("assessed.parquet"));
@@ -112,11 +112,11 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
     gbif_georeferenced_records_count, assessment_id, assessment_date, countries,
     class_name, order_name, family, assessed, col_id`;
 
-  // Every other English common name CoL gives the species (build-vernaculars), so
+  // Every other English common name CoL gives the species (build-common-names), so
   // "baobab" finds Adansonia digitata through "African baobab" even though its display
   // name is a different one — and an assessed species with no IUCN common name is still
   // findable by its CoL names. Absent on syncs built before that file existed.
-  const altNames = path.join(opts.coreDir ?? dir, "species-vernacular-names.parquet");
+  const altNames = path.join(opts.coreDir ?? dir, "species-common-names-col.parquet");
   // …and every English name iNaturalist gives it (inputs/inat-names.ts), matched by
   // scientific name within a kingdom. One row per (species, name, case-insensitive).
   const inatNames = opts.inatNames ?? path.join(dir, "inat-vernaculars.parquet");

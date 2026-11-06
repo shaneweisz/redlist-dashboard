@@ -220,8 +220,8 @@ def files():
         ("1  inputs\ninputs/col.ts, inat.ts", {
             0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat/<month>/\niNaturalist names", False)]}),
         ("2  taxa\ncore/build-taxa.ts", {
-            2: [("taxa.parquet  159 MB\nevery CoL usage", False), ("species-vernaculars.parquet\nCoL common names", False),
-                ("species-vernacular-names\n.parquet  (for search)", False)],
+            2: [("taxa.parquet  159 MB\nevery CoL usage", False), ("species-fallback-display-\nname-col.parquet", False),
+                ("species-common-names-col\n.parquet  (for search)", False)],
             3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False)]}),
         ("3  assessments\ncore/build-assessments.ts", {
             0: [("Red List Postgres\n(read-only, not cached)", False)],

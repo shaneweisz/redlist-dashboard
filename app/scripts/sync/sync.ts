@@ -13,7 +13,7 @@
  *              XR) answers every Red List name; build-link takes the certain
  *              answers and decisions.tsv for the rest, and writes the species
  *              still waiting for a person to build/match-queue.tsv
- *   outputs    the read models, then the summaries, CoL revisions, synonym
+ *   outputs    common names and the read models, then the summaries, CoL revisions, synonym
  *              and search indexes and CoL taxon ids built from them
  *   checks     matching fixtures (any failure stops the sync), and the
  *              comparison against the sync production serves, written to
@@ -37,6 +37,7 @@ import { run as buildOccurrences } from "./core/build-occurrences";
 import { buildLink, summariseQueue } from "./core/build-link";
 import { buildMatches } from "./core/build-matches";
 import { ensureMatcher } from "./inputs/matcher";
+import { buildCommonNames } from "./outputs/build-common-names";
 import { buildReadModels } from "./outputs/build-read-models";
 import { run as buildTaxaSummary } from "./outputs/build-taxa-summary";
 import { run as buildColRevisions } from "./outputs/build-col-revisions";
@@ -136,6 +137,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
     unlinked: Number(basis.unlinked), queue: summariseQueue(queue) };
   console.log(`   ${Number(basis.matcher).toLocaleString()} by the matcher, ${Number(basis.decision).toLocaleString()} by decisions.tsv, ` +
     `${queue.length.toLocaleString()} queued for review (${path.join(BUILD_DIR, "match-queue.tsv")})`);
+  await buildCommonNames(conn, { vernacularTsv: col.vernacularNames, taxa: path.join(CORE_DIR, "taxa.parquet"), coreDir: CORE_DIR, dataDir: OUT_DIR });
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames: inat });
   const [rl] = (await conn.runAndReadAll(`SELECT count(*) FILTER (is_latest) AS species, max(year_published) AS newest
     FROM read_parquet('${path.join(CORE_DIR, "assessments.parquet")}')`)).getRowObjects();

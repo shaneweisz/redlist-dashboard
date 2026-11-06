@@ -216,14 +216,12 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: str
     FROM occ_countries c JOIN taxa u ON u.col_id = c.usage_key
     WHERE u.species_id IS NOT NULL AND c.usage_key NOT IN (SELECT usage_key FROM owned)
     GROUP BY 1`);
-  const vern = path.join(coreDir, "species-vernaculars.parquet");
-  await conn.run(fs.existsSync(vern)
-    ? `CREATE OR REPLACE TEMP TABLE col_names AS SELECT col_id, vernacular_name FROM read_parquet(${lit(vern)})`
-    : `CREATE OR REPLACE TEMP TABLE col_names (col_id VARCHAR, vernacular_name VARCHAR)`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE col_names AS
+    SELECT col_id, common_name FROM read_parquet(${lit(path.join(coreDir, "species-fallback-display-name-col.parquet"))})`);
   await conn.run(`COPY (
     SELECT t.col_id AS id, t.col_id, t.scientific_name,
            -- iNaturalist's preferred name, else CoL's.
-           coalesce(i.preferred_name, v.vernacular_name) AS common_name,
+           coalesce(i.preferred_name, v.common_name) AS common_name,
            t.taxon_group, t.class_name, t.order_name, t.family, 'NE' AS iucn_category,
            c.countries, c.all_records_countries AS gbif_all_records_countries,
            t.col_id AS gbif_species_key,

@@ -33,7 +33,7 @@ The monthly data release. `sync.ts` runs the steps in order; each also runs alon
 | `species-key.ts`, `name-variants.ts`, `taxon-groups.ts` | the concept rules, name spellings, Table 1a groups |
 | **`outputs/`** | what the app reads, built from the core tables |
 | `build-read-models.ts` | `assessed`, `ne`, `species/` and the other parquets |
-| `build-taxa-summary.ts`, `build-col-revisions.ts`, `build-synonym-index.ts`, `build-search-index.ts`, `build-col-taxon-ids.ts`, `build-vernaculars.ts` | summaries, the CoL-revision flag, the search and synonym indexes, CoL ids for the taxonomy tree, common names; all called by `sync.ts` |
+| `build-taxa-summary.ts`, `build-col-revisions.ts`, `build-synonym-index.ts`, `build-search-index.ts`, `build-col-taxon-ids.ts`, `build-common-names.ts` | summaries, the CoL-revision flag, the search and synonym indexes, CoL ids for the taxonomy tree, common names; all called by `sync.ts` |
 | `derive-gbif-taxon-keys.ts` | by hand, with `--write`, when CoL moves: the group root keys the country-stats route queries GBIF with (`src/config/gbif-taxon-keys.json`) |
 | **`checks/`** | what a build is held to before it is published |
 | `check-fixtures.ts`, `fixtures/matching.ts` | 50 named matching cases |
