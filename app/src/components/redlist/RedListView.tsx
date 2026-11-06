@@ -1046,6 +1046,11 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
   onViewModeChange?: (mode: "reassessments" | "new-assessments") => void;
+  // The page renders its own Reassessments / New Assessments header tabs, so
+  // the inline Assessed/Not Evaluated toggle is hidden and the mode is a
+  // persistent tab: browsing to another taxon keeps it rather than resetting
+  // to Assessed. (/compare leaves this off: each panel keeps its inline toggle.)
+  viewModeTabsInHeader?: boolean;
   sharedTaxa?: Set<string>;
   sharedSubgroups?: Set<string>;
   onTaxaChange?: (taxa: Set<string>) => void;
@@ -1056,7 +1061,7 @@ interface RedListViewProps {
   paramSuffix?: string;
 }
 
-export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
+export default function RedListView({ viewMode = "reassessments", onViewModeChange, viewModeTabsInHeader = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
 
   // The ">10 yrs old" outdated threshold is computed against this everywhere
@@ -1211,7 +1216,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // silently follow you from one taxon to the next (you'd otherwise land on a
   // brand-new taxon already in NE mode from browsing a previous one, with no
   // visual cue you're not seeing its Assessed data). Skips the very first
-  // render so a shared link's own ?view=new-assessments still works.
+  // render so a shared link's own ?view=new-assessments still works. Not done
+  // when the page shows header tabs (viewModeTabsInHeader): there the mode is
+  // always visible, so it's a tab you browse within, not a per-taxon opt-in.
   const prevSelectionRef = useRef<{ taxa: Set<string>; subgroups: Set<string> } | null>(null);
   useEffect(() => {
     const prev = prevSelectionRef.current;
@@ -1229,8 +1236,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (prev.taxa.size === 0 && prev.subgroups.size === 0) return;
     const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((v) => b.has(v));
     const changed = !setsEqual(prev.taxa, selectedTaxa) || !setsEqual(prev.subgroups, selectedSubgroups);
-    if (changed && isNewAssessments) onViewModeChange?.("reassessments");
-  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange]);
+    if (changed && isNewAssessments && !viewModeTabsInHeader) onViewModeChange?.("reassessments");
+  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, viewModeTabsInHeader]);
 
   // Reset mode-specific filter state when switching between reassessments and
   // new-assessments. The shared species cache (SpeciesCacheContext) is NOT cleared
@@ -5852,7 +5859,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
                 dataset entirely), moved here from the old dedicated stat-card
                 row now that there isn't one. */}
-            {onViewModeChange && (
+            {onViewModeChange && !viewModeTabsInHeader && (
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0">
                 <button
                   type="button"

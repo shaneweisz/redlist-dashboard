@@ -47,9 +47,8 @@ export default function RedListPage() {
   const [sharedTaxa, setSharedTaxa] = useState<Set<string>>(new Set());
   const [sharedSubgroups, setSharedSubgroups] = useState<Set<string>>(new Set());
 
-  // View-mode switch — previously two header buttons here, now surfaced
-  // instead by RedListView itself (next to its own Assessed/Not Evaluated
-  // stat card, where the mode actually matters), via this callback.
+  // View-mode switch, driven by the Reassessments / New Assessments tabs in
+  // the header below.
   const handleViewModeChange = (mode: ViewMode) => {
     if (viewMode === mode) return;
     setViewMode(mode);
@@ -92,7 +91,7 @@ export default function RedListPage() {
               mobile — only subtitle and search drop to their own full-width
               rows below that on narrow screens. */}
           <div className="mb-[0.9rem] md:mb-[1.35rem]">
-            <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 sm:gap-y-3 [grid-template-areas:'title_controls'_'subtitle_subtitle'_'search_search'] sm:[grid-template-areas:'title_controls'_'subtitle_search']">
+            <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1.5 sm:gap-y-3 [grid-template-areas:'title_controls'_'subtitle_subtitle'_'search_search'_'tabs_tabs'] sm:[grid-template-areas:'title_tabs_controls'_'subtitle_search_search']">
               <button
                 type="button"
                 onClick={() => {
@@ -126,6 +125,31 @@ export default function RedListPage() {
               {brand.subtitle && (
                 <p className="[grid-area:subtitle] text-[15px] md:text-[1.375rem] text-zinc-500 dark:text-zinc-400">{brand.subtitle}</p>
               )}
+              {/* View mode tabs: Red List species (due a reassessment) vs Not
+                  Evaluated species (candidates for a first assessment). Beside the
+                  controls from sm up; their own full-width row below the
+                  search on phones, where they'd crowd the title out. */}
+              <div role="tablist" aria-label="View" className="[grid-area:tabs] flex sm:justify-self-end rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm shrink-0">
+                {([
+                  ["reassessments", "Reassessments"],
+                  ["new-assessments", "New Assessments"],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === mode}
+                    onClick={() => handleViewModeChange(mode)}
+                    className={`flex-1 sm:flex-none px-3 py-2 sm:py-1.5 font-medium whitespace-nowrap transition-colors ${
+                      viewMode === mode
+                        ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
+                        : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="[grid-area:controls] flex items-center gap-2 justify-end sm:justify-self-end">
                 <ThemeToggle />
                 <AuthStatus />
@@ -141,6 +165,7 @@ export default function RedListPage() {
             <RedListView
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
+              viewModeTabsInHeader
               sharedTaxa={sharedTaxa}
               sharedSubgroups={sharedSubgroups}
               onTaxaChange={setSharedTaxa}
