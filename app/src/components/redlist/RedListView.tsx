@@ -5747,6 +5747,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <span className="hidden sm:inline">Starred</span> ({pinnedSpecies.length})
               </button>
             )}
+            {/* The Not Evaluated view is itself a narrowing of the list, so it
+                gets a chip like any filter; Assessed is the default and has none.
+                Removing it switches back to the Assessed view. */}
+            {isNewAssessments && (
+              <button
+                type="button"
+                onClick={() => onViewModeChange?.("reassessments")}
+                disabled={!onViewModeChange}
+                title={onViewModeChange ? "Back to assessed species" : undefined}
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 flex items-center gap-1 hover:opacity-80 disabled:hover:opacity-100 disabled:cursor-default"
+              >
+                Awaiting 1st assessment
+                {onViewModeChange && <span className="text-sm">×</span>}
+              </button>
+            )}
             {Array.from(selectedTaxa).map(taxonId => (
               <button
                 key={taxonId}
@@ -6147,8 +6162,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />
               ) : (
-                // Says which list this is, since the two views share the table.
-                <>{totalFiltered.toLocaleString()} species {isNewAssessments ? "not evaluated" : "assessed"}</>
+                // Which list this is shows as the "Awaiting 1st assessment" chip.
+                <>{totalFiltered.toLocaleString()} species</>
               )}
             </span>
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
