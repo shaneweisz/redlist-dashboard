@@ -47,17 +47,18 @@ beforeAll(async () => {
   // A1, assessed 15 April 2025:
   //   2024: 50 georeferenced                          → before
   //   2025: 3 georeferenced on 1 March, 4 on 1 May,
-  //         2 ungeoreferenced on 1 June, 6 dated only to the year
+  //         2 ungeoreferenced on 1 June, 6 dated only to the year,
+  //         5 dated only to April (its month: can't be placed), 7 only to July
   //   2026: 10 georeferenced, 1 ungeoreferenced       → after
   await copy(`SELECT * FROM (VALUES
       ('A1', 2024::SMALLINT, true, 'HUMAN_OBSERVATION', 50::BIGINT),
-      ('A1', 2025::SMALLINT, true, 'HUMAN_OBSERVATION', 13::BIGINT),
+      ('A1', 2025::SMALLINT, true, 'HUMAN_OBSERVATION', 25::BIGINT),
       ('A1', 2025::SMALLINT, false, 'HUMAN_OBSERVATION', 2::BIGINT),
       ('A1', 2026::SMALLINT, true, 'HUMAN_OBSERVATION', 10::BIGINT),
       ('A1', 2026::SMALLINT, false, 'HUMAN_OBSERVATION', 1::BIGINT),
       ('A2', 2026::SMALLINT, true, 'HUMAN_OBSERVATION', 8::BIGINT),
       ('N1', 2020::SMALLINT, false, 'HUMAN_OBSERVATION', 5::BIGINT)) t(usage_key, year, georef, basis, n)`, "occurrence_counts.parquet");
-  await copy(`SELECT usage_key, d::DATE AS event_date, georef, basis, n FROM (VALUES
+  await copy(`SELECT usage_key, year(d::DATE)::SMALLINT AS year, month(d::DATE)::TINYINT AS month, d::DATE AS event_date, georef, basis, n FROM (VALUES
       ('A1', '2024-06-01', true, 'HUMAN_OBSERVATION', 50::BIGINT),
       ('A1', '2025-03-01', true, 'HUMAN_OBSERVATION', 3::BIGINT),
       ('A1', '2025-05-01', true, 'HUMAN_OBSERVATION', 4::BIGINT),
@@ -65,7 +66,10 @@ beforeAll(async () => {
       ('A1', '2026-02-01', true, 'HUMAN_OBSERVATION', 10::BIGINT),
       ('A1', '2026-02-01', false, 'HUMAN_OBSERVATION', 1::BIGINT),
       ('A2', '2026-11-01', true, 'HUMAN_OBSERVATION', 8::BIGINT),
-      ('N1', '2020-01-01', false, 'HUMAN_OBSERVATION', 5::BIGINT)) t(usage_key, d, georef, basis, n)`, "occurrence_days.parquet");
+      ('N1', '2020-01-01', false, 'HUMAN_OBSERVATION', 5::BIGINT)) t(usage_key, d, georef, basis, n)
+    UNION ALL
+    SELECT 'A1', 2025::SMALLINT, m::TINYINT, NULL::DATE, true, 'HUMAN_OBSERVATION', n::BIGINT
+    FROM (VALUES (4, 5), (7, 7)) t(m, n)`, "occurrence_dates.parquet");
   await copy(`SELECT * FROM (VALUES ('N1', 'MX', false, 'HUMAN_OBSERVATION', 5::BIGINT)) t(usage_key, countrycode, georef, basis, n)`,
     "occurrence_countries.parquet");
 
@@ -82,15 +86,16 @@ afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 describe("GBIF counts in the read models", () => {
   it("counts georeferenced and all records", () => {
-    expect(Number(rows["1"].gbif_georeferenced_records_count)).toBe(73);
-    expect(Number(rows["1"].gbif_all_records_count)).toBe(76);
+    expect(Number(rows["1"].gbif_georeferenced_records_count)).toBe(85);
+    expect(Number(rows["1"].gbif_all_records_count)).toBe(88);
   });
 
   it("starts the since-assessment window the day after the assessment date", () => {
-    // 4 later in 2025 + 10 in 2026; the 3 before 15 April and the 6 dated only to 2025 are left out.
-    expect(Number(rows["1"].gbif_georeferenced_records_since_assessment)).toBe(14);
+    // 4 on 1 May and 7 in July 2025, 10 in 2026. Left out: the 3 before
+    // 15 April, the 5 dated only to April, and the 6 dated only to 2025.
+    expect(Number(rows["1"].gbif_georeferenced_records_since_assessment)).toBe(21);
     // Plus the 2 ungeoreferenced in June 2025 and 1 in 2026.
-    expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(17);
+    expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
   });
 
   it("has no window for an assessment dated after today", () => {

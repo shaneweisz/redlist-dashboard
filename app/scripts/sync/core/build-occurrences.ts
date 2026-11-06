@@ -10,13 +10,15 @@
  * dashboard shows comes from three small tables:
  *
  *   occurrence_counts     usage_key × year × georef × basis → n
- *   occurrence_days       usage_key × event_date × georef × basis → n
+ *   occurrence_dates      usage_key × year × month × event_date × georef × basis → n
  *   occurrence_countries  usage_key × countrycode × georef × basis → n
  *
- * occurrence_days holds only records dated to the day (95% of them), so a
- * since-assessment count can start the day after the assessment rather than
- * the year after it. A record dated only to a year or month can't be placed
- * against a date in its own year, and is left out of that year's window.
+ * occurrence_dates holds the records dated at least to the month (event_date
+ * is NULL for those dated only to the month), so a since-assessment count can
+ * start the day after the assessment rather than the year after it. Within the
+ * assessment's own year a record dated to a later month counts, and one dated
+ * only to the assessment's month, or only to its year, can't be placed and is
+ * left out.
  *
  * usage_key is the record's taxonkey, the usage its name matched (a species,
  * a synonym, a subspecies). Which species a usage counts towards is
@@ -125,7 +127,7 @@ export async function assertComplete(conn: DuckDBConnection, snap: Snapshot): Pr
 }
 
 /** What the cached aggregate holds; a change here rebuilds it rather than reusing it. */
-const GRAIN = "year+day";
+const GRAIN = "year+month+day";
 
 const GEOREF = `decimallatitude IS NOT NULL AND decimallongitude IS NOT NULL
   AND NOT list_has_any(coalesce(issue, []), [${[...GBIF_GEOSPATIAL_ISSUES].map(lit).join(", ")}])`;
@@ -142,7 +144,7 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
     if (fs.existsSync(done)) continue;
     await conn.run(`CREATE OR REPLACE TEMP TABLE batch AS
       SELECT taxonkey AS usage_key, specieskey, CAST(year AS SMALLINT) AS year, basisofrecord AS basis,
-             ${GEOREF} AS georef, countrycode,
+             ${GEOREF} AS georef, countrycode, CAST(month AS TINYINT) AS month,
              -- try_cast: a malformed date (31 February) is undated, not an error
              CASE WHEN day IS NOT NULL AND month IS NOT NULL AND year IS NOT NULL
                   THEN TRY_CAST(printf('%04d-%02d-%02d', year, month, day) AS DATE) END AS event_date
@@ -150,8 +152,9 @@ async function aggregate(conn: DuckDBConnection, snap: Snapshot, workDir: string
       WHERE taxonkey IS NOT NULL`);
     await conn.run(`COPY (SELECT usage_key, year, georef, basis, count(*) AS n FROM batch GROUP BY ALL)
       TO ${lit(path.join(parts, `counts-${tag}.parquet`))} (FORMAT parquet)`);
-    await conn.run(`COPY (SELECT usage_key, event_date, georef, basis, count(*) AS n FROM batch WHERE event_date IS NOT NULL GROUP BY ALL)
-      TO ${lit(path.join(parts, `days-${tag}.parquet`))} (FORMAT parquet)`);
+    await conn.run(`COPY (SELECT usage_key, year, month, event_date, georef, basis, count(*) AS n FROM batch
+      WHERE year IS NOT NULL AND month BETWEEN 1 AND 12 GROUP BY ALL)
+      TO ${lit(path.join(parts, `dates-${tag}.parquet`))} (FORMAT parquet)`);
     await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, count(*) AS n FROM batch WHERE countrycode IS NOT NULL GROUP BY ALL)
       TO ${lit(path.join(parts, `countries-${tag}.parquet`))} (FORMAT parquet)`);
     await conn.run(`COPY (SELECT usage_key, specieskey, count(*) AS n FROM batch GROUP BY ALL)
@@ -209,8 +212,10 @@ export async function buildOccurrences(conn: DuckDBConnection, snap: Snapshot, c
   const parts = (p: string) => lit(path.join(workDir, "parts", `${p}-*.parquet`));
   await conn.run(`COPY (SELECT usage_key, year, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("counts")}) GROUP BY ALL ORDER BY usage_key, year)
     TO ${lit(path.join(coreDir, "occurrence_counts.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
-  await conn.run(`COPY (SELECT usage_key, event_date, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("days")}) GROUP BY ALL ORDER BY usage_key, event_date)
-    TO ${lit(path.join(coreDir, "occurrence_days.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  await conn.run(`COPY (SELECT usage_key, year, month, event_date, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("dates")})
+    GROUP BY ALL ORDER BY usage_key, year, month, event_date)
+    TO ${lit(path.join(coreDir, "occurrence_dates.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
+  fs.rmSync(path.join(coreDir, "occurrence_days.parquet"), { force: true });
   await conn.run(`COPY (SELECT usage_key, countrycode, georef, basis, sum(n)::BIGINT AS n FROM read_parquet(${parts("countries")}) GROUP BY ALL ORDER BY usage_key, countrycode)
     TO ${lit(path.join(coreDir, "occurrence_countries.parquet"))} (FORMAT parquet, COMPRESSION zstd)`);
   await conn.run(`COPY (SELECT usage_key, specieskey, sum(n)::BIGINT AS n FROM read_parquet(${parts("species-keys")}) GROUP BY ALL ORDER BY usage_key)
