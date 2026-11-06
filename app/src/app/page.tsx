@@ -141,7 +141,6 @@ export default function RedListPage() {
             <RedListView
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
-              wideViewModeToggle
               sharedTaxa={sharedTaxa}
               sharedSubgroups={sharedSubgroups}
               onTaxaChange={setSharedTaxa}

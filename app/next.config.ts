@@ -104,6 +104,9 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       { source: "/near-me", destination: "/mapping", permanent: true },
+      // Comparison Mode (two dashboards side by side) was removed; a saved link
+      // opens the dashboard, its first panel's taxa=/filters carried across.
+      { source: "/compare", destination: "/", permanent: true },
     ];
   },
   // PostHog's API relies on trailing slashes; without this Next.js redirects them

@@ -47,7 +47,7 @@ describe("authCallbackUrl", () => {
     const cases = [
       "/?taxa=mammals&categories=CR,EN&years=11-20+years&search=shrew",
       "/?layout=country&country=ZA&view=new-assessments",
-      "/compare?taxa=birds&taxa_b=amphibians",
+      "/narrative-search?taxa=birds&q=fire",
       "/browse?taxon=Aves#top",
     ];
     for (const path of cases) {

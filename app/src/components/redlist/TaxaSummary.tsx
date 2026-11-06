@@ -1784,14 +1784,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         value={layoutMode ?? "taxonomic"}
         onChange={(e) => {
           const v = e.target.value;
-          if (v === "compare") {
-            router.push("/compare");
-            return;
-          }
           // Not a layout of this table but a view of the same data from the
           // other end — the assessors' own words rather than the counts. Its
-          // own route for the same reason Comparison Mode is: it needs the
-          // whole page. It does now take a taxon, though (#565), so one
+          // own route because it needs the whole page. It does now take a taxon, though (#565), so one
           // selected here goes with it — but only one: the text search filters
           // by a single group, and quietly dropping all but the first of
           // several would be a narrower search than the table it came from.
@@ -1821,7 +1816,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           By Realm
         </option>
         <option value="ssc">By SSC Specialist Group (WIP)</option>
-        <option value="compare">Comparison Mode</option>
         <option value="text">By Assessment Text (search)</option>
         <option value="near">Near a Location (map)</option>
         <option value="table1a">Table 1a</option>

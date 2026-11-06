@@ -890,7 +890,7 @@ describe("parseParams ↔ buildQs round-trip", () => {
   });
 });
 
-describe("param suffixing (compare mode)", () => {
+describe("mergeParamsIntoSearch", () => {
   const emptyState = {
     viewMode: "reassessments" as const,
     taxa: new Set<string>(),
@@ -928,86 +928,28 @@ describe("param suffixing (compare mode)", () => {
     tab: null as "gbif" | "literature" | "redlist" | "wikipedia" | "cites" | "assessors" | "reviewers" | "col" | "eol" | null,
   };
 
-  describe("parseParams with a suffix", () => {
-    it("reads the suffixed key, not the bare one", () => {
-      const result = parseParams("?taxa_b=reptiles", "_b");
-      expect(result.taxa).toEqual(new Set(["reptiles"]));
-    });
-
-    it("ignores the bare key when a suffix is given", () => {
-      const result = parseParams("?taxa=birds", "_b");
-      expect(result.taxa.size).toBe(0);
-    });
-
-    it("each suffix only sees its own slice of a combined query string", () => {
-      const search = "?taxa=birds&taxa_b=reptiles";
-      expect(parseParams(search, "").taxa).toEqual(new Set(["birds"]));
-      expect(parseParams(search, "_b").taxa).toEqual(new Set(["reptiles"]));
-    });
-
-    it("suffixes categories, search, and sort too, not just taxa", () => {
-      const result = parseParams("?categories_b=CR,EN&search_b=shrew&sort_b=category&dir_b=asc", "_b");
-      expect(result.categories).toEqual(new Set(["CR", "EN"]));
-      expect(result.search).toBe("shrew");
-      expect(result.sortField).toBe("category");
-      expect(result.sortDirection).toBe("asc");
-    });
+  it("replaces the hook's own previous value rather than accumulating it", () => {
+    const qs = mergeParamsIntoSearch("?taxa=birds", { ...emptyState, taxa: new Set(["mammals"]) });
+    expect(new URLSearchParams(qs).getAll("taxa")).toEqual(["mammals"]);
   });
 
-  describe("buildQs with a suffix", () => {
-    it("writes the suffixed key", () => {
-      const qs = buildQs({ ...emptyState, taxa: new Set(["reptiles"]) }, "_b");
-      expect(qs).toBe("?taxa_b=reptiles");
-    });
-
-    it("round-trips through parseParams with the same suffix", () => {
-      const qs = buildQs({ ...emptyState, taxa: new Set(["reptiles"]), categories: new Set(["CR"]) }, "_b");
-      const parsed = parseParams(qs, "_b");
-      expect(parsed.taxa).toEqual(new Set(["reptiles"]));
-      expect(parsed.categories).toEqual(new Set(["CR"]));
-    });
-
-    it("defaults to no suffix, matching pre-compare-mode behavior", () => {
-      const qs = buildQs({ ...emptyState, taxa: new Set(["birds"]) });
-      expect(qs).toBe("?taxa=birds");
-    });
+  it("preserves query params outside this hook's own vocabulary (e.g. utm tracking)", () => {
+    const qs = mergeParamsIntoSearch("?taxa=reptiles&utm_source=newsletter", { ...emptyState, taxa: new Set(["birds"]) });
+    const params = new URLSearchParams(qs);
+    expect(params.get("utm_source")).toBe("newsletter");
+    expect(params.get("taxa")).toBe("birds");
   });
 
-  describe("mergeParamsIntoSearch", () => {
-    it("adds this panel's params without touching an existing different-suffix panel's params", () => {
-      const currentSearch = "?taxa_b=reptiles&categories_b=CR";
-      const qs = mergeParamsIntoSearch(currentSearch, { ...emptyState, taxa: new Set(["birds"]) }, "");
-      const params = new URLSearchParams(qs);
-      expect(params.get("taxa")).toBe("birds");
-      expect(params.get("taxa_b")).toBe("reptiles");
-      expect(params.get("categories_b")).toBe("CR");
-    });
+  it("clears the hook's own params (e.g. returning to the landing page)", () => {
+    const qs = mergeParamsIntoSearch("?taxa=birds&utm_source=newsletter", { ...emptyState, taxa: new Set() });
+    const params = new URLSearchParams(qs);
+    expect(params.has("taxa")).toBe(false);
+    expect(params.get("utm_source")).toBe("newsletter");
+  });
 
-    it("replaces this panel's own previous value rather than accumulating it", () => {
-      const qs = mergeParamsIntoSearch("?taxa=birds", { ...emptyState, taxa: new Set(["mammals"]) }, "");
-      const params = new URLSearchParams(qs);
-      expect(params.getAll("taxa")).toEqual(["mammals"]);
-    });
-
-    it("preserves query params outside this hook's own vocabulary (e.g. utm tracking)", () => {
-      const currentSearch = "?taxa_b=reptiles&utm_source=newsletter";
-      const qs = mergeParamsIntoSearch(currentSearch, { ...emptyState, taxa: new Set(["birds"]) }, "");
-      const params = new URLSearchParams(qs);
-      expect(params.get("utm_source")).toBe("newsletter");
-    });
-
-    it("clears this panel's own params (e.g. returning to the landing page) without touching the other panel's", () => {
-      const currentSearch = "?taxa=birds&taxa_b=reptiles";
-      const qs = mergeParamsIntoSearch(currentSearch, { ...emptyState, taxa: new Set() }, "");
-      const params = new URLSearchParams(qs);
-      expect(params.has("taxa")).toBe(false);
-      expect(params.get("taxa_b")).toBe("reptiles");
-    });
-
-    it("with no existing foreign params, matches buildQs's own output exactly (backward compatible)", () => {
-      const state = { ...emptyState, taxa: new Set(["birds"]), categories: new Set(["CR", "EN"]) };
-      expect(mergeParamsIntoSearch("", state, "")).toBe(buildQs(state));
-    });
+  it("with no foreign params, matches buildQs's own output exactly", () => {
+    const state = { ...emptyState, taxa: new Set(["birds"]), categories: new Set(["CR", "EN"]) };
+    expect(mergeParamsIntoSearch("", state)).toBe(buildQs(state));
   });
 });
 
@@ -1016,8 +958,7 @@ describe("OWN_PARAM_NAMES stays in sync with buildQs", () => {
     // mergeParamsIntoSearch/syncUrl only ever delete this instance's OWN_PARAM_NAMES
     // keys before re-setting from buildQs's output — if a param were ever added to
     // buildQs without adding it here too, its stale value would survive every
-    // future write instead of being replaced, and (worse) it'd never get a suffix,
-    // so it would leak across compare-mode panels. This "kitchen sink" state
+    // future write instead of being replaced. This "kitchen sink" state
     // populates every field with a non-default value so buildQs emits every key it
     // knows how to write, then asserts each one is accounted for.
     const kitchenSink = {
@@ -1071,8 +1012,8 @@ describe("OWN_PARAM_NAMES stays in sync with buildQs", () => {
       tab: "literature" as const,
     };
 
-    const qs = buildQs(kitchenSink, "_test");
-    const writtenKeys = [...new URLSearchParams(qs).keys()].map((k) => k.replace(/_test$/, ""));
+    const qs = buildQs(kitchenSink);
+    const writtenKeys = [...new URLSearchParams(qs).keys()];
     // Sanity check the fixture itself is actually exercising things, so this test
     // can't silently pass by writing nothing.
     expect(writtenKeys.length).toBeGreaterThan(20);
@@ -1232,7 +1173,7 @@ describe("SPECIES_SCOPED_RESET", () => {
 
   it("removes those params from the live URL, not just from the new state", () => {
     const next = { ...parseParams(searched), taxa: new Set(["birds"]), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
-    const qs = mergeParamsIntoSearch(searched, next as unknown as Parameters<typeof buildQs>[0], "");
+    const qs = mergeParamsIntoSearch(searched, next as unknown as Parameters<typeof buildQs>[0]);
     expect(qs).not.toContain("species=");
     expect(qs).not.toContain("search=");
     expect(qs).not.toContain("tab=");

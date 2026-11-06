@@ -1102,28 +1102,20 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
+  // The view switch, shown as the full-width Species Assessed / Awaiting 1st
+  // Assessment toggle in the taxon header. Being that prominent, the mode is a
+  // persistent choice: browsing to another taxon keeps it.
   onViewModeChange?: (mode: "reassessments" | "new-assessments") => void;
-  // Show the view switch as a full-width Reassessments / First Assessments
-  // toggle above the filter charts, in place of the small inline Assessed/Not
-  // Evaluated one beside the species count. Being that prominent, the mode is
-  // a persistent choice: browsing to another taxon keeps it rather than
-  // resetting to Assessed. (/compare leaves this off: its two panels are too
-  // narrow for it, so each keeps the inline toggle and the reset.)
-  wideViewModeToggle?: boolean;
   sharedTaxa?: Set<string>;
   sharedSubgroups?: Set<string>;
   onTaxaChange?: (taxa: Set<string>) => void;
   onSubgroupsChange?: (subgroups: Set<string>) => void;
-  // Namespaces this instance's URL params (e.g. "_b" turns `taxa` into `taxa_b`) so
-  // two instances can share one URL without clobbering each other — compare mode's
-  // second panel. Defaults to "" (today's single-dashboard behavior).
-  paramSuffix?: string;
 }
 
 // Info note on the toggle's Not Evaluated count.
 const NE_COUNT_NOTE = `According to ${COL_RELEASE_LABEL}. The count could differ under another taxonomy.`;
 
-export default function RedListView({ viewMode = "reassessments", onViewModeChange, wideViewModeToggle = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
+export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
   // The selected taxon row (name + counts), reported by TaxaSummary, for the
   // taxon header beside the wide toggle.
@@ -1226,7 +1218,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     species: urlSpecies, tab: urlTab,
     setSpeciesParam, setTabParam,
     fromPopstateRef,
-  } = useFilterParams(paramSuffix);
+  } = useFilterParams();
   // Not Evaluated species have no assessment, so no New or % New: the chart
   // shows Total there whatever the URL asks for.
   const gbifChartKeys = isNewAssessments ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
@@ -1287,34 +1279,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     setUrlViewMode(viewMode);
   }, [viewMode, setUrlViewMode]);
-
-  // Reset to Assessed whenever the taxon/sub-group selection changes — Not
-  // Evaluated is something to opt into per-taxon, not a mode that should
-  // silently follow you from one taxon to the next (you'd otherwise land on a
-  // brand-new taxon already in NE mode from browsing a previous one, with no
-  // visual cue you're not seeing its Assessed data). Skips the very first
-  // render so a shared link's own ?view=new-assessments still works. Not done
-  // with the wide toggle (wideViewModeToggle): there the mode is always in
-  // plain view, so it's a choice you browse within, not a per-taxon opt-in.
-  const prevSelectionRef = useRef<{ taxa: Set<string>; subgroups: Set<string> } | null>(null);
-  useEffect(() => {
-    const prev = prevSelectionRef.current;
-    prevSelectionRef.current = { taxa: selectedTaxa, subgroups: selectedSubgroups };
-    if (prev === null) return;
-    // Skip going from no taxa to some taxa too — this is URL hydration
-    // (useFilterParams starts empty then populates from URL on mount), not a
-    // user browsing to a new taxon. Without this, a shared link combining
-    // ?view=new-assessments&taxa=X hydrates its taxa a render after this
-    // effect's first (skipped, prev === null) run, so that second run sees
-    // an empty→populated transition, misreads it as a real taxon change, and
-    // immediately resets straight back to Assessed — the exact case the
-    // "very first render" skip above was meant to protect (see the same
-    // hydration guard on the "reset all other filters" effect below).
-    if (prev.taxa.size === 0 && prev.subgroups.size === 0) return;
-    const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((v) => b.has(v));
-    const changed = !setsEqual(prev.taxa, selectedTaxa) || !setsEqual(prev.subgroups, selectedSubgroups);
-    if (changed && isNewAssessments && !wideViewModeToggle) onViewModeChange?.("reassessments");
-  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, wideViewModeToggle]);
 
   // Reset mode-specific filter state when switching between reassessments and
   // new-assessments. The shared species cache (SpeciesCacheContext) is NOT cleared
@@ -1648,9 +1612,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // ── Data fetching ────────────────────────────────────────────────────
   // Species are fetched and cached in the shared SpeciesCacheContext (keyed by
   // the exact request URL, e.g. `/api/redlist/species?taxon=birds`), not local
-  // component state — this is what lets compare mode's two panels share a
-  // fetch when they pick the same taxon, and it naturally keeps Assessed vs Not
-  // Evaluated data for the same taxon separate too, since their URLs differ
+  // component state, which keeps Assessed vs Not Evaluated data for the same
+  // taxon separate, since their URLs differ
   // (`?taxon=birds` vs `?taxon=birds&category=NE`) without needing an explicit
   // mode-prefixed cache key.
   const error = useMemo(() => {
@@ -1689,13 +1652,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the whole object for any method call off a hook-returned value, but
   // cache.request's identity only ever changes together with cache.entries (see
   // SpeciesCacheContext) — depending on the whole object would additionally
-  // re-run this on every loadingUrls/errors-only update, e.g. another
-  // compare-mode panel's fetch completing or failing.
+  // re-run this on every loadingUrls/errors-only update.
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, cache.request, speciesApiUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Loading" means one of THIS panel's currently-relevant URLs is still in flight —
-  // deliberately not "is anything in the shared cache loading", since in compare mode
-  // that set can include requests belonging to the other panel entirely.
+  // "Loading" means one of the currently-relevant URLs is still in flight —
+  // deliberately not "is anything in the shared cache loading", which can include
+  // requests for a selection the user has already moved on from.
   const speciesLoading = useMemo(() => {
     if (selectedTaxa.size === 0) return false;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -1804,9 +1766,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpeciesBase]);
   const repSpecies = selectedRow ? repSpeciesByTaxon[selectedRow.id] ?? pickedSpecies : null;
   useEffect(() => {
-    if (!wideViewModeToggle || !selectedRow || !pickedSpecies || repSpeciesByTaxon[selectedRow.id]) return;
+    if (!selectedRow || !pickedSpecies || repSpeciesByTaxon[selectedRow.id]) return;
     setRepSpeciesByTaxon((prev) => ({ ...prev, [selectedRow.id]: pickedSpecies }));
-  }, [wideViewModeToggle, selectedRow, pickedSpecies, repSpeciesByTaxon]);
+  }, [selectedRow, pickedSpecies, repSpeciesByTaxon]);
   // Whether the current selection's species list has been fetched at all —
   // speciesLoading alone is also false in the render before the fetch starts,
   // which would otherwise read as "no species, show the icon".
@@ -1826,7 +1788,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const ownPhoto = ownKey ? photoResults[ownKey] : null;
   const needSpecies = !ownKey || ownPhoto === null;
   useEffect(() => {
-    if (!wideViewModeToggle) return;
     const wanted: [string, string, boolean][] = [];
     if (ownKey && !(ownKey in photoResults)) wanted.push([ownKey, taxonRank!.name, true]);
     if (needSpecies && spKey && !(spKey in photoResults)) wanted.push([spKey, repSpecies!, false]);
@@ -1836,7 +1797,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         setPhotoResults((prev) => ({ ...prev, [key]: url ? { url, credit: img?.attribution ?? null } : null }));
       });
     }
-  }, [wideViewModeToggle, ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
+  }, [ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
   // Called from the header's render (below neTooLarge's declaration).
   const resolveTaxonPhoto = (): { url: string; credit: string | null } | null | undefined => {
     if (!selectedRow) return null;
@@ -4772,7 +4733,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryScope={countryScope}
         realmModeContent={realmModeContent}
         realmScope={realmScope}
-        onSelectedRow={wideViewModeToggle ? setSelectedRow : undefined}
+        onSelectedRow={setSelectedRow}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -4823,7 +4784,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
-      {wideViewModeToggle && onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
+      {onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
         // One taxon selected but its row not reported yet (fresh load): hold
         // the header card's place with a placeholder rather than showing the
         // bare bar and swapping the card in. Gives up once the species list is
@@ -6151,35 +6112,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <>{totalFiltered.toLocaleString()} species {isNewAssessments ? "not evaluated" : "assessed"}</>
               )}
             </span>
-            {/* Assessed/Not Evaluated — a full view-mode switch (a different
-                dataset entirely), moved here from the old dedicated stat-card
-                row now that there isn't one. */}
-            {onViewModeChange && !wideViewModeToggle && (
-              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("reassessments")}
-                  className={`px-2 py-1 font-medium transition-colors ${
-                    !isNewAssessments
-                      ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  Assessed
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("new-assessments")}
-                  className={`px-2 py-1 font-medium transition-colors ${
-                    isNewAssessments
-                      ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  Not Evaluated
-                </button>
-              </div>
-            )}
           </div>
         </div>
 

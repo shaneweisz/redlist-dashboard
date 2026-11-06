@@ -83,9 +83,6 @@ IUCN range maps and Area of Habitat (AOH) rasters can be overlaid on the species
 ### Country view
 A per-country landing page and country list, combining live DuckDB queries with a precomputed all-species country aggregate — assessment coverage, endemics, and occurrence totals for a single country.
 
-### Compare view
-`/compare` renders two independent dashboard panels side by side, each with its own filters and view mode and both synced to the URL — so two filtered views can be compared directly, and the comparison shared as a link.
-
 ### Agent access (MCP)
 An MCP server at `/api/mcp` (`@modelcontextprotocol/server` + `mcp-handler`) exposes the dashboard's data to agents. Results carry a verifiable `dashboard_url` that resolves to the equivalent UI view.
 

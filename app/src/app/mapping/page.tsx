@@ -13,7 +13,7 @@
  * species map; links to the old address are redirected here (next.config.ts).
  *
  * A route of its own rather than a card on the dashboard, for the same reason
- * /compare and /narrative-search are: it wants the whole window (a map with a
+ * /narrative-search is: it wants the whole window (a map with a
  * table under it), and it has nothing to say about the taxon selection the
  * dashboard is built around.
  *

@@ -93,15 +93,12 @@ const MAX_VALUE_LENGTH = 100;
  * that ~50-field shape: a new filter param becomes countable by adding one line
  * to FILTER_PARAMS, with no risk of reading a field that no longer exists.
  */
-export function activeFilters(
-  search: string,
-  suffix: string = ""
-): Record<string, string | null> {
+export function activeFilters(search: string): Record<string, string | null> {
   const params = new URLSearchParams(search);
   const active: Record<string, string | null> = {};
 
   for (const [param, name] of Object.entries(FILTER_PARAMS)) {
-    const raw = params.get(suffix ? `${param}${suffix}` : param);
+    const raw = params.get(param);
     if (raw === null || raw === "") continue;
     // `endemics` is a flag: present-but-"0" is off, not a filter in use.
     if (param === "endemics" && raw !== "1") continue;
@@ -129,8 +126,8 @@ export function newlyApplied(
     .map(([filter, value]) => ({ filter, value }));
 }
 
-/** Per-suffix baseline, so compare-mode panels are tracked independently. */
-const lastSeen = new Map<string, Record<string, string | null>>();
+/** The filters seen at the last URL write. */
+let lastSeen: Record<string, string | null> = {};
 
 /**
  * Establishes the baseline without emitting anything.
@@ -139,15 +136,15 @@ const lastSeen = new Map<string, Record<string, string | null>>();
  * built the link, not by the person opening it, so counting them would let one
  * widely-shared URL look like a popular filter.
  */
-export function primeFilterBaseline(search: string, suffix: string = ""): void {
-  lastSeen.set(suffix, activeFilters(search, suffix));
+export function primeFilterBaseline(search: string): void {
+  lastSeen = activeFilters(search);
 }
 
 /** Diffs against the baseline and captures one event per newly-applied filter. */
-export function reportFilterUsage(search: string, suffix: string = ""): void {
-  const next = activeFilters(search, suffix);
-  const previous = lastSeen.get(suffix) ?? {};
-  lastSeen.set(suffix, next);
+export function reportFilterUsage(search: string): void {
+  const next = activeFilters(search);
+  const previous = lastSeen;
+  lastSeen = next;
 
   if (!enabled()) return;
 
@@ -155,15 +152,13 @@ export function reportFilterUsage(search: string, suffix: string = ""): void {
     posthog.capture("filter_applied", {
       filter,
       ...(value === null ? {} : { value }),
-      // Which panel, when compare mode has two side by side.
-      ...(suffix ? { panel: suffix } : {}),
     });
   }
 }
 
 /** Test seam: drop the remembered baselines. */
 export function resetFilterBaselines(): void {
-  lastSeen.clear();
+  lastSeen = {};
 }
 
 // --- Search --------------------------------------------------------------
