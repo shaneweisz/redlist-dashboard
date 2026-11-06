@@ -5714,16 +5714,26 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
-            {(selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated || exactFilters.minObs != null || exactFilters.maxObs != null || exactFilters.minAssessmentYear != null || exactFilters.maxAssessmentYear != null || exactFilters.minDescribedYear != null || exactFilters.maxDescribedYear != null) && (
+            {(isNewAssessments || selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated || exactFilters.minObs != null || exactFilters.maxObs != null || exactFilters.minAssessmentYear != null || exactFilters.maxAssessmentYear != null || exactFilters.minDescribedYear != null || exactFilters.maxDescribedYear != null) && (
               <button
                 onClick={() => {
-                  clearAllFiltersAndTaxa();
+                  // The "Awaiting 1st assessment" chip is cleared with the rest,
+                  // like every other chip in this row. View first: its handler
+                  // pushes the entry and re-reads the URL, and the clear below
+                  // then replaces that entry, so one back-press undoes the lot.
+                  const switchView = isNewAssessments && !!onViewModeChange;
+                  if (switchView) onViewModeChange("reassessments");
+                  // Already a complete clear, so the taxa-change effect needn't
+                  // run its own pass (a second history entry). Only raised when
+                  // the taxa will change, since that's the only time it's read.
+                  if (selectedTaxa.size > 0) skipClearOnTaxaChangeRef.current = true;
+                  clearAllFiltersAndTaxa({ replace: switchView });
                   setShowOnlyStarred(false);
                   setExpandedThreat(new Set());
                   setExpandedCriteria(new Set());
                   setExpandedHabitat(new Set());
                 }}
-                title="Reset all filters and the selected taxon"
+                title="Reset all filters and the selected taxon, and go back to assessed species"
                 className="px-2 md:px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-colors flex items-center gap-1 md:gap-1.5 bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700 shrink-0"
               >
                 <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5745,6 +5755,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                 </svg>
                 <span className="hidden sm:inline">Starred</span> ({pinnedSpecies.length})
+              </button>
+            )}
+            {/* The Not Evaluated view is itself a narrowing of the list, so it
+                gets a chip like any filter; Assessed is the default and has none.
+                Removing it switches back to the Assessed view. */}
+            {isNewAssessments && (
+              <button
+                type="button"
+                onClick={() => onViewModeChange?.("reassessments")}
+                disabled={!onViewModeChange}
+                title={onViewModeChange ? "Back to assessed species" : undefined}
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 flex items-center gap-1 hover:opacity-80 disabled:hover:opacity-100 disabled:cursor-default"
+              >
+                Awaiting 1st assessment
+                {onViewModeChange && <span className="text-sm">×</span>}
               </button>
             )}
             {Array.from(selectedTaxa).map(taxonId => (
@@ -6147,8 +6172,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />
               ) : (
-                // Says which list this is, since the two views share the table.
-                <>{totalFiltered.toLocaleString()} species {isNewAssessments ? "not evaluated" : "assessed"}</>
+                // Which list this is shows as the "Awaiting 1st assessment" chip.
+                <>{totalFiltered.toLocaleString()} species</>
               )}
             </span>
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
