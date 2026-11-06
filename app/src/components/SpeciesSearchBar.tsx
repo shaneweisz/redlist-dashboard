@@ -1,5 +1,6 @@
 "use client";
 
+import { emptyGbifRanges } from "@/lib/gbif-records";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { buildQs, type ViewMode } from "../hooks/useFilterParams";
 import { CATEGORY_COLORS } from "../config/taxa";
@@ -203,7 +204,7 @@ export function SpeciesSearchBar() {
         assessmentYears: new Set(),
         describedYears: new Set(),
         countries: new Set(),
-        obsRanges: new Set(),
+        gbifRanges: emptyGbifRanges(),
         assessmentCounts: new Set(),
         systems: new Set(),
         populationTrends: new Set(),
@@ -277,7 +278,7 @@ export function SpeciesSearchBar() {
       assessmentYears: new Set(),
       describedYears: new Set(),
       countries: new Set(),
-      obsRanges: new Set(),
+      gbifRanges: emptyGbifRanges(),
       assessmentCounts: new Set(),
       systems: new Set(),
       populationTrends: new Set(),

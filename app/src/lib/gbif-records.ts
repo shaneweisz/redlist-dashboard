@@ -101,3 +101,91 @@ export function sinceAssessmentStart(assessmentDate: string | null | undefined):
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
+
+// ── The GBIF Records chart and its filters ───────────────────────────────────
+//
+// The chart shows one metric in one mode at a time (a dropdown), and each of
+// the six keeps its own bucket selection, so they combine the way assessors and
+// reviewers do: "Total (all) 10K+" and "Total (georeferenced) 1K-10K" at once.
+// This is independent of the table's toggle, which only sets what is displayed.
+
+export type GbifMetric = "total" | "new" | "pctNew";
+export type GbifRangeKey = `${GbifMetric}.${GbifRecordMode}`;
+
+export const GBIF_RANGE_KEYS: readonly GbifRangeKey[] = [
+  "total.all", "total.georeferenced", "new.all", "new.georeferenced", "pctNew.all", "pctNew.georeferenced",
+];
+export const DEFAULT_GBIF_CHART_KEY: GbifRangeKey = "total.all";
+
+/** Each selection's URL parameter. obsRanges keeps its old meaning (Total, georeferenced). */
+export const GBIF_RANGE_PARAM: Record<GbifRangeKey, string> = {
+  "total.georeferenced": "obsRanges",
+  "total.all": "obsRangesAll",
+  "new.georeferenced": "newRanges",
+  "new.all": "newRangesAll",
+  "pctNew.georeferenced": "pctNewRanges",
+  "pctNew.all": "pctNewRangesAll",
+};
+export const GBIF_CHART_PARAM = "gbifChart";
+
+export type GbifRanges = Record<GbifRangeKey, Set<string>>;
+export const emptyGbifRanges = (): GbifRanges =>
+  Object.fromEntries(GBIF_RANGE_KEYS.map((k) => [k, new Set<string>()])) as GbifRanges;
+export const hasGbifRanges = (r: GbifRanges): boolean => GBIF_RANGE_KEYS.some((k) => r[k].size > 0);
+
+export function parseGbifChartKey(v: string | null | undefined): GbifRangeKey {
+  return (GBIF_RANGE_KEYS as readonly string[]).includes(v ?? "") ? (v as GbifRangeKey) : DEFAULT_GBIF_CHART_KEY;
+}
+export const gbifKeyParts = (key: GbifRangeKey) => {
+  const [metric, mode] = key.split(".") as [GbifMetric, GbifRecordMode];
+  return { metric, mode };
+};
+
+export const GBIF_METRIC_LABEL: Record<GbifMetric, string> = { total: "Total", new: "New", pctNew: "% New" };
+export const gbifRangeKeyLabel = (key: GbifRangeKey): string => {
+  const { metric, mode } = gbifKeyParts(key);
+  return `${GBIF_METRIC_LABEL[metric]} · ${GBIF_RECORD_MODE_LABEL[mode]}`;
+};
+
+export const GBIF_COUNT_BUCKETS = ["0", "1-10", "11-100", "101-1K", "1K-10K", "10K+"] as const;
+export const GBIF_PCT_BUCKETS = ["0%", "<10%", "10-25%", "25-50%", "50%+"] as const;
+export const gbifBucketsFor = (metric: GbifMetric): readonly string[] => (metric === "pctNew" ? GBIF_PCT_BUCKETS : GBIF_COUNT_BUCKETS);
+
+/** A species' value for a chart key; null where it has none (no assessment window, or % of no records). */
+export function gbifMetricValue(s: GbifRecordCounts, key: GbifRangeKey): number | null {
+  const { metric, mode } = gbifKeyParts(key);
+  const total = gbifRecordCount(s, mode) ?? 0;
+  if (metric === "total") return total;
+  const since = gbifRecordsSinceAssessment(s, mode);
+  if (metric === "new") return since;
+  return since == null || total === 0 ? null : (100 * since) / total;
+}
+
+/** The bucket a value falls in, or null for no value. */
+export function gbifBucket(value: number | null, metric: GbifMetric): string | null {
+  if (value == null) return null;
+  if (metric === "pctNew") {
+    if (value === 0) return "0%";
+    if (value < 10) return "<10%";
+    if (value < 25) return "10-25%";
+    if (value < 50) return "25-50%";
+    return "50%+";
+  }
+  if (value === 0) return "0";
+  if (value <= 10) return "1-10";
+  if (value <= 100) return "11-100";
+  if (value <= 1000) return "101-1K";
+  if (value <= 10000) return "1K-10K";
+  return "10K+";
+}
+
+/** Does a species pass every GBIF range selection (except `skip`, the chart's own)? */
+export function matchesGbifRanges(s: GbifRecordCounts, ranges: GbifRanges, skip?: GbifRangeKey): boolean {
+  for (const key of GBIF_RANGE_KEYS) {
+    const sel = ranges[key];
+    if (key === skip || sel.size === 0) continue;
+    const b = gbifBucket(gbifMetricValue(s, key), gbifKeyParts(key).metric);
+    if (b == null || !sel.has(b)) return false;
+  }
+  return true;
+}

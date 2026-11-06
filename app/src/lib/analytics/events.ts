@@ -38,6 +38,11 @@ export const FILTER_PARAMS: Record<string, string> = {
   assessmentYears: "assessment_year",
   describedYears: "described_year",
   obsRanges: "gbif_observations",
+  obsRangesAll: "gbif_records_all",
+  newRanges: "gbif_new_records",
+  newRangesAll: "gbif_new_records_all",
+  pctNewRanges: "gbif_pct_new_records",
+  pctNewRangesAll: "gbif_pct_new_records_all",
   assessmentCounts: "assessment_count",
   systems: "system",
   trends: "population_trend",
@@ -72,7 +77,8 @@ export const FILTER_PARAMS: Record<string, string> = {
  */
 const FILTER_VALUE_SAFE = new Set([
   "countries", "region", "taxa", "categories", "years", "assessmentYears",
-  "describedYears", "obsRanges", "assessmentCounts", "systems", "trends",
+  "describedYears", "obsRanges", "obsRangesAll", "newRanges", "newRangesAll", "pctNewRanges", "pctNewRangesAll",
+  "assessmentCounts", "systems", "trends",
   "movement", "threats", "criteria", "habitat", "habitatBreadth", "endemics",
   "growthForms", "colMatch", "outdated",
 ]);
