@@ -323,8 +323,9 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
     return Array.from(selectedTaxa).sort().join(",");
   }, [selectedTaxa]);
 
-  // Fetch real per-country occurrence counts from GBIF API in the background
-  // All taxa fire in parallel; map updates once when all resolve
+  // Fetch real per-country occurrence counts from GBIF API in the background.
+  // One request for the whole selection — the route sums the groups itself (it
+  // used to be one request per group, eight on the default view).
   useEffect(() => {
     // Use cached result if available
     if (occurrenceCacheRef.current[taxaKey]) {
@@ -332,30 +333,23 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
       return;
     }
 
-    const taxaToFetch = taxaKey === "all" ? ALL_TAXA_IDS : taxaKey.split(",");
+    const taxaToFetch = taxaKey === "all" ? [...ALL_TAXA_IDS].sort() : taxaKey.split(",");
 
     setOccurrenceLoading(true);
     const controller = new AbortController();
 
-    Promise.all(
-      taxaToFetch.map(taxon =>
-        fetch(`/api/country/stats?taxon=${encodeURIComponent(taxon)}`, { signal: controller.signal })
-          .then(res => res.json())
-          .then(data => (data.stats || {}) as CountryStats)
-          .catch(() => ({} as CountryStats))
-      )
-    ).then(results => {
-      if (controller.signal.aborted) return;
-      const combined: CountryStats = {};
-      for (const stats of results) {
-        for (const [code, stat] of Object.entries(stats)) {
-          if (!combined[code]) combined[code] = { occurrences: 0, species: 0 };
-          combined[code].occurrences += stat.occurrences;
-        }
-      }
-      occurrenceCacheRef.current[taxaKey] = combined;
-      setOccurrenceStats(combined);
-    }).finally(() => {
+    fetch(`/api/country/stats?taxon=${taxaToFetch.map(encodeURIComponent).join(",")}`, { signal: controller.signal })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (controller.signal.aborted) return;
+        // A failure leaves the occurrence layer empty but uncached, so changing
+        // the selection back and forth tries again.
+        if (!data?.stats) return;
+        occurrenceCacheRef.current[taxaKey] = data.stats as CountryStats;
+        setOccurrenceStats(data.stats as CountryStats);
+      })
+      .catch(() => {})
+      .finally(() => {
       if (!controller.signal.aborted) setOccurrenceLoading(false);
     });
 

@@ -1863,43 +1863,45 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     setSscLoading(true);
     const requestScopeKey = scopeKey;
 
-    Promise.all(
-      SSC_SECTIONS.map((section) =>
-        fetch(`/api/redlist/taxa-subgroups?nodeId=${section.nodeId}${scopeQs ? `&${scopeQs}` : ""}`)
-          .then(res => (res.ok ? res.json() : null))
-          .then((data): Table1aSectionData | null => {
-            if (!data) return null;
-            const rows: Table1aRowData[] = (data.subgroups ?? []).map((sg: SubGroupSummary) => ({
-              group: sg.id,
-              name: sg.name,
-              estimatedDescribed: sg.estimatedDescribed,
-              totalAssessed: sg.totalAssessed,
-              percentAssessed: sg.estimatedDescribed > 0 ? (sg.totalAssessed / sg.estimatedDescribed) * 100 : 0,
-              outdated: sg.outdated,
-              percentOutdated: sg.totalAssessed > 0 ? (sg.outdated / sg.totalAssessed) * 100 : 0,
-              byCategory: sg.byCategory,
-              gbifNeSpeciesCount: sg.gbifNeSpeciesCount,
-              colDescribed: sg.colDescribed,
-              colNe: sg.colNe,
-              colBreakdown: sg.colBreakdown,
-              parentTaxon: section.parentTaxon,
-            }));
-            // Sort by # assessed descending, but pin the remainder/catch-all row
-            // to the bottom regardless of its own count — it reads as an appendix,
-            // not one of the named specialist groups.
-            rows.sort((a, b) => {
-              if (a.group === section.catchAllId) return 1;
-              if (b.group === section.catchAllId) return -1;
-              return b.totalAssessed - a.totalAssessed;
-            });
-            return { title: section.title, rows, catchAllId: section.catchAllId };
-          })
+    // One request for all six sections (the route's batch form) — it used to be one
+    // per section, which Sentry flagged as an N+1.
+    const nodeIds = SSC_SECTIONS.map((section) => section.nodeId).join(",");
+    fetch(`/api/redlist/taxa-subgroups?nodeIds=${nodeIds}${scopeQs ? `&${scopeQs}` : ""}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { subgroupsByNode?: Record<string, SubGroupSummary[]> } | null): Table1aSectionData[] =>
+        SSC_SECTIONS.flatMap((section) => {
+          const subgroups = data?.subgroupsByNode?.[section.nodeId];
+          if (!subgroups) return [];
+          const rows: Table1aRowData[] = subgroups.map((sg: SubGroupSummary) => ({
+            group: sg.id,
+            name: sg.name,
+            estimatedDescribed: sg.estimatedDescribed,
+            totalAssessed: sg.totalAssessed,
+            percentAssessed: sg.estimatedDescribed > 0 ? (sg.totalAssessed / sg.estimatedDescribed) * 100 : 0,
+            outdated: sg.outdated,
+            percentOutdated: sg.totalAssessed > 0 ? (sg.outdated / sg.totalAssessed) * 100 : 0,
+            byCategory: sg.byCategory,
+            gbifNeSpeciesCount: sg.gbifNeSpeciesCount,
+            colDescribed: sg.colDescribed,
+            colNe: sg.colNe,
+            colBreakdown: sg.colBreakdown,
+            parentTaxon: section.parentTaxon,
+          }));
+          // Sort by # assessed descending, but pin the remainder/catch-all row
+          // to the bottom regardless of its own count — it reads as an appendix,
+          // not one of the named specialist groups.
+          rows.sort((a, b) => {
+            if (a.group === section.catchAllId) return 1;
+            if (b.group === section.catchAllId) return -1;
+            return b.totalAssessed - a.totalAssessed;
+          });
+          return [{ title: section.title, rows, catchAllId: section.catchAllId }];
+        })
       )
-    )
       // Same staleness guard as the Table 1a fetch above — scopeKey
       // changing already reset sscData/sscFetchStartedRef, but didn't cancel
       // this in-flight request.
-      .then((sections) => { if (scopeKeyRef.current === requestScopeKey) setSscData(sections.filter((s): s is Table1aSectionData => s != null)); })
+      .then((sections) => { if (scopeKeyRef.current === requestScopeKey) setSscData(sections); })
       .finally(() => setSscLoading(false));
   }, [sscMode, sscData, scopeKey, scopeQs]);
 
