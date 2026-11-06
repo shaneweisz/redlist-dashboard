@@ -47,7 +47,7 @@ export default function RedListPage() {
   const [sharedTaxa, setSharedTaxa] = useState<Set<string>>(new Set());
   const [sharedSubgroups, setSharedSubgroups] = useState<Set<string>>(new Set());
 
-  // View-mode switch, driven by the Reassessments / New Assessments tabs in
+  // View-mode switch, driven by the Reassessments / First Assessments tabs in
   // the header below.
   const handleViewModeChange = (mode: ViewMode) => {
     if (viewMode === mode) return;
@@ -96,7 +96,7 @@ export default function RedListPage() {
                 type="button"
                 onClick={() => {
                   // "Go home": drop every filter/selection AND reset back to the
-                  // default Assessed view (dropping any New Assessments choice),
+                  // default Assessed view (dropping any First Assessments choice),
                   // but keep the layout (Standard/Table 1a/SSC/Country) choice —
                   // same fields clearAllFiltersAndTaxa preserves minus `view`,
                   // replicated here via raw URL params since this click lives
@@ -132,7 +132,7 @@ export default function RedListPage() {
               <div role="tablist" aria-label="View" className="[grid-area:tabs] flex sm:justify-self-end rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm shrink-0">
                 {([
                   ["reassessments", "Reassessments"],
-                  ["new-assessments", "New Assessments"],
+                  ["new-assessments", "First Assessments"],
                 ] as const).map(([mode, label]) => (
                   <button
                     key={mode}
