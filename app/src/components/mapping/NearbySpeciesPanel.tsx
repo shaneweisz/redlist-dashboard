@@ -538,20 +538,24 @@ function Thumbnail({ name, taxonGroup }: { name: string; taxonGroup: string }) {
               style={{ position: "fixed", top: preview.top, left: preview.left, zIndex: 10050 }}
               className="pointer-events-none block rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
             >
-              <img
-                src={image.mediumUrl ?? image.squareUrl}
-                alt={name}
-                className="block h-40 w-40 rounded object-cover"
-              />
+              <span className="relative block h-40 w-40 overflow-hidden rounded">
+                <img
+                  src={image.mediumUrl ?? image.squareUrl}
+                  alt={name}
+                  className="block h-40 w-40 object-cover"
+                />
+                {/* The photo's credit (its licence requires it), small text
+                    over the bottom of the photo on a fade. */}
+                {image.attribution && (
+                  <span className="absolute inset-x-0 bottom-0 px-1.5 pt-3 pb-1 text-[9px] leading-snug text-white bg-gradient-to-t from-black/75 to-transparent">
+                    {image.attribution}
+                  </span>
+                )}
+              </span>
               <span className="block max-w-40 truncate pt-0.5 text-center text-[10px] italic text-zinc-500 dark:text-zinc-400">
                 {name}
               </span>
-              {/* The photo's credit (its licence requires it). */}
-              {image.attribution && (
-                <span className="block max-w-40 pt-0.5 text-center text-[9px] leading-snug text-zinc-400 dark:text-zinc-500">
-                  {image.attribution}
-                </span>
-              )}
+
             </span>,
             document.body
           )}

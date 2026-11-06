@@ -624,8 +624,8 @@ function explainCriteria(criteria: string): string {
 }
 
 // The shared enlarged-photo preview (#image-preview, rendered once at the
-// bottom of RedListView): the photo, plus its credit line underneath, which
-// the photo's licence requires wherever it's shown. Placed above the anchor,
+// bottom of RedListView): the photo, with its credit overlaid along its
+// bottom edge, which the photo's licence requires wherever it's shown. Placed above the anchor,
 // or below it when preferBelow and there's room.
 function showImagePreview(anchor: DOMRect, src: string, credit: string | null | undefined, preferBelow = false) {
   const box = document.getElementById("image-preview");
@@ -6839,12 +6839,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       {/* Fixed image preview portal */}
       <div
         id="image-preview"
-        className="fixed z-[9999] w-48 rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none overflow-hidden"
+        className="fixed z-[9999] w-48 h-48 rounded shadow-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pointer-events-none overflow-hidden"
         style={{ display: 'none' }}
       >
         <img alt="" className="block w-48 h-48 object-cover" />
-        {/* Filled by showImagePreview: the photo's credit line. */}
-        <span data-credit className="block px-1.5 py-1 text-[10px] leading-snug text-zinc-500 dark:text-zinc-400" />
+        {/* Filled by showImagePreview: the photo's credit, small text over
+            the bottom of the photo, on a fade so it reads on any image. */}
+        <span data-credit className="absolute inset-x-0 bottom-0 px-1.5 pt-3 pb-1 text-[9px] leading-snug text-white bg-gradient-to-t from-black/75 to-transparent" />
       </div>
     </div>
   );
