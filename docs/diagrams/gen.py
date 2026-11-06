@@ -205,86 +205,76 @@ def target():
 
 
 def files():
-    """Every file in a sync (app/data/sync = syncs/<ts>/ in R2): which step writes it, who reads it."""
-    heading(0, -170, "The files in a sync: where each comes from, and who reads it", 34)
-    heading(0, -118, "app/data/sync/ = build/data/ = syncs/<timestamp>/ in R2. The app queries the parquets from R2 at runtime; "
-            "the deploy build turns some into the prebuilt files.", 17, "#495057")
-    heading(0, -86, "Dashed: could be simplified (see docs/sync.md, What the app reads).", 17, "#495057")
-    S = {}
-    W3, X3 = 300, 3.25  # the files column: wider boxes
-    # inputs
-    S["pg"] = box("pg", 0, 0.2, "IUCN Red List\nPostgres (read-only)", "source")
-    S["xr"] = box("xr", 0, 2.6, "CoL XR + curated\nchecklist (+ CoL\ncommon names)", "source", h=86)
-    S["dec"] = box("dec", 0, 4.3, "GBIF matcher (local\nDocker) + decisions.tsv", "source", h=80)
-    S["snap"] = box("snap", 0, 6.2, "GBIF monthly\nsnapshot (local\nmirror)", "source", h=86)
-    S["inat"] = box("inat", 0, 8.0, "iNaturalist\ncommon names", "source")
-    # core tables (build/core/, not published)
-    heading(1 * COL_W, -40, "core/ (not published)", 18, "#2b8a3e")
-    S["assess"] = box("assess", 1, 0.2, "assessments\n(every assessment)", "core")
-    S["taxa"] = box("taxa", 1, 2.6, "taxa\n(every CoL usage)", "core")
-    S["link"] = box("link", 1, 4.3, "assessment_link\nSIS id -> CoL species", "core", h=80)
-    S["occ"] = box("occ", 1, 6.2, "occurrence_counts,\n_dates, _countries", "core", h=80)
-    # steps
-    heading(2 * COL_W, -40, "sync steps (scripts/sync/)", 18, "#5f3dc4")
-    S["s_taxa"] = box("s_taxa", 2, 1.4, "core/build-taxa\n(+ build-vernaculars)", "step")
-    S["s_rm"] = box("s_rm", 2, 3.6, "outputs/\nbuild-read-models", "step")
-    S["s_sum"] = box("s_sum", 2, 7.6, "outputs/\nbuild-taxa-summary", "step")
-    S["s_rev"] = box("s_rev", 2, 9.6, "outputs/\nbuild-col-revisions", "step")
-    S["s_srch"] = box("s_srch", 2, 11.0, "outputs/build-search-\nindex, -synonym-index", "step")
-    S["s_chk"] = box("s_chk", 2, 13.4, "sync.ts: fixtures,\ndata tests, comparison", "step")
-    # files
-    heading(X3 * COL_W, -40, "data/sync/ (published)", 18, "#d9480f")
-    F = [
-        ("f_ass", 0.0, "lists/assessed.parquet  8 MB\none row per assessed species", False),
-        ("f_hist", 0.9, "lists/assessments.parquet  4 MB\npublished history, one per year", False),
-        ("f_spp", 1.8, "lists/species/  37 MB, 29 files\nthe CoL species universe, by group", False),
-        ("f_ne", 2.7, "lists/ne.parquet  34 MB\nGBIF counts for Not Evaluated species", True),
-        ("f_taxa", 3.9, "taxonomy/taxa.parquet  152 MB\ncopy of the taxa core table", True),
-        ("f_sl", 4.8, "taxonomy/species_link.parquet  3 MB\nthe links, in the old shape", True),
-        ("f_al", 5.7, "taxonomy/assessment_link.parquet 3 MB\ncopy of the link core table", False),
-        ("f_vern", 6.6, "taxonomy/vernacular-names.json\nnames for the tree's labels", False),
-        ("f_sum", 7.6, "summaries/  5 JSON, 2.4 MB\ngroup, node, country, realm totals", False),
-        ("f_colx", 8.5, "taxonomy/col-*.parquet  3 files\nCoL-differences breakdowns", False),
-        ("f_rev", 9.6, "taxonomy/col-revisions.json\neach species' CoL-differences flag", False),
-        ("f_name", 10.6, "search/name-index + rank-index\n163 MB: names, taxon suggestions", False),
-        ("f_syn", 11.5, "search/synonym-index  78 MB\nold names", False),
-        ("f_json", 13.4, "sync.json\nevery input version, check result", False),
+    """Every file a sync reads and writes, step by step in sync.ts order, and where each lands."""
+    heading(0, -190, "A sync, step by step: every file it reads and writes, and where it lands", 34)
+    heading(0, -140, "npm run sync (scripts/sync/sync.ts), top to bottom in the order it runs. Paths under ~/.cache/redlist-dashboard/. "
+            "build/data/ is what sync:publish uploads to syncs/<timestamp>/ in R2 and copies to app/data/sync/.", 17, "#495057")
+    heading(0, -110, "Dashed: unused, or could be simpler (docs/sync.md). sync.log is written throughout.", 17, "#495057")
+    cols = [("inputs and caches", 0.0, 290, "#495057"), ("step", 1.05, 250, "#5f3dc4"),
+            ("build/core/  (working, not published)", 2.0, 320, "#2b8a3e"),
+            ("build/data/  (published)", 3.15, 340, "#d9480f"), ("elsewhere", 4.4, 300, "#1e1e1e")]
+    for title, x, _w, color in cols:
+        heading(x * COL_W, -55, title, 18, color)
+    kinds = {0: "source", 2: "core", 3: "out", 4: "app"}
+    steps = [
+        ("1  inputs\ninputs/col.ts, inat.ts", {
+            0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat/<month>/\niNaturalist names", False)]}),
+        ("2  taxa\ncore/build-taxa.ts", {
+            2: [("taxa.parquet  159 MB\nevery CoL usage", False), ("species-vernaculars.parquet\nCoL common names", False),
+                ("species-vernacular-names\n.parquet  (for search)", False)],
+            3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False)]}),
+        ("3  assessments\ncore/build-assessments.ts", {
+            0: [("Red List Postgres\n(read-only, not cached)", False)],
+            2: [("assessments.parquet  12 MB\nevery assessment", False)]}),
+        ("4  occurrences\ncore/build-occurrences.ts", {
+            0: [("~/Data/gbif/<date>/\nthe snapshot mirror", False), ("occurrences/<date>/parts/\nresumable aggregate", False)],
+            2: [("occurrence_counts  135 MB\nusage x year x georef x type", False),
+                ("occurrence_dates  943 MB\n... x month x day", False),
+                ("occurrence_countries  58 MB", False),
+                ("occurrence_species_keys  23 MB\nnothing reads it", True),
+                ("occurrences.json\nsnapshot, citation, rows", False)]}),
+        ("5  match names\ncore/build-matches.ts", {
+            0: [("matching-ws/export-<xr>/\nthe matcher's index (Docker)", False)],
+            2: [("matches.parquet  6 MB\nthe matcher's answers", False), ("matches.json\nnothing reads it", True)]}),
+        ("6  link\ncore/build-link.ts", {
+            0: [("core/decisions.tsv\n(in the repo)", False)],
+            2: [("assessment_link.parquet\nSIS id -> CoL species", False), ("match_queue.parquet\nwaiting for a decision", False)],
+            4: [("build/match-queue.tsv\nthe queue, to review", False)]}),
+        ("7  read models\noutputs/build-read-models.ts", {
+            2: [("count_components.parquet\nwhat each count is made of", False)],
+            3: [("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
+                ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", True),
+                ("taxonomy/species_link.parquet  3 MB", True), ("taxonomy/taxa.parquet  152 MB (copy)", True),
+                ("taxonomy/assessment_link (copy)", False)]}),
+        ("8  summaries, indexes\noutputs/build-taxa-summary,\n-col-revisions, -synonym-\nindex, -search-index", {
+            3: [("summaries/  5 JSON, 2.4 MB", False), ("taxonomy/col-*.parquet  3 files", False),
+                ("taxonomy/col-revisions.json", False), ("search/name-index  160 MB", False),
+                ("search/rank-index  3 MB", False), ("search/synonym-index  78 MB", False)],
+            4: [("app/src/config/col-taxon-ids\n.json, col-release.json (repo)", False)]}),
+        ("9  checks\nsync.ts, checks/", {
+            0: [("baseline-<sync>/  prod's\nsync, downloaded once", False)],
+            3: [("sync.json  every input\nversion, check result", False), ("sync.log  everything\nthe run printed", False)],
+            4: [("build/compare/  report.md,\ndiffs.parquet, summary.json", False)]}),
+        ("10  npm run sync:publish\nscripts/sync/publish.ts", {
+            4: [("app/data/sync/ and R2\nsyncs/<timestamp>/", False), ("app/latest-sync.txt\n(the data PR)", False)]}),
     ]
-    for id_, row, label, dashed in F:
-        S[id_] = box(id_, X3, row, label, "out", w=W3, h=72, size=15, dashed=dashed)
-    # readers
-    heading(4.55 * COL_W, -40, "who reads it", 18, "#1e1e1e")
-    S["r_build"] = box("r_build", 4.55, 0.4, "deploy build: prebuilt\nspecies lists, search\nshards, tree files", "app", h=86)
-    S["r_list"] = box("r_list", 4.55, 2.2, "species lists, charts,\nfilters (/api/redlist/\nspecies, /browse, MCP)", "app", h=86)
-    S["r_detail"] = box("r_detail", 4.55, 4.0, "species detail: history,\nsynonyms", "app")
-    S["r_cmp"] = box("r_cmp", 4.55, 5.7, "next sync's comparison\n(and tracing)", "app")
-    S["r_sum"] = box("r_sum", 4.55, 7.2, "summary table, tree,\ncountry + realm views", "app")
-    S["r_col"] = box("r_col", 4.55, 9.0, "CoL-differences card,\npopover and flags", "app")
-    S["r_srch"] = box("r_srch", 4.55, 11.0, "search bar (beyond the\nshards), /browse, MCP", "app")
-    S["r_pub"] = box("r_pub", 4.55, 13.4, "sync:publish checks,\nprovenance", "app")
-
-    for a, b in [("pg", "assess"), ("xr", "taxa"), ("snap", "occ"),
-                 ("assess", "link"), ("taxa", "link"), ("dec", "link"),
-                 ("xr", "s_taxa"), ("s_taxa", "f_vern"),
-                 ("assess", "s_rm"), ("taxa", "s_rm"), ("link", "s_rm"), ("occ", "s_rm"),
-                 ("s_rm", "f_ass"), ("s_rm", "f_hist"), ("s_rm", "f_spp"), ("s_rm", "f_ne"),
-                 ("s_rm", "f_taxa"), ("s_rm", "f_sl"), ("s_rm", "f_al"),
-                 ("s_rm", "s_sum"), ("s_sum", "s_rev"), ("s_rev", "s_srch"), ("s_srch", "s_chk"),
-                 ("s_sum", "f_sum"), ("s_sum", "f_colx"), ("s_rev", "f_rev"),
-                 ("s_srch", "f_name"), ("s_srch", "f_syn"), ("s_chk", "f_json"),
-                 # readers
-                 ("f_ass", "r_build"), ("f_spp", "r_build"), ("f_ne", "r_build"),
-                 ("f_ass", "r_list"), ("f_ne", "r_list"), ("f_spp", "r_list"), ("f_sl", "r_list"),
-                 ("f_hist", "r_detail"), ("f_taxa", "r_detail"), ("f_sl", "r_detail"),
-                 ("f_al", "r_cmp"),
-                 ("f_vern", "r_sum"), ("f_sum", "r_sum"),
-                 ("f_colx", "r_col"), ("f_rev", "r_col"), ("f_taxa", "r_col"), ("f_sl", "r_col"),
-                 ("f_name", "r_srch"), ("f_syn", "r_srch"), ("f_name", "r_build"),
-                 ("f_json", "r_pub")]:
-        arrow(S[a], S[b])
-    arrow(S["inat"], S["s_rm"], dashed=True)
-    legend(0, 10.2 * ROW_H, [("source", "input"), ("core", "core table (build/core/)"),
-                              ("step", "sync step"), ("out", "published sync file"), ("app", "reader")])
+    BH, GAP = 54, 12
+    y = 0
+    for n, (label, files) in enumerate(steps):
+        rows = max([len(v) for v in files.values()] + [1])
+        bh = max(rows * (BH + GAP) + GAP, 2 * BH)
+        band = base(f"band{n}", "rectangle", -15, y, 4.4 * COL_W + 300 + 30, bh, "transparent",
+                    "#f1f3f5" if n % 2 == 0 else "#ffffff", strokeWidth=0, roundness=None)
+        elements.append(band)
+        step_h = min(bh - 2 * GAP, 96)
+        box(f"st{n}", 1.05, 0, label, "step", w=250, h=step_h, dy=y + (bh - step_h) / 2, size=14)
+        for col, items in files.items():
+            x, w = [(c[1], c[2]) for c in cols][col]
+            for k, (txt, dashed) in enumerate(items):
+                box(f"f{n}_{col}_{k}", x, 0, txt, kinds[col], w=w, h=BH, dy=y + GAP + k * (BH + GAP), size=13, dashed=dashed)
+        y += bh
+    legend(0, y + 30, [("source", "input or cache"), ("step", "sync step"), ("core", "working table"),
+                        ("out", "published"), ("app", "elsewhere")])
 
 
 def build():

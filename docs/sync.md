@@ -200,9 +200,9 @@ It is keyed by `col_id`, which is also its GBIF key. 866,822 species in this syn
 
 ## What the app reads
 
-![The files in a sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/01-sync-files.png)
+![The files in a sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/01-sync-files-v2.png)
 
-Every file in a sync: the step that writes it, and what reads it. The source is [`diagrams/sync-files.excalidraw`](diagrams/sync-files.excalidraw) (`python3 -I diagrams/gen.py files <out>` regenerates it); the routes behind "who reads it" are in [app.md](app.md).
+A sync step by step, in the order `sync.ts` runs them: every input and cache each step reads, and every file it writes, in `build/core/` (working, not published), `build/data/` (published) or elsewhere. What reads each published file is in [app.md](app.md). The source is [`diagrams/sync-files.excalidraw`](diagrams/sync-files.excalidraw) (`python3 -I diagrams/gen.py files <out>` regenerates it).
 
 `build/data/`, which is exactly what gets uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch: the same tree in all three places. Each run starts it empty, so no file outlives the code that wrote it. Built from the core tables by `outputs/build-read-models.ts`, then the other `outputs/` builders run against it in the same process. Intermediates only those builders read (the CoL and iNaturalist common-name tables) stay in `build/core/`.
 
@@ -222,12 +222,15 @@ Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/s
 | `search/` | `name-index.parquet`, `rank-index.parquet`, `synonym-index.parquet` | the search bar |
 | `summaries/` | `taxa-summary.json`, the two children summaries, `country-stats.json`, `realm-stats.json` | per-group and per-place totals |
 | | `sync.json` | every input version and check result |
+| | `sync.log` | everything the run printed: each step, its timings and counts, the data tests and the comparison summary. Written as the sync runs, so a failed run leaves one in `build/data/` too |
 
-Every file has a reader, but three could be simpler (dashed in the diagram):
+Every published file has a reader, but three could be simpler (dashed in the diagram):
 
 - **`taxa.parquet` is a third of a sync (152 of 447 MB)**, yet the app reads 5 of its 16 columns for two lookups by CoL id (a species' synonyms, and the CoL links in the differences popover). A slim copy with those columns, sorted by id, would be a fraction of the size, and cheaper to query over R2.
 - **`species_link.parquet` is `assessment_link.parquet` in the old shape** the app read before the sync rewrite. Pointing its readers at `assessment_link` would drop the file and the reshaping.
 - **`ne.parquet` is joined onto `species/` wherever it is read** (the Not Evaluated list, the build, the summaries). Its GBIF columns could live on the species rows.
+
+Two working files in `build/core/` have no reader at all: `occurrence_species_keys.parquet` (23 MB, GBIF's own species key per usage, kept to check `species_id` against and never read since) and `matches.json` (the matcher's version and name counts, which could go in `sync.json` as `occurrences.json`'s snapshot details already do).
 
 Not sync data, and siblings of `app/data/sync/`: `app/data/narratives/` (per Red List release, from `narratives/<release>/` in R2 or built locally) and `app/data/overlays/` (map layers, from the maps bucket or built locally).
 
