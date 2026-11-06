@@ -32,7 +32,7 @@ import { loadEnvFiles } from "../lib/utils";
 import { ensureColInputs, writeColReleasePin } from "./inputs/col";
 import { ensureInatNames } from "./inputs/inat-names";
 import { run as buildTaxa } from "./core/build-taxa";
-import { run as buildAssessments } from "./core/build-assessments";
+import { run as buildAssessments, REDLIST_DB } from "./core/build-assessments";
 import { run as buildOccurrences } from "./core/build-occurrences";
 import { buildLink, summariseQueue } from "./core/build-link";
 import { buildMatches } from "./core/build-matches";
@@ -141,7 +141,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   await buildReadModels(conn, { coreDir: CORE_DIR, outDir: OUT_DIR, inatNames: inat });
   const [rl] = (await conn.runAndReadAll(`SELECT count(*) FILTER (is_latest) AS species, max(year_published) AS newest
     FROM read_parquet('${path.join(CORE_DIR, "assessments.parquet")}')`)).getRowObjects();
-  manifest.redlist = { database: process.env.DB_NAME ?? "redlist_2026_1", assessed_species: Number(rl.species), newest_published: rl.newest };
+  manifest.redlist = { database: REDLIST_DB, assessed_species: Number(rl.species), newest_published: rl.newest };
   manifest.inat = path.basename(path.dirname(inat));
   done();
 
