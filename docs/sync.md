@@ -212,11 +212,10 @@ Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/s
 |---|---|---|
 | `lists/` | `assessed.parquet` | one row per assessed species: latest assessment, GBIF key and counts, latest credits. Lists stay `;`-joined so the app's filter SQL is unchanged |
 | | `assessments.parquet` | published history, one per year, latest first; unpublished drafts left out |
-| | `ne.parquet` | the Not Evaluated list |
-| | `species/` | the CoL universe, partitioned by group |
-| `taxonomy/` | `taxa.parquet` | the taxonomy core table, which the CoL-differences, synonym and species-listing code queries |
-| | `species_link.parquet` | the links as the app reads them: one row per assessed species and covered row, with its GBIF key |
-| | `assessment_link.parquet` | the link core table, published for the comparison and for tracing |
+| | `ne.parquet` | the Not Evaluated species GBIF has records for, keyed by their GBIF key (a CoL id): counts, countries, common name |
+| | `species/` | every accepted CoL species, partitioned by group, with `described` (the universe every described and Not Evaluated count, list and search tier filters on) |
+| `taxonomy/` | `taxa.parquet` | every CoL usage, with only the 9 columns the app reads (the full table stays in `build/core/`), sorted by `col_id` |
+| | `assessment_link.parquet` | the link core table: which CoL species each assessed species is (`role` primary or covered), read by the app, the summaries and the comparison |
 | | `col-revisions.json`, the three `col-*` parquets | the CoL-differences card: each species' flag, and the precomputed tables its breakdowns join |
 | | `vernacular-names.json` | common names for the tree's class, order, family and genus labels |
 | `search/` | `name-index.parquet`, `rank-index.parquet`, `synonym-index.parquet` | the search bar |
@@ -224,11 +223,7 @@ Files are grouped by what they are for. [`src/lib/data/sync-layout.ts`](../app/s
 | | `sync.json` | every input version and check result |
 | | `sync.log` | everything the run printed: each step, its timings and counts, the data tests and the comparison summary. Written as the sync runs, so a failed run leaves one in `build/data/` too |
 
-Every published file has a reader, but three could be simpler (dashed in the diagram):
-
-- **`taxa.parquet` is a third of a sync (152 of 447 MB)**, yet the app reads 5 of its 16 columns for two lookups by CoL id (a species' synonyms, and the CoL links in the differences popover). A slim copy with those columns, sorted by id, would be a fraction of the size, and cheaper to query over R2.
-- **`species_link.parquet` is `assessment_link.parquet` in the old shape** the app read before the sync rewrite. Pointing its readers at `assessment_link` would drop the file and the reshaping.
-- **`ne.parquet` is joined onto `species/` wherever it is read** (the Not Evaluated list, the build, the summaries). Its GBIF columns could live on the species rows.
+Every published file has a reader. `ne.parquet` and `species/` look like they could be one file, but they answer different questions: `species/` is the universe, read by group (its partitions); `ne.parquet` is looked up by GBIF key (the map's tooltips, nearby species, the search index), which `species/` can't prune.
 
 Not sync data, and siblings of `app/data/sync/`: `app/data/narratives/` (per Red List release, from `narratives/<release>/` in R2 or built locally) and `app/data/overlays/` (map layers, from the maps bucket or built locally).
 

@@ -2225,7 +2225,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Dedupe by row key alone. This used to need a name-equality fallback for NE species,
   // because a row from the NE list was keyed on its CoL id while the same species from
   // search was keyed on its GBIF one — two different keys for one species. Both sides
-  // resolve through species_link to the same `col-…` key now, so the keys match.
+  // resolve through assessment_link to the same `col-…` key now, so the keys match.
   const taxaFilteredSpecies = useMemo(() => {
     if (!singleSpeciesPreview) return taxaFilteredSpeciesNoPreview;
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
@@ -3336,7 +3336,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // Lazily fetch CoL synonyms for the open species — only once the CoL tab is opened.
   // Keyed by the row key, which already encodes which id the lookup uses (`col-…` →
-  // by CoL id, `sis-…` → resolved server-side through species_link).
+  // by CoL id, `sis-…` → resolved server-side through assessment_link).
   useEffect(() => {
     if (selectedSpeciesKey == null || !visitedTabs.has("col")) return;
     const s = paginatedSpecies.find((sp) => sp.species_key === selectedSpeciesKey);

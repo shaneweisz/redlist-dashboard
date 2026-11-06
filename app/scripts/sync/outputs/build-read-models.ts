@@ -9,6 +9,8 @@
  *                        its latest credits and assessment count
  *   assessments.parquet  published assessment history, one row per year
  *   species/, ne.parquet  see notEvaluated
+ *   taxa.parquet         every CoL usage, with the 9 columns the app reads
+ *   assessment_link.parquet  copied from core/
  *
  * GBIF counts per assessed species, from its link rows:
  *   own / covered   its species' records, minus usages another species owns
@@ -305,8 +307,15 @@ export async function buildReadModels(conn: DuckDBConnection, o: ReadModelInputs
   await notEvaluated(conn, o.outDir, o.coreDir);
   await checkEachUsageCountedOnce(conn, o.outDir);
 
-  // The app reads the taxonomy directly, and the comparison reads the link.
-  for (const f of ["assessment_link.parquet", "taxa.parquet"]) fs.copyFileSync(path.join(o.coreDir, f), path.join(o.outDir, syncPath(f)));
+  // The links as the app and the comparison read them, and the taxonomy as the app
+  // reads it: every usage (the synonyms lookup needs them all), but only the columns
+  // a reader uses, sorted by col_id so a lookup by id skips row groups. Lineage, the
+  // universe flags and groups are on species/.
+  fs.copyFileSync(path.join(o.coreDir, "assessment_link.parquet"), path.join(o.outDir, syncPath("assessment_link.parquet")));
+  await conn.run(`COPY (
+    SELECT col_id, parent_id, status, rank, scientific_name, authorship, in_checklist, checklist_parent_id, checklist_name
+    FROM taxa ORDER BY col_id
+  ) TO ${lit(path.join(o.outDir, syncPath("taxa.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 }
 
 export async function run(): Promise<void> {
