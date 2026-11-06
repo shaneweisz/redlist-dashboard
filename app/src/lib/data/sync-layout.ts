@@ -34,7 +34,7 @@ export const SYNC_LAYOUT = {
     "taxa-summary.json", "table1a-children-summaries.json", "ssc-group-children-summaries.json",
     "country-stats.json", "realm-stats.json",
   ],
-  "": ["sync.json"],
+  "": ["sync.json", "sync.log"],
 } as const;
 
 const FOLDER = new Map<string, string>(

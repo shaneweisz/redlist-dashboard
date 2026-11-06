@@ -78,6 +78,7 @@ function contentTypeFor(filePath: string): string {
   if (filePath.endsWith(".csv")) return "text/csv";
   if (filePath.endsWith(".json")) return "application/json";
   if (filePath.endsWith(".pdf")) return "application/pdf";
+  if (filePath.endsWith(".log")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
 }
 

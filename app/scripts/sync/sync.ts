@@ -19,13 +19,14 @@
  *              comparison against the sync production serves, written to
  *              build/compare/ for the PR
  *   sync.json  every input version and check result, published with the data
+ *   sync.log   everything the run printed, published with it
  *
  * Usage:  npm run sync [-- --skip-compare] [-- --baseline <data dir>]
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { loadEnvFiles } from "../lib/utils";
 import { writeReleaseMetadata } from "./inputs/fetch-col-xr";
@@ -58,6 +59,23 @@ function step(name: string): () => void {
   return () => console.log(`   ${name}: ${((Date.now() - start) / 1000).toFixed(0)} s`);
 }
 
+/**
+ * Copy everything the sync prints into `file` as well as the terminal. It is
+ * opened in data/, so the log is published with the sync (sync.log beside
+ * sync.json): each release carries the record of how it was built.
+ */
+function teeOutput(file: string): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    const write = stream.write.bind(stream) as (chunk: string | Uint8Array, ...rest: unknown[]) => boolean;
+    stream.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+      // The file gets plain text; the terminal keeps its colours.
+      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8");
+      fs.appendFileSync(file, text.replace(/\x1b\[[0-9;]*m/g, ""));
+      return write(chunk, ...rest);
+    }) as typeof stream.write;
+  }
+}
+
 function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: APP, encoding: "utf-8" }).trim();
 }
@@ -81,6 +99,8 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   // older version wrote would otherwise be published with every sync after it.
   fs.rmSync(OUT_DIR, { recursive: true, force: true });
   fs.mkdirSync(OUT_DIR, { recursive: true });
+  teeOutput(path.join(OUT_DIR, syncPath("sync.log")));
+  console.log(`sync ${manifest.built_at} at ${String(manifest.commit).slice(0, 8)}${manifest.dirty ? " (uncommitted changes)" : ""}`);
 
   let done = step("inputs");
   const col = await ensureColInputs();
@@ -149,10 +169,14 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   for (const f of DATA_TEST_FILES) {
     if (!fs.existsSync(path.join(OUT_DIR, syncPath(f)))) throw new Error(`sync: ${f} was not built`);
   }
-  try {
-    execFileSync("npx", ["vitest", "run", ...DATA_TESTS], { cwd: APP, stdio: "inherit", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR } });
+  // Piped rather than inherited, so the tests' output reaches sync.log too.
+  const tests = spawnSync("npx", ["vitest", "run", ...DATA_TESTS], {
+    cwd: APP, encoding: "utf-8", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR, FORCE_COLOR: "0" } });
+  process.stdout.write(tests.stdout ?? "");
+  process.stderr.write(tests.stderr ?? "");
+  if (tests.status === 0) {
     manifest.data_tests = { files: DATA_TESTS, passed: true };
-  } catch {
+  } else {
     manifest.data_tests = { files: DATA_TESTS, passed: false };
     fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
     throw new Error("sync: the data tests fail against this build (output above)");

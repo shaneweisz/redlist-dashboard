@@ -17,7 +17,7 @@ const DUCKDB_TRACE = [
 // USE_R2 off, since species-duckdb keys it on assessed.parquet NOT existing
 // locally), the species/ partitions, the narratives and the map overlays.
 // taxa.parquet alone is ~160MB against Vercel's 250MB function cap.
-const ONLY_SUMMARIES = ["**/data/sync/**/*.parquet", "**/data/sync/lists/species/**", "**/data/narratives/**", "**/data/overlays/**"];
+const ONLY_SUMMARIES = ["**/data/sync/**/*.parquet", "**/data/sync/lists/species/**", "**/data/sync/sync.log", "**/data/narratives/**", "**/data/overlays/**"];
 // …and, for routes that never open them, the two children summaries (~2.5MB).
 const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
   "**/data/sync/summaries/table1a-children-summaries.json", "**/data/sync/summaries/ssc-group-children-summaries.json"];
