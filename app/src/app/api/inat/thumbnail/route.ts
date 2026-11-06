@@ -13,6 +13,9 @@ interface InatDefaultImage {
 
 export async function GET(request: NextRequest) {
   const name = request.nextUrl.searchParams.get("name");
+  // rank=any looks up a higher taxon (an order, a class) for the taxon header;
+  // the default stays species-only, as the species table needs.
+  const anyRank = request.nextUrl.searchParams.get("rank") === "any";
   if (!name) {
     return NextResponse.json({ error: "name parameter is required" }, { status: 400 });
   }
@@ -35,7 +38,7 @@ export async function GET(request: NextRequest) {
     // bug (matched_term for the unrelated "monachus" taxa is their own name,
     // not the full queried binomial).
     const taxaResp = await fetch(
-      `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(name)}&rank=species&per_page=10`
+      `https://api.inaturalist.org/v1/taxa?q=${encodeURIComponent(name)}${anyRank ? "" : "&rank=species"}&per_page=10`
     );
     if (!taxaResp.ok) {
       return NextResponse.json({ inatDefaultImage: null }, { headers: CACHE_1H });

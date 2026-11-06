@@ -145,6 +145,8 @@ interface SubGroupSummary {
   colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[]; neSynonymDetails?: NeSynonymDetail[] }[];
 }
 
+export interface SelectedRow { id: string; name: string; assessed: number; notEvaluated: number | null }
+
 interface Props {
   onToggleTaxon: (taxonId: string, event: React.MouseEvent) => void;
   selectedTaxa: Set<string>;
@@ -181,11 +183,11 @@ interface Props {
    * countryScope, and like it only actually narrows this table inside its own
    * view (see the scoped/scopeKey derivation below). */
   realmScope?: string[] | null;
-  /** Reports the selected row's own counts (Red List assessed, Not Evaluated)
-   * so RedListView can show them on its view toggle. null when there's no
-   * single selected row, or it hasn't loaded yet. notEvaluated is null when the
-   * row has no CoL count. */
-  onSelectedCounts?: (counts: { assessed: number; notEvaluated: number | null } | null) => void;
+  /** Reports the selected row (id, display name, Red List assessed and Not
+   * Evaluated counts) so RedListView can show it in the taxon header beside
+   * its view toggle. null when there's no single selected row, or it hasn't
+   * loaded yet. notEvaluated is null when the row has no CoL count. */
+  onSelectedRow?: (row: SelectedRow | null) => void;
   /** Which GBIF records the GBIF columns count (src/lib/gbif-records.ts). */
   gbifRecordMode?: GbifRecordMode;
 }
@@ -1524,7 +1526,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, onSelectedCounts, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, onSelectedRow, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -1545,30 +1547,35 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     [rawSubgroupData, gbifRecordMode]);
   const [loadingSubgroups, setLoadingSubgroups] = useState<Set<string>>(new Set());
 
-  // The selected row's counts, for RedListView's view toggle: the one selected
-  // sub-group if there is one, else the one selected taxon. Reported as two
-  // primitives so the effect only fires when a number actually changes.
-  const selectedCounts = useMemo(() => {
-    const toCounts = (r: { totalAssessed: number; colNe?: number }) => ({ assessed: r.totalAssessed, notEvaluated: r.colNe ?? null });
+  // The selected row, for RedListView's taxon header: the one selected
+  // sub-group if there is one, else the one selected taxon. Reported as
+  // primitives so the effect only fires when something actually changes.
+  const selectedRow = useMemo((): SelectedRow | null => {
+    const toRow = (r: { id: string; name: string; totalAssessed: number; colNe?: number }) =>
+      ({ id: r.id, name: r.name, assessed: r.totalAssessed, notEvaluated: r.colNe ?? null });
     if (selectedSubgroups.size === 1) {
       const id = [...selectedSubgroups][0];
       for (const subs of Object.values(subgroupData)) {
         const sg = subs.find((x) => x.id === id);
-        if (sg) return toCounts(sg);
+        if (sg) return toRow(sg);
       }
       return null;
     }
     if (selectedSubgroups.size === 0 && selectedTaxa.size === 1) {
       const t = taxa.find((x) => x.id === [...selectedTaxa][0]);
-      return t ? toCounts(t) : null;
+      return t ? toRow(t) : null;
     }
     return null;
   }, [selectedTaxa, selectedSubgroups, subgroupData, taxa]);
-  const selAssessed = selectedCounts?.assessed;
-  const selNe = selectedCounts?.notEvaluated;
+  const selId = selectedRow?.id;
+  const selName = selectedRow?.name;
+  const selAssessed = selectedRow?.assessed;
+  const selNe = selectedRow?.notEvaluated;
   useEffect(() => {
-    onSelectedCounts?.(selAssessed === undefined ? null : { assessed: selAssessed, notEvaluated: selNe ?? null });
-  }, [selAssessed, selNe, onSelectedCounts]);
+    onSelectedRow?.(selId === undefined || selName === undefined || selAssessed === undefined
+      ? null
+      : { id: selId, name: selName, assessed: selAssessed, notEvaluated: selNe ?? null });
+  }, [selId, selName, selAssessed, selNe, onSelectedRow]);
   // Refs to avoid stale closures in toggleExpand
   const subgroupDataRef = useRef(rawSubgroupData);
   subgroupDataRef.current = rawSubgroupData;
@@ -1687,13 +1694,20 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     };
   }, [taxaExpanded]);
 
-  // Auto-scroll to show Assessed column on mobile (skip past # Described)
+  // Auto-scroll the table's horizontal overflow. On mobile, skip past
+  // # Described to show the Assessed column. Wider than that, the table only
+  // overflows when a deep drill-down's indented names widen the first column,
+  // and then it should sit at the right end: the numbers on the right stay
+  // whole, and what's hidden under the sticky name column is the start of
+  // # Described instead.
   const autoScroll = useCallback((el: HTMLDivElement) => {
     if (window.innerWidth < 768) {
       const firstDataTh = el.querySelector('thead th:nth-child(2)') as HTMLElement;
       if (firstDataTh) {
         el.scrollLeft = firstDataTh.offsetWidth;
       }
+    } else {
+      el.scrollLeft = el.scrollWidth - el.clientWidth;
     }
   }, []);
 
@@ -1705,6 +1719,26 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       requestAnimationFrame(() => autoScroll(el));
     }
   }, [taxa, autoScroll]);
+
+  // Drilling down (or a sub-group's rows arriving) changes the table's width
+  // without changing `taxa`, so on wider screens also re-apply whenever the
+  // table's own size changes. Only on a resize, never on the reader's own
+  // scroll, so a deliberate scroll back to the left stays put.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let lastWidth = -1;
+    const ro = new ResizeObserver(() => {
+      if (window.innerWidth < 768 || el.scrollWidth === lastWidth) return;
+      lastWidth = el.scrollWidth;
+      autoScroll(el);
+    });
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => ro.disconnect();
+    // loading: the scroll box only mounts once the first fetch lands.
+    // subgroupData: a drill-down's rows arrive after the selection changes.
+  }, [autoScroll, loading, layoutMode, selectedTaxa, selectedSubgroups, subgroupData]);
 
   // Fetch a node's subgroup data if not already loaded/loading (read from refs to
   // avoid stale closures) — factored out of toggleExpand so the ancestor-breadcrumb

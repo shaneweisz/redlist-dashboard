@@ -42,32 +42,34 @@ function withLimit<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /** What is already held for this name, if it has been asked for. */
-export function cachedThumbnail(name: string): InatThumbnail | undefined {
-  return cache.get(name);
+export function cachedThumbnail(name: string, opts?: { anyRank?: boolean }): InatThumbnail | undefined {
+  return cache.get(opts?.anyRank ? `any:${name}` : name);
 }
 
-export function loadThumbnail(name: string): Promise<InatThumbnail> {
-  const held = cache.get(name);
+/** anyRank: look up a higher taxon (order, class...) rather than a species. */
+export function loadThumbnail(name: string, opts?: { anyRank?: boolean }): Promise<InatThumbnail> {
+  const key = opts?.anyRank ? `any:${name}` : name;
+  const held = cache.get(key);
   if (held !== undefined) return Promise.resolve(held);
-  const already = inFlight.get(name);
+  const already = inFlight.get(key);
   if (already) return already;
 
-  const p = withLimit(() => fetch(`/api/inat/thumbnail?name=${encodeURIComponent(name)}`))
+  const p = withLimit(() => fetch(`/api/inat/thumbnail?name=${encodeURIComponent(name)}${opts?.anyRank ? "&rank=any" : ""}`))
     .then((r) => (r.ok ? r.json() : { inatDefaultImage: null }))
     .then((body) => {
       const image = (body?.inatDefaultImage ?? null) as InatThumbnail;
-      cache.set(name, image);
+      cache.set(key, image);
       return image;
     })
     // A species iNaturalist has no photo for and a request that failed look the
     // same to the reader — an icon — so a failure is cached like an absence
     // rather than retried on every scroll.
     .catch(() => {
-      cache.set(name, null);
+      cache.set(key, null);
       return null;
     })
-    .finally(() => inFlight.delete(name));
+    .finally(() => inFlight.delete(key));
 
-  inFlight.set(name, p);
+  inFlight.set(key, p);
   return p;
 }

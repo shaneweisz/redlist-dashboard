@@ -135,6 +135,8 @@ interface WorldMapProps {
   selectedTaxa?: Set<string>;
   // Label for the species count in tooltips (default: "# Assessed")
   speciesLabel?: string;
+  /** Shown after the "Country" title, e.g. an info icon explaining the data source. */
+  titleInfo?: React.ReactNode;
   // Callback when a region is selected from the dropdown (sets country filter)
   /** Set the country selection from the region picker (a union of whole regions). */
   onRegionsChange?: (countries: Set<string>) => void;
@@ -184,7 +186,7 @@ const DEFAULT_ZOOM = 1.5;
 const MIN_ZOOM = 1.0;
 const MAX_ZOOM = 8.0;
 
-function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomputedStats, precomputedStatsTotal, selectedTaxa, speciesLabel = "# Assessed", onRegionsChange, endemicsOnly = false, onEndemicsToggle, footer, showGbifToggle = true, showOutdatedMode = true, showColorModeDropdown = true, mapViewMode, onMapViewModeChange, mapSortKey, mapSortDirection, onMapSortChange, selectOnHover = false, onCountryHover, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: WorldMapProps) {
+function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomputedStats, precomputedStatsTotal, selectedTaxa, speciesLabel = "# Assessed", titleInfo, onRegionsChange, endemicsOnly = false, onEndemicsToggle, footer, showGbifToggle = true, showOutdatedMode = true, showColorModeDropdown = true, mapViewMode, onMapViewModeChange, mapSortKey, mapSortDirection, onMapSortChange, selectOnHover = false, onCountryHover, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: WorldMapProps) {
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
   const [hoveredCountryCode, setHoveredCountryCode] = useState<string | null>(null);
   const [speciesStats, setSpeciesStats] = useState<CountryStats>(precomputedStats || {});
@@ -443,8 +445,9 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
     <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-200 dark:border-zinc-800 p-3 h-full flex-1 min-h-0 flex flex-col">
       {/* Header with controls */}
       <div className="flex items-center justify-between mb-1 gap-2">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 flex items-center gap-1">
           Country
+          {titleInfo}
         </h2>
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           {/* Country search */}
