@@ -33,8 +33,6 @@ import type { ColProvenance } from "@/app/api/col/provenance/route";
 import { parseAssessors, parseInstitutions } from "@/lib/parseAssessors";
 import { iucnRegionCountries, matchingRegions } from "@/lib/regions";
 import { useFilterParams, isScopeLayout, type SortField } from "@/hooks/useFilterParams";
-import RealmBars from "@/components/redlist/RealmBars";
-import type { RealmStatsResponse } from "@/lib/data/scoped-taxa-summary-duckdb";
 import { HABITAT_CATEGORIES } from "@/lib/habitat-classification";
 import { parseHabitatEntries, matchesHabitatFilter as matchesHabitatCriteria, coarseKnownCategories, isRestrictiveSelection, ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { type RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
@@ -1102,28 +1100,20 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
+  // The view switch, shown as the full-width Species Assessed / Awaiting 1st
+  // Assessment toggle in the taxon header. Being that prominent, the mode is a
+  // persistent choice: browsing to another taxon keeps it.
   onViewModeChange?: (mode: "reassessments" | "new-assessments") => void;
-  // Show the view switch as a full-width Reassessments / First Assessments
-  // toggle above the filter charts, in place of the small inline Assessed/Not
-  // Evaluated one beside the species count. Being that prominent, the mode is
-  // a persistent choice: browsing to another taxon keeps it rather than
-  // resetting to Assessed. (/compare leaves this off: its two panels are too
-  // narrow for it, so each keeps the inline toggle and the reset.)
-  wideViewModeToggle?: boolean;
   sharedTaxa?: Set<string>;
   sharedSubgroups?: Set<string>;
   onTaxaChange?: (taxa: Set<string>) => void;
   onSubgroupsChange?: (subgroups: Set<string>) => void;
-  // Namespaces this instance's URL params (e.g. "_b" turns `taxa` into `taxa_b`) so
-  // two instances can share one URL without clobbering each other — compare mode's
-  // second panel. Defaults to "" (today's single-dashboard behavior).
-  paramSuffix?: string;
 }
 
 // Info note on the toggle's Not Evaluated count.
 const NE_COUNT_NOTE = `According to ${COL_RELEASE_LABEL}. The count could differ under another taxonomy.`;
 
-export default function RedListView({ viewMode = "reassessments", onViewModeChange, wideViewModeToggle = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
+export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
   // The selected taxon row (name + counts), reported by TaxaSummary, for the
   // taxon header beside the wide toggle.
@@ -1181,7 +1171,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     originLayout,
     navigateToTaxonSubgroup,
     exitLayoutModeForTaxon,
-    enterRealmDrilldown,
     returnToLayoutMode,
     enterCountryDrilldown,
     selectedTaxa, setSelectedTaxa,
@@ -1226,7 +1215,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     species: urlSpecies, tab: urlTab,
     setSpeciesParam, setTabParam,
     fromPopstateRef,
-  } = useFilterParams(paramSuffix);
+  } = useFilterParams();
   // Not Evaluated species have no assessment, so no New or % New: the chart
   // shows Total there whatever the URL asks for.
   const gbifChartKeys = isNewAssessments ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
@@ -1246,12 +1235,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     []
   );
 
-  // Both scope views need data Not Evaluated species don't have: country needs a
-  // per-country location (no assessment means no assessment_locations row) and
-  // realm needs the assessment's own `systems` field — see the matching
-  // disabled-option guards in TaxaSummary's layoutModeSelect. Exit back to the
-  // taxonomic default if New Assessments is switched on while already in one of
-  // them, rather than leaving an unreachable-but-still-active mode selected.
+  // Country view needs data Not Evaluated species don't have: a per-country
+  // location (no assessment means no assessment_locations row) — see the
+  // matching disabled-option guard in TaxaSummary's layoutModeSelect. Exit back
+  // to the taxonomic default if New Assessments is switched on while in it, rather than leaving an unreachable-but-still-active mode selected.
   useEffect(() => {
     if (isNewAssessments && isScopeLayout(layoutMode)) setLayoutMode(null);
   }, [isNewAssessments, layoutMode, setLayoutMode]);
@@ -1287,34 +1274,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     setUrlViewMode(viewMode);
   }, [viewMode, setUrlViewMode]);
-
-  // Reset to Assessed whenever the taxon/sub-group selection changes — Not
-  // Evaluated is something to opt into per-taxon, not a mode that should
-  // silently follow you from one taxon to the next (you'd otherwise land on a
-  // brand-new taxon already in NE mode from browsing a previous one, with no
-  // visual cue you're not seeing its Assessed data). Skips the very first
-  // render so a shared link's own ?view=new-assessments still works. Not done
-  // with the wide toggle (wideViewModeToggle): there the mode is always in
-  // plain view, so it's a choice you browse within, not a per-taxon opt-in.
-  const prevSelectionRef = useRef<{ taxa: Set<string>; subgroups: Set<string> } | null>(null);
-  useEffect(() => {
-    const prev = prevSelectionRef.current;
-    prevSelectionRef.current = { taxa: selectedTaxa, subgroups: selectedSubgroups };
-    if (prev === null) return;
-    // Skip going from no taxa to some taxa too — this is URL hydration
-    // (useFilterParams starts empty then populates from URL on mount), not a
-    // user browsing to a new taxon. Without this, a shared link combining
-    // ?view=new-assessments&taxa=X hydrates its taxa a render after this
-    // effect's first (skipped, prev === null) run, so that second run sees
-    // an empty→populated transition, misreads it as a real taxon change, and
-    // immediately resets straight back to Assessed — the exact case the
-    // "very first render" skip above was meant to protect (see the same
-    // hydration guard on the "reset all other filters" effect below).
-    if (prev.taxa.size === 0 && prev.subgroups.size === 0) return;
-    const setsEqual = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((v) => b.has(v));
-    const changed = !setsEqual(prev.taxa, selectedTaxa) || !setsEqual(prev.subgroups, selectedSubgroups);
-    if (changed && isNewAssessments && !wideViewModeToggle) onViewModeChange?.("reassessments");
-  }, [selectedTaxa, selectedSubgroups, isNewAssessments, onViewModeChange, wideViewModeToggle]);
 
   // Reset mode-specific filter state when switching between reassessments and
   // new-assessments. The shared species cache (SpeciesCacheContext) is NOT cleared
@@ -1378,10 +1337,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const isMulti = event.metaKey || event.ctrlKey;
 
     // Clicking a specific taxon row while browsing a scoped bare summary table
-    // (Country or Realm view, a selection made, no taxon picked yet — see
-    // TaxaSummary's countryMode/realmMode rendering) exits to the full charts+
-    // species-table view, still scoped the same way (selectedCountries /
-    // selectedSystems untouched). Atomic (one history push) via
+    // (Country view, a selection made, no taxon picked yet — see TaxaSummary's
+    // countryMode rendering) exits to the full charts+species-table view, still
+    // scoped the same way (selectedCountries untouched). Atomic (one history push) via
     // exitLayoutModeForTaxon, so a single "back" press cleanly restores that view's landing page
     // instead of layoutMode and taxa unwinding as separate history entries.
     // The "all" row and multi-select (ctrl/cmd-click) cases fall through to
@@ -1400,14 +1358,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxonId === "all") {
       if (selectedTaxa.size > 0 || selectedSubgroups.size > 0) {
         if (isScopeLayout(originLayout)) {
-          // Came from Country or Realm View's landing page via a taxon drill-down
+          // Came from Country View's landing page via a taxon drill-down
           // (exitLayoutModeForTaxon) — return there instead of the generic
           // default view. See originLayout's own doc in useFilterParams.ts.
           // fromPopstateRef first: this taxa non-empty→empty transition is
           // part of one atomic, fully-specified navigation (countries stays
           // as-is), not a generic "taxon deselected" — without the ref, the
           // "reset filters on taxa change" effect below would immediately
-          // clear the very countries/realms this navigation means to keep (see
+          // clear the very countries this navigation means to keep (see
           // its own comment on enterCountryDrilldown for the same escape hatch).
           fromPopstateRef.current = true;
           returnToLayoutMode(originLayout);
@@ -1648,9 +1606,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // ── Data fetching ────────────────────────────────────────────────────
   // Species are fetched and cached in the shared SpeciesCacheContext (keyed by
   // the exact request URL, e.g. `/api/redlist/species?taxon=birds`), not local
-  // component state — this is what lets compare mode's two panels share a
-  // fetch when they pick the same taxon, and it naturally keeps Assessed vs Not
-  // Evaluated data for the same taxon separate too, since their URLs differ
+  // component state, which keeps Assessed vs Not Evaluated data for the same
+  // taxon separate, since their URLs differ
   // (`?taxon=birds` vs `?taxon=birds&category=NE`) without needing an explicit
   // mode-prefixed cache key.
   const error = useMemo(() => {
@@ -1689,13 +1646,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the whole object for any method call off a hook-returned value, but
   // cache.request's identity only ever changes together with cache.entries (see
   // SpeciesCacheContext) — depending on the whole object would additionally
-  // re-run this on every loadingUrls/errors-only update, e.g. another
-  // compare-mode panel's fetch completing or failing.
+  // re-run this on every loadingUrls/errors-only update.
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, cache.request, speciesApiUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // "Loading" means one of THIS panel's currently-relevant URLs is still in flight —
-  // deliberately not "is anything in the shared cache loading", since in compare mode
-  // that set can include requests belonging to the other panel entirely.
+  // "Loading" means one of the currently-relevant URLs is still in flight —
+  // deliberately not "is anything in the shared cache loading", which can include
+  // requests for a selection the user has already moved on from.
   const speciesLoading = useMemo(() => {
     if (selectedTaxa.size === 0) return false;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -1804,9 +1760,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpeciesBase]);
   const repSpecies = selectedRow ? repSpeciesByTaxon[selectedRow.id] ?? pickedSpecies : null;
   useEffect(() => {
-    if (!wideViewModeToggle || !selectedRow || !pickedSpecies || repSpeciesByTaxon[selectedRow.id]) return;
+    if (!selectedRow || !pickedSpecies || repSpeciesByTaxon[selectedRow.id]) return;
     setRepSpeciesByTaxon((prev) => ({ ...prev, [selectedRow.id]: pickedSpecies }));
-  }, [wideViewModeToggle, selectedRow, pickedSpecies, repSpeciesByTaxon]);
+  }, [selectedRow, pickedSpecies, repSpeciesByTaxon]);
   // Whether the current selection's species list has been fetched at all —
   // speciesLoading alone is also false in the render before the fetch starts,
   // which would otherwise read as "no species, show the icon".
@@ -1826,7 +1782,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const ownPhoto = ownKey ? photoResults[ownKey] : null;
   const needSpecies = !ownKey || ownPhoto === null;
   useEffect(() => {
-    if (!wideViewModeToggle) return;
     const wanted: [string, string, boolean][] = [];
     if (ownKey && !(ownKey in photoResults)) wanted.push([ownKey, taxonRank!.name, true]);
     if (needSpecies && spKey && !(spKey in photoResults)) wanted.push([spKey, repSpecies!, false]);
@@ -1836,7 +1791,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         setPhotoResults((prev) => ({ ...prev, [key]: url ? { url, credit: img?.attribution ?? null } : null }));
       });
     }
-  }, [wideViewModeToggle, ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
+  }, [ownKey, spKey, needSpecies, photoResults, taxonRank, repSpecies]);
   // Called from the header's render (below neTooLarge's declaration).
   const resolveTaxonPhoto = (): { url: string; credit: string | null } | null | undefined => {
     if (!selectedRow) return null;
@@ -1853,37 +1808,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return speciesListFetched || neTooLarge || error ? null : undefined;
   };
 
-  // Exact URL-only base filters (obs / assessment-year / described-year bounds —
-  // outdated is applied separately below, not here). Applied here on the base set
-  // so every chart AND the table inherit them — and identically to the bucket-free
-  // /browse + MCP query, which is what makes an agent's dashboard link reproduce
-  // the same species set. Mirrors species-filter numeric bounds.
-  const taxaFilteredSpeciesExceptOutdated = useMemo(() => {
-    let filtered = taxaFilteredSpeciesBase;
-    const { minObs, maxObs, minAssessmentYear, maxAssessmentYear, minDescribedYear, maxDescribedYear } = exactFilters;
-    if (minObs != null || maxObs != null) {
-      filtered = filtered.filter(s => {
-        const obs = s.gbif_records ?? 0;
-        return (minObs == null || obs >= minObs) && (maxObs == null || obs <= maxObs);
-      });
-    }
-    if (minAssessmentYear != null || maxAssessmentYear != null) {
-      filtered = filtered.filter(s => {
-        const y = s.assessment_date ? parseInt(s.assessment_date.slice(0, 4), 10) : NaN;
-        if (Number.isNaN(y)) return false;
-        return (minAssessmentYear == null || y >= minAssessmentYear) && (maxAssessmentYear == null || y <= maxAssessmentYear);
-      });
-    }
-    if (minDescribedYear != null || maxDescribedYear != null) {
-      filtered = filtered.filter(s =>
-        s.described_year != null
-        && (minDescribedYear == null || s.described_year >= minDescribedYear)
-        && (maxDescribedYear == null || s.described_year <= maxDescribedYear));
-    }
-    return filtered;
-  }, [taxaFilteredSpeciesBase, exactFilters]);
 
-  // Outdated is excluded from taxaFilteredSpeciesExceptOutdated (above) so the
+  // Outdated is left out of taxaFilteredSpeciesBase (above) so the
   // Range/Year chart (which shares this same "when was this species assessed"
   // dimension) can show the full distribution and mute — not remove — bars that
   // don't match the Outdated toggle, mirroring how the Conservation Status chart
@@ -1891,10 +1817,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // memo/the table uses this outdated-filtered version, so the Outdated button
   // behaves like a real, dashboard-wide filter everywhere except its own chart.
   const taxaFilteredSpeciesNoPreview = useMemo(() => {
-    if (!exactFilters.outdated) return taxaFilteredSpeciesExceptOutdated;
+    if (!exactFilters.outdated) return taxaFilteredSpeciesBase;
     const wantOutdated = exactFilters.outdated === "yes";
-    return taxaFilteredSpeciesExceptOutdated.filter(s => isOutdated(s.assessment_date, dataAsOf) === wantOutdated);
-  }, [taxaFilteredSpeciesExceptOutdated, exactFilters.outdated, dataAsOf]);
+    return taxaFilteredSpeciesBase.filter(s => isOutdated(s.assessment_date, dataAsOf) === wantOutdated);
+  }, [taxaFilteredSpeciesBase, exactFilters.outdated, dataAsOf]);
 
   // Helper to check if species matches year range filter
   const matchesYearRangeFilter = useCallback((assessmentDate: string | null, yearRanges: Set<string> = selectedYearRanges): boolean => {
@@ -1987,8 +1913,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return parseAssessors(s.latest_contributors);
   }, []);
 
-  // Institutions are organisations, not people — see parseInstitutions, which
-  // the /browse + MCP filter shares so both surfaces split a line the same way.
+  // Institutions are organisations, not people — see parseInstitutions.
   const getSpeciesInstitutions = useCallback((s: Species): string[] => {
     return parseInstitutions(s.latest_institutions);
   }, []);
@@ -1998,26 +1923,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const [yearsChartMode, setYearsChartMode] = useState<"range" | "year">(
     () => (selectedAssessmentYears.size > 0 ? "year" : "range")
   );
-  // If the URL hydrates with specific years — or an explicit min/max year range
-  // (still accepted from /browse, the MCP server and hand-built links, though
-  // the UI now selects years by shift+dragging the chart) — surface the year
-  // view, so a shared link opens on the chart its filter applies to.
+  // If the URL hydrates with specific years, surface the year view, so a shared
+  // link opens on the chart its filter applies to.
   useEffect(() => {
-    if (selectedAssessmentYears.size > 0
-      || exactFilters.minAssessmentYear != null
-      || exactFilters.maxAssessmentYear != null) {
-      setYearsChartMode("year");
-    }
-  }, [selectedAssessmentYears, exactFilters.minAssessmentYear, exactFilters.maxAssessmentYear]);
+    if (selectedAssessmentYears.size > 0) setYearsChartMode("year");
+  }, [selectedAssessmentYears]);
 
   // Paginate the by-year chart: show 10 years at a time, defaulting to the most recent
   const YEARS_PAGE_SIZE = 10;
   const [yearsPage, setYearsPage] = useState(0);
 
   // Helper to check if species matches the assessors filter.
-  // Case-insensitive SUBSTRING match — same semantics as the /browse + MCP
-  // `assessors` filter, so an agent's dashboard link reproduces the same set.
-  // (A chart click adds a full name, which substring-matches itself; the only
+  // Case-insensitive SUBSTRING match, so a hand-written ?assessors= link can name
+  // a person without their full spelling. (A chart click adds a full name, which substring-matches itself; the only
   // difference is the rare case where one full name is a substring of another.)
   const matchesAssessorsFilter = useCallback((s: Species): boolean => {
     if (selectedAssessors.size === 0) return true;
@@ -2409,7 +2327,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpecies, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Year chart: apply all filters EXCEPT year range AND outdated (see
-  // taxaFilteredSpeciesExceptOutdated above) — buckets align exactly with the
+  // taxaFilteredSpeciesBase above) — buckets align exactly with the
   // ── One filter predicate for every cross-filter chart ────────────────
   //
   // Each chart shows what WOULD match if you clicked a bar, so each applies
@@ -2468,7 +2386,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       { range: "10-20 years", shortRange: "10-20y", count: 0, minYear: 10 },
       { range: "20+ years", shortRange: ">20y", count: 0, minYear: 20 },
     ];
-    taxaFilteredSpeciesExceptOutdated.forEach(s => {
+    taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
       const yearsSince = (now - new Date(s.assessment_date).getTime()) / msPerYear;
@@ -2483,7 +2401,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       ...r,
       label: `${r.count.toLocaleString()} (${total > 0 ? Math.round((r.count / total) * 100) : 0}%)`,
     }));
-  }, [taxaFilteredSpeciesExceptOutdated, matchesFilters]);
+  }, [taxaFilteredSpeciesBase, matchesFilters]);
 
   // Assessments-by-year chart: apply all filters EXCEPT the year-based ones
   // (selectedYearRanges, selectedAssessmentYears) AND outdated. The Range bucket
@@ -2495,7 +2413,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // isOutdated is excluded from assessmentYearData above.
   const assessmentYearsByYearData = useMemo(() => {
     const counts: Record<string, number> = {};
-    taxaFilteredSpeciesExceptOutdated.forEach(s => {
+    taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
       const year = String(new Date(s.assessment_date).getFullYear());
@@ -2510,7 +2428,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         count,
         label: `${count.toLocaleString()} (${total > 0 ? Math.round((count / total) * 100) : 0}%)`,
       }));
-  }, [taxaFilteredSpeciesExceptOutdated, matchesFilters]);
+  }, [taxaFilteredSpeciesBase, matchesFilters]);
 
   const yearsTotalPages = Math.max(1, Math.ceil(assessmentYearsByYearData.length / YEARS_PAGE_SIZE));
   const paginatedAssessmentYearsData = useMemo(
@@ -3700,13 +3618,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // special-case region vs. multi-select here.
   const countryScope = selectedCountries.size > 0 ? [...selectedCountries] : null;
 
-  // The realm counterpart, on exactly the same terms: realms selected anywhere
-  // (the Realm buttons under More Filters as much as the Realm view's own cards)
-  // scope TaxaSummary's fetches while that view is open. It reads the ordinary
-  // `systems` filter rather than anything view-private, so the two entry points
-  // can't disagree about what's selected.
-  const realmScope = selectedSystems.size > 0 ? [...selectedSystems] : null;
-
   // Country view's own map click select — click-only (no hover preview: the
   // table only appears once a country is actually locked in, so scanning the
   // map with the mouse never itself changes what's shown below it). A plain
@@ -3772,58 +3683,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       })
       .catch(() => {});
   }, [layoutMode, countryLandingStats]);
-
-  // Realm view's landing chart — three numbers plus their denominator from one
-  // live GROUP BY (/api/redlist/realm-stats), fetched once per session on
-  // entering the view. Same reasoning as countryLandingStats above: aggregating
-  // these client-side would mean downloading the whole assessed-species dataset
-  // for three totals.
-  const [realmLandingStats, setRealmLandingStats] = useState<RealmStatsResponse | null>(null);
-  useEffect(() => {
-    if (layoutMode !== "realm" || realmLandingStats) return;
-    fetch("/api/redlist/realm-stats")
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => { if (data?.realms) setRealmLandingStats({ realms: data.realms, totalAssessed: data.totalAssessed ?? 0 }); })
-      .catch(() => {});
-  }, [layoutMode, realmLandingStats]);
-
-  // Realm card click — the same gesture the country map uses: a plain click
-  // REPLACES the selection with just that realm (clicking the sole-selected one
-  // again clears back to the unscoped landing state), ctrl/cmd-click toggles it
-  // in/out of a multi-select. Routed through enterRealmDrilldown so the realm
-  // change stays atomic with clearing taxa/subgroups (see its own comment).
-  const handleRealmDrilldown = useCallback(
-    (realm: string, event: React.MouseEvent) => {
-      const isMultiSelect = event.metaKey || event.ctrlKey;
-      enterRealmDrilldown(prev => {
-        if (isMultiSelect) {
-          const next = new Set(prev);
-          if (next.has(realm)) next.delete(realm);
-          else next.add(realm);
-          return next;
-        }
-        if (prev.size === 1 && prev.has(realm)) return new Set<string>();
-        return new Set([realm]);
-      });
-    },
-    [enterRealmDrilldown]
-  );
-
-  // Placeholder sized like the loaded chart (not a bare spinner) so swapping in
-  // the real bars doesn't shift the taxa table below it — same reasoning as
-  // countryModeContent's own placeholder.
-  const realmModeContent = realmLandingStats ? (
-    <RealmBars
-      realms={realmLandingStats.realms}
-      totalAssessed={realmLandingStats.totalAssessed}
-      selected={selectedSystems}
-      onSelect={handleRealmDrilldown}
-    />
-  ) : (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 h-[164px] flex items-center justify-center">
-      <Spinner className="h-6 w-6" />
-    </div>
-  );
 
   // Country view landing page content — a promoted WorldMap (its own Map/List
   // toggle applies here too), passed into TaxaSummary rather than duplicating a
@@ -4770,9 +4629,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryModeContent={countryModeContent}
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
-        realmModeContent={realmModeContent}
-        realmScope={realmScope}
-        onSelectedRow={wideViewModeToggle ? setSelectedRow : undefined}
+        onSelectedRow={setSelectedRow}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -4823,7 +4680,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
-      {wideViewModeToggle && onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
+      {onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
         // One taxon selected but its row not reported yet (fresh load): hold
         // the header card's place with a placeholder rather than showing the
         // bare bar and swapping the card in. Gives up once the species list is
@@ -4944,9 +4801,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           Hidden in the scope views too: TaxaSummary's own countryModeContent (the
           promoted WorldMap) is the entire page in country mode, and selectedTaxa is
           only "all" in that mode as a side effect of loading species for the map's own
-          stats (see setLayoutMode), not a real drill-down into All Species. Realm
-          mode clears taxa on entry for the same reason, so this only bites on a
-          shared ?layout=realm&taxa=… link. */}
+          stats (see setLayoutMode), not a real drill-down into All Species. */}
       {selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (
       // The drill-down prompt is about not being able to list a whole giant taxon — it
       // must not swallow a specific species the user searched for, which is already in
@@ -5714,7 +5569,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
-            {(isNewAssessments || selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated || exactFilters.minObs != null || exactFilters.maxObs != null || exactFilters.minAssessmentYear != null || exactFilters.maxAssessmentYear != null || exactFilters.minDescribedYear != null || exactFilters.maxDescribedYear != null) && (
+            {(isNewAssessments || selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated) && (
               <button
                 onClick={() => {
                   // The "Awaiting 1st assessment" chip is cleared with the rest,
@@ -6145,29 +6000,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <span className="text-sm shrink-0">×</span>
               </button>
             ))}
-            {/* Exact URL-only filters (typically arrive via an agent/MCP dashboard
-                link). Shown as chips so a human can see and clear them. */}
-            {(() => {
-              const ef = exactFilters;
-              const chips: { key: keyof typeof ef; label: string }[] = [];
-              if (ef.outdated) chips.push({ key: "outdated", label: ef.outdated === "yes" ? "Needs updating (>10 yrs)" : "Current (≤10 yrs)" });
-              if (ef.minObs != null) chips.push({ key: "minObs", label: `≥ ${ef.minObs.toLocaleString()} obs` });
-              if (ef.maxObs != null) chips.push({ key: "maxObs", label: `≤ ${ef.maxObs.toLocaleString()} obs` });
-              if (ef.minAssessmentYear != null) chips.push({ key: "minAssessmentYear", label: `Assessed ≥ ${ef.minAssessmentYear}` });
-              if (ef.maxAssessmentYear != null) chips.push({ key: "maxAssessmentYear", label: `Assessed ≤ ${ef.maxAssessmentYear}` });
-              if (ef.minDescribedYear != null) chips.push({ key: "minDescribedYear", label: `Described ≥ ${ef.minDescribedYear}` });
-              if (ef.maxDescribedYear != null) chips.push({ key: "maxDescribedYear", label: `Described ≤ ${ef.maxDescribedYear}` });
-              return chips.map(c => (
-                <button
-                  key={`ef-${c.key}`}
-                  onClick={() => setExactFilters({ [c.key]: null })}
-                  className="px-3 py-1.5 text-sm font-medium rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300 flex items-center gap-1 hover:opacity-80"
-                >
-                  {c.label}
-                  <span className="text-sm">×</span>
-                </button>
-              ));
-            })()}
+            {exactFilters.outdated && (
+              <button
+                onClick={() => setExactFilters({ outdated: null })}
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300 flex items-center gap-1 hover:opacity-80"
+              >
+                {exactFilters.outdated === "yes" ? "Needs updating (>10 yrs)" : "Current (≤10 yrs)"}
+                <span className="text-sm">×</span>
+              </button>
+            )}
             <span className="ml-auto text-sm md:text-base font-semibold text-zinc-700 dark:text-zinc-300 tabular-nums flex items-center gap-2">
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />
@@ -6176,35 +6017,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <>{totalFiltered.toLocaleString()} species</>
               )}
             </span>
-            {/* Assessed/Not Evaluated — a full view-mode switch (a different
-                dataset entirely), moved here from the old dedicated stat-card
-                row now that there isn't one. */}
-            {onViewModeChange && !wideViewModeToggle && (
-              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-xs shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("reassessments")}
-                  className={`px-2 py-1 font-medium transition-colors ${
-                    !isNewAssessments
-                      ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  Assessed
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("new-assessments")}
-                  className={`px-2 py-1 font-medium transition-colors ${
-                    isNewAssessments
-                      ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                      : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  Not Evaluated
-                </button>
-              </div>
-            )}
           </div>
         </div>
 

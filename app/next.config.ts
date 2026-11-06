@@ -104,6 +104,9 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       { source: "/near-me", destination: "/mapping", permanent: true },
+      // Comparison Mode (two dashboards side by side) was removed; a saved link
+      // opens the dashboard, its first panel's taxa=/filters carried across.
+      { source: "/compare", destination: "/", permanent: true },
     ];
   },
   // PostHog's API relies on trailing slashes; without this Next.js redirects them
@@ -125,10 +128,6 @@ const nextConfig: NextConfig = {
     "/api/search/warm": DUCKDB_TRACE,
     "/api/taxa/species": DUCKDB_TRACE,
     "/api/redlist/synonyms": DUCKDB_TRACE,
-    // /browse runs querySpecies/searchSpecies (DuckDB over R2) at request time.
-    "/browse": DUCKDB_TRACE,
-    // /api/mcp runs the same query layer for the MCP tools.
-    "/api/mcp": DUCKDB_TRACE,
     // The standalone mapping page resolves its species server-side with the
     // same DuckDB-over-R2 query (getSpeciesByGbifKey), so it needs the addon's
     // dlopen'd .so and the sync pointer like every route above. Written with a
@@ -147,11 +146,6 @@ const nextConfig: NextConfig = {
     "/api/redlist/taxa-subgroups": DUCKDB_TRACE,
     // Reads assessed.parquet + assessments.parquet over R2 (getCreditSource).
     "/api/redlist/credit-candidates": DUCKDB_TRACE,
-    // Realm view's landing cards — one live GROUP BY over assessed.parquet
-    // (getRealmStats), so the same native addon and the same two entries as the
-    // pair above. Unlike /api/redlist/country-stats next to it, this is NOT a
-    // precomputed JSON read, so it does need the DuckDB trace.
-    "/api/redlist/realm-stats": DUCKDB_TRACE,
     // "What else is assessed near here" joins a GBIF radius facet against
     // assessed.parquet in R2 (getAssessedByGbifKeys) — the same DuckDB-over-R2
     // query as every route above, so it needs the dlopen'd .so and the sync
@@ -206,13 +200,6 @@ const nextConfig: NextConfig = {
     // gated on assessed.parquet NOT existing locally.
     "/api/redlist/taxa-summary": ONLY_SUMMARIES,
     "/api/redlist/taxa-subgroups": ONLY_SUMMARIES,
-    // Reads the small precomputed realm-stats.json, falling back to a live DuckDB
-    // query over assessed.parquet in R2 when a sync predates that file — so it
-    // keeps the DuckDB trace above, and the same CRITICAL parquet exclusion as
-    // /api/redlist/species (USE_R2 is gated on assessed.parquet NOT existing
-    // locally). The two children-summaries files it never opens are pruned, same
-    // as /api/redlist/country-stats.
-    "/api/redlist/realm-stats": ONLY_SMALL_SUMMARIES,
     // Reads only the small precomputed country-stats.json (no DuckDB — this is
     // a static aggregate, not a live query, see species-store.ts's getCountryStats).
     "/api/redlist/country-stats": ONLY_SMALL_SUMMARIES,
@@ -239,12 +226,6 @@ const nextConfig: NextConfig = {
     // straight past Vercel's cap, and flip USE_R2 off into the bargain.
     "/api/narrative-search": ["**/data/**"],
     "/api/narrative-search/[assessmentId]": ["**/data/**"],
-    // /browse mirrors /api/redlist/species (same querySpecies): keep taxa-summary.json
-    // for the instant NE tooLarge check, drop the heavy data + ALL parquets (the USE_R2
-    // gate keys on assessed.parquet being absent locally). /llms.txt reads no data.
-    "/browse": ONLY_SMALL_SUMMARIES,
-    "/api/mcp": ONLY_SMALL_SUMMARIES,
-    "/llms.txt": ["**/data/**"],
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.
     // Without this the shared species-store import drags the whole sync —

@@ -175,14 +175,6 @@ interface Props {
    * scopes this table's own fetches too. One country, a whole region, or an
    * arbitrary multi-select are all just "the current set of codes" here. */
   countryScope?: string[] | null;
-  /** Realm View's landing chooser — the three realm cards, built by RedListView
-   * (which owns the realm-stats fetch and click-through wiring), for the same
-   * reason countryModeContent is built there. */
-  realmModeContent?: React.ReactNode;
-  /** Set whenever at least one realm is selected — the realm counterpart of
-   * countryScope, and like it only actually narrows this table inside its own
-   * view (see the scoped/scopeKey derivation below). */
-  realmScope?: string[] | null;
   /** Reports the selected row (id, display name, Red List assessed and Not
    * Evaluated counts) so RedListView can show it in the taxon header beside
    * its view toggle. null when there's no single selected row, or it hasn't
@@ -1489,7 +1481,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, onSelectedRow, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, onSelectedRow, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -1554,39 +1546,29 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
-  // Only actually scope this table's own data while in the matching scope view —
-  // countryScope/realmScope are each set from ANY selection of that kind anywhere
-  // on the page (e.g. the small map widget in an ordinary taxon view's own charts
-  // row, or the Realm buttons under More Filters), but this table's numbers
-  // (fetchTaxa, ensureSubgroupData, Table 1a/SSC fetches, and the cache-
-  // buster reset below) should stay global outside those views — clicking
-  // DRC while browsing Mammals shouldn't silently re-scope the breadcrumb
-  // tree to DRC's numbers, and nor should ticking Marine under More Filters.
-  // scopeKey derives from these, so gating here covers every one of those
-  // effects at once.
+  // Only actually scope this table's own data while in Country view —
+  // countryScope is set from ANY country selection anywhere on the page (e.g.
+  // the small map widget in an ordinary taxon view's own charts row), but this
+  // table's numbers (fetchTaxa, ensureSubgroupData, Table 1a/SSC fetches, and
+  // the cache-buster reset below) should stay global outside that view —
+  // clicking DRC while browsing Mammals shouldn't silently re-scope the
+  // breadcrumb tree to DRC's numbers. scopeKey derives from this, so gating
+  // here covers every one of those effects at once.
   //
-  // Each part is a stable, order-independent key for its dimension's selection —
-  // used in place of the arrays themselves in effect dependency arrays and fetch
-  // query strings. Both props are a fresh array every render (built via
-  // `[...selectedCountries]` / `[...selectedSystems]` in RedListView), so
-  // depending on an array reference directly would refetch on every unrelated
+  // countryPart is a stable, order-independent key for the selection — used in
+  // place of the array itself in effect dependency arrays and fetch query
+  // strings. The prop is a fresh array every render (built via
+  // `[...selectedCountries]` in RedListView), so depending on an array reference directly would refetch on every unrelated
   // parent re-render, not just when the actual selection changes; sorting also
   // means toggling two countries on in either order produces the same key (and
   // cache-friendly URL), not one per click order.
   const countryPart = layoutMode === "country" && countryScope?.length ? [...countryScope].sort().join(",") : "";
-  const realmPart = layoutMode === "realm" && realmScope?.length ? [...realmScope].sort().join(",") : "";
-  const scoped = !!countryPart || !!realmPart;
-  // Prefixed rather than plain-concatenated so the two dimensions can't collide
-  // into the same key (a country coded "Marine" doesn't exist, but a key whose
-  // meaning depends on no value ever overlapping is a trap worth not setting).
-  const scopeKey = scoped ? `c:${countryPart}|r:${realmPart}` : "";
-  // The query string both scoped dimensions contribute to, built once here so
-  // every fetch below stays in lockstep with scopeKey (the staleness guard) —
-  // no leading ? or &, callers add whichever they need.
-  const scopeQs = [
-    countryPart && `country=${encodeURIComponent(countryPart)}`,
-    realmPart && `realm=${encodeURIComponent(realmPart)}`,
-  ].filter(Boolean).join("&");
+  const scoped = !!countryPart;
+  const scopeKey = scoped ? `c:${countryPart}` : "";
+  // The scope's query string, built once here so every fetch below stays in
+  // lockstep with scopeKey (the staleness guard) — no leading ? or &, callers
+  // add whichever they need.
+  const scopeQs = countryPart ? `country=${encodeURIComponent(countryPart)}` : "";
   // Kept in sync every render (plain assignment, not an effect — refs don't
   // need one) so the promise-chained fetches below (toggleExpand, Table 1a,
   // SSC groups — unlike the main fetchTaxa effect above, these aren't
@@ -1595,13 +1577,11 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // scope and skip applying a now-stale result.
   const scopeKeyRef = useRef(scopeKey);
   scopeKeyRef.current = scopeKey;
-  // Gated on the VIEW, not on whether anything's selected in it — both scope
-  // views' landing pages always use the plain 3-column style (even before a
-  // country/realm is picked, showing global data), since Described/GBIF/CoL
-  // columns have no country dimension there either, and no realm dimension at
-  // all (they describe species that have never been assessed, and realm is
-  // recorded on the assessment — see scoped-taxa-summary-duckdb.ts).
-  const scopeStyleColumns = layoutMode === "country" || layoutMode === "realm";
+  // Gated on the VIEW, not on whether anything's selected in it — Country
+  // view's landing page always uses the plain 3-column style (even before a
+  // country is picked, showing global data), since Described/GBIF/CoL columns
+  // have no country dimension there either.
+  const scopeStyleColumns = layoutMode === "country";
   // Tighter, non-responsive padding for the sticky Taxonomic Group column in
   // the scope views — cellPad's px-4 growth at the md breakpoint is more than the
   // taxon name + icon need just to avoid wrapping, and that column is the
@@ -1771,7 +1751,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   const table1aMode = layoutMode === "table1a";
   const sscMode = layoutMode === "ssc";
   const countryMode = layoutMode === "country";
-  const realmMode = layoutMode === "realm";
 
   // Single view selector — replaces the old Table 1a/SSC Groups button pair
   // (+ their "Exit ... View" states). "Country view" needs real per-country
@@ -1784,14 +1763,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         value={layoutMode ?? "taxonomic"}
         onChange={(e) => {
           const v = e.target.value;
-          if (v === "compare") {
-            router.push("/compare");
-            return;
-          }
           // Not a layout of this table but a view of the same data from the
           // other end — the assessors' own words rather than the counts. Its
-          // own route for the same reason Comparison Mode is: it needs the
-          // whole page. It does now take a taxon, though (#565), so one
+          // own route because it needs the whole page. It does now take a taxon, though (#565), so one
           // selected here goes with it — but only one: the text search filters
           // by a single group, and quietly dropping all but the first of
           // several would be a narrower search than the table it came from.
@@ -1815,13 +1789,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
-        {/* Same reason Country View is disabled here: realm is recorded on the
-            assessment, so Not Evaluated species have none. */}
-        <option value="realm" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no realm recorded" : undefined}>
-          By Realm
-        </option>
         <option value="ssc">By SSC Specialist Group (WIP)</option>
-        <option value="compare">Comparison Mode</option>
         <option value="text">By Assessment Text (search)</option>
         <option value="near">Near a Location (map)</option>
         <option value="table1a">Table 1a</option>
@@ -2159,7 +2127,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     );
   };
 
-  // Scope views (Country/Realm) put the outdated COUNT and its PERCENTAGE in one
+  // Country view puts the outdated COUNT and its PERCENTAGE in one
   // column rather than two adjacent ones. They're two readings of a single fact
   // and were always read together — and the plain (non-scope) table already
   // renders them as one cell, so two columns here was the odd one out.
@@ -3109,12 +3077,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         here), same as before this rework. The table's own scrollRef box
         below is zoomed down (zoom-[.75]) to compensate for the narrower
         (1/2, was 2/3) column. */}
-    {/* Realm View: the three cards sit full width above the taxa table, which
-        stays visible throughout — unlike Country View, which hides its table
-        until a country is picked because its landing map fills the viewport.
-        Three cards leave plenty of room, and keeping the global table on screen
-        is the point of the view: you watch it narrow when you pick a realm. */}
-    {realmMode && <div className="mb-4">{realmModeContent}</div>}
     {countryMode && !scoped && (
       <div className="flex flex-col flex-1 min-h-0 mb-4">{countryModeContent}</div>
     )}
@@ -3651,7 +3613,6 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 mt-1.5">
         <span className="hidden sm:inline pl-3 md:pl-4 text-sm text-zinc-400 dark:text-zinc-500">
           {countryMode ? "Click a country to view its species, Cmd/Ctrl+click to multi-select."
-            : realmMode ? "Click a realm to narrow the table to it, Cmd/Ctrl+click to multi-select."
             : "Click to filter, use charts and search to explore species. Cmd/Ctrl+click to multi-select."}
         </span>
         <span className="inline-flex items-center gap-1.5 ml-auto pr-3 sm:pr-0">

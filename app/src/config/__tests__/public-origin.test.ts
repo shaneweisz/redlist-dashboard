@@ -3,7 +3,7 @@ import { authCallbackUrl, safeRedirectPath } from "../public-origin";
 
 describe("safeRedirectPath", () => {
   it("passes through a normal in-app path, query and fragment included", () => {
-    expect(safeRedirectPath("/browse?taxon=Aves#top")).toBe("/browse?taxon=Aves#top");
+    expect(safeRedirectPath("/mapping/2435099?tab=gbif#top")).toBe("/mapping/2435099?tab=gbif#top");
   });
 
   it("rejects protocol-relative and absolute URLs that would leave the site", () => {
@@ -47,8 +47,8 @@ describe("authCallbackUrl", () => {
     const cases = [
       "/?taxa=mammals&categories=CR,EN&years=11-20+years&search=shrew",
       "/?layout=country&country=ZA&view=new-assessments",
-      "/compare?taxa=birds&taxa_b=amphibians",
-      "/browse?taxon=Aves#top",
+      "/narrative-search?taxa=birds&q=fire",
+      "/mapping/2435099?tab=gbif#top",
     ];
     for (const path of cases) {
       const url = new URL(authCallbackUrl(ORIGIN, path));

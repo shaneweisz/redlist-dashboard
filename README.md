@@ -31,7 +31,7 @@ Clickable charts cross-filter the species table and each other:
 - **Credits** — all five SIS credit types: assessors, reviewers, contributors, facilitators and institutions. Facilitators matter most for birds, where every assessment is credited to "BirdLife International" and the facilitator line is the only one that names a person
 - **Taxonomic differences from Catalogue of Life** — assessed species CoL has split, lumped, placed at a different rank, accepts under a different name, or holds no clean 1:1 match for
 
-Charts support multi-select (Cmd/Ctrl+click), Shift+drag to sweep a range of bars, and cross-filter with the search bar. Filter state lives in the URL through a shared filter registry, so a filtered view is linkable and the MCP tools resolve to the same view the UI shows.
+Charts support multi-select (Cmd/Ctrl+click), Shift+drag to sweep a range of bars, and cross-filter with the search bar. Filter state lives in the URL, so a filtered view is linkable.
 
 ### Species table
 - Search by scientific name, including synonyms — an old name resolves to the currently accepted species — or by genus, family, order or class to browse that node
@@ -74,20 +74,11 @@ From a record, a right-click anywhere on the occurrence map, or the locate contr
 ### Narrative search
 A view of its own that searches what the assessors actually wrote — all 175,910 current global assessments, ~470 MB of prose — over a purpose-built term index. Published once per Red List release under `narratives/<release>/` in the `dashboard-data` bucket rather than once per monthly sync, since the prose only changes when the Red List publishes.
 
-### Realm view
-A three-bar Terrestrial / Freshwater / Marine chart over the same taxa table Country view scopes, so a realm narrows the tree in place. It writes the ordinary `systems` filter, so the narrowing survives leaving the view and composes with a country (`?country=ID&realm=Marine` is marine species *in* Indonesia). Realm is recorded on the assessment, so species not yet assessed have no realm even in principle — the described-species and observation columns are hidden here for that reason.
-
 ### Range maps and Area of Habitat
 IUCN range maps and Area of Habitat (AOH) rasters can be overlaid on the species occurrence map, served from the `dashboard-maps` R2 bucket via `/api/species/[key]/range-map` and `/api/species/[key]/aoh`. Both are **gated to `admin` accounts** — the routes return 403 otherwise. Rasters are uploaded out of band with `scripts/maps/upload-range-maps.ts` and `scripts/maps/upload-aoh-maps.ts`.
 
 ### Country view
 A per-country landing page and country list, combining live DuckDB queries with a precomputed all-species country aggregate — assessment coverage, endemics, and occurrence totals for a single country.
-
-### Compare view
-`/compare` renders two independent dashboard panels side by side, each with its own filters and view mode and both synced to the URL — so two filtered views can be compared directly, and the comparison shared as a link.
-
-### Agent access (MCP)
-An MCP server at `/api/mcp` (`@modelcontextprotocol/server` + `mcp-handler`) exposes the dashboard's data to agents. Results carry a verifiable `dashboard_url` that resolves to the equivalent UI view.
 
 ### Accounts
 Sign-in is handled by Supabase Auth with OAuth providers (GitHub, Google, and Microsoft/Entra). Roles are stored in a `user_roles` table and checked server-side (`src/lib/auth/roles.ts`); `admin` is currently the only role, and it gates the range map and AOH layers below. Schema lives in `app/supabase/migrations/`.
@@ -105,7 +96,6 @@ Maps:      MapLibre GL (react-map-gl) + react-simple-maps
 Charts:    Recharts
 Query:     DuckDB (@duckdb/node-api) over Parquet, inside API routes
 Auth:      Supabase (@supabase/ssr)
-Agents:    MCP server at /api/mcp
 Telemetry: Sentry, PostHog (proxied via /ingest), Vercel Analytics
 Hosting:   Vercel
 
@@ -268,8 +258,6 @@ Contributor conventions (PR descriptions, UI verification, worktrees, screenshot
 - **Recharts** — charts
 - **MapLibre GL** (react-map-gl) / **react-simple-maps** — maps
 - **Supabase** — auth and roles
-- **MCP** (`@modelcontextprotocol/server`, `mcp-handler`) — agent access
-- **Zod** — schema validation
 - **Vitest** — testing
 - **Sentry** / **PostHog** / **Vercel Analytics** — monitoring and analytics
 - **Vercel** — hosting and deployment

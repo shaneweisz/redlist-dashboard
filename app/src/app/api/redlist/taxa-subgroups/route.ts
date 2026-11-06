@@ -15,9 +15,8 @@ async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>):
   // scoped or not (Phase 7: country-scoping ports onto the same
   // getLiveRankChildren mechanism via an extra scope predicate ANDed
   // into the assessed-side query only, mirroring getScopedChildrenSummaries'
-  // existing precedent of omitting CoL/GBIF fields — no country or realm
-  // dimension exists for either — when extraWhere is set; realm rides that
-  // exact same path, it's just a different column in the same predicate).
+  // existing precedent of omitting CoL/GBIF fields — no country dimension
+  // exists for either — when extraWhere is set).
   if (isLiveDrilldownNode(nodeId)) {
     const nextRank = nextDynamicRank(nodeId);
     // No further rank below genus — the leaf is the existing species-list view.
@@ -28,7 +27,7 @@ async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>):
   if (!findNode(nodeId) || !hasChildren(nodeId)) return [];
 
   // Scoped summaries carry zeroed estimatedDescribed/gbifNeSpeciesCount
-  // (neither country nor realm exists in that data) — `scoped` tells the client
+  // (no country dimension exists in that data) — `scoped` tells the client
   // to hide those columns rather than render a misleading 0.
   return where ? getScopedChildrenSummaries(where, nodeId) : getPrecomputedChildrenSummaries(nodeId);
 }
@@ -43,11 +42,9 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const nodeId = params.get("nodeId");
   const nodeIds = params.get("nodeIds")?.split(",").map((n) => n.trim()).filter(Boolean) ?? [];
-  // One or more comma-separated values each, composing by AND — see
-  // taxa-summary/route.ts's own comment.
+  // One or more comma-separated values — see taxa-summary/route.ts's own comment.
   const countries = params.get("country")?.split(",").map((c) => c.trim()).filter(Boolean) ?? [];
-  const realms = params.get("realm")?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];
-  const where = scopeWhere(countries, realms);
+  const where = scopeWhere(countries);
   const scoped = where !== null;
 
   if (!nodeId && nodeIds.length === 0) {

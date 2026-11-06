@@ -12,7 +12,7 @@ interface SpeciesCacheValue {
   loadingUrls: Set<string>;
   errors: Record<string, string>;
   // Idempotent: fetches `url` at most once, no matter how many callers request it
-  // concurrently (e.g. two compare-mode panels both selecting "Birds") — later
+  // concurrently (e.g. a re-render while the first fetch is in flight) — later
   // callers for an already-cached or in-flight url are a no-op.
   request: (url: string) => void;
 }
@@ -22,21 +22,19 @@ const SpeciesCacheContext = createContext<SpeciesCacheValue | null>(null);
 /**
  * Shared species-fetch cache, keyed by the exact request URL (so e.g.
  * `?taxon=birds` and `?taxon=birds&category=NE` are naturally distinct entries).
- * Wrap one or more RedListView instances in a single provider to have them share
- * fetches — the single-dashboard page wraps exactly one instance (no behavior
- * change from today), compare mode wraps two so picking the same taxon on both
- * sides only fetches it once.
+ * The dashboard page wraps its RedListView in one, so switching between the
+ * Assessed and Not Evaluated views, or back to a taxon already visited, reuses
+ * what was fetched instead of fetching it again.
  */
 export function SpeciesCacheProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Record<string, SpeciesCacheEntry>>({});
   const [loadingUrls, setLoadingUrls] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Tracks in-flight requests so concurrent callers (e.g. both panels mounting at
-  // once) dedupe even before the first `entries` update lands.
+  // Tracks in-flight requests so concurrent callers dedupe even before the first `entries` update lands.
   const inFlightRef = useRef<Set<string>>(new Set());
   // One AbortController per in-flight url, aborted on provider unmount — so
-  // navigating away (e.g. leaving /compare) actually cancels in-flight
+  // navigating away (e.g. to /mapping) actually cancels in-flight
   // requests instead of letting them complete for a component tree that's
   // gone, and their completion doesn't call setState on an unmounted provider.
   const abortControllersRef = useRef<Record<string, AbortController>>({});

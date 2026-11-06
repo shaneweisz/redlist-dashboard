@@ -104,9 +104,6 @@ export const COMMA_BEARING_INSTITUTIONS: readonly string[] = [
  *
  * Longest-match-first against COMMA_BEARING_INSTITUTIONS protects the six names
  * whose own comma would otherwise split them.
- *
- * Shared by the dashboard filter and the /browse + MCP filter, so a link built on
- * one surface selects the same species on the other.
  */
 /**
  * Index of the next ", " or " & " that actually separates two institutions, or

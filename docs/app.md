@@ -26,9 +26,9 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 | `/api/redlist/species` | parquet: assessed, species/, ne, assessment_link; JSON: taxa-summary, col-revisions | the species table, through `SpeciesCacheContext`, **only when the prebuilt species list can't answer** (an arbitrary rank, or a failed file load) |
 | `/api/redlist/species/history` | parquet: assessments | the detail panel's history |
 | `/api/redlist/synonyms` | parquet: assessment_link, taxa | the detail panel's CoL tab |
-| `/api/redlist/taxa-summary` | JSON: taxa-summary; parquet (assessed) when scoped to a country or realm | the summary table |
-| `/api/redlist/taxa-subgroups` | JSON: the children summaries; parquet when scoped, or for live drill-down | the summary table's expands, **when the prebuilt tree can't** (a country or realm scope) |
-| `/api/redlist/country-stats`, `/realm-stats` | JSON: country-stats, realm-stats | the country and realm views |
+| `/api/redlist/taxa-summary` | JSON: taxa-summary; parquet (assessed) when scoped to a country | the summary table |
+| `/api/redlist/taxa-subgroups` | JSON: the children summaries; parquet when scoped, or for live drill-down | the summary table's expands, **when the prebuilt tree can't** (a country scope) |
+| `/api/redlist/country-stats` | JSON: country-stats | the country view |
 | `/api/redlist/credit-candidates` | parquet: assessed, assessments; JSON: vernacular-names | the candidate assessors table |
 | `/api/data-sync-date` | `latest-sync.txt` | the "data as of" line |
 
@@ -45,8 +45,6 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 | Route | Reads | Called by |
 |---|---|---|
 | `/api/search`, `/api/search/warm` | parquet: name-index, rank-index, synonym-index, assessed, ne, species/ | the search bar, **after the prebuilt shards** (substring, CoL-only and old-name queries); warm primes it |
-| `/api/mcp`, `/browse` | the same queries, in-process (`src/lib/browse-query.ts`) | AI agents; `/browse` is linked from `/llms.txt` |
-| `/llms.txt` | the filter vocabulary in code | agents |
 | `/api/narrative-search`, `/[assessmentId]` | narratives parquets (R2 `narratives/<release>/`, per Red List release) | the narrative search page |
 
 ### Live data in the detail panel and maps
@@ -83,9 +81,9 @@ Found while mapping the routes, checked against the code. Nothing here is change
 - `/api/species/[key]/breakdown` makes a third GBIF request for recent iNat observations (`recentInatObservations`), which no component reads.
 - `/api/species/[key]/inat-top-observers` has a GBIF name lookup for when no name is passed, but its one caller always passes the name, and `[key]` is always 0.
 
-**Fallbacks the prebuilt files now mostly answer.** `/api/redlist/species`, `/api/search` (and `/warm`, which primes it) and unscoped `/api/redlist/taxa-subgroups` sit behind the prebuilt files. They are still needed for what the files don't cover (arbitrary ranks, substring search, country and realm scopes), and by `/browse` and MCP; but `/warm` now primes a path few searches reach.
+**Fallbacks the prebuilt files now mostly answer.** `/api/redlist/species`, `/api/search` (and `/warm`, which primes it) and unscoped `/api/redlist/taxa-subgroups` sit behind the prebuilt files. They are still needed for what the files don't cover (arbitrary ranks, substring search, country scopes),; but `/warm` now primes a path few searches reach.
 
-**Thin wrappers.** `/api/data-sync-date` returns `latest-sync.txt`, which the client bundle already carries (`NEXT_PUBLIC_SPECIES_LISTS_SYNC`). `/api/redlist/country-stats` returns a static JSON file. `/api/redlist/realm-stats` keeps a DuckDB fallback for syncs older than `realm-stats.json`, which production no longer serves.
+**Thin wrappers.** `/api/data-sync-date` returns `latest-sync.txt`, which the client bundle already carries (`NEXT_PUBLIC_SPECIES_LISTS_SYNC`). `/api/redlist/country-stats` returns a static JSON file.
 
 **The same thing written several times.**
 - Four routes build their own R2 client (`overlays/[asset]`, `range-map`, `aoh`, `aoh/metadata`); `aoh` and `aoh/metadata` repeat the same key lookup ("Mirror of findAohPngKey") and admin check.

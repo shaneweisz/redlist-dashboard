@@ -974,7 +974,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
     criteria: string | null;
     threat_codes: string[];
     /** Year of the assessment itself, not of its publication — the same field
-     *  the dashboard's "outdated" test reads (species-filter.ts). */
+     *  the dashboard's "outdated" test reads. */
     assessment_year: number | null;
     /** The assessment behind the row, so its narrative can be fetched. */
     assessment_id: number | null;

@@ -4,8 +4,8 @@
  *   summaries/taxa-summary.json                 per Table 1a group: assessed, by
  *                                               category, outdated, GBIF totals in
  *                                               both modes, CoL described / NE
- *   summaries/country-stats.json, realm-stats.json   the same across all species,
- *                                               per country and per realm
+ *   summaries/country-stats.json                the same across all species,
+ *                                               per country
  *   summaries/table1a-children-summaries.json   the static tree's children: the
  *   summaries/ssc-group-children-summaries.json Table 1a rows and the SSC groups,
  *                                               with each node's CoL breakdown
@@ -26,7 +26,6 @@ import { getTaxa } from "../../lib/taxa";
 import { NODE_INDEX, hasChildren, matchesFilter } from "../../../src/lib/taxonomy-utils";
 import type { TaxonomyNode } from "../../../src/config/taxonomy-tree";
 import type { NodeSummary } from "../../../src/lib/data/species-store";
-import { REALMS } from "../../../src/lib/data/scoped-taxa-summary-duckdb";
 import {
   COL_SPECIES_NAME_OVERRIDES,
 } from "../../../src/config/col-described-overrides";
@@ -188,7 +187,7 @@ async function attachColCounts(conn: DuckDBConnection, summaries: Record<string,
 /** An assessed species as the summaries need it. */
 interface AssessedRow {
   sis_taxon_id: number; scientific_name: string; class_name: string | null; order_name: string | null; family: string | null;
-  category: string; assessment_date: string | null; countries: string[]; systems: string[];
+  category: string; assessment_date: string | null; countries: string[];
 }
 /** A species GBIF has records for, as the summaries need it. */
 interface GbifRow { scientific_name: string; class_name: string | null; order_name: string | null; family: string | null; counts: Record<GbifRecordMode, number> }
@@ -201,7 +200,7 @@ interface GbifRow { scientific_name: string; class_name: string | null; order_na
 async function loadGroups(conn: DuckDBConnection, dataDir: string): Promise<{ redlist: Map<string, AssessedRow[]>; gbif: Map<string, Map<string, GbifRow>>; linked: Set<string> }> {
   const assessed = (await conn.runAndReadAll(`
     SELECT id, taxon_group, scientific_name, class_name, order_name, family, iucn_category, assessment_date,
-           countries, systems, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
+           countries, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
     FROM read_parquet('${path.join(dataDir, syncPath("assessed.parquet"))}')`)).getRowObjects();
   const ne = (await conn.runAndReadAll(`
     SELECT taxon_group, scientific_name, class_name, order_name, family, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count
@@ -224,7 +223,7 @@ async function loadGroups(conn: DuckDBConnection, dataDir: string): Promise<{ re
     redlist.set(g, list);
     list.push({ sis_taxon_id: Number(r.id), scientific_name: String(r.scientific_name), class_name: str(r.class_name), order_name: str(r.order_name),
       family: str(r.family), category: String(r.iucn_category ?? ""), assessment_date: str(r.assessment_date),
-      countries: split(r.countries), systems: split(r.systems) });
+      countries: split(r.countries) });
     if (r.gbif_species_key != null) {
       linked.add(String(r.gbif_species_key));
       if (Number(r.gbif_all_records_count) > 0) addGbif(g, String(r.gbif_species_key), r);
@@ -249,13 +248,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   // live DuckDB queries — see country-taxa-summary-duckdb.ts), the landing map
   // is always "all species" scope, so this never needs to vary per request.
   const countryStats = new Map<string, { total_assessed: number; outdated: number }>();
-  // Per-realm tally, same shape and same reason as countryStats above: the Realm
-  // view's landing chart is always all-species scope, so a static aggregate beats
-  // a DB round trip on every entry to the view. A species assessed in two realms
-  // is counted in each, so these do NOT sum to realmTotalAssessed — which is why
-  // that total is tracked separately rather than derived from them.
-  const realmStats = new Map<string, { total_assessed: number; outdated: number }>();
-  let realmTotalAssessed = 0;
 
   const linkedGbifKeys = groups.linked;
 
@@ -289,15 +281,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
         entry.total_assessed++;
         if (speciesOutdated) entry.outdated++;
         countryStats.set(cc, entry);
-      }
-
-      // Per-realm tally (see realmStats declaration above)
-      realmTotalAssessed++;
-      for (const sys of s.systems) {
-        const entry = realmStats.get(sys) ?? { total_assessed: 0, outdated: 0 };
-        entry.total_assessed++;
-        if (speciesOutdated) entry.outdated++;
-        realmStats.set(sys, entry);
       }
     }
 
@@ -355,22 +338,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const countryStatsOutputPath = path.join(dataDir, syncPath("country-stats.json"));
   fs.writeFileSync(countryStatsOutputPath, JSON.stringify(countryStatsObj, null, 2) + "\n");
   console.log(`Wrote ${countryStats.size} countries → ${countryStatsOutputPath}`);
-
-  // Driven off REALMS rather than off the tally's own keys, so the file always
-  // carries all three in a fixed order (a realm with no assessments is a real 0,
-  // not a missing entry) and an unexpected value in the column is dropped rather
-  // than written out as a fourth realm.
-  const realmStatsObj = {
-    realms: REALMS.map((realm) => ({
-      realm,
-      species: realmStats.get(realm)?.total_assessed ?? 0,
-      outdated: realmStats.get(realm)?.outdated ?? 0,
-    })),
-    totalAssessed: realmTotalAssessed,
-  };
-  const realmStatsOutputPath = path.join(dataDir, syncPath("realm-stats.json"));
-  fs.writeFileSync(realmStatsOutputPath, JSON.stringify(realmStatsObj, null, 2) + "\n");
-  console.log(`Wrote ${realmStatsObj.realms.length} realms → ${realmStatsOutputPath}`);
 
   // ─── Second pass: precompute node children summaries ──────────────
   console.log("\nComputing node children summaries...");

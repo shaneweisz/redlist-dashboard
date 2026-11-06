@@ -343,7 +343,7 @@ def routes():
         "/api/redlist/species  (fallback: prebuilt lists)",
         "/api/redlist/species/history, /synonyms",
         "/api/redlist/taxa-summary, /taxa-subgroups",
-        "/api/redlist/country-stats, /realm-stats",
+        "/api/redlist/country-stats",
         "/api/redlist/credit-candidates, /api/data-sync-date"])
     group("g_col", 2.1, "CoL differences", [
         "/api/redlist/taxa-breakdown-live",
@@ -351,7 +351,6 @@ def routes():
         "/api/col/provenance  (ChecklistBank)"])
     group("g_srch", 3.6, "Search  (fallback: prebuilt shards)", [
         "/api/search, /api/search/warm"], dashed=True)
-    group("g_agent", 4.6, "For agents", ["/api/mcp, /browse, /llms.txt"])
     group("g_nar", 5.6, "Narrative search", ["/api/narrative-search, /[assessmentId]"])
     group("g_maps", 6.6, "Map layers  (range map + AOH: admins only)", [
         "/api/species/[key]/range-map, /aoh, /aoh/metadata",
@@ -374,18 +373,17 @@ def routes():
     # consumers
     S["c_tbl"] = box("c_tbl", 2.75, 0.3, "species table, charts,\nfilters, summary table", "app")
     S["c_srch"] = box("c_srch", 2.75, 3.4, "search bar", "app")
-    S["c_agent"] = box("c_agent", 2.75, 4.6, "AI agents (MCP)", "app")
     S["c_nar"] = box("c_nar", 2.75, 5.6, "narrative search page", "app")
     S["c_det"] = box("c_det", 2.75, 8.4, "species detail panel:\nGBIF map, iNat, literature,\nCITES, CoL, Red List tabs", "app", h=96)
     S["c_map"] = box("c_map", 2.75, 11.2, "nearby / world map", "app")
     S["c_hdr"] = box("c_hdr", 2.75, 14.3, "sign-in, header", "app")
 
     for a, b in [("pq", "g_list"), ("js", "g_list"), ("pq", "g_col"), ("ext", "g_col"),
-                 ("pq", "g_srch"), ("pq", "g_agent"), ("js", "g_agent"), ("nar", "g_nar"),
+                 ("pq", "g_srch"), ("nar", "g_nar"),
                  ("maps", "g_maps"), ("supa", "g_maps"), ("gbif", "g_gbif"), ("pq", "g_gbif"),
                  ("inat", "g_inat"), ("gbif", "g_inat"), ("iucn", "g_iucn"), ("ext", "g_iucn"),
                  ("ext", "g_misc"), ("supa", "g_auth"), ("pq", "g_dead"), ("ext", "g_dead"),
-                 ("g_list", "c_tbl"), ("g_col", "c_tbl"), ("g_srch", "c_srch"), ("g_agent", "c_agent"),
+                 ("g_list", "c_tbl"), ("g_col", "c_tbl"), ("g_srch", "c_srch"),
                  ("g_nar", "c_nar"), ("g_maps", "c_det"), ("g_gbif", "c_det"), ("g_gbif", "c_map"),
                  ("g_inat", "c_det"), ("g_iucn", "c_det"), ("g_misc", "c_det"), ("g_auth", "c_hdr")]:
         arrow(S[a], S[b])

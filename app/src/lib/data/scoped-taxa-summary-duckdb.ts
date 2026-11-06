@@ -5,9 +5,7 @@
  *
  * A "scope" here is a WHERE fragment narrowing assessed.parquet to some slice of
  * species that the precomputed artifacts don't cover: currently a set of countries
- * (Country View) and/or a set of realms (Realm View). Both are stored the same way
- * — a semicolon-joined varchar column on assessed.parquet — so they build the same
- * shape of predicate and compose by AND (marine species in Indonesia).
+ * (Country View), stored as a semicolon-joined varchar column on assessed.parquet.
  *
  * Precomputing one file per scope was rejected for countries (~150-200 of them): it
  * would multiply scripts/sync/outputs/build-taxa-summary.ts's runtime ~200x, add a staleness
@@ -15,16 +13,10 @@
  * same assessed.parquet species-duckdb.ts already serves /api/redlist/species from,
  * adding the scope predicate to filterToSql()'s taxonomy-node predicate — computed
  * only for the specific scope + node actually requested, not the whole tree upfront.
- * Realm has only three values and so would have been cheap to precompute, but rides
- * the same live path rather than adding a second mechanism for the same job.
  *
  * Deliberately omits GBIF (the gbif totals are zeroes) and
  * Catalogue of Life (col_described, col_ne) fields entirely — neither dataset has a
- * country OR a realm dimension, so there is no valid scoped value to report. (Realm
- * is doubly absent: `systems` is populated only for ASSESSED species — unassessed.parquet
- * has no realm column at all — so a "% of described species assessed" figure can't be
- * computed per realm even in principle. See the taxonomy-tree.ts comment on the fish
- * Red List Authorities for the same blocker.) Callers (the two API routes) must mark
+ * country dimension, so there is no valid scoped value to report. Callers (the two API routes) must mark
  * their response as scoped so the client knows to hide those columns rather than
  * render a misleading 0/undefined.
  */
@@ -56,51 +48,13 @@ export function countriesWhere(codes: string[]): string {
   return codes.map(countryWhere).join(" OR ");
 }
 
-// The three IUCN realms, exactly as assessment_systems spells them in the source
-// data (and so exactly as the `systems` column stores them) — the Realm filter
-// buttons in RedListView use the same three literals.
-export const REALMS = ["Terrestrial", "Freshwater", "Marine"] as const;
-export type Realm = (typeof REALMS)[number];
-
-export function isRealm(value: string): value is Realm {
-  return (REALMS as readonly string[]).includes(value);
-}
-
-// Realm equivalent of countriesWhere — `systems` is the same semicolon-joined
-// varchar shape as `countries`, so this is the same OR'd list_contains check, and
-// a species assessed as e.g. "Freshwater;Marine" is still counted exactly once by
-// the count(*)/GROUP BY below when both realms are selected.
-//
-// Unlike country codes (an open set — any 2-letter string is a plausible code, so
-// countryWhere escapes and passes it through to match nothing if it's bogus), realm
-// is a closed set of three known values, so unrecognized input is dropped outright
-// rather than escaped into the query. Callers decide scoped-ness from the RAW
-// parameter, so ?realm=Lunar still scopes — to FALSE, i.e. no species, which is the
-// honest answer — rather than silently falling back to global numbers.
-export function systemsWhere(realms: string[]): string {
-  const valid = realms.filter(isRealm);
-  if (valid.length === 0) return "FALSE"; // nothing selected, or nothing recognized
-  return valid
-    .map((r) => `list_contains(string_split(coalesce(systems, ''), ';'), '${r}')`)
-    .join(" OR ");
-}
-
 /**
- * The combined scope predicate for a request: countries AND realms, each of which
- * is itself an OR across its own selected values. Returns null when neither
- * dimension is scoped at all, which is the signal to callers to use the
+ * The scope predicate for a request: an OR across the selected countries.
+ * Returns null when nothing is scoped, which is the signal to callers to use the
  * precomputed global artifacts instead of querying at all.
- *
- * AND (not OR) between the two dimensions is what makes them compose the way the
- * rest of the dashboard's filters do: selecting Marine and Indonesia means marine
- * species IN Indonesia, not marine species plus Indonesian ones.
  */
-export function scopeWhere(countries: string[], realms: string[]): string | null {
-  const clauses: string[] = [];
-  if (countries.length > 0) clauses.push(`(${countriesWhere(countries)})`);
-  if (realms.length > 0) clauses.push(`(${systemsWhere(realms)})`);
-  if (clauses.length === 0) return null;
-  return clauses.join(" AND ");
+export function scopeWhere(countries: string[]): string | null {
+  return countries.length > 0 ? `(${countriesWhere(countries)})` : null;
 }
 
 // DATE, not TIMESTAMP — isOutdated() compares full elapsed time, but assessment_date
@@ -108,75 +62,6 @@ export function scopeWhere(countries: string[], realms: string[]): string | null
 // and avoids a timezone-sensitive TIMESTAMP comparison.
 export function outdatedSql(cutoffIso: string): string {
   return `(assessment_date IS NULL OR CAST(assessment_date AS DATE) <= CAST('${cutoffIso}' AS DATE))`;
-}
-
-export interface RealmStats {
-  realm: Realm;
-  /** Assessed species whose `systems` includes this realm. */
-  species: number;
-  /** ...of which are due a reassessment (the same >10yr cutoff the rest of the app uses). */
-  outdated: number;
-}
-
-export interface RealmStatsResponse {
-  realms: RealmStats[];
-  /** Every assessed species, counted once — the denominator the bars' shares use. */
-  totalAssessed: number;
-}
-
-/**
- * Per-realm totals across all assessed species — the Realm view's landing chart.
- * The country equivalent (getCountryStats) reads a precomputed JSON because there
- * are ~200 countries and the landing map needs every one of them; realm has three
- * values and one GROUP BY answers all of them at once, so this stays live rather
- * than adding a fourth build artifact to the monthly sync that could drift.
- *
- * A species assessed as e.g. "Freshwater;Marine" counts once toward BOTH realms
- * here — that's what the unnest does, and it's the honest reading of a bar that
- * says "N marine species assessed". It does mean the three bars sum to more than
- * totalAssessed (1,877 species are in two realms or three), and so that their
- * shares of it sum to more than 100% — which is why totalAssessed is returned
- * explicitly as the denominator rather than left to be inferred by summing the
- * bars, and why the chart says so on its face.
- */
-export async function getRealmStats(): Promise<RealmStatsResponse> {
-  const conn = await getConn();
-  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
-  const assessedUri = parquetUri("assessed.parquet");
-  // The unnest has to happen in a subquery: DuckDB can't GROUP BY an UNNEST
-  // directly ("Binder Error: Cannot group on an UNNEST or UNLIST clause").
-  const rows = (await conn.runAndReadAll(
-    `SELECT realm, count(*) AS n,
-            sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated
-     FROM (
-       SELECT unnest(string_split(systems, ';')) AS realm, assessment_date
-       FROM '${assessedUri}'
-       WHERE systems IS NOT NULL AND systems <> ''
-     )
-     GROUP BY realm`
-  )).getRowObjects();
-
-  const byRealm = new Map(rows.map((r) => [String(r.realm), r]));
-  // Driven off REALMS, not off the query results, so a card is always emitted for
-  // each of the three (a realm with no assessments at all is a real 0, not a
-  // missing card) and any unexpected value in the column is ignored rather than
-  // rendered as a fourth card.
-  const realms = REALMS.map((realm) => {
-    const row = byRealm.get(realm);
-    return {
-      realm,
-      species: row ? Number(row.n) : 0,
-      outdated: row ? Number(row.n_outdated) : 0,
-    };
-  });
-
-  // Separate query, not a sum of the above: the unnest counts a multi-realm
-  // species once per realm, so summing `realms` would overcount the total.
-  const totalRow = (await conn.runAndReadAll(
-    `SELECT count(*) AS n FROM '${assessedUri}'`
-  )).getRowObjects();
-
-  return { realms, totalAssessed: Number(totalRow[0]?.n ?? 0) };
 }
 
 /**
@@ -189,7 +74,7 @@ export async function getRealmStats(): Promise<RealmStatsResponse> {
  * marine mosses; no mammals in Antarctica).
  *
  * `where` is a scope predicate from scopeWhere() — see its doc comment for why
- * this is safe from double-counting however many countries/realms it covers.
+ * this is safe from double-counting however many countries it covers.
  */
 export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRow[]> {
   const conn = await getConn();

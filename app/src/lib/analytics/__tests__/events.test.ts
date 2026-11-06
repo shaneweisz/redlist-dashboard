@@ -58,12 +58,6 @@ describe("activeFilters", () => {
     expect(activeFilters("?categories=")).toEqual({});
   });
 
-  it("reads the suffixed params of a compare-mode panel", () => {
-    const search = "?categories=CR&categories_b=EN";
-    expect(activeFilters(search, "_b")).toEqual({ risk_category: "EN" });
-    expect(activeFilters(search)).toEqual({ risk_category: "CR" });
-  });
-
   it("truncates an over-long value", () => {
     const long = "x".repeat(500);
     expect(activeFilters(`?categories=${long}`).risk_category).toHaveLength(100);
@@ -141,18 +135,6 @@ describe("reportFilterUsage", () => {
     reportFilterUsage("?categories=CR&sort=year");
     reportFilterUsage("?categories=CR&sort=year&tab=gbif");
     expect(posthog.capture).toHaveBeenCalledTimes(1);
-  });
-
-  it("tracks compare-mode panels independently", () => {
-    primeFilterBaseline("", "");
-    primeFilterBaseline("", "_b");
-    reportFilterUsage("?categories=CR&categories_b=EN", "_b");
-    expect(posthog.capture).toHaveBeenCalledTimes(1);
-    expect(posthog.capture).toHaveBeenCalledWith("filter_applied", {
-      filter: "risk_category",
-      value: "EN",
-      panel: "_b",
-    });
   });
 
   it("captures nothing when PostHog is not configured", () => {
