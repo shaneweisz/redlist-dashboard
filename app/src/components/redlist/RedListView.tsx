@@ -804,6 +804,24 @@ function prefetchColProvenance(colId: string): Promise<void> {
 }
 
 /**
+ * Warm the cache for every ⚑ on the current table page, a few lookups at a
+ * time, so a hover opens the panel complete. Uncached, the route takes
+ * 0.3-0.75s on prod (three ChecklistBank hops), longer than the tooltip will
+ * wait, and a source block landing after the panel opened grew it upward under
+ * the pointer. Only runs while the flags are shown (the CoL filter is on),
+ * which caps it at one page of rows; `isCancelled` stops a page the reader
+ * has already left from queueing more.
+ */
+const COL_PROVENANCE_PREFETCH_CONCURRENCY = 3;
+async function prefetchColProvenanceAll(colIds: string[], isCancelled: () => boolean): Promise<void> {
+  const queue = colIds.filter((id) => !colProvenanceCache.has(id));
+  const worker = async () => {
+    while (queue.length > 0 && !isCancelled()) await prefetchColProvenance(queue.shift()!);
+  };
+  await Promise.all(Array.from({ length: COL_PROVENANCE_PREFETCH_CONCURRENCY }, worker));
+}
+
+/**
  * Where CoL's record came from — scrutiny, source dataset, and the record on the
  * source's own site. Usually `prepare` has already filled the cache before the
  * panel opened. When the lookup outran PREPARE_MAX_WAIT_MS (a cold API route or
@@ -3063,6 +3081,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return [singleSpeciesPreview, ...paginatedSpeciesBase];
   }, [paginatedSpeciesBase, singleSpeciesPreview]);
+
+  // The CoL records behind this page's ⚑ markers, as one string so the effect
+  // below re-runs when the page's flags change, not on every render.
+  const pageFlagColIds = colFilterActive
+    ? [...new Set(paginatedSpecies.flatMap((s) => (isFlagged(s.col_revision) && s.col_revision!.colId ? [s.col_revision!.colId] : [])))].join(",")
+    : "";
+  useEffect(() => {
+    if (!pageFlagColIds) return;
+    let cancelled = false;
+    void prefetchColProvenanceAll(pageFlagColIds.split(","), () => cancelled);
+    return () => { cancelled = true; };
+  }, [pageFlagColIds]);
 
   // ── Single species mode: show info card instead of charts ──────────
   // Only activate when arrived via the main search bar (which sets the
