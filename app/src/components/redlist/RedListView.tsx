@@ -555,7 +555,6 @@ const SPECIES_TH_SORTABLE = "cursor-pointer hover:text-zinc-900 dark:hover:text-
 //   Assessment / Date               84   ("Assessment" 83)
 //   Total / New / % New           one line each, under the GBIF Records heading
 //   Year Described                  104  (one line, 102 — new-assessments has the room)
-//   GBIF Records                    96   (one line, 94 — likewise)
 //
 // One shared width would have to be the largest of them, which is what left Assessment
 // Date and Total GBIF Records ~50px wider than their text and put a gutter of dead space
@@ -5910,12 +5909,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         >
           <table className="w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-800">
-              {/* Assessed species have three GBIF columns, grouped under one GBIF heading
-                  carrying the record-mode toggle (two header rows). The Not Evaluated
-                  list has one, which the heading and toggle would only widen (the
-                  chart's toggle sets the mode there): one row. */}
+              {/* The GBIF columns sit under one GBIF Records heading carrying the
+                  record-mode toggle (two header rows): Total, New and % New for
+                  assessed species, Total alone for Not Evaluated ones. */}
               {(() => {
-                const gbifHeadRows = isNewAssessments ? 1 : 2;
+                const gbifHeadRows = 2;
                 const gbifColumns = (
                   <>
                 <th
@@ -5923,7 +5921,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onClick={(e) => handleSort("totalGbif", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={isNewAssessments ? `${SPECIES_TH_LABEL} w-[96px]` : SPECIES_TH_NOWRAP}>{isNewAssessments ? "GBIF Records" : "Total"}</span>
+                    <span className={SPECIES_TH_NOWRAP}>Total</span>
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -5965,7 +5963,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 );
                 return (
                   <>
-              <tr className={isNewAssessments ? "border-b border-zinc-200 dark:border-zinc-700" : undefined}>
+              <tr>
                 <th rowSpan={gbifHeadRows} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-800 px-2 py-3 text-center text-sm font-bold text-zinc-600 dark:text-zinc-300 w-10">
                   <svg className="w-4 h-4 mx-auto text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
@@ -6007,8 +6005,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
-                {isNewAssessments ? gbifColumns : (
-                <>
                 {/* One heading over the GBIF columns, with the record-mode toggle:
                     the mode is said once here, not under every column. */}
                 <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
@@ -6017,10 +6013,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
-                </>
-                )}
               </tr>
-              {!isNewAssessments && <tr className="border-b border-zinc-200 dark:border-zinc-700">{gbifColumns}</tr>}
+              <tr className="border-b border-zinc-200 dark:border-zinc-700">{gbifColumns}</tr>
                   </>
                 );
               })()}
