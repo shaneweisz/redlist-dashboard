@@ -1065,6 +1065,8 @@ interface RedListViewProps {
 
 export default function RedListView({ viewMode = "reassessments", onViewModeChange, wideViewModeToggle = false, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange, paramSuffix = "" }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
+  // The selected taxon's counts, reported by TaxaSummary, for the wide toggle.
+  const [selectedCounts, setSelectedCounts] = useState<{ assessed: number; notEvaluated: number | null } | null>(null);
 
   // The ">10 yrs old" outdated threshold is computed against this everywhere
   // in this component (species filtering, the by-year chart, the map, the
@@ -4597,6 +4599,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryScope={countryScope}
         realmModeContent={realmModeContent}
         realmScope={realmScope}
+        onSelectedCounts={wideViewModeToggle ? setSelectedCounts : undefined}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -4650,22 +4653,27 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       {wideViewModeToggle && onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (
         <div role="tablist" aria-label="View" className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm mb-4">
           {([
-            ["reassessments", "Reassessments"],
-            ["new-assessments", "First Assessments"],
-          ] as const).map(([mode, label]) => (
+            ["reassessments", "Reassessments", selectedCounts?.assessed, "assessed"],
+            ["new-assessments", "First Assessments", selectedCounts?.notEvaluated, "awaiting a first assessment"],
+          ] as const).map(([mode, label, count, countLabel]) => (
             <button
               key={mode}
               type="button"
               role="tab"
               aria-selected={viewMode === mode}
               onClick={() => onViewModeChange(mode)}
-              className={`flex-1 px-3 py-2 font-medium whitespace-nowrap transition-colors ${
+              className={`flex-1 px-3 py-2 transition-colors ${
                 viewMode === mode
                   ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
                   : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
               }`}
             >
-              {label}
+              <span className="block font-medium whitespace-nowrap">{label}</span>
+              {count != null && (
+                <span className={`block text-xs tabular-nums ${viewMode === mode ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {count.toLocaleString()} species {countLabel}
+                </span>
+              )}
             </button>
           ))}
         </div>

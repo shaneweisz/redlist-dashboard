@@ -181,6 +181,11 @@ interface Props {
    * countryScope, and like it only actually narrows this table inside its own
    * view (see the scoped/scopeKey derivation below). */
   realmScope?: string[] | null;
+  /** Reports the selected row's own counts (Red List assessed, Not Evaluated)
+   * so RedListView can show them on its view toggle. null when there's no
+   * single selected row, or it hasn't loaded yet. notEvaluated is null when the
+   * row has no CoL count. */
+  onSelectedCounts?: (counts: { assessed: number; notEvaluated: number | null } | null) => void;
   /** Which GBIF records the GBIF columns count (src/lib/gbif-records.ts). */
   gbifRecordMode?: GbifRecordMode;
 }
@@ -1519,7 +1524,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, realmModeContent, realmScope, onSelectedCounts, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -1539,6 +1544,31 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     () => Object.fromEntries(Object.entries(rawSubgroupData).map(([k, subs]) => [k, withNeCount(subs, gbifRecordMode)])),
     [rawSubgroupData, gbifRecordMode]);
   const [loadingSubgroups, setLoadingSubgroups] = useState<Set<string>>(new Set());
+
+  // The selected row's counts, for RedListView's view toggle: the one selected
+  // sub-group if there is one, else the one selected taxon. Reported as two
+  // primitives so the effect only fires when a number actually changes.
+  const selectedCounts = useMemo(() => {
+    const toCounts = (r: { totalAssessed: number; colNe?: number }) => ({ assessed: r.totalAssessed, notEvaluated: r.colNe ?? null });
+    if (selectedSubgroups.size === 1) {
+      const id = [...selectedSubgroups][0];
+      for (const subs of Object.values(subgroupData)) {
+        const sg = subs.find((x) => x.id === id);
+        if (sg) return toCounts(sg);
+      }
+      return null;
+    }
+    if (selectedSubgroups.size === 0 && selectedTaxa.size === 1) {
+      const t = taxa.find((x) => x.id === [...selectedTaxa][0]);
+      return t ? toCounts(t) : null;
+    }
+    return null;
+  }, [selectedTaxa, selectedSubgroups, subgroupData, taxa]);
+  const selAssessed = selectedCounts?.assessed;
+  const selNe = selectedCounts?.notEvaluated;
+  useEffect(() => {
+    onSelectedCounts?.(selAssessed === undefined ? null : { assessed: selAssessed, notEvaluated: selNe ?? null });
+  }, [selAssessed, selNe, onSelectedCounts]);
   // Refs to avoid stale closures in toggleExpand
   const subgroupDataRef = useRef(rawSubgroupData);
   subgroupDataRef.current = rawSubgroupData;
@@ -1790,12 +1820,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         className="text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
       >
         <option value="taxonomic">By Taxonomic Group</option>
-        <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for New Assessments — Not Evaluated species have no location data" : undefined}>
+        <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
         {/* Same reason Country View is disabled here: realm is recorded on the
             assessment, so Not Evaluated species have none. */}
-        <option value="realm" disabled={isNewAssessments} title={isNewAssessments ? "Not available for New Assessments — Not Evaluated species have no realm recorded" : undefined}>
+        <option value="realm" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no realm recorded" : undefined}>
           By Realm
         </option>
         <option value="ssc">By SSC Specialist Group (WIP)</option>
