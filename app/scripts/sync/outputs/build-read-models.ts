@@ -166,7 +166,12 @@ async function history(conn: DuckDBConnection, coreDir: string): Promise<void> {
  * The Not Evaluated side and the CoL universe it is drawn from:
  *
  *   species/taxon_group=*\/   every accepted species the curated checklist keeps,
- *                             with lineage, partitioned by group
+ *                             with lineage, partitioned by group. `described` is
+ *                             the dashboard's universe: in the curated Base, extant
+ *                             (or extinct and assessed EX/EW, which IUCN agrees
+ *                             with), and not a domestic form or human (NE_EXCLUDED).
+ *                             Every "described" and Not Evaluated count, list and
+ *                             search tier filters on it, so they can't disagree.
  *   ne.parquet                one row per species in that universe that no
  *                             assessed species is linked to and GBIF has records
  *                             for: its counts, GBIF countries and common name.
@@ -178,9 +183,14 @@ async function history(conn: DuckDBConnection, coreDir: string): Promise<void> {
 async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: string): Promise<void> {
   const speciesDir = path.join(outDir, syncPath("species"));
   fs.rmSync(speciesDir, { recursive: true, force: true });
+  await conn.run(`CREATE OR REPLACE TEMP TABLE ex_ew_linked AS
+    SELECT DISTINCT l.col_id FROM link l JOIN latest USING (sis_taxon_id)
+    WHERE l.col_id IS NOT NULL AND latest.category IN ('EX', 'EW')`);
   await conn.run(`COPY (
     SELECT col_id, scientific_name, authorship, described_year, kingdom, phylum, class_name, order_name, family, genus,
-           extinct, in_base, taxon_group
+           extinct, in_base,
+           in_base AND (extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_linked)) AND ne_excluded IS NULL AS described,
+           taxon_group
     FROM taxa WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
     ORDER BY taxon_group, class_name, order_name, family, scientific_name
   ) TO ${lit(speciesDir)} (FORMAT parquet, PARTITION_BY (taxon_group), COMPRESSION zstd, ROW_GROUP_SIZE 20000)`);

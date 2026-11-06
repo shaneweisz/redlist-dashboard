@@ -282,10 +282,9 @@ export function filterToSql(filter: NodeFilter, nodeId?: string): string {
   if (filter.excludeGenera?.length) conds.push(`${genus} NOT IN (${sqlStrList(filter.excludeGenera)})`);
   if (filter.speciesNames?.length) conds.push(`${sciName} IN (${sqlStrList(filter.speciesNames)})`);
   if (filter.excludeSpeciesNames?.length) conds.push(`${sciName} NOT IN (${sqlStrList(filter.excludeSpeciesNames)})`);
-  // Domestic forms + species reassigned to another node's CoL override (see above) —
-  // excluded from every node's count so they don't inflate one group's total or get
-  // double-counted between two groups. matchesFilter() applies this same exclusion
-  // unconditionally to every row (CoL, redlist, or GBIF), so it belongs here too.
+  // Species reassigned to another node's CoL override (Bison, see
+  // col-described-overrides.ts), kept out of every other node so two groups don't
+  // both count them. matchesFilter() applies the same exclusion to every row.
   conds.push(`${sciName} NOT IN (${sqlStrList(COL_EXCLUDE_ALL_NODES)})`);
   const normalClause = conds.join(" AND ");
   // extraSpeciesNames: mirrors matchesFilter's OR escape hatch (taxonomy-utils.ts) —

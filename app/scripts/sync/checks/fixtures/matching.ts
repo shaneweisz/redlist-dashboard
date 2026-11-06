@@ -325,9 +325,10 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Canis familiaris",
-    why: "Domestic forms have a wild sibling counted separately.",
-    source: "col-described-overrides.ts COL_DOMESTIC_EXCLUDE_NAMES",
-    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false } },
+    why: "Domestic forms have a wild sibling counted separately; goat, sheep, yak, dromedary and guinea pig were once counted as Not Evaluated by one list and left out by another.",
+    source: "taxon-groups.ts NE_EXCLUDED; build-read-models.ts described",
+    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false,
+      "Capra hircus": false, "Ovis aries": false, "Bos grunniens": false, "Camelus dromedarius": false, "Cavia porcellus": false } },
   },
   {
     name: "Pycnonotus tricolor",

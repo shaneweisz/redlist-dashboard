@@ -23,17 +23,15 @@ import * as path from "path";
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
 import { getTaxa } from "../../lib/taxa";
-import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../../../src/lib/data/taxonomy-constants";
 import { NODE_INDEX, hasChildren, matchesFilter } from "../../../src/lib/taxonomy-utils";
 import type { TaxonomyNode } from "../../../src/config/taxonomy-tree";
 import type { NodeSummary } from "../../../src/lib/data/species-store";
 import { REALMS } from "../../../src/lib/data/scoped-taxa-summary-duckdb";
 import {
   COL_SPECIES_NAME_OVERRIDES,
-  COL_DOMESTIC_EXCLUDE_NAMES,
 } from "../../../src/config/col-described-overrides";
 import { isOutdated } from "../../../src/lib/outdated";
-import { filterToSql, sqlStrList, canonicalClassColumnSql, canonicalOrderColumnSql, type NodeFilter } from "../../../src/lib/taxonomy-sql";
+import { filterToSql, canonicalClassColumnSql, canonicalOrderColumnSql, type NodeFilter } from "../../../src/lib/taxonomy-sql";
 import { DYNAMIC_DRILLDOWN_ROOTS, nextDynamicRank } from "../../../src/lib/dynamic-taxon";
 import {
   computeBreakdownEntry,
@@ -46,10 +44,6 @@ import { syncPath } from "../../../src/lib/data/sync-layout";
 import { requireFiles } from "../paths";
 import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-records";
 import { openDuckDB } from "../sql";
-
-// CoL species kept out of the universe (like the domesticated-GBIF exclusion). Homo sapiens
-// — IUCN omits humans from its Red List export. Keep in sync with species-duckdb.ts.
-const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
 
 export interface TaxonSummaryRow {
   table1a_taxon_group: string;
@@ -73,56 +67,17 @@ function median(values: number[]): number | null {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// A species CoL flags extinct still counts toward "described" if IUCN's OWN linked
-// assessment agrees it's extinct (category EX/EW) — matching IUCN's Red List
-// Guidelines (taxa extinct before 1500 CE are out of scope entirely; CoL gives us no
-// extinction date, so "IUCN has confirmed EX/EW" is the closest available signal).
-// Deliberately NOT "any IUCN assessment exists for this col_id": species_link matches
-// by name/synonym, not taxonomic concept, so a CoL-extinct species can link to a
-// STALE assessment of an unrelated or since-split taxon with a non-EX category (e.g.
-// several CoL-extinct-flagged names matched to Least-Concern Columba species during
-// verification) — requiring the category itself be EX/EW is what makes this safe.
-// Species newly included this way are, by construction, always already-assessed
-// (that's the join condition), so they can never also appear in col_ne — expanding
-// this set only ever grows col_described, it never mislabels something "Not
-// Evaluated" that's actually a long-extinct, never-assessed fossil.
-async function createExEwAssessedTable(conn: DuckDBConnection, link: string, assessed: string, tableName: string): Promise<void> {
-  await conn.run(`
-    CREATE OR REPLACE TEMP TABLE ${tableName} AS
-      SELECT DISTINCT l.col_id
-      FROM read_parquet('${link}') l
-      JOIN read_parquet('${assessed}') a ON a.id = l.id
-      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
-}
-
-// "Extant, or CoL-extinct but IUCN-confirmed EX/EW" — see createExEwAssessedTable.
-function extantUniverseSql(exEwTable: string): string {
-  return `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ${exEwTable}))`;
-}
-
-// Per-taxon_group CoL counts: col_described = the extant accepted universe;
-// col_ne = that minus the col_ids IUCN has assessed. species/ is partitioned by
-// taxon_group, so this is a single grouped scan.
+// Per-taxon_group CoL counts: col_described = the described species (species/'s
+// `described`, defined once in build-read-models); col_ne = those IUCN hasn't
+// assessed. species/ is partitioned by taxon_group, so this is one grouped scan.
 async function colCountsByGroup(conn: DuckDBConnection, dataDir: string): Promise<Map<string, { col_described: number; col_ne: number }>> {
   const out = new Map<string, { col_described: number; col_ne: number }>();
   const link = path.join(dataDir, syncPath("species_link.parquet"));
-  const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
-  await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
-  const universe = extantUniverseSql("ex_ew_assessed");
-  // Same domestic-form exclusion every SSC group's own CoL count already applies (see
-  // filterToSql/COL_DOMESTIC_EXCLUDE_NAMES below) — without it, this per-taxon_group
-  // total (used for the top-level "Mammals" row etc.) counts a domestic form alongside
-  // its wild sibling species, diverging from the sum of that taxon's SSC group rows.
-  // Deliberately COL_DOMESTIC_EXCLUDE_NAMES here, not the wider COL_EXCLUDE_ALL_NODES —
-  // the extra bison-name overrides in that list exist only to stop sibling SSC nodes
-  // (Bison SG vs. Asian Wild Cattle SG) double-counting each other, which doesn't apply
-  // to this flat, single-group scan; excluding them here would just undercount bison.
-  const notDomestic = `coalesce(lower(scientific_name), '') NOT IN (${sqlStrList(COL_DOMESTIC_EXCLUDE_NAMES)})`;
   const rows = await (await conn.run(`
     SELECT taxon_group,
-           count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${notDomestic}) AS col_described,
-           count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${notDomestic} AND col_id NOT IN (
+           count(*) FILTER (described) AS col_described,
+           count(*) FILTER (described AND col_id NOT IN (
              SELECT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL
            )) AS col_ne
     FROM read_parquet('${speciesGlob}', hive_partitioning=true)
@@ -161,8 +116,6 @@ async function attachColCounts(conn: DuckDBConnection, summaries: Record<string,
   await conn.run(
     `CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
   );
-  await createExEwAssessedTable(conn, link, assessedPath, "ex_ew_assessed");
-  const universe = extantUniverseSql("ex_ew_assessed");
   await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
   await conn.run(SYNONYM_ASSESSED_SQL(taxaPath, assessedPath, "assessed_cids"));
   await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
@@ -178,8 +131,7 @@ async function attachColCounts(conn: DuckDBConnection, summaries: Record<string,
   console.log(`  CoL match helpers: ${splitCandidatesOut}, ${synonymAssessedOut}, ${colToAssessedOut}`);
   const breakdownCtx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
-    universeSql: universe, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa: true, taxaPath,
+    assessedCidsTable: "assessed_cids", hasTaxa: true, taxaPath,
   };
   let n = 0;
   let breakdownQueries = 0;
@@ -188,8 +140,8 @@ async function attachColCounts(conn: DuckDBConnection, summaries: Record<string,
       const node = NODE_INDEX.get(child.id);
       if (!node) continue;
       const rows = await (await conn.run(`
-        SELECT count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}) AS col_described,
-               count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND col_id NOT IN (SELECT col_id FROM assessed_cids)) AS col_ne
+        SELECT count(*) FILTER (described) AS col_described,
+               count(*) FILTER (described AND col_id NOT IN (SELECT col_id FROM assessed_cids)) AS col_ne
         FROM read_parquet('${speciesGlob}', hive_partitioning=true)
         WHERE ${filterToSql(node.filter, node.id)}`)).getRowObjects();
       child.colDescribed = Number(rows[0].col_described);
@@ -426,11 +378,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const redlistByGroup = groups.redlist;
   const gbifByGroup = groups.gbif;
 
-  // Must match EXCLUDED_DOMESTICATED_GBIF_KEYS in species-store.ts
-  // Was a hand-copied duplicate of the same list, carrying a comment asking that
-  // the two be kept in step; imported now so they cannot drift.
-  const excludedDomesticatedGbifKeys = EXCLUDED_DOMESTICATED_GBIF_KEYS;
-
   /** An NE species counts in each mode it has a record in. */
   const countNe = (t: Record<GbifRecordMode, number>, g: GbifRow) => {
     if (g.counts.georeferenced > 0) t.georeferenced++;
@@ -458,7 +405,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       if (gbifMap) {
         for (const [key, gbifRow] of gbifMap) {
           if (linkedGbifKeys.has(key)) continue;
-          if (excludedDomesticatedGbifKeys.has(key)) continue;
           if (!matchesFilter(gbifRow, filter)) continue;
           countNe(gbifNeSpecies, gbifRow);
         }
@@ -515,7 +461,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
           const gbifMap = gbifByGroup.get(group);
           if (gbifMap) {
             for (const [key, gbifRow] of gbifMap) {
-              if (!linkedGbifKeys.has(key) && !excludedDomesticatedGbifKeys.has(key) && matchesFilter(gbifRow, child.filter)) {
+              if (!linkedGbifKeys.has(key) && matchesFilter(gbifRow, child.filter)) {
                 claimedGbifKeys.add(key);
               }
             }
@@ -545,7 +491,6 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
         if (gbifMap) {
           for (const [key, gbifRow] of gbifMap) {
             if (linkedGbifKeys.has(key)) continue;
-            if (excludedDomesticatedGbifKeys.has(key)) continue;
             if (!matchesFilter(gbifRow, child.filter)) continue;
             if (claimedGbifKeys.has(key)) continue;
             countNe(gbifNeSpecies, gbifRow);

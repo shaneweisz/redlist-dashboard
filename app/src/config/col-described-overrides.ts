@@ -10,48 +10,21 @@
  * automatically shows up in the tooltip note too, instead of two lists silently drifting.
  */
 
-// Domestic/feral forms that would otherwise inflate a CoL-derived "described species"
-// count for the SSC group whose genus/family they fall under — e.g. Canid SG (family
-// Canidae) would count the domestic dog as one of its described species. Each name here
-// has a wild-form sibling species confirmed present separately in the CoL backbone
-// (verified directly against data/species/), so excluding the domestic form doesn't
-// lose real wild-species coverage:
-//   Bos taurus (domestic cattle) — sibling: Bos primigenius (aurochs)
-//   Bos frontalis (gayal/mithun, domesticated from gaur) — sibling: Bos gaurus
-//   Bubalus bubalis (domestic water buffalo) — sibling: Bubalus arnee (wild water buffalo)
-//   Canis familiaris (domestic dog) — sibling: Canis lupus
-//   Equus caballus (domestic horse) — sibling: Equus ferus
-//   Equus asinus (domestic donkey) — sibling: Equus africanus
-//   Felis catus (domestic cat) — sibling: Felis lybica
-//   Lama glama (domestic llama) — sibling: Lama guanicoe (guanaco)
-//   Sus domesticus (domestic pig) — sibling: Sus scrofa (wild boar)
-//   Vicugna pacos (domestic alpaca) — sibling: Vicugna vicugna (wild vicuña)
-// Bubalus bubalis, Lama glama, and Sus domesticus were added to this list once the
-// 2026-06-19 CoL XR release (COL26.6 XR) split each from its wild sibling as its own
-// accepted species — a prior release lumped them together (or, for Lama glama, was
-// missing the guanaco entirely), so excluding them wasn't possible/safe before then.
-// If a future release re-lumps a pair (or splits another one, e.g. Bos frontalis),
-// re-verify against data/species/ rather than assuming this list stays accurate.
-export const COL_DOMESTIC_EXCLUDE_NAMES = [
-  "bos taurus", "bos frontalis", "bubalus bubalis", "canis familiaris",
-  "equus caballus", "equus asinus", "felis catus", "lama glama",
-  "sus domesticus", "vicugna pacos",
-];
+// Domestic forms and humans aren't here: they are left out of the described
+// species once, in the sync (scripts/sync/core/taxon-groups.ts NE_EXCLUDED, which
+// sets species/'s `described`), so every count and list agrees.
 
 // CoL lumps genus Bison entirely into Bos (no "Bison" genus exists in this release —
 // verified directly), so the Bison SG filter (genera: ["bison"]) matches zero CoL rows.
 // Override its CoL computation to match by species name instead of genus. The same two
-// names are added to the domestic-exclude list's effect for every OTHER node (via
-// COL_EXCLUDE_ALL_NODES) so Afro-Asian Wild Cattle SG — whose own genus filter
-// (bos/bubalus/pseudoryx) would otherwise also match them — doesn't double-count.
+// names are kept out of every OTHER node (COL_EXCLUDE_ALL_NODES) so Afro-Asian Wild
+// Cattle SG, whose own genus filter (bos/bubalus/pseudoryx) would otherwise also
+// match them, doesn't double-count.
 export const COL_SPECIES_NAME_OVERRIDES: Record<string, string[]> = {
   "ssc-bison": ["bos bison", "bos bonasus"],
 };
 
-export const COL_EXCLUDE_ALL_NODES = [
-  ...COL_DOMESTIC_EXCLUDE_NAMES,
-  ...COL_SPECIES_NAME_OVERRIDES["ssc-bison"],
-];
+export const COL_EXCLUDE_ALL_NODES = [...COL_SPECIES_NAME_OVERRIDES["ssc-bison"]];
 
 // Short, human-readable explanations for the "# Described Species" hover tooltip —
 // only needed for nodes where the CoL-derived count involves one of the overrides

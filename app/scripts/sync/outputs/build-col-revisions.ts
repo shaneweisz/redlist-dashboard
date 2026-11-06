@@ -46,9 +46,6 @@ import { syncPath } from "../../../src/lib/data/sync-layout";
 import { requireFiles } from "../paths";
 import { openDuckDB } from "../sql";
 
-// Keep in sync with build-taxa-summary.ts / species-duckdb.ts.
-const EXCLUDED_COL_IDS_SQL = `('6MB3T')`; // Homo sapiens
-
 export interface ColRevisionsFile {
   /** Per-signal counts, so the dashboard can size its chart without walking the
    *  map. These do NOT sum to `total`: a species carrying both a no-match reason
@@ -88,24 +85,13 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   await conn.run(
     `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
   );
-  // Same "extant, or CoL-extinct but IUCN-confirmed EX/EW" universe every other
-  // CoL count uses — see build-taxa-summary.ts's createExEwAssessedTable.
-  await conn.run(`
-    CREATE TEMP TABLE ex_ew_assessed AS
-      SELECT DISTINCT l.col_id
-      FROM read_parquet('${link}') l
-      JOIN read_parquet('${assessedPath}') a ON a.id = l.id
-      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
-  const universeSql = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_assessed))`;
-
   // The infraspecific/provisional reasons need these.
   await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
   await conn.run(COL_TO_ASSESSED_SQL(link, assessedPath));
 
   const ctx: BreakdownQueryContext = {
     conn, speciesGlob, assessedPath, linkPath: link,
-    universeSql, assessedCidsTable: "assessed_cids",
-    excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa: true, taxaPath,
+    assessedCidsTable: "assessed_cids", hasTaxa: true, taxaPath,
   };
 
   const started = Date.now();
@@ -135,7 +121,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 
   // Second signal: the Not Evaluated species CoL has likely split OUT of an
   // assessed one — split_candidates read the other way round. Scoped to exactly
-  // the NE universe the SSC view counts (in_base, extant-or-EX/EW, not already
+  // the NE universe the SSC view counts (described, not already
   // assessed, not excluded), so a name here is one the dashboard's Not Evaluated
   // list actually shows. Ordered by name for a file that's stable across re-runs.
   //
@@ -166,7 +152,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const splitRows = await (await conn.run(`
     WITH ne AS (
       SELECT col_id, scientific_name FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-      WHERE in_base AND ${universeSql} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+      WHERE described
         AND col_id NOT IN (SELECT col_id FROM assessed_cids)
     ),
     parent_col AS (
@@ -259,7 +245,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
              any_value(p.col_id) AS shared_col_id,
              any_value(acc.scientific_name) AS accepted_name,
              list(struct_pack(name := p.other_name, col_id := p.other_syn_col_id,
-                              category := p.other_category) ORDER BY p.other_name) AS others
+                              category := p.other_category) ORDER BY p.other_name, p.other_syn_col_id NULLS LAST) AS others
       FROM pairs p
       LEFT JOIN read_parquet('${speciesGlob}', hive_partitioning=true) acc ON acc.col_id = p.col_id
       GROUP BY p.id ORDER BY p.id`)).getRowObjects();

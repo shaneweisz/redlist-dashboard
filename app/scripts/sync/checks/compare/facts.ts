@@ -134,25 +134,26 @@ export async function loadFacts(conn: DuckDBConnection, schema: string, dir: str
     FROM read_parquet(${f("assessed.parquet")}) a
     LEFT JOIN (SELECT sis_taxon_id, col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
       ON l.sis_taxon_id = a.id`);
-  // The NE list as the app builds it: the CoL universe minus assessed col_ids,
-  // fossils (unless IUCN says EX/EW) and excluded names, with ne.parquet's counts.
+  // The NE list as the app builds it: the described species no assessed species
+  // is linked to, with ne.parquet's counts. A sync from before species/ carried
+  // `described` (November 2026) reads as the app then built it, so the comparison
+  // shows what the column changed; drop this once production's sync has it.
+  const hasDescribed = (await conn.runAndReadAll(`SELECT 1 FROM parquet_schema(${q(path.join(inSync(dir, "species"), "**", "*.parquet"))})
+    WHERE name = 'described' LIMIT 1`)).getRowObjects().length > 0;
+  const described = hasDescribed ? "u.described" : `u.in_base AND u.col_id <> '6MB3T' AND (u.extinct IS NOT TRUE OR u.col_id IN (
+      SELECT DISTINCT l.col_id FROM read_parquet(${f("species_link.parquet")}) l JOIN read_parquet(${f("assessed.parquet")}) a ON a.id = l.id
+      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')))
+    AND lower(u.scientific_name) NOT IN ('bos taurus', 'bos frontalis', 'bubalus bubalis', 'canis familiaris', 'equus caballus',
+      'equus asinus', 'felis catus', 'lama glama', 'sus domesticus', 'vicugna pacos')`;
   await conn.run(`CREATE TABLE ${schema}.ne AS
     WITH assessed_cols AS (
-      SELECT DISTINCT col_id FROM read_parquet(${f("species_link.parquet")}) WHERE src = 'redlist' AND col_id IS NOT NULL),
-    ex_ew AS (
-      SELECT DISTINCT l.col_id FROM read_parquet(${f("species_link.parquet")}) l
-      JOIN read_parquet(${f("assessed.parquet")}) a ON a.id = l.id
-      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW'))
+      SELECT DISTINCT col_id FROM read_parquet(${f("species_link.parquet")}) WHERE src = 'redlist' AND col_id IS NOT NULL)
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
            g.gbif_all_records_countries, g.countries, g.common_name
     FROM read_parquet(${q(path.join(inSync(dir, "species"), "**", "*.parquet"))}, hive_partitioning=true) u
-    JOIN read_parquet(${f("taxa.parquet")}) t ON t.col_id = u.col_id
     LEFT JOIN read_parquet(${f("ne.parquet")}) g ON g.col_id = u.col_id
-    WHERE u.in_base
-      AND (u.extinct IS NOT TRUE OR u.col_id IN (SELECT col_id FROM ex_ew))
-      AND u.col_id NOT IN (SELECT col_id FROM assessed_cols)
-      AND t.ne_excluded IS NULL`);
+    WHERE ${described} AND u.col_id NOT IN (SELECT col_id FROM assessed_cols)`);
   await loadSummaryFacts(conn, schema, dir);
 }
 

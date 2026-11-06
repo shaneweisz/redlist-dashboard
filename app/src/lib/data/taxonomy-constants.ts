@@ -1,36 +1,6 @@
 /**
- * Shared constants used by species-store.ts (runtime) and build-read-models.ts
- * (build time).
+ * Shared taxonomy constants.
  */
-
-/**
- * GBIF taxon keys for domesticated species excluded from new assessments.
- *
- * Catalogue of Life keys, each resolved through GBIF rather than a local copy of
- * the checklist (see src/lib/gbif.ts).
- *
- * The domestic pigeon is deliberately absent. IUCN's "Columba domestica" is a
- * synonym of Columba livia in CoL — the wild Rock Dove, which is itself an
- * assessed species — so there is no key that excludes the domestic form without
- * also excluding the wild one. Excluding it would remove a real assessed species
- * from the dashboard, which is worse than leaving the domestic form in.
- */
-export const EXCLUDED_DOMESTICATED_GBIF_KEYS = new Set([
-  "MLQ5",  // Bos taurus (Cow)
-  "3DXV3", // Felis catus (Cat)
-  "4B9VF", // Ovis aries (Domestic Sheep)
-  "QS68",  // Capra hircus (Domestic Goat)
-  "7TKN2", // Equus caballus (Horse)
-  "NKLN",  // Bubalus bubalis (Water Buffalo)
-  "7TKMV", // Equus asinus (Donkey)
-  "Q9XD",  // Camelus dromedarius (Arabian Camel)
-  "Q9XC",  // Camelus bactrianus (Bactrian Camel)
-  "3RYF2", // Lama glama (Llama)
-  "5BD72", // Vicugna pacos (Alpaca)
-  "MLPW",  // Bos grunniens (Yak)
-  "RY7S",  // Cavia porcellus (Guinea Pig)
-  "6MB3T", // Homo sapiens (Human)
-]);
 
 /**
  * Maps taxon group names (IUCN Table 1a) to display taxon IDs.

@@ -23,7 +23,7 @@ import * as path from "path";
 import { DATA_DIR } from "../../lib/utils";
 import { requireFiles } from "../paths";
 import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "../../../src/config/taxonomy-tree";
-import { COL_DOMESTIC_EXCLUDE_NAMES, COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
+import { COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { syncPath } from "../../../src/lib/data/sync-layout";
 import { openDuckDB } from "../sql";
 
@@ -115,7 +115,6 @@ function collectNames(): Map<string, Rank> {
     for (const c of node.children ?? []) walk(c);
   };
   walk(TAXONOMY_TREE);
-  add("species", COL_DOMESTIC_EXCLUDE_NAMES);
   for (const arr of Object.values(COL_SPECIES_NAME_OVERRIDES)) add("species", arr);
   return names;
 }

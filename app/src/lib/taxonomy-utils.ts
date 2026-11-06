@@ -404,7 +404,7 @@ export function matchesFilter(
 ): boolean {
   const sciNameLower = (row.scientific_name ?? "").trim().toLowerCase();
 
-  // CoL-only universe exclusion applies unconditionally, even to extraSpeciesNames
+  // Names another node's CoL override claims (Bison), even for extraSpeciesNames
   // below — checked first so nothing can bypass it.
   if (sciNameLower && COL_EXCLUDE_ALL_NODES.includes(sciNameLower)) return false;
 
@@ -464,8 +464,7 @@ export function matchesFilter(
     if (filter.excludeSpeciesNames && filter.excludeSpeciesNames.length > 0 && name && filter.excludeSpeciesNames.includes(name)) return false;
   }
 
-  // (CoL-only universe exclusions — domestic/feral forms, e.g. Felis catus, + names
-  // reassigned to another node's species-name override, e.g. Bison — already
+  // (Names reassigned to another node's species-name override, e.g. Bison, are
   // checked at the top of this function, before the extraSpeciesNames bypass.)
 
   return true;

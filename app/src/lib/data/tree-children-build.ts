@@ -30,7 +30,7 @@ import { NODE_INDEX } from "@/lib/taxonomy-utils";
 import { getConn, parquetUri, ensureNeHelpers } from "./species-duckdb";
 import { outdatedSql } from "./scoped-taxa-summary-duckdb";
 import { ensureVernacularNamesLoaded } from "./vernacular-names";
-import { EXCLUDED_COL_IDS_SQL, RANK_COLUMN_SQL, isEmptyLiveBucket } from "./live-taxa-children";
+import { RANK_COLUMN_SQL, isEmptyLiveBucket } from "./live-taxa-children";
 import type { NodeSummary } from "./species-store";
 import { filterToSql, expandClasses, expandOrders, GENUS_SQL } from "@/lib/taxonomy-sql";
 import { outdatedCutoffDate } from "@/lib/outdated";
@@ -130,8 +130,7 @@ export async function buildRootChildren(rootId: string): Promise<Record<string, 
   await ensureNeHelpers(conn);
   const where = filterToSql(root.filter);
   const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
-  const universe = `(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ne_ex_ew_col_ids))`;
-  const counted = `in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}`;
+  const counted = `described`;
 
   const toRow = (r: Record<string, unknown>, src: "a" | "c"): Row => ({
     cls: String(r.cls), ord: String(r.ord), fam: String(r.fam), gen: String(r.gen),

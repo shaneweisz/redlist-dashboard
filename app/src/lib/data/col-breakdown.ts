@@ -391,11 +391,8 @@ export interface BreakdownQueryContext {
   speciesGlob: string;
   assessedPath: string;
   linkPath: string;
-  /** e.g. "(extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_assessed))" */
-  universeSql: string;
   /** Table of all IUCN-linked col_ids (assessed_cids at build time, ne_assessed_col_ids live). */
   assessedCidsTable: string;
-  excludedColIdsSql: string;
   /** Whether split_candidates/col_to_assessed (backbone-dependent) have been built. */
   hasTaxa: boolean;
   /** Only read when hasTaxa is true. */
@@ -423,7 +420,7 @@ export async function computeNoMatchDetails(
    *  Defaults to speciesWhere. */
   matchWhere: string = speciesWhere,
 ): Promise<NoMatchDetail[]> {
-  const { conn, speciesGlob, assessedPath, linkPath, universeSql: universe, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa } = ctx;
+  const { conn, speciesGlob, assessedPath, linkPath, hasTaxa } = ctx;
   // The synonym-rename claim needs both the backbone AND its checklist columns.
   const hasSynClaim = hasTaxa;
   // The specific assessed species (sis_taxon_id) behind that gap, plus enough
@@ -447,7 +444,7 @@ export async function computeNoMatchDetails(
       -- Calamariinae) has a perfectly good 1:1 match when both families are in
       -- the same group. Only a counterpart outside the group is a mismatch.
       SELECT col_id FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-      WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND ${matchWhere}
+      WHERE described AND ${matchWhere}
     ),
     matched_assessed AS (
       -- family/order come along so classified_elsewhere can say WHICH rank CoL
@@ -595,11 +592,11 @@ export async function computeBreakdownEntry(
    *  computeNoMatchDetails' matchWhere. */
   nodeFilter: NodeFilter = narrowed,
 ): Promise<BreakdownEntry> {
-  const { conn, speciesGlob, assessedPath, universeSql: universe, assessedCidsTable, excludedColIdsSql: EXCLUDED_COL_IDS_SQL, hasTaxa } = ctx;
+  const { conn, speciesGlob, assessedPath, assessedCidsTable, hasTaxa } = ctx;
 
   const bRows = await (await conn.run(`
-    SELECT count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}) AS n,
-           count(*) FILTER (in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL} AND col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})) AS ne
+    SELECT count(*) FILTER (described) AS n,
+           count(*) FILTER (described AND col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})) AS ne
     FROM read_parquet('${speciesGlob}', hive_partitioning=true)
     WHERE ${filterToSql(narrowed, nodeId)}`)).getRowObjects();
   // IUCN's own count of assessed species matching this one name — via filterToSql
@@ -614,15 +611,15 @@ export async function computeBreakdownEntry(
   const noMatchDetails = await computeNoMatchDetails(ctx, filterToSql(narrowed, nodeId), filterToSql(narrowed), filterToSql(nodeFilter, nodeId));
   // "Split from" candidates for this name's NE species — a lookup against the
   // once-per-caller-lifetime split_candidates table, not a fresh taxa.parquet
-  // scan. Deliberately scoped to the SAME NE universe as bRows.ne (in_base,
-  // extant/EX-EW, narrowed filter), so an entry here is guaranteed to be one of
+  // scan. Deliberately scoped to the SAME NE universe as bRows.ne (described,
+  // narrowed filter), so an entry here is guaranteed to be one of
   // this name's neCount species.
   const splitDetails: SplitDetail[] = hasTaxa
     ? (await (await conn.run(`
         SELECT ns.col_id AS ne_col_id, sc.parent_id, sc.parent_name, sc.parent_category
         FROM (
           SELECT col_id FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-          WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+          WHERE described
             AND ${filterToSql(narrowed, nodeId)} AND col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
         ) ns
         JOIN split_candidates sc ON sc.ne_col_id = ns.col_id AND sc.rn = 1
@@ -642,7 +639,7 @@ export async function computeBreakdownEntry(
         SELECT ns.col_id AS ne_col_id, sa.assessed_id, sa.assessed_name, sa.assessed_category
         FROM (
           SELECT col_id FROM read_parquet('${speciesGlob}', hive_partitioning=true)
-          WHERE in_base AND ${universe} AND col_id NOT IN ${EXCLUDED_COL_IDS_SQL}
+          WHERE described
             AND ${filterToSql(narrowed, nodeId)} AND col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
         ) ns
         JOIN synonym_assessed sa ON sa.ne_col_id = ns.col_id
