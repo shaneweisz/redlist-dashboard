@@ -6096,7 +6096,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               {speciesLoading && totalFiltered === 0 && !singleSpeciesPreview ? (
                 <Spinner className="h-4 w-4" />
               ) : (
-                <>{totalFiltered.toLocaleString()} species</>
+                // Says which list this is, since the two views share the table.
+                <>{totalFiltered.toLocaleString()} species {isNewAssessments ? "not evaluated" : "assessed"}</>
               )}
             </span>
             {/* Assessed/Not Evaluated — a full view-mode switch (a different
