@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import TaxaSummary from "./TaxaSummary";
 import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams, taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
+import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode } from "@/lib/gbif-records";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
@@ -120,6 +121,22 @@ function Spinner({ className = "" }: { className?: string }) {
 
 // Use RedListSpecies from the hook; alias for convenience
 type Species = RedListSpecies;
+
+/**
+ * A species as the view shows it in a GBIF record mode: the count and the
+ * since-assessment count for that mode, and for a Not Evaluated species the
+ * countries its records come from (its countries are GBIF's, unlike an assessed
+ * species' Red List range). The cached rows are left as they arrived, so
+ * switching mode re-derives from them.
+ */
+function inGbifMode(s: Species, mode: GbifRecordMode): Species {
+  return {
+    ...s,
+    gbif_records: gbifRecordCount(s, mode),
+    gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
+    countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
+  };
+}
 
 /** IUCN threat classification hierarchy */
 const THREAT_CATEGORIES: { code: string; label: string; children: { code: string; label: string }[] }[] = [
@@ -361,13 +378,13 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     case "category":
       return (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99);
     case "totalGbif":
-      return (a.gbif_occurrence_count ?? -1) - (b.gbif_occurrence_count ?? -1);
+      return (a.gbif_records ?? -1) - (b.gbif_records ?? -1);
     case "newGbif":
-      return (a.gbif_observations_after_assessment_year ?? -1) - (b.gbif_observations_after_assessment_year ?? -1);
+      return (a.gbif_records_since_assessment ?? -1) - (b.gbif_records_since_assessment ?? -1);
     case "pctNewGbif": {
       const pct = (s: Species) =>
-        (s.gbif_occurrence_count && s.gbif_occurrence_count > 0 && s.gbif_observations_after_assessment_year != null)
-          ? s.gbif_observations_after_assessment_year / s.gbif_occurrence_count : -1;
+        (s.gbif_records && s.gbif_records > 0 && s.gbif_records_since_assessment != null)
+          ? s.gbif_records_since_assessment / s.gbif_records : -1;
       return pct(a) - pct(b);
     }
     case "describedYear":
@@ -404,8 +421,6 @@ interface SpeciesDetails {
   criteria: string | null;
   commonName: string | null;
   gbifUrl: string | null;
-  gbifOccurrences: number | null;
-  gbifOccurrencesSinceAssessment: number | null;
   gbifMatchStatus: GbifMatchStatus | null;
   // undefined = still loading (show spinner), null = fetched, no image
   inatDefaultImage: InatDefaultImage | null | undefined;
@@ -442,8 +457,8 @@ function previewFromSearchResult(r: SearchResult): RedListSpecies | null {
     taxon_id: r.taxon_id,
     described_year: null,
     gbif_species_key: r.gbif_species_key,
-    gbif_occurrence_count: r.gbif_occurrence_count,
-    gbif_observations_after_assessment_year: null,
+    gbif_georeferenced_records_count: r.gbif_georeferenced_records_count,
+    gbif_georeferenced_records_since_assessment: null,
     latest_assessors: null,
     latest_reviewers: null,
     latest_facilitators: null,
@@ -992,7 +1007,33 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
 }
 
 
-function GbifInfoTooltip() {
+/**
+ * Georeferenced / All records: which GBIF records every count on the page
+ * counts. Kept in the URL (records=all), so a shared link shows the same numbers.
+ */
+function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChange: (mode: GbifRecordMode) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Which GBIF records to count"
+      className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-700 overflow-hidden text-[11px]">
+      {GBIF_RECORD_MODES.map((m) => (
+        <button
+          key={m}
+          type="button"
+          role="radio"
+          aria-checked={mode === m}
+          onClick={() => onChange(m)}
+          className={`px-1.5 py-0.5 transition-colors ${mode === m
+            ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
+            : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+        >
+          {GBIF_RECORD_MODE_LABEL[m]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function GbifInfoTooltip({ mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecordMode }) {
   const [isHovered, setIsHovered] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -1026,8 +1067,18 @@ function GbifInfoTooltip() {
             transform: 'translateX(-50%) translateY(-100%)',
           }}
         >
-          <div className="font-medium text-[10px] mb-0.5">Georeferenced GBIF records only:</div>
-          <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
+          {mode === "all" ? (
+            <>
+              <div className="font-medium text-[10px] mb-0.5">All GBIF records:</div>
+              <div className="text-zinc-400">With or without coordinates, including records GBIF flags with a geospatial issue.</div>
+            </>
+          ) : (
+            <>
+              <div className="font-medium text-[10px] mb-0.5">Georeferenced GBIF records only:</div>
+              <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
+            </>
+          )}
+          <div className="text-zinc-400 mt-1">Since assessment: records dated after the assessment date.</div>
           <div className="font-medium text-zinc-100 mt-1">Included:</div>
           <ul className="text-zinc-300 list-disc list-inside">
             <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
@@ -1120,6 +1171,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedDescribedYears, setSelectedDescribedYears,
     selectedCountries, setSelectedCountries,
     selectedObsRanges, setSelectedObsRanges,
+    gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
     selectedPopulationTrends, setSelectedPopulationTrends,
@@ -1693,7 +1745,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
-  const species = assessedSpecies;
+  // Every memo below reads the GBIF counts of the record mode in force.
+  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
@@ -1761,7 +1814,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const { minObs, maxObs, minAssessmentYear, maxAssessmentYear, minDescribedYear, maxDescribedYear } = exactFilters;
     if (minObs != null || maxObs != null) {
       filtered = filtered.filter(s => {
-        const obs = s.gbif_occurrence_count ?? 0;
+        const obs = s.gbif_records ?? 0;
         return (minObs == null || obs >= minObs) && (maxObs == null || obs <= maxObs);
       });
     }
@@ -2189,8 +2242,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
       return taxaFilteredSpeciesNoPreview;
     }
-    return [singleSpeciesPreview, ...taxaFilteredSpeciesNoPreview];
-  }, [taxaFilteredSpeciesNoPreview, singleSpeciesPreview]);
+    return [inGbifMode(singleSpeciesPreview, gbifRecordMode), ...taxaFilteredSpeciesNoPreview];
+  }, [taxaFilteredSpeciesNoPreview, singleSpeciesPreview, gbifRecordMode]);
 
   const [mounted, setMounted] = useState(false);
 
@@ -2306,7 +2359,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
       if (selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return;
       if (selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return;
-      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return;
+      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return;
       if (selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return;
       if (selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return;
       if (selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return;
@@ -2360,7 +2413,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // assessment date to compare against.
     if (!skip.has("years") && s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return false;
     if (!skip.has("assessmentYears") && s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return false;
-    if (!skip.has("obs") && selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return false;
+    if (!skip.has("obs") && selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return false;
     if (!skip.has("assessmentCounts") && selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return false;
     if (!skip.has("systems") && selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return false;
     if (!skip.has("trends") && selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return false;
@@ -2486,7 +2539,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const byBucket: Record<string, number> = Object.fromEntries(ranges.map((r, i) => [r.range, i]));
     taxaFilteredSpecies.forEach(s => {
       if (!matchesFilters(s, SKIP_OBS)) return;
-      ranges[byBucket[gbifObsBucket(s.gbif_occurrence_count)]].count++;
+      ranges[byBucket[gbifObsBucket(s.gbif_records)]].count++;
     });
     const total = ranges.reduce((sum, r) => sum + r.count, 0);
     return ranges.map(r => ({
@@ -2530,7 +2583,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (s.category !== "NE") return;
       if (!matchesSearch(s)) return;
       if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
-      if (!matchesObsRangeFilter(s.gbif_occurrence_count)) return;
+      if (!matchesObsRangeFilter(s.gbif_records)) return;
       counts[describedYearBucket(s.described_year)]++;
     });
     const total = buckets.reduce((sum, b) => sum + counts[b], 0);
@@ -2605,7 +2658,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
       if (s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return;
       if (s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return;
-      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return;
+      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return;
       if (selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return;
       if (selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return;
       if (selectedMovementPatterns.size > 0 && (!s.movement_pattern || !selectedMovementPatterns.has(s.movement_pattern))) return;
@@ -2637,7 +2690,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
       if (s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return;
       if (s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return;
-      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return;
+      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return;
       if (selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return;
       if (selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return;
       if (selectedMovementPatterns.size > 0 && (!s.movement_pattern || !selectedMovementPatterns.has(s.movement_pattern))) return;
@@ -2667,7 +2720,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
       if (s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return;
       if (s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return;
-      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return;
+      if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return;
       if (selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return;
       if (selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return;
       if (selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return;
@@ -2904,7 +2957,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       const matchesYear = s.category === "NE" || (matchesYearRangeFilter(s.assessment_date) && matchesAssessmentYearFilter(s.assessment_date));
       // Described-year applies to NE rows only (the only ones carrying described_year).
       const matchesDescribed = s.category !== "NE" || matchesDescribedYearFilter(s.described_year);
-      const matchesObs = matchesObsRangeFilter(s.gbif_occurrence_count);
+      const matchesObs = matchesObsRangeFilter(s.gbif_records);
       const matchesAssessmentCount = matchesAssessmentCountFilter(s.assessment_count);
       const matchesCountry = selectedCountries.size === 0 || s.countries.some(c => selectedCountries.has(c));
       const matchesSystem = selectedSystems.size === 0 || s.systems?.some(sys => selectedSystems.has(sys));
@@ -2955,7 +3008,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // Implicit tiebreaker: total GBIF desc, then stable row-key order. Kept
       // below the explicit secondary so the old behaviour still applies once
       // the user's own columns have run out of discriminating power.
-      const gbifCmp = (b.gbif_occurrence_count ?? -1) - (a.gbif_occurrence_count ?? -1);
+      const gbifCmp = (b.gbif_records ?? -1) - (a.gbif_records ?? -1);
       if (gbifCmp !== 0) return gbifCmp;
 
       return a.species_key.localeCompare(b.species_key);
@@ -3135,8 +3188,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           criteria: null,
           commonName: s.common_name || null,
           gbifUrl: `https://www.gbif.org/species/${s.gbif_species_key}`,
-          gbifOccurrences: s.gbif_occurrence_count ?? null,
-          gbifOccurrencesSinceAssessment: s.gbif_observations_after_assessment_year ?? null,
           gbifMatchStatus: { matchType: 'EXACT' },
           inatDefaultImage: undefined, // Loading — fetched per-page below
         };
@@ -3145,8 +3196,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           criteria: null,
           commonName: s.common_name || null,
           gbifUrl: null,
-          gbifOccurrences: null,
-          gbifOccurrencesSinceAssessment: null,
           gbifMatchStatus: { matchType: 'NONE' },
           inatDefaultImage: undefined, // Loading
         };
@@ -3556,7 +3605,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     });
   }, []);
 
-  const currentYear = new Date().getFullYear();
   // GBIF relaunched gbif.org on 18 June 2026 with Catalogue of Life Extended
   // Release as its default taxonomy. The gbif_species_key values stored here are
   // keys from the GBIF Backbone, which resolve to nothing under CoL — and GBIF
@@ -3574,11 +3622,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Until then this keeps every link working.
   // Built from the shared module so the links and the queries behind the numbers
   // they sit next to can never name different checklists.
-  const GBIF_FILTERS = gbifOccurrenceParams().toString();
+  const GBIF_FILTERS = gbifOccurrenceParams({}, { mode: gbifRecordMode }).toString();
   // Plants and fungi count preserved specimens and animals do not, so the filter
   // string follows the species: a herbarium-heavy plant linking to the animal
   // filter set lands on a search holding a fraction of the number clicked on.
-  const GBIF_FILTERS_WITH_SPECIMENS = gbifOccurrenceParams({}, { includePreservedSpecimens: true }).toString();
+  const GBIF_FILTERS_WITH_SPECIMENS = gbifOccurrenceParams({}, { includePreservedSpecimens: true, mode: gbifRecordMode }).toString();
   const gbifFiltersFor = (taxonGroup: string | undefined) =>
     taxonGroupCountsPreservedSpecimens(taxonGroup) ? GBIF_FILTERS_WITH_SPECIMENS : GBIF_FILTERS;
   const isNE = (s: Species) => s.category === "NE";
@@ -3767,6 +3815,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // avoids any layout jump when it's swapped in for the real map.
   const countryModeContent = countryLandingStats ? (
     <WorldMap
+      gbifRecordMode={gbifRecordMode}
       selectedCountries={selectedCountries}
       onCountrySelect={handleCountryDrilldown}
       precomputedStats={countryLandingStats}
@@ -3850,6 +3899,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       ) : (
         <WorldMap
+          gbifRecordMode={gbifRecordMode}
           selectedCountries={selectedCountries}
           onCountrySelect={handleCountrySelect}
           precomputedStats={countryStatsForMap}
@@ -4667,6 +4717,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         className={layoutMode === "country" && !countryScope ? "flex-1 min-h-0 flex flex-col" : undefined}
       >
       <TaxaSummary
+        gbifRecordMode={gbifRecordMode}
         onToggleTaxon={handleToggleTaxon}
         selectedTaxa={selectedTaxa}
         selectedSubgroups={selectedSubgroups}
@@ -5018,14 +5069,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifRecordMode} /></span>
+                {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                    {gbifObsBucket(singleSpecies.gbif_occurrence_count)}
+                    {gbifObsBucket(singleSpecies.gbif_records)}
                   </span>
                 ) : gbifObsData.length > 0 ? (
                   <FilterBarChart
@@ -5097,14 +5149,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip /></span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records <GbifInfoTooltip mode={gbifRecordMode} /></span>
+                {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                    {gbifObsBucket(singleSpecies.gbif_occurrence_count)}
+                    {gbifObsBucket(singleSpecies.gbif_records)}
                   </span>
                 ) : (
                   <FilterBarChart
@@ -5229,7 +5282,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     if (selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return;
                     if (s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return;
                     if (s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return;
-                    if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_occurrence_count, selectedObsRanges)) return;
+                    if (selectedObsRanges.size > 0 && !matchesObsRangeFilter(s.gbif_records, selectedObsRanges)) return;
                     if (selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return;
                     if (selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return;
                     if (selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return;
@@ -6046,7 +6099,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={`${SPECIES_TH_LABEL} ${isNewAssessments ? "w-[96px]" : "w-[72px]"}`}>{isNewAssessments ? "GBIF Records" : "Total GBIF Records"}</span>
-                    <GbifInfoTooltip />
+                    <GbifInfoTooltip mode={gbifRecordMode} />
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6303,17 +6356,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     )}
                     {/* Total GBIF */}
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {details?.gbifOccurrences != null && details?.gbifUrl ? (
-                        <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${details.gbifUrl.split('/').pop()}&${gbifFiltersFor(s.taxon_group)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {details.gbifOccurrences.toLocaleString()}
-                        </a>
-                      ) : s.gbif_occurrence_count != null && s.gbif_species_key ? (
+                      {s.gbif_records != null && s.gbif_species_key ? (
                         <a
                           href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
@@ -6321,7 +6364,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {s.gbif_occurrence_count.toLocaleString()}
+                          {s.gbif_records.toLocaleString()}
                         </a>
                       ) : details?.gbifMatchStatus?.matchType === 'HIGHERRANK' || details?.gbifMatchStatus?.matchType === 'NONE' ? (
                         <HoverTooltip
@@ -6339,16 +6382,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       {isNE(s) ? (
                         <span className="text-zinc-400">N/A</span>
                       ) : (() => {
-                        const newObs = details?.gbifOccurrencesSinceAssessment ?? s.gbif_observations_after_assessment_year;
+                        const newObs = s.gbif_records_since_assessment;
                         if (newObs == null) return "—";
                         const key = details?.gbifUrl?.split('/').pop() ?? s.gbif_species_key;
-                        // A species assessed this year has no "since" range to
-                        // link to — year=<next year>,<this year> is a reversed,
-                        // meaningless range — so show the number unlinked.
-                        if (key && assessmentYear && assessmentYear < currentYear) {
+                        // The count starts the day after the assessment date, and
+                        // so does the search it links to. A null count already
+                        // means there is no window (an assessment dated today or later).
+                        const since = sinceAssessmentStart(s.assessment_date);
+                        if (key && since) {
                           return (
                             <a
-                              href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&year=${assessmentYear + 1},${currentYear}&${gbifFiltersFor(s.taxon_group)}`}
+                              href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
@@ -6366,8 +6410,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {!isNewAssessments && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
-                        const total = details?.gbifOccurrences ?? s.gbif_occurrence_count;
-                        const newObs = details?.gbifOccurrencesSinceAssessment ?? s.gbif_observations_after_assessment_year;
+                        const total = s.gbif_records;
+                        const newObs = s.gbif_records_since_assessment;
                         if (total == null || total === 0 || newObs == null) return "—";
                         const pct = (newObs / total) * 100;
                         return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;

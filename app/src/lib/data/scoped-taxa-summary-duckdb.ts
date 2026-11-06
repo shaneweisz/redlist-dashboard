@@ -18,7 +18,7 @@
  * Realm has only three values and so would have been cheap to precompute, but rides
  * the same live path rather than adding a second mechanism for the same job.
  *
- * Deliberately omits GBIF (gbif_species_count, gbif_ne_species_count, ...) and
+ * Deliberately omits GBIF (the gbif totals are zeroes) and
  * Catalogue of Life (col_described, col_ne) fields entirely — neither dataset has a
  * country OR a realm dimension, so there is no valid scoped value to report. (Realm
  * is doubly absent: `systems` is populated only for ASSESSED species — unassessed.parquet
@@ -211,11 +211,10 @@ export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRo
       total_assessed: 0,
       outdated: 0,
       by_category: {},
-      gbif_species_count: 0,
-      gbif_ne_species_count: 0,
-      total_gbif_observations: 0,
-      mean_gbif_obs: 0,
-      median_gbif_obs: null,
+      gbif: {
+        georeferenced: { species_count: 0, ne_species_count: 0, records: 0, median: null },
+        all: { species_count: 0, ne_species_count: 0, records: 0, median: null },
+      },
     });
   }
   for (const r of rows) {
@@ -294,7 +293,7 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
       estimatedDescribed: 0,
       totalAssessed,
       outdated,
-      gbifNeSpeciesCount: 0,
+      gbifNeSpecies: { georeferenced: 0, all: 0 },
       byCategory,
     });
   }

@@ -18,12 +18,12 @@ import type { SearchResult, TaxonSuggestion } from "@/lib/data/species-duckdb";
 // the first, which is the better-ranked one. The name index adds a second way to arrive at
 // the same species (a hit on its scientific name AND its epithet, say), and this collapses
 // that too. Null keys are never collapsed — those species have no shared identity to merge on.
-export function dedupeByRowKey<T extends Pick<SearchResult, "species_key" | "gbif_occurrence_count">>(hits: T[]): T[] {
+export function dedupeByRowKey<T extends Pick<SearchResult, "species_key" | "gbif_georeferenced_records_count">>(hits: T[]): T[] {
   const bestByKey = new Map<string, T>();
   for (const r of hits) {
     if (!r.species_key) continue;
     const prev = bestByKey.get(r.species_key);
-    if (!prev || (r.gbif_occurrence_count ?? -1) > (prev.gbif_occurrence_count ?? -1)) {
+    if (!prev || (r.gbif_georeferenced_records_count ?? -1) > (prev.gbif_georeferenced_records_count ?? -1)) {
       bestByKey.set(r.species_key, r);
     }
   }

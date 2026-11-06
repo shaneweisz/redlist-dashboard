@@ -92,7 +92,8 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
         WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND a.iucn_category IN ('EX', 'EW')`);
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
-        SELECT col_id, gbif_species_key, gbif_occurrence_count, countries, common_name
+        SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
+               countries, gbif_all_records_countries, common_name
         FROM read_parquet('${neUri}')`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
   }
@@ -157,7 +158,8 @@ export interface PreviousAssessment {
 const ASSESSED_SELECT = `
   id, assessment_id, scientific_name, common_name, family, iucn_category AS category,
   assessment_date, year_published, population_trend, countries, class_name, order_name,
-  taxon_group, gbif_species_key, gbif_occurrence_count, gbif_observations_after_assessment_year,
+  taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
+  gbif_all_records_count, gbif_all_records_since_assessment,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -204,8 +206,10 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     // columns with a cited-reference-year fallback — see build-taxa.
     described_year: num(r.described_year),
     gbif_species_key: str(r.gbif_species_key),
-    gbif_occurrence_count: num(r.gbif_occurrence_count),
-    gbif_observations_after_assessment_year: num(r.gbif_observations_after_assessment_year),
+    gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
+    gbif_georeferenced_records_since_assessment: num(r.gbif_georeferenced_records_since_assessment),
+    gbif_all_records_count: num(r.gbif_all_records_count),
+    gbif_all_records_since_assessment: num(r.gbif_all_records_since_assessment),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,
@@ -364,7 +368,8 @@ export async function querySpecies(opts: {
       // universe (woolly mammoth in_base=false; American mastodon CoL-unmatched).
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year,
-               g.gbif_species_key, g.gbif_occurrence_count, g.countries, g.common_name
+               g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
+               g.countries, g.gbif_all_records_countries, g.common_name
         FROM (
           SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
@@ -372,7 +377,7 @@ export async function querySpecies(opts: {
         LEFT JOIN ne_gbif_by_col g ON g.col_id = u.col_id`;
       const univRows = (await conn.runAndReadAll(univSql, where.params)).getRowObjects();
       for (const r of univRows) {
-        // Slim NE row — only the 13 populated fields. The other 16 (assessment-only:
+        // Slim NE row — only the 15 populated fields. The other 16 (assessment-only:
         // assessment_id/date, trend, criteria, threats, systems, assessors, …) are always
         // null/empty/false for NE, so omitting them ~halves the payload + server
         // serialization (beetles ~262k rows: 178MB → ~90MB). The client handles their
@@ -410,7 +415,9 @@ export async function querySpecies(opts: {
           taxon_id: taxonId,
           described_year: num(r.described_year),
           gbif_species_key: str(r.gbif_species_key),
-          gbif_occurrence_count: num(r.gbif_occurrence_count),
+          gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
+          gbif_all_records_count: num(r.gbif_all_records_count),
+          gbif_all_records_countries: splitList(r.gbif_all_records_countries),
         } as unknown as ReturnType<typeof toSpeciesRow>);
       }
     }
@@ -443,7 +450,7 @@ export interface SearchResult {
   // Carried so the single-species preview the dashboard renders from this result (before
   // — or instead of — the taxon's own list arriving) shows the species' real occurrence
   // count rather than a blank cell.
-  gbif_occurrence_count: number | null;
+  gbif_georeferenced_records_count: number | null;
   assessment_id: number | null;
   assessment_date: string | null;
   countries: string[];
@@ -547,7 +554,7 @@ export function nodeIdForSpecies(taxonGroup: string, lineage: Lineage): string |
 const searchProj = (src: string, assessed: boolean) => `
   SELECT CAST(id AS VARCHAR) AS id, ${assessed ? "NULL::VARCHAR" : "col_id"} AS col_id, scientific_name, common_name,
          lower(scientific_name) AS sn_lo, lower(common_name) AS cn_lo,
-         taxon_group, iucn_category AS category, gbif_species_key, gbif_occurrence_count,
+         taxon_group, iucn_category AS category, gbif_species_key, gbif_georeferenced_records_count,
          ${assessed ? "assessment_id, CAST(assessment_date AS VARCHAR) AS assessment_date" : "NULL AS assessment_id, NULL AS assessment_date"},
          countries, class_name, order_name, family, ${assessed} AS assessed
   FROM '${parquetUri(src)}'`;
@@ -615,7 +622,7 @@ export function toSearchResult(r: Record<string, unknown>, colIdOverride: string
     taxon_group: tg,
     category: String(r.category ?? ""),
     gbif_species_key: str(r.gbif_species_key),
-    gbif_occurrence_count: num(r.gbif_occurrence_count),
+    gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
     assessment_id: num(r.assessment_id),
     assessment_date: (r.assessment_date as string) ?? null,
     countries: splitList(r.countries),
@@ -754,7 +761,7 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
       taxon_group: tg,
       category: "NE",
       gbif_species_key: null,
-      gbif_occurrence_count: null,
+      gbif_georeferenced_records_count: null,
       assessment_id: null,
       assessment_date: null,
       countries: [],
@@ -809,7 +816,7 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
         taxon_group: tg,
         category: cat,
         gbif_species_key: null,
-        gbif_occurrence_count: null,
+        gbif_georeferenced_records_count: null,
         assessment_id: null,
         assessment_date: null,
         countries: [],

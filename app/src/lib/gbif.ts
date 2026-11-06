@@ -25,6 +25,7 @@
 
 import DERIVED_TAXON_KEYS from "@/config/gbif-taxon-keys.json";
 import { mapTaxonId } from "@/lib/data/taxonomy-constants";
+import { DEFAULT_GBIF_RECORD_MODE, gbifRecordModeParams, type GbifRecordMode } from "@/lib/gbif-records";
 
 /** Catalogue of Life Extended Release — gbif.org's default taxonomy since June 2026. */
 export const COL_XR_CHECKLIST_KEY = "7ddf754f-d193-4cc9-b351-99906754a03b";
@@ -177,18 +178,19 @@ export function taxonGroupCountsPreservedSpecimens(taxonGroup: string | undefine
  * Base parameters shared by every GBIF occurrence query and outbound link, so a
  * count shown here and the search a user lands on describe the same records.
  *
+ * `mode` is the record mode the count beside it uses (src/lib/gbif-records.ts).
  * `includePreservedSpecimens` follows the taxon: pass it wherever the caller
  * knows which group the query is about, or the link next to a plant's count will
  * land on a search that excludes most of what the count included.
  */
 export function gbifOccurrenceParams(
   extra: Record<string, string> = {},
-  { includePreservedSpecimens = false }: { includePreservedSpecimens?: boolean } = {},
+  { includePreservedSpecimens = false, mode = DEFAULT_GBIF_RECORD_MODE }: { includePreservedSpecimens?: boolean; mode?: GbifRecordMode } = {},
 ): URLSearchParams {
   const params = new URLSearchParams({
     checklistKey: GBIF_CHECKLIST_KEY,
-    hasCoordinate: "true",
-    hasGeospatialIssue: "false",
+    // Georeferenced: coordinates and no geospatial issue. All records: neither.
+    ...gbifRecordModeParams(mode),
     ...extra,
   });
   includedBasisOfRecord(includePreservedSpecimens).forEach((b) =>

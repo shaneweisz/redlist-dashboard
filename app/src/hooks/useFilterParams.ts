@@ -8,6 +8,7 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
+import { GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
 // checked" (nothing excluded) rather than "nothing checked" — see
@@ -115,6 +116,7 @@ export const OWN_PARAM_NAMES = [
   "search", "outdated", "minObs", "maxObs",
   "minAssessmentYear", "maxAssessmentYear", "minDescribedYear", "maxDescribedYear",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
+  GBIF_RECORDS_PARAM,
 ];
 
 /**
@@ -371,6 +373,9 @@ export function parseParams(search: string, suffix: string = "") {
     sortField2: parseSortField(p.get(k("sort2"))),
     sortDirection2: (p.get(k("dir2")) === "asc" ? "asc" : "desc") as "asc" | "desc",
     mapViewMode: (p.get(k("mapview")) === "list" ? "list" : "map") as MapViewMode,
+    // Which GBIF records every count counts (georeferenced, the default, or all).
+    // A measure rather than a filter, so clearing filters leaves it alone.
+    gbifRecordMode: parseGbifRecordMode(p.get(k(GBIF_RECORDS_PARAM))),
     mapSortKey: (
       p.get(k("mapsort")) === "name" ? "name" :
       p.get(k("mapsort")) === "outdated" ? "outdated" :
@@ -461,6 +466,7 @@ export function buildQs(state: {
   sortField2: SortField | null;
   sortDirection2: "asc" | "desc";
   mapViewMode?: MapViewMode;
+  gbifRecordMode?: GbifRecordMode;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
   species: string | null;
@@ -533,6 +539,7 @@ export function buildQs(state: {
     if (state.sortDirection2 !== "desc") p.set(k("dir2"), state.sortDirection2);
   }
   if (state.mapViewMode === "list") p.set(k("mapview"), "list");
+  if (state.gbifRecordMode === "all") p.set(k(GBIF_RECORDS_PARAM), "all");
   if (state.mapSortKey && state.mapSortKey !== "species") p.set(k("mapsort"), state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set(k("mapdir"), "asc");
   const qs = prettifyQs(p.toString());
@@ -1206,6 +1213,17 @@ export function useFilterParams(paramSuffix: string = "") {
     [syncUrl]
   );
 
+  const setGbifRecordMode = useCallback(
+    (mode: GbifRecordMode) => {
+      setState(prev => {
+        const next = { ...prev, gbifRecordMode: mode };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setMapSort = useCallback(
     (key: MapSortKey, direction: "asc" | "desc") => {
       setState(prev => {
@@ -1377,6 +1395,7 @@ export function useFilterParams(paramSuffix: string = "") {
     sortField2: state.sortField2,
     sortDirection2: state.sortDirection2,
     mapViewMode: state.mapViewMode,
+    gbifRecordMode: state.gbifRecordMode,
     mapSortKey: state.mapSortKey,
     mapSortDirection: state.mapSortDirection,
 
@@ -1421,6 +1440,7 @@ export function useFilterParams(paramSuffix: string = "") {
     setSort,
     setSort2,
     setMapViewMode,
+    setGbifRecordMode,
     setMapSort,
     fromPopstateRef,
     clearAllFilters,

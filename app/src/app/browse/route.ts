@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
     contributors: parseList(sp, "contributors"),
     institutions: parseList(sp, "institutions"),
     minObs: intParam("minObs"), maxObs: intParam("maxObs"),
+    records: sp.get("records") === "all" ? "all" : undefined,
     minAssessmentYear: intParam("minAssessmentYear"), maxAssessmentYear: intParam("maxAssessmentYear"),
     minDescribedYear: intParam("minDescribedYear"), maxDescribedYear: intParam("maxDescribedYear"),
   };
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
       { headers: { ...CACHE_1H, ...NOINDEX } },
     );
   }
-  return html(resultsHtml(result));
+  return html(resultsHtml(result, input.records === "all" ? "all" : undefined));
 }
 
 // ─── rendering ─────────────────────────────────────────────────────────────
@@ -144,7 +145,7 @@ function unresolvedBlock(unresolved: string[]): string {
   return `<p class="warn">Couldn't interpret: ${unresolved.map((u) => `<code>${esc(u)}</code>`).join(", ")}. See <a href="/llms.txt">/llms.txt</a> for valid values.</p>`;
 }
 
-function resultsHtml(r: BrowseResult): string {
+function resultsHtml(r: BrowseResult, records?: "all"): string {
   const filterDesc = r.interpreted.length ? esc(r.interpreted.join("; ")) : "no filters";
   const breakdownStr = Object.entries(r.breakdown)
     .sort((x, y) => (CATEGORY_ORDER[x[0]] ?? 99) - (CATEGORY_ORDER[y[0]] ?? 99))
@@ -173,12 +174,13 @@ function resultsHtml(r: BrowseResult): string {
         : `<em>${esc(s.scientific_name)}</em>`;
       const threats = [...new Set(s.threats.map((t) => t.label))].map(esc).join(", ");
       const year = s.assessment_date ? esc(s.assessment_date.slice(0, 4)) : "—";
-      const obs = s.gbif_occurrence_count != null ? s.gbif_occurrence_count.toLocaleString() : "—";
+      const n = records === "all" ? s.gbif_all_records_count : s.gbif_georeferenced_records_count;
+      const obs = n != null ? n.toLocaleString() : "—";
       return `<tr><td>${name}</td><td>${esc(s.common_name ?? "")}</td><td>${esc(s.category_label)}</td><td>${year}</td><td>${obs}</td><td>${threats}</td></tr>`;
     })
     .join("");
   const table = r.species.length
-    ? `<table><thead><tr><th>Scientific name</th><th>Common name</th><th>IUCN category</th><th>Assessed</th><th>GBIF obs.</th><th>Threats</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Scientific name</th><th>Common name</th><th>IUCN category</th><th>Assessed</th><th>${records === "all" ? "GBIF records" : "GBIF georeferenced records"}</th><th>Threats</th></tr></thead><tbody>${rows}</tbody></table>`
     : "";
 
   return `${PAGE_HEAD}<h1>Red List — filtered species</h1>${unresolvedBlock(r.unresolved)}${summary}${table}${PAGE_FOOT}`;

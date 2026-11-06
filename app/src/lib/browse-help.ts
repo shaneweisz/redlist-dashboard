@@ -42,6 +42,7 @@ export function buildVocabulary(): Vocabulary {
       search: "free-text scientific or common name (incl. synonyms / old names).",
       minObs: "min GBIF occurrence count (e.g. 100).",
       maxObs: "max GBIF occurrence count.",
+      records: "all = minObs/maxObs count every GBIF record, with or without coordinates (default: georeferenced only).",
       minAssessmentYear: "earliest assessment year (e.g. 2015).",
       maxAssessmentYear: "latest assessment year.",
       minDescribedYear: "earliest CoL year-described (NE species).",

@@ -6,6 +6,7 @@ import {
   taxonGroupCountsPreservedSpecimens,
 } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
+import { GBIF_RECORDS_PARAM, parseGbifRecordMode } from "@/lib/gbif-records";
 
 interface CountryStats {
   [countryCode: string]: {
@@ -33,7 +34,9 @@ export async function GET(request: NextRequest) {
     (searchParams.get("taxon") || "plantae").split(",").map((t) => t.trim()).filter(Boolean),
   )].sort();
 
-  const cacheKey = taxonIds.join(",");
+  // Georeferenced records (the default) or all records, as the counts beside the map.
+  const mode = parseGbifRecordMode(searchParams.get(GBIF_RECORDS_PARAM));
+  const cacheKey = `${taxonIds.join(",")}|${mode}`;
 
   // Return cached data if still valid
   if (cachedStats[cacheKey] && Date.now() - (cacheTime[cacheKey] || 0) < CACHE_DURATION) {
@@ -68,7 +71,7 @@ export async function GET(request: NextRequest) {
       [...keysByBasis].filter(([, keys]) => keys.size > 0).map(([includePreservedSpecimens, keys]) => {
         const params = gbifOccurrenceParams(
           { facet: "country", facetLimit: "300", limit: "0" },
-          { includePreservedSpecimens },
+          { includePreservedSpecimens, mode },
         );
         for (const key of keys) params.append("taxonKey", key);
         return gbifJson(`https://api.gbif.org/v1/occurrence/search?${params}`) as Promise<GbifFacetResponse>;

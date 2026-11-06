@@ -68,7 +68,7 @@ async function loadContext(conn: Awaited<ReturnType<DuckDBInstance["connect"]>>,
   // can be plain semi-joins instead of correlated subqueries per difference.
   await conn.run(`CREATE TABLE pair AS
     SELECT b.key, b.link_col_id AS b_col, a.link_col_id AS a_col, b.gbif_species_key AS b_key, a.gbif_species_key AS a_key,
-           b.gbif_occurrence_count AS b_n, a.gbif_occurrence_count AS a_n
+           b.gbif_georeferenced_records_count AS b_n, a.gbif_georeferenced_records_count AS a_n
     FROM b.assessed b JOIN a.assessed a USING (key)`);
 }
 

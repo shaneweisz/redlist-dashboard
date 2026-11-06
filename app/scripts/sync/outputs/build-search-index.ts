@@ -88,7 +88,7 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
   await conn.run(`
     CREATE TEMP TABLE species AS
       SELECT a.id, a.scientific_name, a.common_name, a.taxon_group, a.iucn_category AS category,
-             a.gbif_species_key, a.gbif_occurrence_count,
+             a.gbif_species_key, a.gbif_georeferenced_records_count,
              a.assessment_id, CAST(a.assessment_date AS VARCHAR) AS assessment_date,
              a.countries, a.class_name, a.order_name, a.family,
              true AS assessed, CAST(NULL AS VARCHAR) AS col_id, ra.col_id AS name_col_id
@@ -102,14 +102,14 @@ export async function run(opts: { dataDir?: string; coreDir?: string; inatNames?
       UNION ALL
       -- Not Evaluated species GBIF has records for, keyed by col_id (also their GBIF key).
       SELECT NULL::BIGINT, u.scientific_name, u.common_name, u.taxon_group, u.iucn_category,
-             u.gbif_species_key, u.gbif_occurrence_count,
+             u.gbif_species_key, u.gbif_georeferenced_records_count,
              NULL, NULL,
              u.countries, u.class_name, u.order_name, u.family,
              false, u.col_id, u.col_id
       FROM read_parquet('${ne}') u`);
 
   const payload = `id, scientific_name, common_name, taxon_group, category, gbif_species_key,
-    gbif_occurrence_count, assessment_id, assessment_date, countries,
+    gbif_georeferenced_records_count, assessment_id, assessment_date, countries,
     class_name, order_name, family, assessed, col_id`;
 
   // Every other English common name CoL gives the species (build-vernaculars), so

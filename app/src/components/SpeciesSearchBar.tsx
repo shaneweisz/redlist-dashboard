@@ -27,7 +27,7 @@ export interface SearchResult {
   taxon_group: string;
   category: string;
   gbif_species_key: string | null;
-  gbif_occurrence_count: number | null;
+  gbif_georeferenced_records_count: number | null;
   assessment_id: number | null;
   assessment_date: string | null;
   countries: string[];

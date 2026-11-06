@@ -70,6 +70,7 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 | `taxa` | CoL usage (8.0M) | `build-taxa.ts` |
 | `assessments` | global assessment of a current species (all years) | `build-assessments.ts` |
 | `occurrence_counts` | usage × year × georeferenced × record type, with a count | `build-occurrences.ts` |
+| `occurrence_days` | usage × day × georeferenced × record type, for records dated to the day | `build-occurrences.ts` |
 | `assessment_link` | assessed species × CoL species it is (primary, plus covered rows) | `build-link.ts`, from the matcher's answers (`matches`, `build-matches.ts`) and `decisions.tsv` |
 
 **`taxa`** is the XR with three things worked out per usage:
@@ -82,11 +83,24 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 
 **`occurrence_counts`** is the whole snapshot (3.9 billion records) reduced to 4.1M usages' counts by year, by whether the record is georeferenced, and by basis of record. *Georeferenced* means what GBIF's API means by `hasCoordinate=true&hasGeospatialIssue=false`; the snapshot has no `hasGeospatialIssue` column, so it is recomputed from each record's issues using GBIF's own set (`GBIF_GEOSPATIAL_ISSUES` in `app/src/lib/gbif.ts`, checked per code against the live API). A companion table holds the same by country.
 
+**`occurrence_days`** is the same with the record's date in place of its year (324M rows, 789 MB, from the 90% of records dated to the day). It exists for one number: records since an assessment start the day after the assessment date, so the assessment's own year has to be split at that date. Later years come from `occurrence_counts`. A record dated only to a year or month can't be placed against a date in its own year, so it is left out of that year's window.
+
 **`assessment_link`** is the subject of [Matching](#matching-which-col-species-an-assessed-species-is).
 
 ## The counting rule
 
-`counts.ts`, 62 lines. Every GBIF number on the dashboard is this rule with a different filter (georeferenced or all records, since the assessment year, by country, by group).
+`counts.ts`. Every GBIF number on the dashboard is this rule with a different filter: georeferenced or all records, since the assessment date, by country, by group.
+
+**Two record modes.** Every count is published twice, and the dashboard's Georeferenced / All records toggle (`records=all` in the URL, `src/lib/gbif-records.ts`) picks one for every number on the page at once:
+
+| | Georeferenced (default) | All records |
+|---|---|---|
+| Counts | records with coordinates and no geospatial issue | every counted record, with or without coordinates |
+| Species columns | `gbif_georeferenced_records_count`, `gbif_georeferenced_records_since_assessment` | `gbif_all_records_count`, `gbif_all_records_since_assessment` |
+| NE countries | `countries` | `gbif_all_records_countries` |
+| Group totals (`taxa-summary.json`) | `gbif.georeferenced` | `gbif.all` |
+
+A species with no records in a mode reads 0 there. The since-assessment count is NULL only when there is no window: an undated assessment, or one dated after the sync.
 
 > A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**, keeping only the record types its kingdom counts.
 

@@ -85,7 +85,8 @@ institutions: latest-assessment institution (substring, e.g. institutions=Kew) â
   assessment, e.g. BirdLife International, Botanic Gardens Conservation International, NatureServe.
 search:  scientific or common name (incl. synonyms)
 outdated: yes | no  (assessment more than 10 years old)
-minObs / maxObs: GBIF occurrence-count bounds
+minObs / maxObs: GBIF record-count bounds (georeferenced records, or all records with records=all)
+records: all = count every GBIF record, with or without coordinates (default: georeferenced only)
 minAssessmentYear / maxAssessmentYear: assessment-year bounds
 minDescribedYear / maxDescribedYear: year-described bounds (NE species)
 

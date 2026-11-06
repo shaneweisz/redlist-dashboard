@@ -4,6 +4,7 @@ import { getScopedTaxaSummary, scopeWhere } from "@/lib/data/scoped-taxa-summary
 import { findNode, getTaxonGroupsForNode } from "@/lib/taxonomy-utils";
 import { getView } from "@/config/taxonomy-views";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { GBIF_RECORDS_PARAM, parseGbifRecordMode } from "@/lib/gbif-records";
 
 interface TaxonSummary {
   id: string;
@@ -54,6 +55,8 @@ export async function GET(request: NextRequest) {
     // Indonesia, not the union of the two).
     const countries = request.nextUrl.searchParams.get("country")?.split(",").map((c) => c.trim()).filter(Boolean) ?? [];
     const realms = request.nextUrl.searchParams.get("realm")?.split(",").map((r) => r.trim()).filter(Boolean) ?? [];
+    // Which GBIF records the gbif* totals count (src/lib/gbif-records.ts).
+    const mode = parseGbifRecordMode(request.nextUrl.searchParams.get(GBIF_RECORDS_PARAM));
     const where = scopeWhere(countries, realms);
     const data = where ? await getScopedTaxaSummary(where) : getTaxaSummary();
     const scoped = where !== null;
@@ -82,13 +85,13 @@ export async function GET(request: NextRequest) {
             (sum, r) => sum + Number(r.outdated ?? 0), 0
           );
           const gbifSpeciesCount = matchedRows.reduce(
-            (sum, r) => sum + Number(r.gbif_species_count ?? 0), 0
+            (sum, r) => sum + Number(r.gbif?.[mode]?.species_count ?? 0), 0
           );
           const gbifNeSpeciesCount = matchedRows.reduce(
-            (sum, r) => sum + Number(r.gbif_ne_species_count ?? 0), 0
+            (sum, r) => sum + Number(r.gbif?.[mode]?.ne_species_count ?? 0), 0
           );
           const totalGbifObservations = matchedRows.reduce(
-            (sum, r) => sum + Number(r.total_gbif_observations ?? 0), 0
+            (sum, r) => sum + Number(r.gbif?.[mode]?.records ?? 0), 0
           );
           const colDescribed = matchedRows.reduce((sum, r) => sum + Number(r.col_described ?? 0), 0);
           const colNe = matchedRows.reduce((sum, r) => sum + Number(r.col_ne ?? 0), 0);
@@ -108,8 +111,8 @@ export async function GET(request: NextRequest) {
             colNe,
             totalGbifObservations,
             meanGbifObsPerSpecies: gbifSpeciesCount > 0 ? totalGbifObservations / gbifSpeciesCount : undefined,
-            medianGbifObsPerSpecies: matchedRows.length === 1 && matchedRows[0].median_gbif_obs != null
-              ? Number(matchedRows[0].median_gbif_obs)
+            medianGbifObsPerSpecies: matchedRows.length === 1 && matchedRows[0].gbif?.[mode]?.median != null
+              ? Number(matchedRows[0].gbif[mode].median)
               : undefined,
           };
         }),
@@ -172,13 +175,13 @@ export async function GET(request: NextRequest) {
           matchedRows.map((r) => ({ by_category: r.by_category ?? {} }))
         );
         const totalGbifObservations = matchedRows.reduce(
-          (sum, r) => sum + Number(r.total_gbif_observations ?? 0), 0
+          (sum, r) => sum + Number(r.gbif?.[mode]?.records ?? 0), 0
         );
         const gbifSpeciesCount = matchedRows.reduce(
-          (sum, r) => sum + Number(r.gbif_species_count ?? 0), 0
+          (sum, r) => sum + Number(r.gbif?.[mode]?.species_count ?? 0), 0
         );
         const gbifNeSpeciesCount = matchedRows.reduce(
-          (sum, r) => sum + Number(r.gbif_ne_species_count ?? 0), 0
+          (sum, r) => sum + Number(r.gbif?.[mode]?.ne_species_count ?? 0), 0
         );
         const colDescribed = matchedRows.reduce((sum, r) => sum + Number(r.col_described ?? 0), 0);
         const colNe = matchedRows.reduce((sum, r) => sum + Number(r.col_ne ?? 0), 0);
@@ -186,8 +189,8 @@ export async function GET(request: NextRequest) {
           gbifSpeciesCount > 0 ? totalGbifObservations / gbifSpeciesCount : undefined;
 
         const medianGbifObsPerSpecies =
-          matchedRows.length === 1 && matchedRows[0].median_gbif_obs != null
-            ? Number(matchedRows[0].median_gbif_obs)
+          matchedRows.length === 1 && matchedRows[0].gbif?.[mode]?.median != null
+            ? Number(matchedRows[0].gbif[mode].median)
             : undefined;
 
         const estimatedDescribed = node.estimatedDescribed ?? 0;

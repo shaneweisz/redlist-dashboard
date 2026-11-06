@@ -31,8 +31,22 @@ export interface RedListSpecies {
   // null for assessed species and for NE names with no datable CoL source.
   described_year: number | null;
   gbif_species_key: string | null;
-  gbif_occurrence_count: number | null;
-  gbif_observations_after_assessment_year: number | null;
+  // GBIF records, georeferenced only and all (src/lib/gbif-records.ts). The
+  // since-assessment counts start the day after the assessment date; null when
+  // there is no window (an undated assessment, or one dated in the future).
+  gbif_georeferenced_records_count: number | null;
+  gbif_georeferenced_records_since_assessment: number | null;
+  gbif_all_records_count?: number | null;
+  gbif_all_records_since_assessment?: number | null;
+  /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
+  gbif_all_records_countries?: string[];
+  /**
+   * The counts the view shows, for the record mode it is in. Set by RedListView
+   * when species arrive (inGbifMode), so charts, filters, sorting and the table
+   * all read one number and a mode change re-derives every one of them.
+   */
+  gbif_records?: number | null;
+  gbif_records_since_assessment?: number | null;
   // Latest assessment's credits, inline in the species list (drives the credit
   // filters). The full history array is fetched lazily into previous_assessments
   // when a detail panel opens — empty in the list response.
