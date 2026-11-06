@@ -2046,6 +2046,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     [colMatch, selectedColReasons],
   );
 
+  // Is either half of that filter active? The ⚑ marker on a species row keys off
+  // this — see the row itself for why the flag is opt-in rather than always on.
+  const colFilterActive = colMatch != null || selectedColReasons.size > 0;
+
   // Consolidates all 5 habitat-related filters into one predicate (rather than 5
   // separate inline checks repeated at every filter site) since major/resident both
   // need the full parsed entry list, not just codes — cheaper to parse once per
@@ -6392,11 +6396,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               "give me all of these" case. A species can carry
                               both signals, hence a list of sentences.
 
-                              Shown on every flagged row, whether or not that
-                              card is filtering: the difference is a property
-                              of the species, so a reader browsing the
-                              unfiltered table sees it too. */}
-                          {isFlagged(s.col_revision) && (
+                              Shown only while that card is actually filtering
+                              (colFilterActive). The flag answers a question the
+                              reader has to have asked — "which of these differ
+                              from CoL, and how?" — and on the unfiltered table
+                              it was answering it unprompted, putting a caveat
+                              about a second checklist beside names in a list
+                              that is otherwise about assessments. Once a
+                              flagged/clean or reason filter is on, the marker
+                              earns its place: it says which signal each row
+                              matched on, which is exactly what was asked.
+                              Showing it on every row was tried in #607 and
+                              backed out for now. */}
+                          {colFilterActive && isFlagged(s.col_revision) && (
                             <SelectableHoverTooltip
                               content={<RevisionTooltipContent flag={s.col_revision!} name={s.scientific_name} category={s.category} />}
                               prepare={s.col_revision!.colId ? () => prefetchColProvenance(s.col_revision!.colId!) : undefined}
