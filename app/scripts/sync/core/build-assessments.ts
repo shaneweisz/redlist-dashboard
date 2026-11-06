@@ -47,8 +47,9 @@ const CREDIT_TYPES = { 1: "assessors", 2: "reviewers", 3: "contributors", 4: "fa
 /** A query run inside Postgres; DuckDB only sees its result. */
 const pg = (sql: string) => `postgres_query('pg', ${lit(sql)})`;
 
-const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
-const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
+/** A species' current taxon record (as alias t), and a global assessment of it (as alias a). */
+export const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
+export const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
   SELECT 1 FROM assessment_scopes s WHERE s.assessment_id = a.id AND s.scope_lookup_id = 15)`;
 const IN_SCOPE = `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon_id WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`;
 

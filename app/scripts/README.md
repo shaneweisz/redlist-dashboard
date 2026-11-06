@@ -60,4 +60,4 @@ Run by hand when their source changes: `upload-range-maps.ts` and `upload-aoh-ma
 
 ## lib/
 
-`utils.ts` (env loading, `DATA_DIR`, logging), `taxa.ts` (the Red List group definitions scripts share), `r2.ts` (listing and downloading a sync).
+`utils.ts` (env loading, `DATA_DIR`, a JSONL logger the map uploaders use, a concurrency helper), `taxa.ts` (the 28 Table 1a group definitions), `r2.ts` (the one R2 client every script uses, and downloading a sync), `redlist-db.ts` (the Red List database, opened read-only, for the scripts outside the sync).

@@ -1,22 +1,16 @@
 /**
- * fetch-duckdb-ext (#260 Phase 2): vendor the DuckDB `httpfs` extension for the
- * deployment target into app/duckdb-ext/ at build time.
+ * fetch-duckdb-ext: vendor DuckDB's httpfs extension for Vercel into
+ * app/duckdb-ext/ at build time.
  *
- * Why: the v2 read layer queries Parquet in R2 over httpfs. Doing
- * `INSTALL httpfs` at runtime hits extensions.duckdb.org on every cold start
- * (a network round-trip on the request path). Instead we download the matching
- * extension once at build time and `LOAD` it by path — no runtime network, no
- * cold-start INSTALL. next.config traces this dir into the v2 function.
+ * On Vercel the routes query the sync's parquets in R2 over httpfs. Installing
+ * it at runtime would download it from extensions.duckdb.org on every cold
+ * start, so the build downloads the matching build once and the routes LOAD it
+ * by path (next.config.ts traces the folder into the functions). Always
+ * linux_amd64, Vercel's runtime; locally the routes read app/data/sync and never
+ * load it. The engine version is read from DuckDB itself, so a @duckdb/node-api
+ * bump fetches the matching file; an unchanged version skips the download.
  *
- * Target is always linux_amd64 (Vercel's runtime). Locally the file is unused
- * (dev reads local parquets, USE_R2=false) but harmless to have. The engine
- * version is read from DuckDB itself so this survives a @duckdb/node-api bump.
- *
- * Runs as part of `prebuild`. Idempotent: skips the download when the vendored
- * file already matches the current engine version (via a .version sidecar).
- *
- * Usage:
- *   npx tsx scripts/build/fetch-duckdb-ext.ts
+ * Usage:  npm run fetch-duckdb-ext
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -25,7 +19,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 
 export const EXT_DIR = path.join(__dirname, "..", "..", "duckdb-ext");
 const EXT_NAME = "httpfs";
-const PLATFORM = "linux_amd64"; // Vercel runtime; the only place USE_R2 is true.
+const PLATFORM = "linux_amd64"; // Vercel's runtime, the only place the routes read R2
 
 async function engineVersion(): Promise<string> {
   const inst = await DuckDBInstance.create(":memory:");

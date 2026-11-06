@@ -15,7 +15,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { loadEnvFiles, SyncLogger, DATA_DIR, mapConcurrent } from "../lib/utils";
+import { loadEnvFiles, DATA_DIR, mapConcurrent } from "../lib/utils";
 import { r2Client, dataBucket } from "../lib/r2";
 
 const UPLOAD_CONCURRENCY = 16;
@@ -44,7 +44,6 @@ function contentTypeFor(filePath: string): string {
 
 /** Upload app/data/sync as a new sync and point latest-sync.txt at it. Returns the sync's name. */
 export async function uploadSync(): Promise<string> {
-  const logger = new SyncLogger("upload-data-to-r2");
 
   if (!fs.existsSync(DATA_DIR)) {
     throw new Error(`Data dir does not exist: ${DATA_DIR}`);
@@ -85,7 +84,6 @@ export async function uploadSync(): Promise<string> {
     `Uploading ${localPaths.length} files (${(totalBytes / 1024 / 1024).toFixed(1)} MB) ` +
       `to s3://${bucket}/${syncPrefix}`
   );
-  logger.log("upload_started", { bucket, timestamp, fileCount: localPaths.length, totalBytes });
 
   let completed = 0;
   await mapConcurrent(localPaths, UPLOAD_CONCURRENCY, async (localPath) => {
@@ -102,17 +100,14 @@ export async function uploadSync(): Promise<string> {
     );
     completed++;
     process.stdout.write(`\r  ${completed}/${localPaths.length}`);
-    logger.log("uploaded", { key, bytes: body.length });
   });
   console.log("");
 
   // Update the repo-tracked pointer file so the next PR flips production.
   fs.writeFileSync(LATEST_SYNC_FILE, timestamp + "\n");
-  logger.log("pointer_file_updated", { timestamp, path: LATEST_SYNC_FILE });
 
   console.log(`Uploaded ${localPaths.length} files`);
   console.log(`Updated ${path.relative(process.cwd(), LATEST_SYNC_FILE)} → ${timestamp}`);
-  logger.close();
   return timestamp;
 }
 

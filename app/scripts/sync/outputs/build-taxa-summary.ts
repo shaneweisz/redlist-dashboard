@@ -22,7 +22,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles, DATA_DIR } from "../../lib/utils";
-import { allTaxaUnchecked } from "../../lib/taxa";
+import { getTaxa } from "../../lib/taxa";
 import { EXCLUDED_DOMESTICATED_GBIF_KEYS } from "../../../src/lib/data/taxonomy-constants";
 import { NODE_INDEX, hasChildren, matchesFilter } from "../../../src/lib/taxonomy-utils";
 import type { TaxonomyNode } from "../../../src/config/taxonomy-tree";
@@ -307,7 +307,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 
   const linkedGbifKeys = groups.linked;
 
-  for (const taxon of allTaxaUnchecked()) {
+  for (const taxon of getTaxa()) {
     if (!groups.redlist.has(taxon.id)) {
       console.log(`  Skipping ${taxon.id} — no assessed species`);
       continue;
@@ -636,8 +636,8 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 async function checkTaxonomyAliasDrift(conn: DuckDBConnection, dataDir: string): Promise<void> {
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
-  const liveTaxa = allTaxaUnchecked().filter((t) => DYNAMIC_DRILLDOWN_ROOTS.has(t.id));
-  const dimensions: { label: "class" | "order"; col: string; taxa: ReturnType<typeof allTaxaUnchecked> }[] = [
+  const liveTaxa = getTaxa().filter((t) => DYNAMIC_DRILLDOWN_ROOTS.has(t.id));
+  const dimensions: { label: "class" | "order"; col: string; taxa: ReturnType<typeof getTaxa> }[] = [
     { label: "class", col: canonicalClassColumnSql("class_name"), taxa: liveTaxa.filter((t) => nextDynamicRank(t.id) === "class") },
     { label: "order", col: canonicalOrderColumnSql("order_name", "scientific_name"), taxa: liveTaxa },
   ];

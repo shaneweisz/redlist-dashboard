@@ -27,9 +27,10 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { loadEnvFiles, NARRATIVES_DIR } from "../lib/utils";
 import { NARRATIVE_RELEASE, narrativeKey } from "../../src/lib/redlist/narrative-release";
+import { r2Client, dataBucket } from "../lib/r2";
 
 /** The files the search reads. Both, or neither — they index each other. */
 export const NARRATIVE_FILES = [
@@ -41,15 +42,7 @@ export const NARRATIVE_FILES = [
 
 async function main(): Promise<void> {
   loadEnvFiles();
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucket = process.env.R2_DATA_BUCKET_NAME;
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error(
-      "Missing R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_DATA_BUCKET_NAME)"
-    );
-  }
+  const bucket = dataBucket();
 
   const local = NARRATIVE_FILES.map((name) => ({ name, file: path.join(NARRATIVES_DIR, name) }));
   const missing = local.filter((f) => !fs.existsSync(f.file));
@@ -59,11 +52,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const client = new S3Client({
-    region: "auto",
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId, secretAccessKey },
-  });
+  const client = r2Client();
 
   // A release's narratives are written once and then read for six months.
   // Overwriting them in place is how a deployed search starts disagreeing with

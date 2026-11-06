@@ -116,12 +116,8 @@ export async function mapConcurrent<T, R>(
   return results;
 }
 
-export function toTitleCase(s: string): string {
-  return s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-}
-
 // =============================================================================
-// CSV UTILITIES
+// WHERE THINGS ARE
 // =============================================================================
 
 /**
@@ -131,98 +127,3 @@ export function toTitleCase(s: string): string {
 export const DATA_DIR = process.env.PIPELINE_DATA_DIR ?? path.join(__dirname, "..", "..", "data", "sync");
 /** The searchable narratives, built per Red List release (scripts/narratives/). */
 export const NARRATIVES_DIR = path.join(__dirname, "..", "..", "data", "narratives");
-export const REDLIST_DIR = path.join(DATA_DIR, "redlist");
-export const GBIF_DIR = path.join(DATA_DIR, "gbif");
-
-/**
- * Quoting for DuckDB's read_csv, matching what writeCsv below emits.
- *
- * Pass this rather than letting auto-detection guess. It samples 20,480 rows and
- * infers quote='' if it sees none, which is a coin flip on a file whose only
- * quoted rows are rare: flowering_plants.csv has 231,000 rows and exactly two
- * containing a comma inside a vernacular name ("Barun, Banny"). The sample
- * missed both, quoting was inferred off, and the row split into ten fields —
- * surfacing as a type error on a column four positions away, an hour and a half
- * into a sync.
- */
-export const CSV_QUOTING = `quote='"', escape='"'`;
-
-function csvEscape(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return '"' + value.replace(/"/g, '""') + '"';
-  }
-  return value;
-}
-
-export function writeCsv(
-  rows: Record<string, string | number | null | undefined>[],
-  columns: string[],
-  outputPath: string
-): void {
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  const header = columns.join(",");
-  const lines = rows.map((row) =>
-    columns.map((col) => {
-      const val = row[col];
-      if (val === null || val === undefined || val === "") return "";
-      return csvEscape(String(val));
-    }).join(",")
-  );
-  fs.writeFileSync(outputPath, header + "\n" + lines.join("\n") + "\n");
-}
-
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ",") {
-        fields.push(current);
-        current = "";
-      } else {
-        current += ch;
-      }
-    }
-  }
-  fields.push(current);
-  return fields;
-}
-
-export function readCsv<T>(
-  inputPath: string,
-  parse: (row: Record<string, string>) => T
-): T[] {
-  const content = fs.readFileSync(inputPath, "utf-8");
-  const lines = content.split("\n").filter((l) => l.trim() !== "");
-  if (lines.length === 0) return [];
-
-  const headers = parseCsvLine(lines[0]);
-  const results: T[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]);
-    const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j] ?? "";
-    }
-    results.push(parse(row));
-  }
-
-  return results;
-}
