@@ -1450,7 +1450,10 @@ describe.skipIf(!HAS_SUMMARIES)("table1a-children-summaries.json + ssc-group-chi
         expect(typeof child.id).toBe("string");
         expect(typeof child.totalAssessed).toBe("number");
         expect(typeof child.outdated).toBe("number");
-        expect(typeof child.gbifNeSpeciesCount).toBe("number");
+        // NE species with GBIF records, per record mode; any record includes the georeferenced ones.
+        const ne = child.gbifNeSpecies as { georeferenced: number; all: number };
+        expect(typeof ne.georeferenced).toBe("number");
+        expect(ne.all).toBeGreaterThanOrEqual(ne.georeferenced);
         expect((child.totalAssessed as number)).toBeGreaterThanOrEqual(0);
       }
     }
