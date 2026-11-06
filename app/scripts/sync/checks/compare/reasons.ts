@@ -194,7 +194,7 @@ export const REASONS: ReasonRule[] = [
     // can't shrink.
     description: "Records since assessment now start the day after the assessment date, not the year after it.",
     kinds: ["assessed"], fields: ["gbif_georeferenced_records_since_assessment"],
-    where: `d.before IS NOT NULL AND d.after >= d.before`,
+    where: `d.before IS NOT NULL AND d.delta >= 0`,
   },
   {
     code: "since_assessment_window_this_year",
@@ -206,8 +206,8 @@ export const REASONS: ReasonRule[] = [
   {
     code: "no_records_is_zero",
     description: "A species with no records in a mode now reads 0 there, not NULL.",
-    kinds: ["assessed", "ne"], fields: ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment"],
-    where: `d.before IS NULL AND d.after = 0`,
+    kinds: ["assessed", "ne"], fields: ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment", "gbif_all_records_count"],
+    where: `d.before IS NULL AND d.after = '0'`,
   },
   {
     code: "snapshot_vs_api",
