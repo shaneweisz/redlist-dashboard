@@ -1000,8 +1000,8 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
  * counts. Kept in the URL (records=georeferenced), so a shared link shows the same numbers.
  */
 /**
- * The GBIF Records chart's controls: which metric (Total / New / % New, a
- * dropdown) and which records (All records / Georeferenced, a toggle). Each of the six
+ * The GBIF Records chart's controls, two dropdowns in its header: which
+ * metric (Total / New / % New) and which records (All records / Georeferenced). Each of the six
  * combinations keeps its own bucket selection, so a filter made under one
  * stays on while another is shown. Independent of the table's toggle. The Not
  * Evaluated list has no assessment, so no metric toggle.
@@ -1011,19 +1011,19 @@ function GbifChartControls({ value, onChange, showMetric }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
 }) {
   const { metric, mode } = gbifKeyParts(value);
+  const select = "text-[11px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-1 py-0.5";
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex items-center gap-1">
       {showMetric && (
-        <select
-          aria-label="Which GBIF metric the chart shows"
-          value={metric}
-          onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}
-          className="text-[11px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5"
-        >
+        <select aria-label="Which GBIF metric the chart shows" value={metric} className={select}
+          onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}>
           {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
         </select>
       )}
-      <GbifRecordModeToggle mode={mode} onChange={(m) => onChange(`${metric}.${m}`)} />
+      <select aria-label="Which GBIF records the chart counts" value={mode} className={select}
+        onChange={(e) => onChange(`${metric}.${e.target.value as GbifRecordMode}`)}>
+        {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{GBIF_RECORD_MODE_LABEL[m]}</option>)}
+      </select>
     </div>
   );
 }
@@ -5004,8 +5004,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
-              </div>
-              <div className="mb-1">
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
@@ -5086,8 +5084,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
-              </div>
-              <div className="mb-1">
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
