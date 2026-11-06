@@ -36,7 +36,7 @@ import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { loadEnvFiles } from "../../lib/utils";
 import { inatKingdomSql } from "../inputs/fetch-inat-vernaculars";
-import { usageCountsSql, georeferencedSql } from "../core/counts";
+import { usageCountsSql } from "../core/counts";
 import { ensureInatNames } from "../inputs/inat";
 import { CORE_DIR, DUCKDB_TMP, OUT_DIR } from "../paths";
 import { syncPath, SYNC_FOLDERS } from "../../../src/lib/data/sync-layout";
@@ -212,7 +212,7 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: str
   // from what the publisher wrote, so an all-records country list is longer.
   await conn.run(`CREATE OR REPLACE TEMP TABLE ne_countries AS
     SELECT u.species_id,
-           string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) FILTER (${georeferencedSql("c.georef", "c.basis")}) AS countries,
+           string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) FILTER (c.georef) AS countries,
            string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) AS all_records_countries
     FROM occ_countries c JOIN taxa u ON u.col_id = c.usage_key
     WHERE u.species_id IS NOT NULL AND c.usage_key NOT IN (SELECT usage_key FROM owned)

@@ -25,11 +25,11 @@ describe("gbif record modes", () => {
     expect(parseGbifRecordMode("bogus")).toBe("all");
   });
 
-  it("asks GBIF for coordinates and record types only when georeferenced", () => {
+  it("asks GBIF for coordinates only when georeferenced", () => {
     const geo = applyGbifRecordMode(new URLSearchParams(), "georeferenced");
     expect(geo.get("hasCoordinate")).toBe("true");
     expect(geo.get("hasGeospatialIssue")).toBe("false");
-    expect(geo.getAll("basisOfRecord")).toHaveLength(6);
+    expect(geo.has("basisOfRecord")).toBe(false);
     expect(applyGbifRecordMode(new URLSearchParams(), "all").toString()).toBe("");
     expect(gbifOccurrenceParams({}, { mode: "georeferenced" }).get("hasCoordinate")).toBe("true");
     expect(gbifOccurrenceParams().has("hasCoordinate")).toBe(false);

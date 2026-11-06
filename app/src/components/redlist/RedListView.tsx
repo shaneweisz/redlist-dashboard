@@ -1094,22 +1094,8 @@ function GbifInfoTooltip({ mode = DEFAULT_GBIF_RECORD_MODE }: { mode?: GbifRecor
             </>
           ) : (
             <>
-              <div className="font-medium text-[10px] mb-0.5">Georeferenced records, the ones a map can use:</div>
-              <div className="text-zinc-400"><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
-              <div className="font-medium text-zinc-100 mt-1">Included:</div>
-              <ul className="text-zinc-300 list-disc list-inside">
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">HUMAN_OBSERVATION</code> <span className="text-zinc-400">(e.g. iNat, eBird)</span></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MACHINE_OBSERVATION</code> <span className="text-zinc-400">(e.g. camera traps)</span></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_SAMPLE</code> <span className="text-zinc-400">(e.g. eDNA)</span></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">PRESERVED_SPECIMEN</code> <span className="text-zinc-400">(museums, herbaria)</span></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OCCURRENCE</code>, <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">OBSERVATION</code></li>
-              </ul>
-              <div className="font-medium text-zinc-100 mt-1">Excluded:</div>
-              <ul className="text-zinc-300 list-disc list-inside">
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">LIVING_SPECIMEN</code> <span className="text-zinc-400">(zoos, botanic gardens)</span></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">FOSSIL_SPECIMEN</code></li>
-                <li><code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">MATERIAL_CITATION</code> <span className="text-zinc-400">(literature records)</span></li>
-              </ul>
+              <div className="font-medium text-[10px] mb-0.5">Georeferenced records:</div>
+              <div className="text-zinc-400">Records with coordinates and no geospatial issue, of any type: <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasCoordinate=true</code> · <code className="bg-zinc-800 dark:bg-zinc-700 px-0.5 rounded">hasGeospatialIssue=false</code></div>
             </>
           )}
           <div className="text-zinc-400 mt-1">New: records dated after the assessment date. % New: New as a share of Total.</div>

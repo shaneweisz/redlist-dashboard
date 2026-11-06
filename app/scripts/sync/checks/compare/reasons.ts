@@ -209,8 +209,8 @@ export const REASONS: ReasonRule[] = [
     kinds: ["assessed", "ne"], fields: ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment", "gbif_all_records_count"],
     where: `d.before IS NULL AND d.after = '0'`,
   },
-  // ── Record types (2026-11-06): all records is every record; georeferenced
-  // counts preserved specimens for every kingdom, so only animals can move.
+  // ── Record types (2026-11-06): both modes count every record type, so
+  // every count can only grow.
   {
     code: "all_records_counts_every_record_type",
     description: "All records now counts every record type (fossils, zoo and garden specimens, literature records, and museum specimens for animals), so it only grows.",
@@ -218,31 +218,24 @@ export const REASONS: ReasonRule[] = [
     where: `d.before IS NULL OR d.delta >= 0`,
   },
   {
-    code: "museum_specimens_georeferenced_for_animals",
-    description: "Georeferenced counts now include preserved (museum) specimens for animals, as they always did for plants and fungi; an animal's count only grows.",
+    code: "georeferenced_counts_every_record_type",
+    description: "Georeferenced counts now include every record type with coordinates and no geospatial issue (museum specimens for animals; fossil, zoo, garden and literature records for every kingdom), so they only grow.",
     kinds: ["assessed", "ne"], fields: ["gbif_georeferenced_records_count", "gbif_georeferenced_records_since_assessment"],
-    where: `(d.before IS NULL OR d.delta >= 0) AND (
-              (d.kind = 'assessed' AND TRY_CAST(d.key AS BIGINT) IN (SELECT l.sis_taxon_id FROM ctx_link l JOIN ctx_taxa t ON t.col_id = l.usage_id
-                                              WHERE l.role = 'primary' AND coalesce(t.kingdom, 'animalia') = 'animalia'))
-              OR (d.kind = 'ne' AND d.key IN (SELECT col_id FROM ctx_taxa WHERE coalesce(kingdom, 'animalia') = 'animalia')))`,
+    where: `d.before IS NULL OR d.delta >= 0`,
   },
   {
-    code: "museum_specimen_countries",
-    description: "An animal's georeferenced countries now include those of its museum specimens; the list only grows.",
+    code: "countries_of_every_record_type",
+    description: "A Not Evaluated species' georeferenced countries now include those of every record type; the list only grows.",
     kinds: ["ne"], fields: ["countries"],
-    where: `list_has_all(string_split(coalesce(d.after, ''), ';'), string_split(coalesce(d.before, ''), ';'))
-            AND d.key IN (SELECT col_id FROM ctx_taxa WHERE coalesce(kingdom, 'animalia') = 'animalia')`,
+    where: `list_has_all(string_split(coalesce(d.after, ''), ';'), string_split(coalesce(d.before, ''), ';'))`,
   },
   {
-    code: "key_follows_museum_specimens",
-    description: "An animal's GBIF key is the counted usage with the most georeferenced records, which can change once museum specimens count.",
+    code: "key_follows_the_newly_counted_records",
+    description: "A species' GBIF key is the counted usage with the most georeferenced records, which can change once every record type counts.",
     kinds: ["assessed"], fields: ["gbif_species_key"],
     // The key is picked among the species' own counted link rows by their
-    // counts (build-read-models), which museum specimens change; bound it to
-    // those rows, and to animals, whose georeferenced counts are the ones that moved.
-    where: `d.key IN (SELECT p.key FROM pair p JOIN ctx_link l ON l.sis_taxon_id = TRY_CAST(p.key AS BIGINT) AND l.usage_id = p.a_key AND l.counted)
-            AND ${sis} IN (SELECT l.sis_taxon_id FROM ctx_link l JOIN ctx_taxa t ON t.col_id = l.usage_id
-                          WHERE l.role = 'primary' AND coalesce(t.kingdom, 'animalia') = 'animalia')`,
+    // counts (build-read-models); bound it to those rows.
+    where: `d.key IN (SELECT p.key FROM pair p JOIN ctx_link l ON l.sis_taxon_id = TRY_CAST(p.key AS BIGINT) AND l.usage_id = p.a_key AND l.counted)`,
   },
   {
     code: "key_for_newly_counted_records",

@@ -5,22 +5,12 @@
  * it (taxa.species_id: its own, its synonyms', its infraspecifics', its BINs'),
  * leaving out usages a separately assessed species owns.
  *
- * All records counts every record, of any type. A georeferenced record has
- * coordinates, no geospatial issue and a record type that places the species
- * where it lives wild (GEOREFERENCED_BASIS_OF_RECORD in src/lib/gbif-records.ts),
- * the same for every kingdom. Every number the dashboard shows from GBIF is
- * this rule with a different filter: georeferenced or all records, since an
- * assessment date, per country.
+ * All records counts every record, of any type; a georeferenced record is one
+ * with coordinates and no geospatial issue (the snapshot's georef flag), also
+ * of any type. Every number the dashboard shows from GBIF is this rule with a
+ * different filter: georeferenced or all records, since an assessment date,
+ * per country.
  */
-
-import { GEOREFERENCED_BASIS_OF_RECORD } from "../../../src/lib/gbif-records";
-
-const list = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(", ");
-
-/** Is this aggregate row georeferenced, in the dashboard's sense? */
-export function georeferencedSql(georefCol: string, basisCol: string): string {
-  return `(${georefCol} AND ${basisCol} IN (${list(GEOREFERENCED_BASIS_OF_RECORD)}))`;
-}
 
 export interface CountSources {
   /** A relation with col_id and species_id (taxa.parquet). */
@@ -41,7 +31,7 @@ export interface CountSources {
 export function usageCountsSql(s: CountSources): string {
   return `
     SELECT c.usage_key, u.species_id, ${s.dated ? "c.year, c.month, c.event_date" : "c.year"},
-           ${georeferencedSql("c.georef", "c.basis")} AS georef, c.n
+           c.georef, c.n
     FROM ${s.counts} c
     JOIN ${s.taxa} u ON u.col_id = c.usage_key`;
 }

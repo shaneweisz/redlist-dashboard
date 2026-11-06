@@ -93,9 +93,9 @@ In `~/.cache/redlist-dashboard/build/core/`. Nothing else is a source of truth; 
 
 **Two record modes.** Every count is published twice, and the dashboard's Georeferenced / All records toggle (`records=all` in the URL, `src/lib/gbif-records.ts`) picks one for every number on the page at once:
 
-| | Georeferenced (default) | All records |
+| | Georeferenced | All records (default) |
 |---|---|---|
-| Counts | records with coordinates and no geospatial issue | every counted record, with or without coordinates |
+| Counts | records with coordinates and no geospatial issue | every record, with or without coordinates |
 | Species columns | `gbif_georeferenced_records_count`, `gbif_georeferenced_records_since_assessment` | `gbif_all_records_count`, `gbif_all_records_since_assessment` |
 | NE countries | `countries` | `gbif_all_records_countries` |
 | Group totals (`taxa-summary.json`) | `gbif.georeferenced` | `gbif.all` |
@@ -104,7 +104,7 @@ A species with no records in a mode reads 0 there. The since-assessment count is
 
 > A species counts the records of every usage whose `species_id` is that species (its own name, its synonyms, its subspecies, their BINs), **minus usages a separately assessed species owns**.
 
-**Record types.** *All records* counts every record, of any type: the number gbif.org shows. A *georeferenced* record also has to be of a type that places the species where it lives wild, the same for every kingdom: observations, machine records, material samples, the generic types, and preserved specimens (museum and herbarium material, often the main record of a rare species). Living specimens (zoos, botanic gardens), fossils and material citations (literature records, often copies of a specimen GBIF already holds) are left out of it. Until 2026-11-06 the rule was per kingdom: animals left out preserved specimens, so 16,801 assessed animals showed no records at all. The occurrence map keeps its own per-kingdom defaults.
+**Record types.** Both modes count every record type, the same for every kingdom: *all records* is every record (the number gbif.org shows), *georeferenced* is the ones with coordinates and no geospatial issue. Until 2026-11-06 the rule was per kingdom and left out zoo and garden, fossil and literature records, and for animals museum specimens too, so 16,801 assessed animals showed no records at all. The occurrence map applies its own record-type defaults.
 
 **Ownership** is what "minus" means. Most assessed species simply own their CoL species and everything under it. The exceptions come from IUCN and CoL drawing species boundaries differently:
 
