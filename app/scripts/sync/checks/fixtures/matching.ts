@@ -25,8 +25,6 @@ export interface MatchCase {
     /** CoL species name → whether the NE list shows it. */
     neListed?: Record<string, boolean>;
   };
-  /** Set when the expectation is the intended outcome and today's sync misses it. */
-  knownBug?: string;
 }
 
 export const MATCHING_CASES: MatchCase[] = [
@@ -34,7 +32,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Hylatomus pileatus",
     why: "IUCN's genus for the Pileated Woodpecker; GBIF files its 5.4M records under Dryocopus pileatus. Ranking keys by match order showed 156.",
-    source: "species-key.ts sameOrganism; build-parquet.ts chooseRepresentative",
+    source: "species-key.ts sameOrganism; build-read-models.ts species_gbif (the GBIF key)",
     expect: { gbifKeyName: "Dryocopus pileatus", minRecords: 1_000_000, neListed: { "Dryocopus pileatus": false } },
   },
   {
@@ -52,13 +50,13 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Sminthopsis fuliginosa",
     why: "Gender agreement: CoL spells it fuliginosus.",
-    source: "name-variants.ts; build-matching.ts passes 4-6",
+    source: "name-variants.ts; accept-match.ts; decisions.tsv",
     expect: { hasRecords: true },
   },
   {
     name: "Ochotona pallasii",
     why: "Patronymic -ii vs CoL's -i.",
-    source: "name-variants.ts; build-matching.ts passes 4-6",
+    source: "name-variants.ts; accept-match.ts; decisions.tsv",
     expect: { hasRecords: true },
   },
   {
@@ -70,19 +68,19 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Colostygia puengeleri",
     why: "CoL spells it pungeleri (both for Püngeler). Accepted by pass 7 only because the GBIF key and the spelling rule agree.",
-    source: "build-matching.ts pass 7; name-variants.ts",
+    source: "accept-match.ts; name-variants.ts",
     expect: { hasRecords: true },
   },
   {
     name: "Agelaius phoeniceus",
     why: "Without classification context GBIF's matcher backed off to the genus and the bird lost its 20M records.",
-    source: "match-redlist-species-to-gbif.ts",
+    source: "build-matches.ts (the classification hints)",
     expect: { gbifKeyName: "Agelaius phoeniceus", minRecords: 1_000_000 },
   },
   {
     name: "Verreauxia africana",
     why: "Linked to CoL's non-Base Verreauxia africana; its IUCN synonym Sasia africana is CoL's Base name for the same bird and must not reappear as Not Evaluated.",
-    source: "build-matching.ts iucn_synonym_covered",
+    source: "build-link.ts covered rows",
     expect: { linkedTo: "Verreauxia africana", hasRecords: true, neListed: { "Sasia africana": false } },
   },
   {
@@ -96,12 +94,11 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Pseudophilautus abundus",
     why: "Shares authorship with P. procax; authorship alone matched them and abundus (EN) showed procax's records.",
-    source: "species-key.ts sameOrganism; build-parquet.ts",
+    source: "species-key.ts sameOrganism; build-link.ts",
     // IUCN also lists "Philautus  procax" (sic, double space) as a synonym of
-    // abundus, so procax stays off the NE list; prod only missed that because it
-    // didn't normalise the space. Its records still don't count for abundus.
+    // abundus, so procax stays off the NE list once the space is normalised.
+    // Its records still don't count for abundus.
     expect: { linkedTo: "Pseudophilautus abundus", gbifKeyName: "Pseudophilautus abundus", maxRecords: 100, neListed: { "Pseudophilautus procax": false } },
-    knownBug: "prod lists P. procax as Not Evaluated: IUCN's synonym is written with a double space and prod didn't normalise it",
   },
   {
     name: "Acacia koaia",
@@ -118,40 +115,39 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Agrotis sabine",
     why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490).",
-    source: "build-matching.ts pass 7; name-variants.ts",
+    source: "accept-match.ts; name-variants.ts",
     expect: { linkedTo: null, gbifKeyName: null },
-    knownBug: "build-matching refuses the link, but phase 6 still gives it sabura's key and records",
   },
 
   // ── Lumped: a synonym in CoL keeps its own records ─────────────────────────
   {
     name: "Malus sieversii",
     why: "CoL lumps it into Malus domestica; it showed 146,340 of the apple's records instead of its own ~8,000.",
-    source: "fetch-lumped-own-counts.ts",
+    source: "build-read-models.ts ownedUsages",
     expect: { linkedTo: "Malus domestica", gbifKeyName: "Malus sieversii", hasRecords: true, maxRecords: 30_000 },
   },
   {
     name: "Thymallus aeliani",
     why: "Lumped; showed 73,641 records instead of its own handful.",
-    source: "fetch-lumped-own-counts.ts",
+    source: "build-read-models.ts ownedUsages",
     expect: { gbifKeyName: "Thymallus aeliani", maxRecords: 1_000 },
   },
   {
     name: "Epilobium numidicum",
     why: "Lumped; showed 295,698 records instead of its own (none georeferenced).",
-    source: "fetch-lumped-own-counts.ts",
+    source: "build-read-models.ts ownedUsages",
     expect: { maxRecords: 100 },
   },
   {
     name: "Pararge xiphioides",
     why: "Lumped into Pararge aegeria; its own usage sat outside every facet and it showed 0.",
-    source: "fetch-lumped-own-counts.ts",
+    source: "build-read-models.ts ownedUsages",
     expect: { linkedTo: "Pararge aegeria", gbifKeyName: "Pararge xiphioides", hasRecords: true },
   },
   {
     name: "Fringilla polatzeki",
     why: "A subspecies of F. teydea in CoL, so no species facet emits its key; it showed 0.",
-    source: "fetch-lumped-own-counts.ts",
+    source: "build-read-models.ts ownedUsages",
     // Its own records (about 715), not the 7,000+ of F. teydea, and not its
     // synonym's records twice (it showed 1,430 when the synonym sat under both
     // of its roots).
@@ -253,7 +249,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Xyrichtys trivittatus",
     why: "A CoL synonym of Iniistius trivittatus, assessed separately; same shape as Pleurobema furvum.",
-    source: "match-redlist-species-to-gbif.test.ts",
+    source: "species-key.ts isSeparatelyAssessed",
     expect: { maxRecords: 100 },
   },
   {
@@ -265,7 +261,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Catapodium borgesii",
     why: "Azores endemic once matched via a synonym onto Catapodium marinum and shown its 19,901 records.",
-    source: "fetch-lumped-own-counts.ts; species-key.ts decideKey",
+    source: "build-read-models.ts ownedUsages; species-key.ts decideKey",
     expect: { maxRecords: 100 },
   },
   {
@@ -279,7 +275,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Stenocranius raddei",
     why: "Checklist columns case: an XR-only claim once sent readers to a CoL page that didn't corroborate it.",
-    source: "build-backbone.ts checklist columns",
+    source: "build-taxa.ts checklist columns",
     // GBIF's records for it are all preserved specimens, which don't count for mammals.
     expect: { linkedTo: "Stenocranius raddei" },
   },
@@ -292,7 +288,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Mayaheros ericymba",
     why: "Its latest assessment is an amendment flagged latest=false and has to be forced in.",
-    source: "fetch-redlist-species.ts",
+    source: "build-assessments.ts FORCED_LATEST",
     expect: { assessed: true, linkedTo: "Mayaheros ericymba" },
   },
   {
@@ -312,19 +308,19 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Miniopterus schreibersii",
     why: "CoL also has a provisionally accepted twin; it must not appear as Not Evaluated.",
-    source: "build-parquet.ts name-twin rule",
+    source: "build-link.ts twinKeys",
     expect: { hasRecords: true, neListed: { "Miniopterus schreibersii": false } },
   },
   {
     name: "Columba livia",
     why: "Provisionally accepted twin of the assessed Rock Dove.",
-    source: "build-parquet.ts name-twin rule; taxonomy-constants.ts",
+    source: "build-link.ts twinKeys; taxon-groups.ts NE_EXCLUDED",
     expect: { minRecords: 1_000_000, neListed: { "Columba livia": false } },
   },
   {
     name: "Homo sapiens",
     why: "IUCN leaves humans out of the Red List; CoL has them.",
-    source: "taxonomy-constants.ts, and six other places",
+    source: "taxon-groups.ts NE_EXCLUDED",
     expect: { assessed: false, neListed: { "Homo sapiens": false } },
   },
   {
@@ -336,13 +332,13 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Pycnonotus tricolor",
     why: "An XR over-split the curated checklist demotes; it showed as a spurious Not Evaluated bulbul.",
-    source: "build-backbone.ts curated demotion",
+    source: "build-taxa.ts demoted",
     expect: { assessed: false, neListed: { "Pycnonotus tricolor": false } },
   },
   {
     name: "Brachistus stramoniifolius",
     why: "Assessed under an old genus; CoL's Witheringia stramoniifolia (stramonifolia in the release) is the same plant and must not reappear as Not Evaluated.",
-    source: "build-matching.ts pass 2; build-backbone.ts checklist_name",
+    source: "build-taxa.ts checklist_name",
     expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false } },
   },
   {

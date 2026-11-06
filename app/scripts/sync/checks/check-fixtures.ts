@@ -6,26 +6,22 @@
  * published for it: which CoL species an assessed species is linked to, which
  * GBIF key the app uses, whether it has records, and whether given CoL species
  * appear in the Not Evaluated list. It reads the same facts as the comparison
- * harness, so the old and new pipelines are held to the same cases.
+ * (compare/facts.ts). The sync stops if any case fails.
  *
  * Expectations are by name, not CoL id, because CoL renumbers about 2% of
  * ids each release.
  *
- * A case marked knownBug states the intended outcome. Today's pipeline is
- * allowed to miss it (reported, not failed); the rewrite is not.
- *
  * Usage:
- *   npx tsx scripts/sync/checks/check-fixtures.ts [DIR] [--observe] [--strict]
- *     DIR        data directory (default app/data)
+ *   npx tsx scripts/sync/checks/check-fixtures.ts [DIR] [--observe]
+ *     DIR        data directory (default app/data/sync)
  *     --observe  print what the sync shows for every case, check nothing
- *     --strict   fail on knownBug cases too
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
-import { loadFacts, inSync, type Layout } from "./compare/facts";
+import { loadFacts, inSync } from "./compare/facts";
 import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
 import { lit } from "../sql";
 
@@ -40,17 +36,12 @@ export interface Observed {
 }
 
 
-/** CoL names for ids, from whichever taxonomy file the layout has. */
-function taxonomySql(dir: string, layout: Layout): string {
-  return `read_parquet(${lit(layout === "v1" ? path.join(dir, "backbone.parquet") : inSync(dir, "taxa.parquet"))})`;
-}
-
 export async function observe(conn: DuckDBConnection, dir: string, cases: MatchCase[]): Promise<Map<string, Observed>> {
-  const layout = await loadFacts(conn, "f", dir);
-  const tax = taxonomySql(dir, layout);
+  await loadFacts(conn, "f", dir);
+  const tax = `read_parquet(${lit(inSync(dir, "taxa.parquet"))})`;
   // species_name: the accepted species a usage belongs to (a synonym's accepted
-  // name, an infraspecific's species), so a link reads the same whether a
-  // layout points it at the usage or at the species.
+  // name, an infraspecific's species), so a link reads the same whether it
+  // points at the usage or at the species.
   await conn.run(`CREATE TEMP TABLE names AS
     WITH t AS (SELECT col_id, parent_id, status, rank, scientific_name FROM ${tax}),
     s1 AS (SELECT t.col_id, t.scientific_name,
@@ -70,9 +61,7 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
       LEFT JOIN names g ON g.col_id = a.gbif_species_key
       WHERE a.scientific_name = ${lit(c.name)}`)).getRowObjects();
     const neListed: Record<string, boolean> = {};
-    const hasNe = (await conn.runAndReadAll(`SELECT 1 FROM information_schema.tables WHERE table_schema = 'f' AND table_name = 'ne'`)).getRowObjects().length > 0;
     for (const n of Object.keys(c.expect.neListed ?? {})) {
-      if (!hasNe) continue;
       const [r] = (await conn.runAndReadAll(`
         SELECT count(*) AS c FROM f.ne WHERE scientific_name = ${lit(n)}`)).getRowObjects();
       neListed[n] = Number(r.c) > 0;
@@ -108,7 +97,7 @@ export function mismatches(c: MatchCase, o: Observed): string[] {
     miss.push(`records: expected at most ${e.maxRecords}, got ${o.records}`);
   }
   for (const [n, listed] of Object.entries(e.neListed ?? {})) {
-    if (n in o.neListed) want(`${n} in NE list`, listed, o.neListed[n]);
+    want(`${n} in NE list`, listed, o.neListed[n]);
   }
   return miss;
 }
@@ -125,20 +114,14 @@ if (isDirectRun) {
       for (const c of MATCHING_CASES) console.log(c.name.padEnd(28), JSON.stringify(obs.get(c.name)));
       return;
     }
-    const strict = process.argv.includes("--strict");
     let failed = 0;
-    let bugs = 0;
     for (const c of MATCHING_CASES) {
       const miss = mismatches(c, obs.get(c.name)!);
-      if (miss.length === 0) {
-        if (c.knownBug) console.log(`fixed   ${c.name} (was: ${c.knownBug})`);
-        continue;
-      }
-      const label = c.knownBug && !strict ? "bug" : "FAIL";
-      if (label === "bug") bugs++; else failed++;
-      console.log(`${label.padEnd(7)} ${c.name}: ${miss.join("; ")}${c.knownBug ? `  [known: ${c.knownBug}]` : ""}`);
+      if (miss.length === 0) continue;
+      failed++;
+      console.log(`FAIL    ${c.name}: ${miss.join("; ")}`);
     }
-    console.log(`\n${MATCHING_CASES.length} cases: ${failed} failed, ${bugs} known bugs still present.`);
+    console.log(`\n${MATCHING_CASES.length} cases: ${failed} failed.`);
     if (failed > 0) process.exitCode = 1;
   })().catch((e) => { console.error(e); process.exit(1); });
 }

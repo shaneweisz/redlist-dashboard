@@ -250,13 +250,12 @@ Four layers, from strict to advisory.
 
 **4. The comparison, which is for review.** `compare.ts` reduces the new sync and the one production serves to the same fact tables, diffs every field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. The report lands in `build/compare/report.md`; unexplained differences don't stop the sync, they are what you read before publishing.
 
-A reason is only as good as its bound. The rules come in three strengths:
+A reason is only as good as its bound: a rule that explains a change without bounding it can hide a bug. There are two, and both are bounded:
 
-- **Bounded**: they check the size of the change against what the reason predicts. `snapshot_vs_api` (within 5% or 5 records), `separately_assessed_split_not_double_counted` and `duplicate_concept_summed` (the new count must equal the old one plus or minus the records moved, within noise), the date and credit rules (the exact record they predict).
-- **Sign-only**: `outdated_as_of_a_later_sync_date` (outdated may only rise), `duplicate_concepts_no_longer_not_evaluated` (NE counts may only fall).
-- **Catch-alls**: `gbif_stats_from_the_ne_list`, `follows_the_new_links`, `common_name_from_inaturalist_or_col`. Read these as "not checked here": per-group GBIF figures, CoL-revision flags and NE common names are covered by the invariants and by the per-species checks they derive from, not by the comparison.
+- `newer_gbif_snapshot`: the syncs counted different snapshots, and a GBIF figure rose, or fell by no more than 5%.
+- `outdated_as_of_a_later_sync_date`: outdated may only rise.
 
-A rule that explains a change without bounding it can hide a bug, and this is how the first review of the rewrite found most of its bugs. `lumped_counts_from_its_infraspecific` once covered any change to a lumped species' counts, and so explained *Zosterops simplex*'s count doubling to 1.14M; it now requires the baseline's count to equal the records on its old key alone. `no_longer_linked` once explained every species joining the NE list; it now covers only species the baseline linked. Tightening the two surfaced a counting bug, a prod bug (`ambiguous_synonym_no_longer_hides`: *Vicia cracca*, 871k records, kept off the NE list by an ambiguous synonym) and, in the unexplained remainder, the respelling, provisional-name, twin, demotion and cross-phylum cases above.
+Everything else is unexplained until a rule says why, so a new Red List or CoL release shows up in full the first time. Add a rule when a change is understood, with the evidence in its commit message, and bound it by what the change predicts. The rewrite's acceptance review ran on 38 such rules (the history of `compare/reasons.ts` before November 2026); tightening two of them is what surfaced *Zosterops simplex*'s doubled count and *Vicia cracca* missing from the NE list.
 
 When reading the unexplained list, sort by size and look at **falls** first: a number dropping below production's is where a matching regression shows.
 
@@ -338,7 +337,7 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 
 - **IUCN's group for assessed species, CoL's for the rest.** Table 1a stays exact; NE species are grouped by CoL lineage.
 - **IUCN's synonyms keep CoL species off the NE list.** If IUCN lists a name as a synonym of an assessed species and CoL accepts it, it isn't Not Evaluated as far as the Red List is concerned, even when the records aren't counted (5,674 refused covered rows; *Rubus plicatus* and *R. vestitus* sit under the *R. fruticosus* aggregate).
-- **Preserved specimens count only outside Animalia.** Several animals once listed as "known bugs" (*Stenocranius raddei*, *Hylomyscus anselli*) have only museum specimens, so zero is right.
+- **Every record type counts, for every kingdom.** Museum specimens, fossils and literature records are in both the all-records and georeferenced totals, as on gbif.org; the occurrence map applies its own filters.
 - **Outdated is as of the sync date.**
 - **The XR, not the curated checklist, decides `species_id`**, because that is what GBIF indexes. The checklist only demotes.
 

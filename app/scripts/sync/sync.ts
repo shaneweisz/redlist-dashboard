@@ -155,7 +155,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   done = step("checks");
   const fx = await (await DuckDBInstance.create(":memory:")).connect();
   const obs = await observe(fx, OUT_DIR, MATCHING_CASES);
-  const failed = MATCHING_CASES.filter((c) => !c.knownBug && mismatches(c, obs.get(c.name)!).length > 0);
+  const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
   manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };
   if (failed.length > 0) {
     fs.writeFileSync(path.join(OUT_DIR, syncPath("sync.json")), JSON.stringify(manifest, null, 2) + "\n");
@@ -183,7 +183,7 @@ export async function sync(opts: { skipCompare?: boolean; baseline?: string } = 
   if (!opts.skipCompare) {
     const baseline = opts.baseline ? path.resolve(opts.baseline) : await ensureBaseline(prodSync());
     const out = path.join(BUILD_DIR, "compare");
-    const summary = await compare({ baseline, candidate: OUT_DIR, out, core: CORE_DIR });
+    const summary = await compare({ baseline, candidate: OUT_DIR, out });
     manifest.compare = { baseline: path.basename(baseline), report: path.join(out, "report.md"), ...summary };
     console.log(`   ${summary.total.toLocaleString()} differences against ${path.basename(baseline)}, ` +
       `${summary.unexplained.toLocaleString()} unexplained — ${path.join(out, "report.md")}`);

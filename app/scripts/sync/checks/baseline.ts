@@ -5,8 +5,9 @@
  * says on origin/main. Not this branch's copy: a branch that has run an upload
  * has bumped its own pointer, and comparing a sync with itself reports nothing.
  *
- * Copies live in ~/.cache/redlist-dashboard/baseline-<sync>/ and are reused.
- * A copy is complete only once its .complete marker exists.
+ * The copy lives in ~/.cache/redlist-dashboard/baseline-<sync>/ and is reused
+ * until production moves on; then the older copy is removed. A copy is complete
+ * only once its .complete marker exists.
  *
  * Usage:
  *   npx tsx scripts/sync/checks/baseline.ts            # prod's sync
@@ -19,13 +20,6 @@ import { execFileSync } from "child_process";
 import { loadEnvFiles } from "../../lib/utils";
 import { downloadSync } from "../../lib/r2";
 import { CACHE_ROOT } from "../paths";
-import { inSync } from "./compare/facts";
-
-/**
- * Syncs before 2026-11-05 left col-revisions.json out (git held it); for one of
- * those, it is taken from main's history, if main still has it.
- */
-const ONCE_IN_GIT = ["col-revisions.json"];
 
 export function prodSync(): string {
   return execFileSync("git", ["show", "origin/main:app/latest-sync.txt"], {
@@ -41,19 +35,15 @@ export function baselineDir(sync: string): string {
 export async function ensureBaseline(sync = prodSync()): Promise<string> {
   const dir = baselineDir(sync);
   const marker = path.join(dir, ".complete");
+  // Only one sync is compared against at a time; older copies are 500 MB each.
+  for (const old of fs.readdirSync(CACHE_ROOT).filter((d) => d.startsWith("baseline-") && d !== path.basename(dir))) {
+    fs.rmSync(path.join(CACHE_ROOT, old), { recursive: true, force: true });
+    console.log(`Removed the older baseline ${old}`);
+  }
   if (fs.existsSync(marker)) return dir;
   console.log(`Downloading baseline sync ${sync} into ${dir}`);
   fs.rmSync(dir, { recursive: true, force: true });
   const n = await downloadSync(sync, dir);
-  for (const name of ONCE_IN_GIT) {
-    if (fs.existsSync(inSync(dir, name))) continue;
-    try {
-      const body = execFileSync("git", ["show", `origin/main:app/data/${name}`], {
-        cwd: path.join(__dirname, "..", "..", ".."), maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"],
-      });
-      fs.writeFileSync(path.join(dir, name), body);
-    } catch { /* not in git either: the comparison reads it as absent */ }
-  }
   fs.writeFileSync(marker, JSON.stringify({ sync, files: n, at: new Date().toISOString() }) + "\n");
   return dir;
 }
