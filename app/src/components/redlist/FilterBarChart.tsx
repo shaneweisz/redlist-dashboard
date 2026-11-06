@@ -210,7 +210,10 @@ export default function FilterBarChart({
             itemStyle={{ color: "#fff" }}
             labelStyle={{ color: "#a1a1aa" }}
           />
-          <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+          {/* No animation: Recharts hides a bar's LabelList until its animation
+              ends, so every filter change blanked all the counts for ~0.5s and
+              popped them back. Bars and numbers now change in the same frame. */}
+          <Bar dataKey="count" radius={[0, 4, 4, 0]} isAnimationActive={false}>
             {data.map((entry, index) => {
               const itemKey = entry.code || entry.range || "";
               const isHighlighted = highlightedItems?.has(itemKey);
