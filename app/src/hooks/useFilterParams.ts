@@ -1095,6 +1095,10 @@ export function useFilterParams() {
   const setViewMode = useCallback(
     (mode: ViewMode) => {
       setState(prev => {
+        // RedListView mirrors the page's viewMode in here after every switch,
+        // and the page has already pushed the URL by then: an unchanged mode
+        // would only push a duplicate history entry.
+        if (prev.viewMode === mode) return prev;
         const next = { ...prev, viewMode: mode };
         queueMicrotask(() => syncUrl(next, true));
         return next;
@@ -1239,7 +1243,10 @@ export function useFilterParams() {
     });
   }, [syncUrl]);
 
-  const clearAllFiltersAndTaxa = useCallback(() => {
+  // `replace` overwrites the current history entry instead of pushing one, for
+  // a caller that has just pushed its own entry for the same click (Clear all
+  // switching back from Not Evaluated) so one back-press still undoes it all.
+  const clearAllFiltersAndTaxa = useCallback((opts?: { replace?: boolean }) => {
     setState(prev => {
       const next = {
         ...prev,
@@ -1282,7 +1289,7 @@ export function useFilterParams() {
         species: null,
         tab: null,
       };
-      queueMicrotask(() => syncUrl(next, true));
+      queueMicrotask(() => syncUrl(next, !opts?.replace));
       return next;
     });
   }, [syncUrl]);
