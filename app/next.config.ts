@@ -28,6 +28,9 @@ const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
 const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
 
 const nextConfig: NextConfig = {
+  // CI's typecheck job checks the types on every PR,
+  // so the deploy build doesn't check them again (24 of its 41 seconds).
+  typescript: { ignoreBuildErrors: true },
   env: {
     NEXT_PUBLIC_SPECIES_LISTS_SYNC: SPECIES_LISTS_SYNC,
   },
@@ -82,8 +85,10 @@ const nextConfig: NextConfig = {
       // production deployment answers on sends visitors there, path and query
       // string intact. red.cst.cam.ac.uk and en.ki never appear here by name:
       // the Caddy proxy in front of them rewrites Host to
-      // red-list-dashboard.vercel.app (see src/config/public-origin.ts), so
-      // matching that host catches them too. Next anchors `has` values as a
+      // red-list-dashboard.vercel.app (the issue behind #416), so
+      // matching that host catches them too. With every request now on
+      // dashforlife.org (or a preview / localhost, which talk to Vercel
+      // directly), the app can trust its own Host header again. Next anchors `has` values as a
       // full-string regex. Preview deployments use other hostnames and are
       // untouched.
       {
@@ -104,30 +109,6 @@ const nextConfig: NextConfig = {
   // PostHog's API relies on trailing slashes; without this Next.js redirects them
   // and breaks event capture through the proxy.
   skipTrailingSlashRedirect: true,
-
-  // Server Actions (e.g. the GitHub sign-in form in /login) reject any request
-  // whose Origin header doesn't match the request's own host, as CSRF
-  // protection — by default only the exact same origin is trusted. This app is
-  // served on multiple custom domains (see src/config/brand.ts), and two of them
-  // (red.cst.cam.ac.uk and en.ki) reach Vercel through a Caddy reverse proxy on
-  // a Cambridge VM that rewrites Host to red-list-dashboard.vercel.app, so the
-  // Origin the browser sends never matches the Host Next.js sees and sign-in
-  // 500s without an explicit entry — list every domain this app answers on,
-  // plus a wildcard for Vercel's own preview deployments (both URL shapes: the
-  // stable git-branch alias and the per-deployment hash that changes on every
-  // push). Keep in step with src/config/public-origin.ts.
-  experimental: {
-    serverActions: {
-      allowedOrigins: [
-        "dashforlife.org",
-        "dashoflife.org",
-        "red-list-dashboard.vercel.app",
-        "red.cst.cam.ac.uk",
-        "en.ki",
-        "*-shaneweiszs-projects.vercel.app",
-      ],
-    },
-  },
 
   // #261: DuckDB-backed read routes query Parquet in R2. Keep the native addon
   // out of the bundler, and force-include the 68MB libduckdb.so it dlopens at

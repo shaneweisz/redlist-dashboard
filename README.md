@@ -2,14 +2,7 @@
 
 A web application for exploring **IUCN Red List assessment coverage and prioritization**, integrated with GBIF occurrence records, CITES trade data and the Catalogue of Life. Designed to identify species that may need reassessment based on new evidence — and, increasingly, to be a general-purpose window onto biodiversity data, including described species that haven't been assessed for the Red List yet.
 
-The same app is served under several brands, chosen by hostname (`src/config/brand.ts`):
-
-| Host | Brand |
-|------|-------|
-| `dashforlife.org` | **Dash for Life** (default — also used for previews and localhost) |
-| `dashoflife.org` | **Dash of Life** |
-| `red.cst.cam.ac.uk` | **Red List Dashboard** |
-| `red-list-dashboard.vercel.app` | **Red List Dashboard** |
+The app is served as **Dash for Life** at [dashforlife.org](https://dashforlife.org). Its earlier domains (`dashoflife.org`, `red.cst.cam.ac.uk`, `en.ki`, `red-list-dashboard.vercel.app` and the `www.` variants) permanently redirect there with the path and query string intact (`redirects()` in `app/next.config.ts`).
 
 ## Core Purpose
 

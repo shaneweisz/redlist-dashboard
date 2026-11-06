@@ -1,6 +1,5 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
 import { VISIBLE_OAUTH_PROVIDERS } from "@/config/oauth-providers";
 import { signInWithOAuth } from "@/lib/auth/actions";
 
@@ -44,41 +43,20 @@ const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
-// window.location.origin never changes for the life of the page, so there is
-// nothing to subscribe to — this is just the React-sanctioned way to read a
-// browser-only value without a hydration mismatch. It renders as "" on the
-// server and during hydration, then as the real origin.
-const NEVER_CHANGES = () => () => {};
-const readOrigin = () => window.location.origin;
-const noOriginOnServer = () => "";
-
 /**
- * Sends the browser's own origin along with the sign-in request.
+ * The sign-in buttons.
  *
- * The server can't derive it reliably: red.cst.cam.ac.uk and en.ki are proxied
- * to Vercel through a Caddy instance that rewrites the Host header, so the
- * request arrives claiming to be red-list-dashboard.vercel.app and the OAuth
- * callback used to be sent there — to a domain without the PKCE cookie, which
- * failed the exchange (#416). Only the browser knows the true origin.
- *
- * Filled in after hydration (window doesn't exist during SSR). If JavaScript
- * never runs, the field stays empty and the server falls back to the request
- * headers, which is what every Vercel-served domain used before this.
- *
- * `next` rides along the same way, but comes from this page's own `?next=`
+ * `next` rides along as a hidden field, taken from this page's own `?next=`
  * rather than from `window`: by the time the form is on screen the browser is
  * on /login, so its current URL is no longer the page worth returning to. The
  * header's sign-in link is what captured that, one navigation earlier
  * (components/AuthStatus.tsx).
  */
 export function SignInForm({ next }: { next?: string }) {
-  const origin = useSyncExternalStore(NEVER_CHANGES, readOrigin, noOriginOnServer);
-
   return (
-    // One form, one origin field, one button per provider: the pressed button's
+    // One form, one button per provider: the pressed button's
     // name/value is what tells the action which provider to start.
     <form action={signInWithOAuth} className="flex flex-col gap-3">
-      <input type="hidden" name="origin" value={origin} />
       <input type="hidden" name="next" value={next ?? ""} />
       {VISIBLE_OAUTH_PROVIDERS.map(({ id, label }) => (
         <button

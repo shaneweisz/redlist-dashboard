@@ -13,6 +13,8 @@ out/
 # Build
 build/
 dist/
+# …but not the deploy-build scripts, which share the name
+!app/scripts/build/
 
 # Debug
 npm-debug.log*

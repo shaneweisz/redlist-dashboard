@@ -67,9 +67,8 @@ export const VISIBLE_OAUTH_PROVIDERS: readonly OAuthProvider[] =
  * the providers above, or null.
  *
  * The value is caller-controlled form data that goes straight into a Supabase
- * call which redirects the browser off-site, so it gets the same treatment as
- * the origin posted alongside it (see resolvePublicOrigin): checked against a
- * fixed list rather than trusted.
+ * call which redirects the browser off-site, so it is checked against a fixed
+ * list rather than trusted.
  *
  * Deliberately searches OAUTH_PROVIDERS rather than VISIBLE_OAUTH_PROVIDERS:
  * hiding a button shouldn't break a sign-in already in flight, and the check
