@@ -8,7 +8,7 @@
  *                        its GBIF counts under the counting rule (counts.ts),
  *                        its latest credits and assessment count
  *   assessments.parquet  published assessment history, one row per year
- *   species/, ne.parquet, species_link.parquet  see notEvaluated
+ *   species/, ne.parquet  see notEvaluated
  *
  * GBIF counts per assessed species, from its link rows:
  *   own / covered   its species' records, minus usages another species owns
@@ -176,9 +176,6 @@ async function history(conn: DuckDBConnection, coreDir: string): Promise<void> {
  *                             assessed species is linked to and GBIF has records
  *                             for: its counts, GBIF countries and common name.
  *                             Keyed by col_id, which is also its GBIF key.
- *   species_link.parquet      the assessed species' links as the CoL-differences
- *                             code reads them: one row per species and CoL id,
- *                             covered rows as match_method iucn_synonym_covered
  */
 async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: string): Promise<void> {
   const speciesDir = path.join(outDir, syncPath("species"));
@@ -194,18 +191,6 @@ async function notEvaluated(conn: DuckDBConnection, outDir: string, coreDir: str
     FROM taxa WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
     ORDER BY taxon_group, class_name, order_name, family, scientific_name
   ) TO ${lit(speciesDir)} (FORMAT parquet, PARTITION_BY (taxon_group), COMPRESSION zstd, ROW_GROUP_SIZE 20000)`);
-
-  await conn.run(`COPY (
-    SELECT sis_taxon_id AS id, sis_taxon_id, gbif_species_key, scientific_name, col_id, match_method, 'redlist' AS src FROM (
-      SELECT l.sis_taxon_id, a.gbif_species_key, latest.scientific_name, l.col_id,
-             CASE WHEN l.role = 'covered' THEN 'iucn_synonym_covered' WHEN l.col_id IS NULL THEN 'unmatched' ELSE l.method END AS match_method,
-             l.role
-      FROM link l JOIN latest USING (sis_taxon_id)
-      LEFT JOIN species_gbif a ON a.sis = l.sis_taxon_id AND l.role = 'primary'
-      WHERE l.role = 'primary' OR l.col_id IS NOT NULL
-      QUALIFY row_number() OVER (PARTITION BY l.sis_taxon_id, l.col_id, l.role ORDER BY l.usage_id NULLS LAST) = 1)
-    ORDER BY sis_taxon_id
-  ) TO ${lit(path.join(outDir, syncPath("species_link.parquet")))} (FORMAT parquet, COMPRESSION zstd)`);
 
   // Counted records and GBIF countries per NE species, under the counting rule:
   // its species' usages, minus any an assessed species owns.

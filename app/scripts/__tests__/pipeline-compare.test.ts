@@ -96,18 +96,15 @@ describe("compare over a sync", () => {
       t(id, scientific_name, iucn_category, taxon_group, gbif_species_key, gbif_georeferenced_records_count)`, at("assessed.parquet"));
     await copy(`SELECT * FROM (VALUES (1::BIGINT, 'primary', 'C1', 'accepted'))
       t(sis_taxon_id, role, col_id, method)`, at("assessment_link.parquet"));
-    await copy(`SELECT * FROM (VALUES (1::BIGINT, 1::BIGINT, 'C1', 'accepted', 'redlist'))
-      t(id, sis_taxon_id, col_id, match_method, src)`, at("species_link.parquet"));
     await copy(`SELECT * FROM (VALUES ('C2', 42::BIGINT, 50::BIGINT, 'BR;PE', 'BR;PE;CO', NULL::VARCHAR, 'C2'))
       t(col_id, gbif_georeferenced_records_count, gbif_all_records_count, countries, gbif_all_records_countries, common_name, gbif_species_key)`,
       at("ne.parquet"));
     // C1 is assessed, C3 is domestic, C4 is extinct and not IUCN EX/EW, C5 is outside the base:
     // only C2 is a Not Evaluated species the app lists.
-    await copy(`SELECT * FROM (VALUES ('C1', NULL::VARCHAR), ('C2', NULL), ('C3', 'domesticated'), ('C4', NULL), ('C5', NULL))
-      t(col_id, ne_excluded)`, at("taxa.parquet"));
     const part = path.join(dir, syncPath("species"), "taxon_group=mammals", "part.parquet");
     fs.mkdirSync(path.dirname(part), { recursive: true });
-    await copy(`SELECT * FROM (VALUES
+    // described as the sync sets it: in Base, extant, not excluded (C3 is domestic).
+    await copy(`SELECT *, in_base AND NOT extinct AND col_id <> 'C3' AS described FROM (VALUES
         ('C1', 'Panthera leo', 'Mammalia', 'Carnivora', 'Felidae', 1758, false, true),
         ('C2', '${opts.neName}', 'Mammalia', 'Carnivora', 'Felidae', 1758, false, true),
         ('C3', 'Felis catus', 'Mammalia', 'Carnivora', 'Felidae', 1758, false, true),

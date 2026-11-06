@@ -92,7 +92,7 @@ export async function getLiveBreakdown(nodeId: string): Promise<BreakdownEntry |
     conn,
     speciesGlob: parquetUri("species/**/*.parquet"),
     assessedPath: parquetUri("assessed.parquet"),
-    linkPath: parquetUri("species_link.parquet"),
+    linkPath: parquetUri("assessment_link.parquet"),
     assessedCidsTable: "ne_assessed_col_ids",
     hasTaxa,
     taxaPath: hasTaxa ? parquetUri("taxa.parquet") : undefined,

@@ -18,7 +18,7 @@
  * defined in those terms (exact common name > common-name prefix > scientific prefix).
  *
  * Rows carry the whole SearchResult payload, including the col_id the NE list keys on,
- * so a hit needs no join back to the species parquets and no species_link lookup.
+ * so a hit needs no join back to the species parquets and no link lookup.
  *
  * Covers the fast path only (assessed ∪ GBIF-observed). The CoL-only and synonym tiers
  * are reached solely when nothing here matches, and they already have their own answer:
@@ -30,7 +30,7 @@
  * scans of both parquets. Pre-aggregating here rather than at query time is also what
  * makes the answer deterministic — see the comment on the struct min below.
  *
- * Input: assessed, ne and species_link from data/; the CoL common names from core/;
+ * Input: assessed, ne and assessment_link from data/; the CoL common names from core/;
  * iNaturalist's names. Output: search/name-index.parquet, search/rank-index.parquet.
  *
  *   npx tsx scripts/sync/outputs/build-search-index.ts
@@ -65,7 +65,7 @@ export async function run(opts: { dataDir: string; coreDir: string; inatNames: s
   const dir = opts.dataDir;
   const assessed = path.join(dir, syncPath("assessed.parquet"));
   const ne = path.join(dir, syncPath("ne.parquet"));
-  const link = path.join(dir, syncPath("species_link.parquet"));
+  const link = path.join(dir, syncPath("assessment_link.parquet"));
   // Every alternative common name comes from the last two; without them, they would silently stop matching.
   const altNames = path.join(opts.coreDir, "species-common-names-col.parquet");
   const inatNames = opts.inatNames;
@@ -89,8 +89,8 @@ export async function run(opts: { dataDir: string; coreDir: string; inatNames: s
       LEFT JOIN (
         -- The primary link only: a covered row names another concept the species
         -- is kept out of the NE list under, not the species itself.
-        SELECT id, any_value(col_id) AS col_id FROM read_parquet('${link}')
-        WHERE src = 'redlist' AND col_id IS NOT NULL AND match_method <> 'iucn_synonym_covered' GROUP BY 1
+        SELECT sis_taxon_id AS id, any_value(col_id) AS col_id FROM read_parquet('${link}')
+        WHERE col_id IS NOT NULL AND role = 'primary' GROUP BY 1
       ) ra ON ra.id = a.id
       UNION ALL
       -- Not Evaluated species GBIF has records for, keyed by col_id (also their GBIF key).

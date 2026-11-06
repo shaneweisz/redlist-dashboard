@@ -73,7 +73,7 @@ export interface ColRevisionsFile {
 
 export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   const dataDir = opts.dataDir ?? DATA_DIR;
-  const link = path.join(dataDir, syncPath("species_link.parquet"));
+  const link = path.join(dataDir, syncPath("assessment_link.parquet"));
   const assessedPath = path.join(dataDir, syncPath("assessed.parquet"));
   const speciesGlob = path.join(dataDir, syncPath("species"), "**", "*.parquet");
   const taxaPath = path.join(dataDir, syncPath("taxa.parquet"));
@@ -83,7 +83,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
 
   const conn = await openDuckDB();
   await conn.run(
-    `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE src = 'redlist' AND col_id IS NOT NULL`
+    `CREATE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM read_parquet('${link}') WHERE col_id IS NOT NULL`
   );
   // The infraspecific/provisional reasons need these.
   await conn.run(SPLIT_CANDIDATES_SQL(taxaPath, assessedPath, "assessed_cids"));
@@ -127,7 +127,7 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
   //
   // A split-only species usually has a perfectly clean CoL match, so it has no
   // NoMatchDetail and no col_id from the diagnostic above — the join to
-  // species_link supplies its own CoL record for the flag to link to.
+  // assessment_link supplies its own CoL record for the flag to link to.
   let splitParents = 0;
   // The evidence behind every split: CoL keeps the old infraspecific name as a
   // synonym when one is promoted, so "which accepted species does the name
@@ -156,10 +156,10 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
         AND col_id NOT IN (SELECT col_id FROM assessed_cids)
     ),
     parent_col AS (
-      SELECT l.id AS id, any_value(l.col_id) AS col_id
+      SELECT l.sis_taxon_id AS id, any_value(l.col_id) AS col_id
       FROM read_parquet('${link}') l
-      WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
-      GROUP BY l.id
+      WHERE l.col_id IS NOT NULL AND l.role = 'primary'
+      GROUP BY l.sis_taxon_id
     ),
     -- One split-off species per row, with the oldest-sorting synonym that
     -- points at it as the evidence. More than one can back a split (26% of
@@ -228,8 +228,8 @@ export async function run(opts: { dataDir?: string } = {}): Promise<void> {
       WITH members AS (
         SELECT l.col_id AS col_id, a.id AS id, a.scientific_name AS name, a.iucn_category AS category
         FROM read_parquet('${link}') l
-        JOIN read_parquet('${assessedPath}') a ON a.id = l.id
-        WHERE l.src = 'redlist' AND l.col_id IS NOT NULL AND l.match_method != 'iucn_synonym_covered'
+        JOIN read_parquet('${assessedPath}') a ON a.id = l.sis_taxon_id
+        WHERE l.col_id IS NOT NULL AND l.role = 'primary'
       ),
       groups AS (SELECT col_id FROM members GROUP BY col_id HAVING count(*) > 1),
       pairs AS (
@@ -305,7 +305,7 @@ const renameRows = (await conn.runAndReadAll(`
              b.checklist_parent_id,
              coalesce(b.checklist_name, b.scientific_name) AS self_name
       FROM read_parquet('${assessedPath}') a
-      JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.src = 'redlist'
+      JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id AND l.role = 'primary'
       JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
       WHERE b.rank = 'species'
     ),

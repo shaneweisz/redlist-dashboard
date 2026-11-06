@@ -71,10 +71,10 @@ let neHelpersPromise: Promise<void> | null = null;
 export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
   if (!neHelpersPromise) {
     neHelpersPromise = (async () => {
-      const linkUri = parquetUri("species_link.parquet");
+      const linkUri = parquetUri("assessment_link.parquet");
       const neUri = parquetUri("ne.parquet");
       await conn.run(`CREATE TEMP TABLE ne_assessed_col_ids AS
-        SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE src = 'redlist' AND col_id IS NOT NULL`);
+        SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE col_id IS NOT NULL`);
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
@@ -304,7 +304,7 @@ export async function querySpecies(opts: {
   // this taxon that is NOT IUCN-assessed — keyed by CoL `col_id`, not by name. Name
   // de-duping double-counted: IUCN assesses Hipposideros X while CoL's accepted name
   // is Doryrhina X (a genus reassignment), so the same animal showed once as assessed
-  // and again as "new". species_link bridges both names to one col_id, so de-duping by
+  // and again as "new". assessment_link bridges both names to one col_id, so de-duping by
   // col_id collapses them. Two parts: (A) the CoL extant universe under the taxon minus
   // already-assessed col_ids, with GBIF occurrences overlaid; (B) GBIF-observed species
   // not represented in that universe (orphans). Safety-capped.
@@ -703,7 +703,7 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
   // GBIF-observed. species/ has no common name and can't partition-prune on name, so this
   // full-scans the name column — gated above on the direct search returning nothing, so it
   // holds ALL assessed+GBIF matches (none), and any species/ match is genuinely CoL-only
-  // (name-dedup suffices, no species_link anti-join needed). Render as NE → leaf taxon.
+  // (name-dedup suffices, no link anti-join needed). Render as NE → leaf taxon.
   const seen = new Set(fast.map((r) => r.scientific_name.toLowerCase()));
   const colSql = `
     SELECT col_id, scientific_name, taxon_group, class_name, order_name, family
@@ -834,7 +834,7 @@ export interface SpeciesSynonyms {
 
 // Synonyms (+ accepted name/authorship) for one species, for the detail panel's CoL tab.
 // Resolve the CoL col_id from either the col_id (NE rows carry it) or the sis id (assessed,
-// via species_link), then one scan of backbone for `col_id = c` (the accepted) OR
+// via assessment_link), then one scan of backbone for `col_id = c` (the accepted) OR
 // `parent_id = c` (its synonyms). backbone isn't indexed on these, so it full-scans — fine
 // for a deliberate, cached detail-tab open (not the search hot path).
 /**
@@ -1027,9 +1027,9 @@ export async function getSynonyms(opts: { col?: string | null; sis?: number | nu
   const conn = await getConn();
   let colId = opts.col ?? null;
   if (!colId && opts.sis != null) {
-    const linkUri = parquetUri("species_link.parquet");
+    const linkUri = parquetUri("assessment_link.parquet");
     const r = (await conn.runAndReadAll(
-      `SELECT col_id FROM read_parquet('${linkUri}') WHERE src='redlist' AND id=$id AND col_id IS NOT NULL LIMIT 1`,
+      `SELECT col_id FROM read_parquet('${linkUri}') WHERE role = 'primary' AND sis_taxon_id = $id AND col_id IS NOT NULL`,
       { id: opts.sis })).getRowObjects();
     colId = r.length ? String(r[0].col_id) : null;
   }
