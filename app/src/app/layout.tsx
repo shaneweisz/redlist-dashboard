@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -7,7 +6,7 @@ import { ThemeProvider } from "../components/ThemeProvider";
 import { BrandProvider } from "../components/BrandProvider";
 import { MeProvider } from "../components/MeProvider";
 import { PostHogProvider } from "../components/PostHogProvider";
-import { brandForHost } from "../config/brand";
+import { BRAND } from "../config/brand";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
@@ -26,26 +25,22 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export async function generateMetadata(): Promise<Metadata> {
-  const brand = brandForHost((await headers()).get("host"));
-  return {
-    title: brand.tabTitle ?? brand.title,
-    description: brand.description,
-  };
-}
+export const metadata: Metadata = {
+  title: BRAND.tabTitle ?? BRAND.title,
+  description: BRAND.description,
+};
 
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const brand = brandForHost((await headers()).get("host"));
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <BrandProvider brand={brand}>
+        <BrandProvider brand={BRAND}>
           <MeProvider>
             <PostHogProvider>
               <ThemeProvider>{children}</ThemeProvider>

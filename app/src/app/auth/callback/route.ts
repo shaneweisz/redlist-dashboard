@@ -7,11 +7,11 @@ import { createClient } from "@/lib/supabase/server";
  * URL it is already on.
  *
  * Deliberately not `NextResponse.redirect(absoluteUrl)`: the origin of
- * `request.url` is built from the Host header, and behind the Caddy proxy in
- * front of red.cst.cam.ac.uk / en.ki that header says
- * red-list-dashboard.vercel.app. An absolute redirect therefore threw users off
- * their own domain half-way through sign-in (#416). A relative one keeps them
- * wherever they started, on every domain, with no host detection at all.
+ * `request.url` is built from the Host header, which a Host-rewriting proxy
+ * gets wrong. One used to sit in front of red.cst.cam.ac.uk / en.ki and threw
+ * users off their own domain half-way through sign-in (#416). Those domains
+ * now redirect to dashforlife.org, but a relative Location still keeps users
+ * wherever they started with no host detection at all.
  */
 function redirectToPath(path: string) {
   return new NextResponse(null, { status: 302, headers: { Location: path } });
