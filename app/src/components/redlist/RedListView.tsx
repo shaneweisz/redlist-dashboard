@@ -17,6 +17,7 @@ import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
 import TaxaIcon from "../TaxaIcon";
+import PhotoCredit from "../PhotoCredit";
 import { FaInfoCircle } from "react-icons/fa";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
@@ -624,17 +625,14 @@ function explainCriteria(criteria: string): string {
 }
 
 // The shared enlarged-photo preview (#image-preview, rendered once at the
-// bottom of RedListView): the photo, with its credit overlaid along its
-// bottom edge, which the photo's licence requires wherever it's shown. Placed above the anchor,
-// or below it when preferBelow and there's room.
-function showImagePreview(anchor: DOMRect, src: string, credit: string | null | undefined, preferBelow = false) {
+// bottom of RedListView). Placed above the anchor, or below it when
+// preferBelow and there's room. The photo's credit isn't here: it's the ©
+// on the photo itself (PhotoCredit), since this preview can't be clicked.
+function showImagePreview(anchor: DOMRect, src: string, preferBelow = false) {
   const box = document.getElementById("image-preview");
   const img = box?.querySelector("img");
-  const cap = box?.querySelector<HTMLElement>("[data-credit]");
-  if (!box || !img || !cap) return;
+  if (!box || !img) return;
   img.src = src;
-  cap.textContent = credit ?? "";
-  cap.style.display = credit ? "block" : "none";
   box.style.display = "block";
   box.style.left = `${anchor.left}px`;
   const h = box.offsetHeight;
@@ -4872,14 +4870,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {taxonPhoto ? (
-                <img
-                  src={taxonPhoto.url}
-                  alt=""
-                  className="w-20 h-20 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-zinc-400"
+                <PhotoCredit
+                  credit={taxonPhoto.credit}
+                  className="flex-shrink-0"
                   // Same enlarged hover preview as the species header's photo.
-                  onMouseEnter={(e) => showImagePreview(e.currentTarget.getBoundingClientRect(), taxonPhoto.url, taxonPhoto.credit)}
+                  onMouseEnter={(e) => showImagePreview(e.currentTarget.getBoundingClientRect(), taxonPhoto.url)}
                   onMouseLeave={hideImagePreview}
-                />
+                >
+                  <img src={taxonPhoto.url} alt="" className="block w-20 h-20 object-cover rounded cursor-pointer hover:ring-2 hover:ring-zinc-400" />
+                </PhotoCredit>
               ) : (
                 <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
                   {taxonPhoto === undefined ? (
@@ -4944,17 +4943,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" />
                   </div>
                 ) : details?.inatDefaultImage?.squareUrl ? (
-                  <img
-                    src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
-                    alt=""
-                    className="w-24 h-24 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
+                  <PhotoCredit
+                    credit={details.inatDefaultImage.attribution}
+                    className="flex-shrink-0"
                     onMouseEnter={(e) => showImagePreview(
                       e.currentTarget.getBoundingClientRect(),
                       details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
-                      details.inatDefaultImage?.attribution,
                     )}
                     onMouseLeave={hideImagePreview}
-                  />
+                  >
+                    <img
+                      src={details.inatDefaultImage.mediumUrl || details.inatDefaultImage.squareUrl}
+                      alt=""
+                      className="block w-24 h-24 object-cover rounded cursor-pointer hover:ring-2 hover:ring-red-400"
+                    />
+                  </PhotoCredit>
                 ) : (
                   <div className="w-24 h-24 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
                     <TaxaIcon taxonId={singleSpecies.taxon_id || "all"} size={40} />
@@ -6344,18 +6347,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             <span className="inline-block animate-spin h-4 w-4 border-2 border-zinc-400 border-t-transparent rounded-full" />
                           </div>
                         ) : details?.inatDefaultImage?.squareUrl ? (
-                          <img
-                            src={details.inatDefaultImage.squareUrl}
-                            alt=""
-                            className="w-8 h-8 md:w-10 md:h-10 object-cover rounded flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-red-400"
+                          <PhotoCredit
+                            credit={details.inatDefaultImage.attribution}
+                            className="flex-shrink-0"
+                            iconSize={12}
                             onMouseEnter={(e) => showImagePreview(
                               e.currentTarget.getBoundingClientRect(),
                               details.inatDefaultImage?.mediumUrl || details.inatDefaultImage?.squareUrl || "",
-                              details.inatDefaultImage?.attribution,
                               true,
                             )}
                             onMouseLeave={hideImagePreview}
-                          />
+                          >
+                            <img
+                              src={details.inatDefaultImage.squareUrl}
+                              alt=""
+                              className="block w-8 h-8 md:w-10 md:h-10 object-cover rounded cursor-pointer hover:ring-2 hover:ring-red-400"
+                            />
+                          </PhotoCredit>
                         ) : (
                           <div className="w-8 h-8 md:w-10 md:h-10 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center text-zinc-400 flex-shrink-0">
                             <TaxaIcon taxonId={s.taxon_id || "all"} size={18} />
@@ -6843,9 +6851,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         style={{ display: 'none' }}
       >
         <img alt="" className="block w-48 h-48 object-cover" />
-        {/* Filled by showImagePreview: the photo's credit, small text over
-            the bottom of the photo, on a fade so it reads on any image. */}
-        <span data-credit className="absolute inset-x-0 bottom-0 px-1.5 pt-3 pb-1 text-[9px] leading-snug text-white bg-gradient-to-t from-black/75 to-transparent" />
       </div>
     </div>
   );
