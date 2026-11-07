@@ -1,6 +1,7 @@
-"""Generator for the sync diagrams: boxes on a grid, arrows bound between them.
+"""Generator for the build and API-route diagrams: boxes on a grid, arrows bound between them.
+(The sync's are sync_overview.py and sync_tables.py.)
 
-Usage: python3 -I gen.py <today|target|files|build|routes> <out.excalidraw>
+Usage: python3 -I gen.py <build|routes> <out.excalidraw>
 Render: npx @excalidraw/cli@0.2.0 render <out.excalidraw> --out <out.png> --scale 2
 The .excalidraw files are the editable sources (open them at excalidraw.com).
 Specs are Python functions below returning (nodes, edges, notes).
@@ -117,162 +118,6 @@ def legend(x, y, items):
 
 
 # ---------------------------------------------------------------- specs
-
-def today():
-    heading(0, -150, "Today: 20 steps, API-shaped", 34)
-    heading(0, -100, "Two independent matching chains; counts assembled from API facets via per-group CSVs",
-            17, "#495057")
-    S = {}
-    S["pg"] = box("pg", 0, 0, "IUCN Red List\nPostgres", "source")
-    S["xr"] = box("xr", 0, 2, "CoL XR +\ncurated checklist", "source")
-    S["gapi"] = box("gapi", 0, 4.4, "GBIF API\n(search + match)", "api")
-    S["inat"] = box("inat", 0, 6.6, "iNaturalist", "source")
-
-    S["p1"] = box("p1", 1, 0, "1  fetch-redlist", "phase")
-    S["p24"] = box("p24", 1, 2, "2-4  backbone\n4b  derive root keys", "phase")
-    S["p5"] = box("p5", 1, 3.5, "5  species facets\nper group root", "api")
-    S["p78"] = box("p78", 1, 4.6, "7 countries  8 per-year\n8b lumped keys", "api")
-    S["p6"] = box("p6", 1, 5.7, "6  match SIS → GBIF key\n(one name per request)", "api")
-    S["p8c"] = box("p8c", 1, 6.8, "8c  iNat names", "phase")
-
-    S["rlcsv"] = box("rlcsv", 2, 0, "redlist/*.csv\nhistory/*.json", "file")
-    S["bb"] = box("bb", 2, 2, "backbone.parquet\nspecies/", "file")
-    S["gcsv"] = box("gcsv", 2, 4, "gbif/*.csv\nlumped-own-counts.csv", "file")
-    S["map"] = box("map", 2, 5.7, "mapping.csv\n(key claims, verdicts)", "file")
-
-    S["p9"] = box("p9", 3, 1.6, "9  build-parquet\n(chooseRepresentative,\ncross-group owner)", "phase", h=92)
-    S["p10"] = box("p10", 3, 3.4, "10  build-matching\n(SIS → col_id by name,\n7 passes)", "phase", h=92)
-    S["pq"] = box("pq", 4, 0.6, "assessed / unassessed /\nassessments.parquet", "out")
-    S["sl"] = box("sl", 4, 3.4, "species_link.parquet\n(899k rows, 2 halves)", "out")
-    S["p11"] = box("p11", 5, 1.2, "11, 11b  synonym +\nsearch indexes", "phase")
-    S["p13"] = box("p13", 5, 2.6, "13  taxa-summary\n13a col-revisions", "phase")
-    S["json"] = box("json", 6, 1.9, "summary JSON\n(precomputed AND live)", "out")
-    S["chk"] = box("chk", 5, 4.2, "13b regression check\nvs prod", "phase")
-
-    for a, b in [("pg", "p1"), ("p1", "rlcsv"), ("xr", "p24"), ("p24", "bb"),
-                 ("gapi", "p5"), ("gapi", "p78"), ("gapi", "p6"), ("p5", "gcsv"),
-                 ("p78", "gcsv"), ("p6", "map"), ("inat", "p8c"),
-                 ("rlcsv", "p9"), ("gcsv", "p9"), ("map", "p9"), ("bb", "p9"),
-                 ("p9", "pq"), ("pq", "p10"), ("bb", "p10"), ("p10", "sl"),
-                 ("pq", "p11"), ("sl", "p11"), ("sl", "p13"), ("pq", "p13"),
-                 ("rlcsv", "p13"), ("p13", "json"),
-                 ("pq", "chk")]:
-        arrow(S[a], S[b])
-    arrow(S["gcsv"], S["p13"], via=[(870, 560), (1420, 560)])
-    arrow(S["p8c"], S["p9"], dashed=True)
-    legend(6 * COL_W, 4.2 * ROW_H, [("source", "external input"), ("api", "GBIF API work"),
-                                     ("phase", "phase"), ("file", "intermediate file"),
-                                     ("out", "what the app reads")])
-
-
-def target():
-    heading(0, -150, "Rewrite: three inputs, four tables, one match", 34)
-    heading(0, -100, "Monthly, local on the Mac Studio. Everything the app reads is SQL over the core tables.",
-            17, "#495057")
-    S = {}
-    S["pg"] = box("pg", 0, 0.3, "IUCN Red List\nPostgres", "source")
-    S["xr"] = box("xr", 0, 1.9, "CoL XR (release\nGBIF indexes)\n+ curated checklist", "source", h=86)
-    S["snap"] = box("snap", 0, 3.6, "GBIF monthly\nsnapshot (local\nmirror, 253 GiB)", "source", h=86)
-    S["inat"] = box("inat", 0, 1.1, "iNaturalist\n(names)", "source")
-
-    S["assess"] = box("assess", 1.15, 0.3, "assessments\none row per assessment\nlists as lists", "core", h=86, size=16)
-    S["taxa"] = box("taxa", 1.15, 1.9, "taxa\none row per CoL usage\nlineage, group, names", "core", h=86)
-    S["occ"] = box("occ", 1.15, 3.6, "occurrence_counts\nusage × year × georef\n× basis (+ countries)", "core", h=86)
-
-    S["match"] = box("match", 2.3, 1.1, "match (one step)\nlocal name passes,\nGBIF batch matcher\nfor leftovers", "step", h=104)
-    S["link"] = box("link", 3.3, 1.1, "assessment_link\nSIS → col_id + own usage\nverdict · method · reason\n(one-to-one)", "core", h=104)
-
-    S["sql"] = box("sql", 4.4, 2.3, "SQL read models\n(same modules the\nlive routes run)", "step", h=96)
-
-    S["o1"] = box("o1", 5.5, 0.6, "assessed.parquet\n+ history", "out")
-    S["o2"] = box("o2", 5.5, 1.65, "ne.parquet + species/\n(keyed by col_id)", "out")
-    S["o3"] = box("o3", 5.5, 2.7, "search + synonym\nindexes", "out")
-    S["o4"] = box("o4", 5.5, 3.75, "summaries JSON\n(as of the sync date)", "out")
-
-    S["chk"] = box("chk", 4.4, 4.5, "checks: snapshot complete,\nTable 1a, invariants,\ndiff vs prod", "phase", w=250, h=90)
-    S["pub"] = box("pub", 5.5, 5.0, "R2 upload +\nlatest-sync.txt PR", "app")
-
-    for a, b in [("pg", "assess"), ("xr", "taxa"), ("snap", "occ"),
-                 ("assess", "match"), ("taxa", "match"), ("match", "link"),
-                 ("link", "sql"), ("taxa", "sql"), ("occ", "sql"),
-                 ("sql", "o1"), ("sql", "o2"), ("sql", "o3"), ("sql", "o4"),
-                 ("sql", "chk"), ("chk", "pub")]:
-        arrow(S[a], S[b])
-    arrow(S["inat"], S["taxa"], dashed=True)
-    arrow(S["assess"], S["sql"], via=[(1265, 76)])
-    legend(0, 5.0 * ROW_H, [("source", "external input"), ("core", "core table (source of truth)"),
-                             ("step", "derivation step"), ("out", "what the app reads")])
-
-
-def files():
-    """Every file a sync reads and writes, step by step in sync.ts order, and where each lands."""
-    heading(0, -190, "A sync, step by step: every file it reads and writes, and where it lands", 34)
-    heading(0, -140, "npm run sync (scripts/sync/sync.ts), top to bottom in the order it runs. Paths under ~/.cache/redlist-dashboard/. "
-            "build/data/ is what sync:publish uploads to syncs/<timestamp>/ in R2 and copies to app/data/sync/.", 17, "#495057")
-    heading(0, -110, "sync.log is written throughout.", 17, "#495057")
-    cols = [("inputs and caches", 0.0, 290, "#495057"), ("step", 1.05, 250, "#5f3dc4"),
-            ("build/core/  (working, not published)", 2.0, 320, "#2b8a3e"),
-            ("build/data/  (published)", 3.15, 340, "#d9480f"), ("elsewhere", 4.4, 300, "#1e1e1e")]
-    for title, x, _w, color in cols:
-        heading(x * COL_W, -55, title, 18, color)
-    kinds = {0: "source", 2: "core", 3: "out", 4: "app"}
-    steps = [
-        ("1  inputs\ninputs/col.ts, inat-names.ts", {
-            0: [("col/<xr>/  CoL XR + curated\nchecklist + common names", False), ("inat-names-<month>/\niNaturalist names", False)]}),
-        ("2  taxa\ncore/build-taxa.ts", {
-            2: [("taxa.parquet  159 MB\nevery CoL usage", False)]}),
-        ("3  assessments\ncore/build-assessments.ts", {
-            0: [("Red List Postgres\n(read-only, not cached)", False)],
-            2: [("assessments.parquet  12 MB\nevery assessment", False)]}),
-        ("4  occurrences\ncore/build-occurrences.ts", {
-            0: [("~/Data/gbif/<date>/\nthe snapshot mirror", False), ("occurrences/<date>/parts/\nresumable aggregate", False)],
-            2: [("occurrence_counts  135 MB\nusage x year x georef x type", False),
-                ("occurrence_dates  943 MB\n... x month x day", False),
-                ("occurrence_countries  58 MB", False)]}),
-        ("5  match names\ncore/build-matches.ts", {
-            0: [("matching-ws/export-<xr>/\nthe matcher's index (Docker)", False)],
-            2: [("matches.parquet  6 MB\nthe matcher's answers", False)]}),
-        ("6  link\ncore/build-link.ts", {
-            0: [("core/decisions.tsv\n(in the repo)", False)],
-            2: [("assessment_link.parquet\nSIS id -> CoL species", False)],
-            4: [("build/match-queue.tsv\nthe queue, to review", False)]}),
-        ("7  common names, read models\noutputs/build-common-names.ts,\nbuild-read-models.ts", {
-            2: [("species-common-names-col\n.parquet  (for search)", False), ("species-fallback-display-\nname-col.parquet", False),
-                ("count_components.parquet\nwhat each count is made of", False)],
-            3: [("taxonomy/vernacular-names.json\nnames for the tree's labels", False), ("lists/assessed.parquet  8 MB", False), ("lists/assessments.parquet  4 MB", False),
-                ("lists/species/  29 files, 37 MB", False), ("lists/ne.parquet  34 MB", False),
-                ("taxonomy/taxa.parquet  127 MB\n(9 columns)", False),
-                ("taxonomy/assessment_link (copy)", False)]}),
-        ("8  summaries, indexes\noutputs/build-taxa-summary,\n-col-revisions, -synonym-\nindex, -search-index", {
-            3: [("summaries/  5 JSON, 2.4 MB", False), ("taxonomy/col-*.parquet  3 files", False),
-                ("taxonomy/col-revisions.json", False), ("search/name-index  160 MB", False),
-                ("search/rank-index  3 MB", False), ("search/synonym-index  78 MB", False)],
-            4: [("app/src/config/col-taxon-ids\n.json, col-release.json (repo)", False)]}),
-        ("9  checks\nsync.ts, checks/", {
-            0: [("baseline-<sync>/  prod's\nsync, downloaded once", False)],
-            3: [("sync.json  every input\nversion, check result", False), ("sync.log  everything\nthe run printed", False)],
-            4: [("build/compare/  report.md,\ndiffs.parquet, summary.json", False)]}),
-        ("10  npm run sync:publish\nscripts/sync/publish.ts", {
-            4: [("app/data/sync/ and R2\nsyncs/<timestamp>/", False), ("app/latest-sync.txt\n(the data PR)", False)]}),
-    ]
-    BH, GAP = 54, 12
-    y = 0
-    for n, (label, files) in enumerate(steps):
-        rows = max([len(v) for v in files.values()] + [1])
-        bh = max(rows * (BH + GAP) + GAP, 2 * BH)
-        band = base(f"band{n}", "rectangle", -15, y, 4.4 * COL_W + 300 + 30, bh, "transparent",
-                    "#f1f3f5" if n % 2 == 0 else "#ffffff", strokeWidth=0, roundness=None)
-        elements.append(band)
-        step_h = min(bh - 2 * GAP, 96)
-        box(f"st{n}", 1.05, 0, label, "step", w=250, h=step_h, dy=y + (bh - step_h) / 2, size=14)
-        for col, items in files.items():
-            x, w = [(c[1], c[2]) for c in cols][col]
-            for k, (txt, dashed) in enumerate(items):
-                box(f"f{n}_{col}_{k}", x, 0, txt, kinds[col], w=w, h=BH, dy=y + GAP + k * (BH + GAP), size=13, dashed=dashed)
-        y += bh
-    legend(0, y + 30, [("source", "input or cache"), ("step", "sync step"), ("core", "working table"),
-                        ("out", "published"), ("app", "elsewhere")])
-
 
 def build():
     """Every deploy: what the build fetches and writes, and who reads it."""
@@ -392,7 +237,7 @@ def routes():
 
 
 if __name__ == "__main__":
-    {"today": today, "target": target, "files": files, "build": build, "routes": routes}[sys.argv[1]]()
+    {"build": build, "routes": routes}[sys.argv[1]]()
     doc = {"type": "excalidraw", "version": 2, "source": "redlist-dashboard",
            "elements": elements,
            "appState": {"viewBackgroundColor": "#ffffff", "gridSize": None},
