@@ -6,8 +6,8 @@ import { createPortal } from "react-dom";
 /**
  * Wraps a photo with its credit, which the photo's licence requires wherever
  * it's shown: a small © in the photo's bottom-right corner (on hover, or
- * always on touchscreens, which have no hover) that opens the credit text
- * when clicked. Clicking elsewhere or pressing Escape closes it.
+ * always, smaller and fainter, on touchscreens, which have no hover) that
+ * opens the credit text when clicked. Clicking elsewhere or pressing Escape closes it.
  *
  * Hover handlers for the photo (e.g. an enlarged preview) go on this wrapper
  * rather than the <img>, so moving onto the © doesn't count as leaving it.
@@ -89,8 +89,10 @@ export default function PhotoCredit({
           setOpen((o) => !o);
         }}
         style={{ width: iconSize, height: iconSize, fontSize: Math.round(iconSize * 0.7) }}
-        className={`absolute bottom-0.5 right-0.5 flex items-center justify-center rounded-full bg-black/60 text-white leading-none cursor-pointer transition-opacity hover:bg-black/80 ${
-          open ? "opacity-100" : "opacity-0 group-hover/credit:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+        // On touchscreens it's always visible (no hover to reveal it), so it's
+        // shrunk and faded there to sit quietly on the photo.
+        className={`absolute bottom-0.5 right-0.5 flex origin-bottom-right items-center justify-center rounded-full bg-black/60 text-white leading-none cursor-pointer transition-opacity hover:bg-black/80 [@media(hover:none)]:scale-75 [@media(hover:none)]:bg-black/40 ${
+          open ? "opacity-100" : "opacity-0 group-hover/credit:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-60"
         }`}
       >
         ©
