@@ -1,10 +1,10 @@
 /**
- * Author agreement for the orthographic pass (scripts/sync/core/build-link.ts):
+ * Author agreement for the orthographic pass (scripts/sync/link/assessment-link.ts):
  * IUCN and CoL format one author citation many ways, so equality is too strict,
  * but a different author or year must still refuse.
  */
 import { describe, it, expect } from "vitest";
-import { sameAuthors } from "../sync/core/accept-match";
+import { sameAuthors } from "../sync/link/accept-match";
 
 describe("sameAuthors", () => {
   it.each([

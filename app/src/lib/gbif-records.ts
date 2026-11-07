@@ -9,7 +9,7 @@
  *
  * Both count every record type (the maps apply their own record-type
  * defaults), and the species' own name, synonyms and subspecies the same way
- * (scripts/sync/core/counts.ts). Every GBIF number on the dashboard reads its
+ * (scripts/sync/count/). Every GBIF number on the dashboard reads its
  * mode through here, so the toggle changes them together.
  */
 

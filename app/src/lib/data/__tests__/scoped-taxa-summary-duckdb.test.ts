@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { countryWhere, countriesWhere, scopeWhere, outdatedSql, claimEligibleSiblingsSql } from "@/lib/data/scoped-taxa-summary-duckdb";
+import { countryWhere, countriesWhere, scopeWhere, outdatedSql } from "@/lib/data/scoped-taxa-summary-duckdb";
+import { claimEligibleSiblingsSql } from "@/lib/taxonomy-sql";
 import type { TaxonomyNode } from "@/config/taxonomy-tree";
 
 // Unit tests for the pure SQL-fragment builders in scoped-taxa-summary-duckdb.ts.

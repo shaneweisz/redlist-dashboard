@@ -1427,7 +1427,7 @@ describe.skipIf(!HAS_SUMMARIES)("table1a-children-summaries.json + ssc-group-chi
     ...read("ssc-group-children-summaries.json"),
   };
 
-  it("has entries for all parent nodes in the tree, except 'all' (deliberately excluded — see build-taxa-summary.ts)", () => {
+  it("has entries for all parent nodes in the tree, except 'all' (deliberately excluded — see precomputed/summaries.ts)", () => {
     for (const [id] of NODE_INDEX) {
       if (!hasChildren(id) || id === "all") continue;
       expect(data[id], `missing precomputed entry for parent "${id}"`).toBeDefined();

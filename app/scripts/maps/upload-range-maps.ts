@@ -34,7 +34,7 @@ import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/clien
 import { loadEnvFiles, SyncLogger } from "../lib/utils";
 import { getTaxa, type Taxon } from "../lib/taxa";
 import { connectRedListDb } from "../lib/redlist-db";
-import { CURRENT_TAXON, GLOBAL_ASSESSMENT } from "../sync/core/build-assessments";
+import { CURRENT_TAXON, GLOBAL_ASSESSMENT } from "../sync/sources/assessments";
 import { r2Client } from "../lib/r2";
 
 const R2_PREFIX = "iucn-range-maps";

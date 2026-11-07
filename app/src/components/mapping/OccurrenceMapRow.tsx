@@ -511,7 +511,7 @@ interface OccurrenceMapRowProps {
   scientificName?: string;
   /** This species' native-range countries (ISO 3166-1 alpha-2), per its IUCN Red
    * List assessment's locations (already filtered to origin="Native" upstream in
-   * scripts/sync/core/build-assessments.ts) — the "Red List" native-range source. */
+   * scripts/sync/sources/assessments.ts) — the "Red List" native-range source. */
   nativeCountriesRedList?: string[];
   /** This species' past Red List assessments (most recent one is covered by
    * assessmentDate/assessmentYear above, not repeated here unless the caller's

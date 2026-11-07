@@ -8,6 +8,7 @@ Everything here runs outside the web app, and each folder is one answer to *when
 | [`build/`](build) | every deploy (`prebuild`), and locally on `npm run build` | Vercel | `app/data/sync/` from R2, then static files in `app/public/prebuilt/<sync>/` | [docs/build.md](../../docs/build.md) |
 | [`narratives/`](narratives) | each Red List release (twice a year) | your machine: the Red List database | `narratives/<release>/` in R2 | [README](../../README.md#narrative-search) |
 | [`maps/`](maps) | when a map source changes | your machine | rasters and overlays in the maps bucket, reference data in `src/lib/` | each script's header |
+| [`config/`](config) | by hand, when CoL moves | your machine | committed config in `src/config/` | the script's header |
 | [`lib/`](lib) | (shared) | | | |
 | [`ci/`](ci) | on every pull request | GitHub Actions | the coverage comment | |
 
@@ -15,29 +16,45 @@ Tests for all of them are in [`__tests__/`](__tests__).
 
 ## sync/
 
-The monthly data release. `sync.ts` runs the steps in order; each also runs alone with `npx tsx`.
+The monthly data release. `sync.ts` is the whole sync, read top to bottom: one section per stage, each builder given the tables it reads. Every builder's file starts with its table's description (what a row is, what it is built from, its columns, its decisions); [docs/sync.md](../../docs/sync.md#the-tables) collects them. `npm run sync -- --from <stage>` reruns from a stage on.
 
 | | |
 |---|---|
-| `sync.ts` | the driver: inputs → core → outputs → checks, then `sync.json` |
+| `sync.ts` | the recipe: inputs, then the six stages, then `sync.json` |
+| `paths.ts` | where the cache and the build live (`~/.cache/redlist-dashboard/`), and the name of every file a sync builds |
+| `sql.ts` | `openDuckDB` and small SQL helpers |
 | `publish.ts`, `upload-data-to-r2.ts` | copy a finished build into `app/data/sync/` and upload it as a new sync |
-| `paths.ts` | where the cache and the build live (`~/.cache/redlist-dashboard/`) |
-| **`inputs/`** | what a sync is built from, each cached by version |
+| **`inputs/`** | fetch and cache each input, by version |
 | `col.ts`, `col-xr.ts`, `col-checklist.ts` | Catalogue of Life: the XR GBIF indexes, the curated checklist, Base sources |
 | `inat-names.ts` | iNaturalist's English common names |
+| `gbif-snapshot.ts` | the GBIF snapshot mirror: found, checked complete, reduced once to per-usage counts |
 | `matcher.ts` | GBIF's name matcher (matching-ws), built and served in Docker |
-| **`core/`** | the four source-of-truth tables, and the rules that make them |
-| `build-taxa.ts`, `build-assessments.ts`, `build-occurrences.ts` | CoL usages, Red List assessments, GBIF record counts |
-| `build-matches.ts`, `accept-match.ts`, `decisions.ts`, `decisions.tsv`, `build-link.ts` | which CoL species each assessed species is |
-| `counts.ts` | the counting rule |
-| `species-key.ts`, `name-variants.ts`, `taxon-groups.ts` | the concept rules, name spellings, Table 1a groups |
-| **`outputs/`** | what the app reads, built from the core tables |
-| `build-read-models.ts` | `assessed`, `ne`, `species/` and the other parquets |
-| `build-taxa-summary.ts`, `build-col-revisions.ts`, `build-synonym-index.ts`, `build-search-index.ts`, `build-col-taxon-ids.ts`, `build-common-names.ts` | summaries, the CoL-revision flag, the search and synonym indexes, CoL ids for the taxonomy tree, common names; all called by `sync.ts` |
-| `derive-gbif-taxon-keys.ts` | by hand, with `--write`, when CoL moves: the group root keys the country-stats route queries GBIF with (`src/config/gbif-taxon-keys.json`) |
-| **`checks/`** | what a build is held to before it is published |
+| **`sources/`** | 1: each input as one clean table |
+| `taxa.ts`, `taxon-groups.ts` | every CoL usage, with its species and Table 1a group |
+| `assessments.ts` | every global assessment, from the Red List database (read-only) |
+| `occurrences.ts` | GBIF records per usage, georeferenced or not, by date; and by country |
+| `common-names.ts` | every common name CoL and iNaturalist give, and the one each would show |
+| **`link/`** | 2: which CoL species each assessed species is |
+| `matches.ts` | GBIF's matcher's answer for every Red List name |
+| `accept-match.ts`, `decisions.ts` | when the matcher's answer is taken without review; people's decisions otherwise |
+| `assessment-link.ts`, `species-key.ts`, `name-variants.ts` | the link table and its concept rules |
+| **`count/`** | 3: whose records each GBIF usage's are |
+| `usage-owners.ts` | `usage_owner`: the counting rule, as a table |
+| `record-counts.ts` | each species' totals, in both record modes and since its assessment |
+| **`lists/`** | 4: what the app reads, joins only: `assessed.ts`, `assessment-history.ts`, `species.ts`, `ne.ts`, `app-taxonomy.ts`, `vernacular-names.ts` |
+| **`precomputed/`** | 5: the app's own queries, run ahead of time |
+| `col-differences.ts`, `col-revisions.ts` | the CoL-differences card's tables and per-species flags |
+| `summaries.ts` | per-group, per-country and per-tree-node totals |
+| `search-index.ts`, `synonym-index.ts` | the search bar's indexes |
+| `col-taxon-ids.ts` | the CoL id of every taxonomy-tree name (written into `src/config/`) |
+| **`checks/`** | 6: what a build is held to before it is published |
 | `check-fixtures.ts`, `fixtures/matching.ts` | 50 named matching cases |
 | `compare.ts`, `compare/`, `baseline.ts` | the field-by-field comparison with the sync production serves |
+| **`seeds/`** | every decision a person made, one TSV per kind, each row with its reason (`seeds.ts` lists them) |
+
+## config/
+
+`derive-gbif-taxon-keys.ts`: by hand, with `--write`, when CoL moves: the group root keys the country-stats route queries GBIF with (`src/config/gbif-taxon-keys.json`).
 
 ## build/
 
