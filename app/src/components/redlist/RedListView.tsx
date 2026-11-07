@@ -28,7 +28,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { type HistBin, type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -599,22 +599,11 @@ const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
 /** Where a species sits on the priority scatter; null when it has no assessment date or no record window. */
-function priorityYears(s: Species): number | null {
-  if (s.category === "NE" || !s.assessment_date) return null;
+function priorityOf(s: Species): { years: number; newRecords: number } | null {
+  if (s.category === "NE" || !s.assessment_date || s.gbif_records_since_assessment == null) return null;
   const years = yearsSince(s.assessment_date);
-  return isNaN(years) ? null : years;
+  return isNaN(years) ? null : { years, newRecords: s.gbif_records_since_assessment };
 }
-
-// The priority scatter's edge histograms, placed on its axes: each bucket's
-// span in years since assessment, and in raw GBIF values.
-const YEAR_RANGE_SPANS: Record<string, [number, number]> = {
-  "<1 year": [0, 1], "1-5 years": [1, 5], "5-10 years": [5, 10], "10-20 years": [10, 20], "20+ years": [20, Infinity],
-};
-const GBIF_BUCKET_SPANS: Record<string, [number, number]> = {
-  "0": [0, 1], "1-10": [1, 10], "11-100": [10, 100], "101-1K": [100, 1000], "1K-10K": [1000, 10000], "10K+": [10000, Infinity],
-  "0%": [0, 1], "<10%": [1, 10], "10-25%": [10, 25], "25-50%": [25, 50], "50%+": [50, 100],
-};
-const SKIP_PRIORITY_AXES = skipSet("priority", "years", "assessmentYears", "obs");
 
 // Explain IUCN Red List criteria codes
 // See: https://www.iucnredlist.org/resources/categories-and-criteria
@@ -2569,26 +2558,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }));
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
 
-  // Priority scatter: every assessed species passing every filter but its own
-  // box and its two axes' histograms. A species outside a histogram selection
-  // is faded rather than dropped, as the bar charts mute rather than remove.
+  // Priority scatter: every assessed species passing every filter but its own box.
   const priorityPoints = useMemo((): PriorityPoint[] => {
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
     for (const s of taxaFilteredSpecies) {
-      const years = priorityYears(s);
-      const value = gbifMetricValue(s, gbifChartKey);
-      if (years == null || value == null || !matchesFilters(s, SKIP_PRIORITY_AXES)) continue;
+      const p = priorityOf(s);
+      if (!p || !matchesFilters(s, SKIP_PRIORITY)) continue;
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
-        years, value, total: s.gbif_records ?? null, newRecords: s.gbif_records_since_assessment ?? null,
-        assessmentDate: s.assessment_date!, dim: !matchesFilters(s, SKIP_PRIORITY),
+        total: s.gbif_records ?? null, assessmentDate: s.assessment_date!, ...p,
       });
     }
     return out;
-  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, gbifChartKey]);
+  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments]);
   const priorityInBox = useMemo(
-    () => priorityBox ? priorityPoints.filter((p) => !p.dim && priorityBox.keys.has(p.key)).length : 0,
+    () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
   );
 
@@ -3639,30 +3624,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       setter(prev => isAdditive ? new Set([...prev, ...keys]) : new Set(keys));
     }, []);
   const rangeSelectCategories = useMemo(() => makeRangeSelect(setSelectedCategories), [makeRangeSelect, setSelectedCategories]);
-  // The priority scatter's edge histograms: the Years Since Assessed chart
-  // (age buckets, or one bar per assessment year) along the top, the GBIF
-  // Records chart up the side, each on the scatter's own axis and filtering
-  // through the same handlers and URL state as those charts did.
-  const priorityXBins = useMemo((): HistBin[] => {
-    if (yearsChartMode === "range") {
-      return assessmentYearData.map((r) => {
-        const [from, to] = YEAR_RANGE_SPANS[r.range] ?? [0, 0];
-        return { key: r.range, from, to, count: r.count, title: r.range, label: r.label, selected: yearRangeSelectedItems.has(r.range) };
-      });
-    }
-    return assessmentYearsByYearData.map((d) => ({
-      key: d.code,
-      from: Math.max(0, yearsSince(`${d.code}-12-31`)),
-      to: Math.max(0, yearsSince(`${d.code}-01-01`)),
-      count: d.count, title: `Assessed in ${d.code}`, label: d.label,
-      selected: assessmentYearSelectedItems.has(d.code),
-    }));
-  }, [yearsChartMode, assessmentYearData, assessmentYearsByYearData, yearRangeSelectedItems, assessmentYearSelectedItems]);
-  const priorityYBins = useMemo((): HistBin[] => gbifObsData.map((r) => {
-    const [from, to] = GBIF_BUCKET_SPANS[r.range] ?? [0, 0];
-    return { key: r.range, from, to, count: r.count, title: `${r.range} ${gbifKeyParts(gbifChartKey).metric === "pctNew" ? "new" : "records"}`, label: r.label, selected: gbifRanges[gbifChartKey].has(r.range) };
-  }), [gbifObsData, gbifRanges, gbifChartKey]);
-
   const rangeSelectYearRanges = useMemo(() => makeRangeSelect(setSelectedYearRanges), [makeRangeSelect, setSelectedYearRanges]);
   const rangeSelectAssessmentYears = useMemo(() => makeRangeSelect(setSelectedAssessmentYears), [makeRangeSelect, setSelectedAssessmentYears]);
   const rangeSelectObsRanges = useMemo(() => makeRangeSelect((u) => setGbifRanges(gbifChartKey, u)), [makeRangeSelect, setGbifRanges, gbifChartKey]);
@@ -5098,15 +5059,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             );
           })()}
 
-          {/* Charts row 1: bar charts (new-assessments mode only shows GBIF Observations).
-              With the priority scatter (a group of assessed species), it is instead
-              Conservation Status over the Country map on the left and the scatter on
-              the right: the scatter's edge histograms replace the Years Since
-              Assessed and GBIF Records charts. */}
+          {/* Charts row 1: bar charts (new-assessments mode only shows GBIF Observations) */}
           {!isNewAssessments && (
-          <div className={showPriority ? "grid grid-cols-1 lg:grid-cols-5 gap-3 mb-4" : "grid grid-cols-1 sm:grid-cols-3 gap-4"}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Conservation Status */}
-            <div className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col ${showPriority ? "lg:col-span-2 lg:row-start-1" : ""}`}>
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Conservation Status</span>
                 {!(isSingleSpecies && singleSpecies) && (
@@ -5160,7 +5117,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             </div>
 
             {/* Years Since Assessed / Year of Latest Assessment */}
-            {!showPriority && (<>
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               {/* Little room here: the title, the "10+ yrs old" button and the view
                   select only just fit on one line at the 3-up grid's widest (the
@@ -5296,40 +5252,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 ) : null}
               </div>
             </div>
-            </>)}
-            {showPriority && (<>
+          </div>
+          )}
+
+          {/* Reassessment priority (prototype): years since assessment against
+              GBIF records since, so "outdated AND new evidence" is one corner. */}
+          {showPriority && (
+            <div className="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
             {/* countryMapCard is wrapped in a plain div; making that a flex column
-                lets the card inside fill its row. */}
-            <div className="lg:col-span-2 lg:row-start-2 min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
-            <div className="lg:col-span-3 lg:col-start-3 lg:row-start-1 lg:row-span-2 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+                lets the card inside fill the row's height beside the scatter. */}
+            <div className="lg:col-span-2 min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
+            <div className="lg:col-span-3 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Years Since Assessed × GBIF Records</span>
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Priority</span>
+                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Years since assessed vs GBIF records since · drag to select</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-1">
-                  {/* x axis: the Years Since Assessed chart's controls */}
-                  <button
-                    type="button"
-                    onClick={handleOutdatedClick}
-                    className={chartControlClass(isOutdatedSelected, "bg-red-600 text-white border-red-600")}
-                    aria-pressed={isOutdatedSelected}
-                    title={`Filter to species last assessed before ${outdatedCutoffDate(dataAsOf).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
-                  >
-                    10+ yrs old
-                  </button>
-                  <select
-                    value={yearsChartMode}
-                    onChange={(e) => setYearsChartMode(e.target.value as "range" | "year")}
-                    aria-label="Top histogram: age ranges or assessment years"
-                    className={CHART_SELECT_CLASS}
-                  >
-                    <option value="range">Range</option>
-                    <option value="year">Year</option>
-                  </select>
-                  <span className="mx-0.5 h-4 w-px bg-zinc-200 dark:bg-zinc-700" aria-hidden />
-                  {/* y axis: the GBIF Records chart's controls. The box is in the
-                      old metric's units, so a metric change clears it. */}
-                  <GbifChartControls value={gbifChartKey} onChange={(k) => { setGbifChartKey(k); setPriorityBox(null); }} showMetric />
+                <div className="flex items-center gap-1">
                   {priorityBox && (
                     <button type="button" onClick={() => setPriorityBox(null)}
                       className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
@@ -5339,7 +5278,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
               </div>
               {speciesLoading && assessedSpecies.length === 0 ? (
-                <div className="flex-1 min-h-[420px] flex items-center justify-center"><Spinner /></div>
+                <div className="h-[280px] flex items-center justify-center"><Spinner /></div>
               ) : (
                 <PriorityScatter
                   points={priorityPoints}
@@ -5348,19 +5287,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onBoxChange={setPriorityBox}
                   onPointClick={openSpeciesFromScatter}
                   selectedKey={selectedSpeciesKey}
-                  yScale={gbifKeyParts(gbifChartKey).metric === "pctNew" ? "pct" : "log"}
-                  yTitle={`${GBIF_METRIC_LABEL[gbifKeyParts(gbifChartKey).metric]} GBIF records · ${GBIF_RECORD_MODE_LABEL[gbifKeyParts(gbifChartKey).mode].toLowerCase()}`}
-                  xBins={priorityXBins}
-                  yBins={priorityYBins}
-                  onXBin={(key, e) => (yearsChartMode === "range"
-                    ? handleYearClick({ payload: { range: key } }, e)
-                    : handleAssessmentYearClick({ payload: { code: key } }, e))}
-                  onYBin={(key, e) => handleObsClick({ payload: { range: key } }, e)}
                 />
               )}
             </div>
-            </>)}
-          </div>
+            </div>
           )}
 
           {/* Charts row 2 (new-assessments mode only): Country map + Year
