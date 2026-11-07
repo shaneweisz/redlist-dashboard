@@ -3,14 +3,15 @@
 /**
  * Reassessment priority: one dot per assessed species, years since its latest
  * assessment across, GBIF records dated after that assessment up (log scale),
- * coloured by Red List category. The top-right corner is "outdated, and new
- * evidence has arrived since". Drag a box to filter the page to the species
- * inside it; click a dot to open that species.
+ * coloured by Red List category: the top right is outdated with plenty of new
+ * evidence since. Drag a box to filter the page to the species inside it;
+ * click a dot to open that species.
  *
  * Canvas rather than SVG: "All species" is ~175k dots. Hover and the drag box
  * are DOM overlays, so the canvas only redraws when the data or box changes.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { yearsMonthsSince } from "@/lib/outdated";
 
 export interface PriorityPoint {
   key: string;
@@ -21,26 +22,34 @@ export interface PriorityPoint {
   years: number;
   /** GBIF records dated after the assessment (current record mode). */
   newRecords: number;
+  /** All GBIF records (current record mode). */
+  total: number | null;
+  assessmentDate: string;
 }
 
-/** A selection in data units: years, and log10(newRecords + 1). */
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number }
+/**
+ * A selection: the box in data units (years, log10(newRecords + 1)), for
+ * drawing, and the species whose dots were inside it as drawn. Filtering by
+ * the keys rather than re-testing the box keeps it exactly what you see: dots
+ * are jittered a few pixels, so a tight box around one dot could miss its
+ * unjittered position and select nothing.
+ */
+export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
 
-export const pointY = (newRecords: number) => Math.log10(newRecords + 1);
-export const inBox = (box: PriorityBox, years: number, newRecords: number) => {
-  const y = pointY(newRecords);
-  return years >= box.x0 && years <= box.x1 && y >= box.y0 && y <= box.y1;
-};
-
-/** The corner the chart highlights: assessed 10+ years ago, 100+ new records since. */
-export const OUTDATED_YEARS = 10;
-export const NEW_EVIDENCE_RECORDS = 100;
+const pointY = (newRecords: number) => Math.log10(newRecords + 1);
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
 const M = { left: 44, right: 12, top: 10, bottom: 28 };
 const HEIGHT = 280;
 const HIT_RADIUS = 6;
+
+/** "10 years, 3 months ago", "4 months ago", "this month". */
+function ageText(date: string): string {
+  const { years, months } = yearsMonthsSince(date);
+  const parts = [years ? `${years} year${years === 1 ? "" : "s"}` : "", months ? `${months} month${months === 1 ? "" : "s"}` : ""].filter(Boolean);
+  return parts.length ? `${parts.join(", ")} ago` : "this month";
+}
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
@@ -73,7 +82,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   // Scales. X runs to the oldest assessment (rounded up to 5 years); Y to the
   // largest count's power of ten.
   const scales = useMemo(() => {
-    let maxYears = OUTDATED_YEARS * 2, maxY = 3;
+    let maxYears = 10, maxY = 3;
     for (const p of points) {
       if (p.years > maxYears) maxYears = p.years;
       const y = pointY(p.newRecords);
@@ -113,12 +122,6 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     return { ordered, xy, grid, cell };
   }, [points, scales]);
 
-  const corner = useMemo(() => {
-    let n = 0;
-    for (const p of points) if (p.years >= OUTDATED_YEARS && p.newRecords >= NEW_EVIDENCE_RECORDS) n++;
-    return n;
-  }, [points]);
-
   // Draw.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -130,11 +133,6 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, HEIGHT);
     const { sx, sy, xMax, yMax, plotW, plotH } = scales;
-
-    // The highlighted corner.
-    const cx = sx(OUTDATED_YEARS), cy = sy(pointY(NEW_EVIDENCE_RECORDS));
-    ctx.fillStyle = "rgba(239, 68, 68, 0.06)";
-    ctx.fillRect(cx, M.top, M.left + plotW - cx, cy - M.top);
 
     // Grid and ticks.
     ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
@@ -153,20 +151,13 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ctx.fillText(`${yr}y`, x, M.top + plotH + 6);
     }
 
-    // Threshold lines.
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(161, 161, 170, 0.6)";
-    ctx.beginPath(); ctx.moveTo(Math.round(cx) + 0.5, M.top); ctx.lineTo(Math.round(cx) + 0.5, M.top + plotH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(M.left, Math.round(cy) + 0.5); ctx.lineTo(M.left + plotW, Math.round(cy) + 0.5); ctx.stroke();
-    ctx.setLineDash([]);
-
     // Dots.
     const { ordered, xy } = layout;
     const big = ordered.length > 20000;
     const r = big ? 1.2 : 2.4;
     for (let i = 0; i < ordered.length; i++) {
       const p = ordered[i];
-      const dim = box ? !inBox(box, p.years, p.newRecords) : false;
+      const dim = box ? !box.keys.has(p.key) : false;
       ctx.globalAlpha = dim ? 0.12 : big ? 0.5 : 0.75;
       ctx.fillStyle = colors[p.category] || "#a1a1aa";
       const x = xy[i * 2], y = xy[i * 2 + 1];
@@ -212,10 +203,15 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const moved = Math.abs(x - drag.x0) > 4 || Math.abs(y - drag.y0) > 4;
     if (moved) {
       const { ix, iy } = scales;
-      onBoxChange({
-        x0: Math.max(0, ix(Math.min(drag.x0, x))), x1: ix(Math.max(drag.x0, x)),
-        y0: Math.max(0, iy(Math.max(drag.y0, y))), y1: iy(Math.min(drag.y0, y)),
-      });
+      const left = Math.min(drag.x0, x), right = Math.max(drag.x0, x);
+      const top = Math.min(drag.y0, y), bottom = Math.max(drag.y0, y);
+      const keys = new Set<string>();
+      const { ordered, xy } = layout;
+      for (let i = 0; i < ordered.length; i++) {
+        const px = xy[i * 2], py = xy[i * 2 + 1];
+        if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
+      }
+      onBoxChange({ x0: Math.max(0, ix(left)), x1: ix(right), y0: Math.max(0, iy(bottom)), y1: iy(top), keys });
       return;
     }
     const i = hitTest(x, y);
@@ -223,8 +219,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     else if (box) onBoxChange(null);
   };
 
-  // Clamped to the plot: the corner shortcut's box runs to "any age, any count"
-  // (x1/y1 far past the axes), which unclamped drew across the whole page.
+  // Clamped to the plot, so a box dragged past an axis stays inside the chart
   const boxPx = box && width > 0 ? (() => {
     const cx = (v: number) => Math.min(Math.max(v, 0), scales.xMax);
     const cy = (v: number) => Math.min(Math.max(v, 0), scales.yMax);
@@ -249,13 +244,6 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       onMouseLeave={() => { setHover(null); setDrag(null); }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
-      {width > 0 && (
-        <div className="pointer-events-none absolute text-[10px] leading-[13px] text-right text-red-600/80 dark:text-red-400/80"
-          style={{ right: M.right + 6, top: M.top + 4 }}>
-          <div className="font-semibold">Outdated, with new evidence</div>
-          <div>{OUTDATED_YEARS}+ yrs since assessed · {NEW_EVIDENCE_RECORDS}+ new records · {corner.toLocaleString()} species</div>
-        </div>
-      )}
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />
@@ -280,11 +268,15 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
             {hover.p.commonName && <div className="text-zinc-500 dark:text-zinc-400">{hover.p.commonName}</div>}
             <div className="mt-0.5 text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
               <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
-              {" · "}assessed {hover.p.years.toFixed(1)} yrs ago
+              {" · "}assessed {ageText(hover.p.assessmentDate)}
             </div>
-            <div className="text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">{hover.p.newRecords.toLocaleString()}</span> GBIF records since
-            </div>
+            <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
+              <tbody>
+                <tr><td className="pr-3">GBIF records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">At assessment</td><td className="text-right">{hover.p.total != null ? Math.max(0, hover.p.total - hover.p.newRecords).toLocaleString() : "—"}</td></tr>
+                <tr><td className="pr-3">Since</td><td className="text-right">{hover.p.newRecords.toLocaleString()}</td></tr>
+              </tbody>
+            </table>
             <div className="mt-0.5 text-zinc-400">Click to open · drag to select an area</div>
           </div>
         </>

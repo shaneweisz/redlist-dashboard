@@ -27,7 +27,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { inBox, NEW_EVIDENCE_RECORDS, OUTDATED_YEARS, pointY, type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -40,7 +40,7 @@ import { HABITAT_CATEGORIES } from "@/lib/habitat-classification";
 import { parseHabitatEntries, matchesHabitatFilter as matchesHabitatCriteria, coarseKnownCategories, isRestrictiveSelection, ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { type RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { useSpeciesCache } from "@/contexts/SpeciesCacheContext";
-import { isOutdated, outdatedCutoffDate } from "@/lib/outdated";
+import { isOutdated, outdatedCutoffDate, yearsSince } from "@/lib/outdated";
 
 import CandidatesTable from "../CandidatesTable";
 import type { CreditRole } from "@/lib/credit-candidates";
@@ -598,10 +598,10 @@ const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
 /** Where a species sits on the priority scatter; null when it has no assessment date or no record window. */
-const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 function priorityOf(s: Species): { years: number; newRecords: number } | null {
   if (s.category === "NE" || !s.assessment_date || s.gbif_records_since_assessment == null) return null;
-  return { years: (Date.now() - new Date(s.assessment_date).getTime()) / MS_PER_YEAR, newRecords: s.gbif_records_since_assessment };
+  const years = yearsSince(s.assessment_date);
+  return isNaN(years) ? null : { years, newRecords: s.gbif_records_since_assessment };
 }
 
 // Explain IUCN Red List criteria codes
@@ -1874,15 +1874,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const matchesYearRangeFilter = useCallback((assessmentDate: string | null, yearRanges: Set<string> = selectedYearRanges): boolean => {
     if (yearRanges.size === 0) return true;
     if (!assessmentDate) return false;
-    const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
-    const yearsSince = (Date.now() - new Date(assessmentDate).getTime()) / msPerYear;
+    const years = yearsSince(assessmentDate);
     for (const range of yearRanges) {
       switch (range) {
-        case "<1 year": if (yearsSince < 1) return true; break;
-        case "1-5 years": if (yearsSince >= 1 && yearsSince < 5) return true; break;
-        case "5-10 years": if (yearsSince >= 5 && yearsSince < 10) return true; break;
-        case "10-20 years": if (yearsSince >= 10 && yearsSince < 20) return true; break;
-        case "20+ years": if (yearsSince >= 20) return true; break;
+        case "<1 year": if (years < 1) return true; break;
+        case "1-5 years": if (years >= 1 && years < 5) return true; break;
+        case "5-10 years": if (years >= 5 && years < 10) return true; break;
+        case "10-20 years": if (years >= 10 && years < 20) return true; break;
+        case "20+ years": if (years >= 20) return true; break;
       }
     }
     return false;
@@ -2225,11 +2224,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Reassessment priority scatter (prototype): the box dragged on it filters
   // the page like any chart. Local state for now, not in the URL.
   const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
-  const matchesPriorityBox = useCallback((s: Species): boolean => {
-    if (!priorityBox) return true;
-    const p = priorityOf(s);
-    return p != null && inBox(priorityBox, p.years, p.newRecords);
-  }, [priorityBox]);
+  const matchesPriorityBox = useCallback(
+    (s: Species): boolean => !priorityBox || priorityBox.keys.has(s.species_key),
+    [priorityBox],
+  );
 
   const taxaFilteredSpecies = useMemo(() => {
     if (!singleSpeciesPreview) return taxaFilteredSpeciesNoPreview;
@@ -2436,8 +2434,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // isOutdated() threshold (>10 years) so the Outdated toggle mutes rather than
   // zeroes out the buckets that don't match.
   const assessmentYearData = useMemo(() => {
-    const now = Date.now();
-    const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
+    const now = new Date();
     const ranges = [
       { range: "<1 year", shortRange: "<1y", count: 0, minYear: 0 },
       { range: "1-5 years", shortRange: "1-5y", count: 0, minYear: 1 },
@@ -2448,11 +2445,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
-      const yearsSince = (now - new Date(s.assessment_date).getTime()) / msPerYear;
-      if (yearsSince < 1) ranges[0].count++;
-      else if (yearsSince < 5) ranges[1].count++;
-      else if (yearsSince < 10) ranges[2].count++;
-      else if (yearsSince < 20) ranges[3].count++;
+      const years = yearsSince(s.assessment_date, now);
+      if (years < 1) ranges[0].count++;
+      else if (years < 5) ranges[1].count++;
+      else if (years < 10) ranges[2].count++;
+      else if (years < 20) ranges[3].count++;
       else ranges[4].count++;
     });
     const total = ranges.reduce((sum, r) => sum + r.count, 0);
@@ -2548,12 +2545,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     for (const s of taxaFilteredSpecies) {
       const p = priorityOf(s);
       if (!p || !matchesFilters(s, SKIP_PRIORITY)) continue;
-      out.push({ key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category, ...p });
+      out.push({
+        key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
+        total: s.gbif_records ?? null, assessmentDate: s.assessment_date!, ...p,
+      });
     }
     return out;
   }, [taxaFilteredSpecies, matchesFilters, isNewAssessments]);
   const priorityInBox = useMemo(
-    () => priorityBox ? priorityPoints.filter((p) => inBox(priorityBox, p.years, p.newRecords)).length : 0,
+    () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
   );
 
@@ -3096,6 +3096,29 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // species should keep showing the regular charts view.
   const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
+  const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
+
+  // Clicking a dot on the priority scatter opens that species in the table and
+  // scrolls to it: turn to the page it is on, then scroll once the row renders.
+  // A dot outside the scatter's own box is faded but still clickable; its
+  // species isn't in the table, so the box is cleared first.
+  const [scrollToSpecies, setScrollToSpecies] = useState<string | null>(null);
+  const openSpeciesFromScatter = useCallback((key: string) => {
+    if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
+    setSelectedSpeciesKey(key);
+    setScrollToSpecies(key);
+  }, [priorityBox, setSelectedSpeciesKey]);
+  useEffect(() => {
+    if (!scrollToSpecies) return;
+    const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
+    if (index < 0) return; // not in the table (yet): wait for the next render
+    const page = Math.floor(index / pageSize) + 1;
+    if (page !== currentPage) { setCurrentPage(page); return; }
+    const row = document.querySelector(`[data-species-row="${CSS.escape(scrollToSpecies)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "start" });
+    setScrollToSpecies(null);
+  }, [scrollToSpecies, sortedSpecies, pageSize, currentPage]);
   const singleSpeciesAssessors = useMemo(() => singleSpecies ? getSpeciesAssessors(singleSpecies) : [], [singleSpecies, getSpeciesAssessors]);
   const singleSpeciesReviewers = useMemo(() => singleSpecies ? getSpeciesReviewers(singleSpecies) : [], [singleSpecies, getSpeciesReviewers]);
   const singleSpeciesFacilitators = useMemo(() => singleSpecies ? getSpeciesFacilitators(singleSpecies) : [], [singleSpecies, getSpeciesFacilitators]);
@@ -5055,10 +5078,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       if (!singleSpecies.assessment_date) return (
                         <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">N/A</span>
                       );
-                      const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
-                      const elapsed = Date.now() - new Date(singleSpecies.assessment_date).getTime();
-                      const yearsSince = elapsed / msPerYear;
-                      const range = yearsSince < 1 ? "<1y" : yearsSince < 5 ? "1-5y" : yearsSince < 10 ? "5-10y" : yearsSince < 20 ? "10-20y" : ">20y";
+                      const years = yearsSince(singleSpecies.assessment_date);
+                      const range = years < 1 ? "<1y" : years < 5 ? "1-5y" : years < 10 ? "5-10y" : years < 20 ? "10-20y" : ">20y";
                       return (
                         <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                           {range}
@@ -5132,25 +5153,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {/* Reassessment priority (prototype): years since assessment against
               GBIF records since, so "outdated AND new evidence" is one corner. */}
-          {!isNewAssessments && !(isSingleSpecies && singleSpecies) && (
-            <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+          {showPriority && (
+            <div className="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
+            {/* countryMapCard is wrapped in a plain div; making that a flex column
+                lets the card inside fill the row's height beside the scatter. */}
+            <div className="lg:col-span-2 min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
+            <div className="lg:col-span-3 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Priority</span>
                   <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Years since assessed vs GBIF records since · drag to select</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  {priorityBox ? (
+                  {priorityBox && (
                     <button type="button" onClick={() => setPriorityBox(null)}
-                      className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-red-600 text-white border-red-600")}`}>
+                      className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
                       {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                    </button>
-                  ) : (
-                    <button type="button"
-                      onClick={() => setPriorityBox({ x0: OUTDATED_YEARS, x1: 1000, y0: pointY(NEW_EVIDENCE_RECORDS), y1: 99 })}
-                      className={chartControlClass(false, "")}
-                      title={`Species last assessed ${OUTDATED_YEARS}+ years ago with ${NEW_EVIDENCE_RECORDS}+ GBIF records since`}>
-                      Select outdated with new evidence
                     </button>
                   )}
                 </div>
@@ -5163,10 +5181,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   colors={CATEGORY_COLORS}
                   box={priorityBox}
                   onBoxChange={setPriorityBox}
-                  onPointClick={(key) => setSelectedSpeciesKey(key)}
+                  onPointClick={openSpeciesFromScatter}
                   selectedKey={selectedSpeciesKey}
                 />
               )}
+            </div>
             </div>
           )}
 
@@ -5278,8 +5297,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           {!isNewAssessments && moreFiltersOpen && (
             <>
                 {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
+                {/* With the priority scatter showing, Country sits beside it above,
+                    so the CoL differences card takes its place here. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {countryMapCard}
+                  {!showPriority && countryMapCard}
                   {isSingleSpecies && singleSpecies ? (() => {
                     // Facilitators are absent on ~62% of latest assessments, and
                     // contributors (~67%) and institutions (~81%) more often still —
@@ -5335,6 +5356,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       loading={speciesLoading && assessedSpecies.length === 0}
                     />
                   )}
+                  {showPriority && taxonomicRevisionCard}
                 </div>
 
                 {/* Growth Form (plants/fungi only) */}
@@ -5550,7 +5572,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     property of an IUCN assessment's name, so it has no meaning
                     in the Not Evaluated (new-assessments) view, whose rows are
                     CoL species with no assessment to disagree with. */}
-                {!isNewAssessments && (
+                {!isNewAssessments && !showPriority && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {taxonomicRevisionCard}
                   </div>
@@ -6182,7 +6204,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 const assessmentDateObj = s.assessment_date ? new Date(s.assessment_date) : null;
                 const assessmentYear = assessmentDateObj ? assessmentDateObj.getFullYear() : null;
                 const yearsSinceAssessment = assessmentDateObj
-                  ? Math.floor((Date.now() - assessmentDateObj.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+                  ? Math.floor(yearsSince(assessmentDateObj))
                   : null;
                 const details = speciesDetails[s.species_key];
                 const gbifSpeciesKey = s.gbif_species_key || details?.gbifUrl?.split('/').pop() || null;
@@ -6205,6 +6227,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <React.Fragment key={speciesKey}>
                   <tr
                     className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer ${selectedSpeciesKey === speciesKey ? "bg-zinc-100 dark:bg-zinc-800" : ""} ${isDragging ? "opacity-50" : ""} ${isDragOver ? "border-t-2 border-amber-500" : ""}`}
+                    data-species-row={speciesKey}
                     onClick={() => { setSelectedSpeciesKey(selectedSpeciesKey === speciesKey ? null : speciesKey); }}
                     draggable={isPinned && showOnlyStarred}
                     onDragStart={(e) => handleDragStart(e, speciesKey)}
