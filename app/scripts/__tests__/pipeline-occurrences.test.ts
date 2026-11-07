@@ -1,10 +1,10 @@
 /**
- * Snapshot completeness (scripts/sync/core/build-occurrences.ts): a gap in the
+ * Snapshot completeness (scripts/sync/inputs/gbif-snapshot.ts): a gap in the
  * part-file numbering is what gbif/occurrence#609 looked like, so it must be
  * found, and a complete listing must pass.
  */
 import { describe, it, expect } from "vitest";
-import { missingFileNumbers } from "../sync/core/build-occurrences";
+import { missingFileNumbers } from "../sync/inputs/gbif-snapshot";
 
 const files = (nums: number[]) => nums.map((n) => `/m/2026-11-01/occurrence.parquet/${String(n).padStart(6, "0")}`);
 

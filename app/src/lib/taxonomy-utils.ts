@@ -500,7 +500,7 @@ export function speciesMatchesNode(
   // Must belong to one of the filter's taxon groups
   if (!f.taxonGroups.includes(species.taxon_group)) return false;
 
-  // Mirrors filterToSql's COL_SPECIES_NAME_OVERRIDES branch (build-taxa-summary.ts):
+  // Mirrors filterToSql's COL_SPECIES_NAME_OVERRIDES branch (precomputed/summaries.ts):
   // CoL lumps genus Bison into Bos, so a CoL-sourced row (NE species, named "Bos
   // bison") never matches Bison SG's own filter (genera: ["bison"]) — but an
   // IUCN-sourced row (assessed species, still named "Bison bison") DOES match the
@@ -552,7 +552,7 @@ const capitalizeSpeciesName = (s: string): string => s.split(" ").map((w, i) => 
 // clauses — see primaryFilterRank below.
 export type FilterRank = "class" | "order" | "family" | "genus" | "species" | "remainder";
 
-// name → CoL taxon id, built by scripts/sync/outputs/build-col-taxon-ids.ts from the taxonomy tree
+// name → CoL taxon id, built by scripts/sync/precomputed/col-taxon-ids.ts from the taxonomy tree
 // + taxa.parquet. Only covers names actually referenced by a SpeciesFilter
 // somewhere in the tree — not every name resolves (CoL classifies a few things
 // differently, e.g. Bison is lumped into Bos), in which case the segment below just
@@ -561,14 +561,14 @@ const COL_TAXON_ID_MAP: Record<string, string> = COL_TAXON_IDS;
 
 // A container rank (class/order/family/genus) links to a species-level search scoped
 // to that taxon, with the same extant + accepted-only definition colDescribed itself
-// uses (SPECIES_STATUS in scripts/sync/core/build-taxa.ts) — so clicking through shows
+// uses (scripts/sync/sources/taxa.ts) — so clicking through shows
 // exactly the species being counted, not just a static profile page. Deliberately
 // omits status=provisionally%20accepted: colDescribed excludes those names (they
 // overshoot IUCN's own described-species totals — see the SPECIES_STATUS comment),
 // so including them here would make the count look wrong on click-through even
 // though it isn't. Known gap: a handful of nodes' colDescribed also includes
 // CoL-extinct species IUCN has confirmed EX/EW (see createExEwAssessedTable in
-// build-taxa-summary.ts) — those don't show up here since CoL's extinct=0/1 filter
+// precomputed/summaries.ts) — those don't show up here since CoL's extinct=0/1 filter
 // can't express "extinct, but only the IUCN-confirmed ones," so a clicked-through
 // count can undercount colDescribed by that node's EX/EW additions. A species-rank
 // name has no "species under it" to browse, so it links straight to its own taxon
@@ -586,7 +586,7 @@ function colHref(rank: FilterRank, colId: string): string {
 // Which of a filter's include fields enumerates this node's species (its "primary
 // dimension") — the tree never sets more than one at a time (verified by
 // taxonomy-tree.test.ts), so the first non-empty one is unambiguous. Mirrors
-// primaryDimension() in scripts/sync/outputs/build-taxa-summary.ts, which decides the same thing
+// primaryDimension() in scripts/sync/precomputed/summaries.ts, which decides the same thing
 // server-side to compute NodeSummary.colBreakdown.
 export function primaryFilterRank(filter: SpeciesFilter): { rank: FilterRank; label: string } | null {
   if (filter.classNames?.length) return { rank: "class", label: "Class" };
@@ -596,7 +596,7 @@ export function primaryFilterRank(filter: SpeciesFilter): { rank: FilterRank; la
   if (filter.speciesNames?.length) return { rank: "species", label: "Species" };
   // Catch-all/remainder node (excludeOrders/excludeClasses/excludeFamilies/
   // excludeGenera/excludeSpeciesNames only, no positive dimension) — mirrors
-  // isExcludeOnlyCatchAll in scripts/sync/outputs/build-taxa-summary.ts, which computes exactly
+  // isExcludeOnlyCatchAll in scripts/sync/precomputed/summaries.ts, which computes exactly
   // one colBreakdown bucket (keyed by the node's own name) for these nodes.
   if (
     filter.excludeOrders?.length ||

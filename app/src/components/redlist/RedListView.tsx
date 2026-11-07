@@ -20,6 +20,7 @@ import TaxaIcon from "../TaxaIcon";
 import PhotoCredit from "../PhotoCredit";
 import { FaInfoCircle } from "react-icons/fa";
 import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
+import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
@@ -1076,6 +1077,25 @@ const TABLE_NUMBER_LINK = "text-zinc-700 dark:text-zinc-300 underline decoration
 /** The Realm / Movement / Trend cards: a row of chips beside the title. */
 const CHIP_CARD = "flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3";
 const CHIP_CARD_TITLE = "text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20";
+// A single species' own value, where a group's card would show a clickable count chip.
+const STATIC_TAG = "inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300";
+const SINGLE_EMPTY = "text-sm text-zinc-400 dark:text-zinc-500";
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+/** A single species' GBIF value for the chart's metric: "7.3K" records, or "16%" new. */
+function formatSingleGbif(value: number | null, metric: GbifMetric): string {
+  if (value == null) return "—";
+  return metric === "pctNew" ? `${Math.round(value)}%` : compactNumber.format(value);
+}
+/** Time since a single species' assessment, exactly: "1.5 years", or months under a year. */
+function formatTimeSince(date: string, now = new Date()): string {
+  const years = yearsSince(date, now);
+  if (years < 1) {
+    const months = Math.max(0, Math.floor(years * 12));
+    return months === 0 ? "<1 month" : `${months} month${months === 1 ? "" : "s"}`;
+  }
+  const y = years.toFixed(1).replace(/\.0$/, "");
+  return `${y} year${y === "1" ? "" : "s"}`;
+}
 const REALM_CHIPS = [
   { value: "Terrestrial", icon: LuMountain, colors: "bg-amber-500 text-white border-amber-500" },
   { value: "Freshwater", icon: LuDroplet, colors: "bg-cyan-500 text-white border-cyan-500" },
@@ -3968,6 +3988,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               </svg>
             </HoverTooltip>
           </span>
+          {!isSingleSpecies && (
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
               type="button"
@@ -3988,9 +4009,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               Clean {colTally.clean.toLocaleString()}
             </button>
           </div>
+          )}
         </div>
         {loading ? (
           <div style={{ height: 150 }} className="flex items-center justify-center"><Spinner className="h-4 w-4" /></div>
+        ) : isSingleSpecies && singleSpecies ? (
+          // One species: say what its own difference is, not a chart of one.
+          <div style={{ height: 120 }} className="flex flex-col items-center justify-center gap-2 text-center">
+            {barData.length > 0 ? (
+              <div className="flex flex-wrap justify-center gap-1">
+                {barData.map(d => <span key={d.rawCode} className={STATIC_TAG}>⚑ {d.code}</span>)}
+              </div>
+            ) : (
+              <span className={SINGLE_EMPTY}>{colTally.flagged > 0 ? "Flagged" : "Clean one-to-one match"}</span>
+            )}
+          </div>
         ) : barData.length > 0 ? (
           <>
             <div style={{ height: Math.max(90, barData.length * 26) }}>
@@ -4131,6 +4164,61 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Threats card — reassessments mode only (new-assessments shows Geospatial
   // GBIF Records instead, in Charts row 2). Lives in More Filters, not the
   // primary view — see the More Filters section below.
+  // One species: its own coded classes as a list (category, then the
+  // sub-classes under it), not a chart of single-species bars. Codes deeper
+  // than the scheme's second level fold into their second-level parent.
+  const renderSpeciesCodeList = (
+    scheme: { code: string; label: string; children: { code: string; label: string }[] }[],
+    codes: string[],
+    emptyText: string,
+  ) => {
+    const have = new Set<string>();
+    for (const c of codes) {
+      const parts = c.split(".");
+      have.add(parts[0]);
+      if (parts.length > 1) have.add(`${parts[0]}.${parts[1]}`);
+    }
+    const groups = scheme.filter(cat => have.has(cat.code));
+    if (groups.length === 0) {
+      return <div style={{ height: 120 }} className="flex items-center justify-center"><span className={SINGLE_EMPTY}>{emptyText}</span></div>;
+    }
+    return (
+      <ul className="mt-1 space-y-2 overflow-y-auto" style={{ maxHeight: 320 }}>
+        {groups.map(cat => {
+          const kids = cat.children.filter(ch => have.has(ch.code));
+          return (
+            <li key={cat.code}>
+              <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{cat.label}</div>
+              {kids.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {kids.map(ch => (
+                    <span key={ch.code} className={STATIC_TAG}>
+                      {ch.label.startsWith(`${cat.label} - `) ? ch.label.slice(cat.label.length + 3) : ch.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
+  // One species' realm/movement/trend: just the values it has, without counts.
+  const singleTags = (chips: readonly { value: string; icon: IconType }[], values: string[]) => {
+    if (values.length === 0) return <span className={SINGLE_EMPTY}>Not recorded</span>;
+    return values.map(v => {
+      const Icon = chips.find(c => c.value === v)?.icon;
+      return (
+        <span key={v} className={STATIC_TAG}>
+          {Icon && <Icon aria-hidden className="w-3 h-3 shrink-0" />}
+          {v}
+        </span>
+      );
+    });
+  };
+
   const threatsCard = (() => {
     // Map label→code for reverse lookup from chart clicks
     const threatLabelToCode = new Map(THREAT_CATEGORIES.map(c => [c.label, c.code]));
@@ -4197,6 +4285,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               the default state precisely because it IS narrowing the data: a
               default that quietly drops species should say so on the card.
               Mirrors the Habitat card's Breadth dropdown. */}
+          {!isSingleSpecies && (
           <div className="relative" ref={threatsScopeMenuRef}>
             <button
               type="button"
@@ -4234,9 +4323,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               </div>
             )}
           </div>
+          )}
         </div>
         {loading ? (
           <div style={{ height: 200 }} className="flex items-center justify-center"><Spinner /></div>
+        ) : isSingleSpecies && singleSpecies ? (
+          renderSpeciesCodeList(THREAT_CATEGORIES, singleSpecies.threat_codes ?? [], "No threats coded")
         ) : threatBarData.length > 0 ? (
           renderInlineDrilldown(
             threatBarData,
@@ -4329,6 +4421,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
         <div className="flex items-center justify-between mb-1 min-h-[24px] flex-wrap gap-1">
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Habitat</span>
+          {!isSingleSpecies && (
           <div className="flex items-center flex-wrap gap-1 justify-end">
             {/* Breadth — single-select Specialist/Generalist dropdown, replacing
                 a plain "Specialists" toggle so the (exactly 1)/(2+) split is
@@ -4485,9 +4578,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               )}
             </div>
           </div>
+          )}
         </div>
         {loading ? (
           <div style={{ height: 200 }} className="flex items-center justify-center"><Spinner /></div>
+        ) : isSingleSpecies && singleSpecies ? (
+          renderSpeciesCodeList(HABITAT_CATEGORIES, parseHabitatEntries(singleSpecies.habitat_codes).map(e => e.code), "No habitats coded")
         ) : habitatBarData.length > 0 ? (
           <>
             {renderInlineDrilldown(
@@ -4639,6 +4735,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
         {loading ? (
           <div style={{ height: 90 }} className="flex items-center justify-center"><Spinner className="h-4 w-4" /></div>
+        ) : isSingleSpecies && singleSpecies ? (
+          <div style={{ height: 120 }} className="flex items-center justify-center text-center">
+            {singleSpecies.criteria ? (
+              <span className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 break-words">{singleSpecies.criteria}</span>
+            ) : (
+              <span className={SINGLE_EMPTY}>No criteria listed</span>
+            )}
+          </div>
         ) : criteriaBarData.length > 0 ? (
           renderInlineDrilldown(
             criteriaBarData,
@@ -4755,7 +4859,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
-      {onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && (() => {
+      {/* Not for a searched species: its own header below says who it is, and the
+          taxon's counts and view toggle describe the group, not it. */}
+      {onViewModeChange && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && !(urlSpecies != null && (isSingleSpecies || speciesLoading)) && (() => {
         // One taxon selected but its row not reported yet (fresh load): hold
         // the header card's place with a placeholder rather than showing the
         // bare bar and swapping the card in. Gives up once the species list is
@@ -5078,11 +5184,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       if (!singleSpecies.assessment_date) return (
                         <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">N/A</span>
                       );
-                      const years = yearsSince(singleSpecies.assessment_date);
-                      const range = years < 1 ? "<1y" : years < 5 ? "1-5y" : years < 10 ? "5-10y" : years < 20 ? "10-20y" : ">20y";
                       return (
                         <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                          {range}
+                          {formatTimeSince(singleSpecies.assessment_date)}
                         </span>
                       );
                     })()}
@@ -5132,7 +5236,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <Spinner />
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                    {gbifBucket(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric) ?? "—"}
+                    {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
                   </span>
                 ) : gbifObsData.length > 0 ? (
                   <FilterBarChart
@@ -5250,7 +5354,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <Spinner />
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                    {gbifBucket(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric) ?? "—"}
+                    {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
                   </span>
                 ) : (
                   <FilterBarChart
@@ -5419,7 +5523,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               }}
                               className={chartControlClass(isSelected, "bg-lime-600 text-white border-lime-600")}
                             >
-                              {gf} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()}</span>
+                              {gf}{!isSingleSpecies && <> <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()}</span></>}
                             </button>
                           );
                         })}
@@ -5457,6 +5561,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Number of Assessments</span>
+                        {!isSingleSpecies && (
                         <button
                           type="button"
                           onClick={handleReassessedClick}
@@ -5466,13 +5571,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         >
                           Reassessed
                         </button>
+                        )}
                       </div>
                       <div style={{ height: 170 }} className="flex items-center justify-center">
                         {speciesLoading && assessedSpecies.length === 0 ? (
                           <Spinner />
                         ) : isSingleSpecies && singleSpecies ? (
                           <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                            {assessmentCountBucket(singleSpecies.assessment_count)}
+                            {singleSpecies.assessment_count ?? "—"}
                           </span>
                         ) : assessmentCountData.length > 0 ? (
                           <FilterBarChart
@@ -5500,6 +5606,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <div className="flex flex-wrap gap-1">
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
+                      ) : isSingleSpecies && singleSpecies ? (
+                        singleTags(REALM_CHIPS, singleSpecies.systems ?? [])
                       ) : REALM_CHIPS.map(({ value: system, icon, colors }) => (
                         <ChartChip
                           key={system}
@@ -5521,6 +5629,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       <div className="flex flex-wrap gap-1">
                         {speciesLoading && assessedSpecies.length === 0 ? (
                           <Spinner className="h-4 w-4" />
+                        ) : isSingleSpecies && singleSpecies ? (
+                          singleTags(MOVEMENT_CHIPS, singleSpecies.movement_pattern ? [singleSpecies.movement_pattern] : [])
                         ) : MOVEMENT_CHIPS.map(({ value: pattern, icon, title }) => {
                           const count = movementPatternCounts[pattern] ?? 0;
                           if (count === 0) return null;
@@ -5547,6 +5657,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <div className="flex flex-wrap gap-1">
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
+                      ) : isSingleSpecies && singleSpecies ? (
+                        singleTags(TREND_CHIPS, singleSpecies.population_trend ? [singleSpecies.population_trend] : [])
                       ) : TREND_CHIPS.map(({ value: trend, icon }) => (
                         <ChartChip
                           key={trend}

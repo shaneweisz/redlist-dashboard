@@ -335,7 +335,7 @@ describe("getCreditCandidates", () => {
   it("returns no facilitators when the history predates the field", () => {
     const group = uniqueGroup();
     const row = makeRow({ countries: ["ZA"], scientific_name: "Panthera pardus" });
-    // History JSON written before build-assessments emitted facilitators has
+    // History JSON written before sources/assessments.ts emitted facilitators has
     // no such key at all — that must read as "nobody", never throw.
     setup([row], {
       [String(row.sis_taxon_id)]: [

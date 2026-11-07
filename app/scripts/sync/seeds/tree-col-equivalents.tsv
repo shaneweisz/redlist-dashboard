@@ -1,0 +1,14 @@
+tree_name	col_name	col_rank	why
+family:calamariidae	Calamariinae	subfamily	a subfamily of Colubridae on CoL
+family:grayiidae	Grayiinae	subfamily	a subfamily of Colubridae on CoL
+family:pseudoxenodontidae	Pseudoxenodontinae	subfamily	a subfamily of Colubridae on CoL
+family:sibynophiidae	Sibynophiinae	subfamily	a subfamily of Colubridae on CoL
+family:charinaidae	Charininae	subfamily	a subfamily of Boidae on CoL
+family:ungaliophiidae	Ungaliophiinae	subfamily	a subfamily of Boidae on CoL
+genus:ctenonotus	Anolis	genus	CoL holds Ctenonotus as a synonym of the anole Anolis and of the flea Tarsopsylla; the tree means the anole (an Anoline SG genus)
+class:chondrichthyes	Chondrichthyes	parvphylum	CoL ranks it a parvphylum, not a class
+genus:deltorrhinum	Deltorhinum	genus	misspelling the tree keeps to match Red List data
+species:arachnochium mirabile	Arachnochium mirabilis	species	CoL's spelling of the epithet
+species:macrobrachium vollenhoveni	Macrobrachium vollenhovenii	species	CoL's spelling of the epithet
+species:macrobrachium bombayense	Macrobrachium bombajense	species	CoL's spelling of the epithet
+species:isurus desori	Cosmopolitodus hastalis	species	CoL has three synonym records for this fossil mako: two point to Cosmopolitodus hastalis (as does Oxyrhina hastalis, which the same node excludes), one to Glyphis pagoda

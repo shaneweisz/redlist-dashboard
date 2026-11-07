@@ -3,7 +3,7 @@ import { filterToSql, sqlStrList, canonicalOrderColumnSql, canonicalClassColumnS
 import { matchesFilter } from "@/lib/taxonomy-utils";
 
 // filterToSql is the SQL mirror of matchesFilter (taxonomy-utils.ts) — previously
-// inline in scripts/sync/outputs/build-taxa-summary.ts (untested there), now shared with the live
+// inline in scripts/sync/precomputed/summaries.ts (untested there), now shared with the live
 // per-country query path (scoped-taxa-summary-duckdb.ts). These tests check the
 // generated predicate's shape; full row-matching parity against real parquet data is
 // verified manually (see scoped-taxa-summary-duckdb.test.ts's file comment).

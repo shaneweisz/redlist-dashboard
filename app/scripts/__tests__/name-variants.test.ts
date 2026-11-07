@@ -1,6 +1,6 @@
 /**
- * name-variants test: when two spellings are one name (sync/core/name-variants.ts),
- * which the CoL-revision flag and build-link's twin and duplicate rules rely on.
+ * name-variants test: when two spellings are one name (sync/link/name-variants.ts),
+ * which the CoL-revision flag and assessment-link.ts's twin and duplicate rules rely on.
  *
  * Every positive case is a real Red List assessment whose name CoL spells
  * differently. Every negative is a real case that must NOT be swept up: a
@@ -11,7 +11,7 @@
  * one species' occurrence records and assessment to another.
  */
 import { describe, it, expect } from "vitest";
-import { canonicalEpithet, speciesNameParts, orthographicallySame, orthographicKey } from "../sync/core/name-variants";
+import { canonicalEpithet, speciesNameParts, orthographicallySame, orthographicKey } from "../sync/link/name-variants";
 
 describe("speciesNameParts", () => {
   it("drops a parenthesised subgenus", () => {

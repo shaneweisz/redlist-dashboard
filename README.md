@@ -130,7 +130,7 @@ Live external APIs:
 ### GBIF integration
 The key innovation — linking assessment data to real-world observations:
 
-1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/sync/core/decisions.tsv`) where it isn't, and its GBIF records follow from that.
+1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/sync/seeds/decisions.tsv`) where it isn't, and its GBIF records follow from that.
 2. **Observation counts**: from GBIF's monthly snapshot, not the API. A species counts every record filed under its own name, its synonyms, its subspecies and their DNA-barcode BINs, minus any usage another assessed species owns (a split IUCN assesses that CoL files as a subspecies, for instance). Every count comes two ways, all records (the default) and georeferenced records only, and the GBIF Records toggle switches every number on the page between them. **Total GBIF** is the species' records; **Since Assessment** is the records dated after its assessment date. Both count every record type: all records is every record, the number gbif.org shows (the default); georeferenced is the ones with coordinates and no geospatial issue. The occurrence map applies its own record-type defaults.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
 4. **Quality filters**: georeferenced means coordinates without a GBIF geospatial issue (the codes GBIF's own `hasGeospatialIssue` acts on, checked against the API).
@@ -153,7 +153,7 @@ A sync goes live only when its one-line `app/latest-sync.txt` change merges to `
 
 ### Running a sync
 
-The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally), reads three inputs and builds everything the dashboard shows from four tables, by one counting rule. The diagram's editable source is [`docs/diagrams/sync.excalidraw`](docs/diagrams/sync.excalidraw) (open it at excalidraw.com; `docs/diagrams/gen.py` regenerates it).
+The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally). It ingests the Catalogue of Life, the Red List and the GBIF snapshot, links each assessed species to its CoL species, counts each species' records by one rule, and builds everything the dashboard shows from those tables; [docs/sync.md](docs/sync.md) has the diagram and every table's columns.
 
 ```bash
 # 1. Mirror the new GBIF snapshot (~255 GiB, public, no account)

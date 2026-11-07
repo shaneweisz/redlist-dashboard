@@ -239,7 +239,7 @@ describe("isFlagged / revisionReasons", () => {
   it("is unflagged for no flag, and for a flag carrying neither signal", () => {
     expect(isFlagged(null)).toBe(false);
     expect(isFlagged(undefined)).toBe(false);
-    // An empty splitInto must not flag a species — build-col-revisions omits the
+    // An empty splitInto must not flag a species — precomputed/col-revisions.ts omits the
     // key entirely, but a hand-written or future-encoded entry might not.
     expect(isFlagged({ splitInto: [] })).toBe(false);
     expect(isFlagged({ colId: "ABC" })).toBe(false);

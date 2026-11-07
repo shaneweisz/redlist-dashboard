@@ -1,5 +1,5 @@
 /**
- * build-taxa (scripts/sync/core/build-taxa.ts): species_id resolution, checklist
+ * taxa (scripts/sync/sources/taxa.ts): species_id resolution, checklist
  * demotion, one group per usage, and the Not Evaluated exclusion list, over a
  * tiny synthetic ColDP.
  */
@@ -8,7 +8,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { buildTaxa } from "../sync/core/build-taxa";
+import { buildTaxa } from "../sync/sources/taxa";
 
 const HEAD = ["col:ID", "col:parentID", "col:status", "col:rank", "col:scientificName", "col:authorship",
   "col:combinationAuthorshipYear", "col:basionymAuthorshipYear", "col:nameReferenceID",
@@ -57,9 +57,10 @@ beforeAll(async () => {
   ], ["col:ID", "col:parentID", "col:status", "col:rank", "col:scientificName"]);
 
   const conn = await (await DuckDBInstance.create(":memory:")).connect();
-  const out = await buildTaxa(conn, {
+  const out = path.join(tmp, "out", "taxa.parquet");
+  await buildTaxa({
     nameUsage: nu, checklistNameUsage: cl, baseSourceIds: ["1000"], neExcluded: { "felis catus": "domesticated" },
-  }, path.join(tmp, "out"));
+  }, out);
   const all = (await conn.runAndReadAll(`SELECT * FROM read_parquet('${out}')`)).getRowObjects();
   rows = Object.fromEntries(all.map((r) => [String(r.col_id), r]));
 });
@@ -116,9 +117,8 @@ describe("groups, base and exclusions", () => {
     expect(rows.LEO.described_year).toBe(1758);
   });
   it("fails when an excluded name is not an accepted species", async () => {
-    const conn = await (await DuckDBInstance.create(":memory:")).connect();
-    await expect(buildTaxa(conn, {
+    await expect(buildTaxa({
       nameUsage: path.join(tmp, "NameUsage.tsv"), baseSourceIds: ["1000"], neExcluded: { "canis familiaris": "domesticated" },
-    }, path.join(tmp, "out2"))).rejects.toThrow(/canis familiaris/);
+    }, path.join(tmp, "out2", "taxa.parquet"))).rejects.toThrow(/canis familiaris/);
   });
 });
