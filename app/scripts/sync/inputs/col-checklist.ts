@@ -3,7 +3,7 @@
  *
  * The XR maximises coverage but doesn't reconcile its sources, so it over-splits:
  * Pycnonotus tricolor is an accepted species in the XR and a synonym of the
- * assessed P. barbatus in the checklist. build-taxa uses the checklist only to
+ * assessed P. barbatus in the checklist. sources/taxa.ts uses the checklist only to
  * demote such species, never to add or delete any: groups the checklist lacks
  * (macroalgae) are kept. col_ids are shared, so the join is exact where both
  * datasets carry a usage, though about 95k checklist usages have no XR row.

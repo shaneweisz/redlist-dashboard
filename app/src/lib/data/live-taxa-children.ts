@@ -13,7 +13,7 @@
  * have 50-300+ distinct values, so looping per-value would be 50-300 round trips.
  *
  * Deliberately omits the no-match diagnostic breakdown (colBreakdown /
- * noMatchDetails / splitDetails) that scripts/sync/outputs/build-taxa-summary.ts's
+ * noMatchDetails / splitDetails) that scripts/sync/precomputed/summaries.ts's
  * attachColCounts computes for the static tree — that machinery depends on
  * taxa.parquet-joined temp tables built once per whole build run, not cheap
  * per (rank,value) on demand. A later phase adds it back as a separate, lazy,

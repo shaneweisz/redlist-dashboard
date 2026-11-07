@@ -1,10 +1,10 @@
 /**
- * When build-link takes GBIF's matcher's answer without review
- * (scripts/sync/core/accept-match.ts). Cases are real answers from matching-ws
+ * When assessment-link.ts takes GBIF's matcher's answer without review
+ * (scripts/sync/link/accept-match.ts). Cases are real answers from matching-ws
  * against COL26.6 XR, trimmed to the fields the rule reads.
  */
 import { describe, it, expect } from "vitest";
-import { acceptMatch, sameAuthors, type MatchAnswer } from "../sync/core/accept-match";
+import { acceptMatch, sameAuthors, type MatchAnswer } from "../sync/link/accept-match";
 
 const answer = (over: Partial<MatchAnswer>): MatchAnswer => ({
   usage_id: "U1", usage_name: "Puma concolor", usage_authorship: "(Linnaeus, 1771)", usage_rank: "SPECIES",

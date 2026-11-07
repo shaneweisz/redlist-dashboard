@@ -1,7 +1,7 @@
 /**
  * Overrides layered on top of a node's own SpeciesFilter when computing its
  * Catalogue-of-Life-derived "described species" count (colDescribed) — used by
- * scripts/sync/outputs/build-taxa-summary.ts (which needs the raw name lists to build SQL) and by
+ * scripts/sync/precomputed/summaries.ts (which needs the raw name lists to build SQL) and by
  * the frontend (which needs human-readable notes to explain a number that would
  * otherwise look unexplained, e.g. "why does Bison SG show a number at all when its
  * filter is genus: bison and Catalogue of Life has no genus Bison?").
@@ -11,7 +11,7 @@
  */
 
 // Domestic forms and humans aren't here: they are left out of the described
-// species once, in the sync (scripts/sync/core/taxon-groups.ts NE_EXCLUDED, which
+// species once, in the sync (scripts/sync/seeds/ne-excluded.tsv, which
 // sets species/'s `described`), so every count and list agrees.
 
 // CoL lumps genus Bison entirely into Bos (no "Bison" genus exists in this release —

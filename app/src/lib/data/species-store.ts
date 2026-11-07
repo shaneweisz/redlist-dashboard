@@ -63,8 +63,8 @@ export interface PreviousAssessment {
    * person and the facilitator line is the only one that can.
    *
    * Optional because it is optional in the FILES, not just the type: history
-   * JSON written before build-assessments started emitting the field has no
-   * such key (same story as `criteria` — see build-read-models.ts, which reads these
+   * JSON written before sources/assessments.ts started emitting the field has no
+   * such key (same story as `criteria` — see scripts/sync/lists/assessed.ts, which writes these
    * same files and coalesces both).
    */
   facilitators?: string | null;
@@ -153,7 +153,7 @@ export function getCountryStats(): Record<string, { species: number; outdated: n
 /**
  * sis_taxon_id → the taxonomic-difference flag, for the ~6% of
  * assessed species carrying one (data/col-revisions.json, built by
- * scripts/sync/outputs/build-col-revisions.ts). Two independent signals share the entry: no
+ * scripts/sync/precomputed/col-revisions.ts). Two independent signals share the entry: no
  * clean 1:1 Catalogue of Life match, and species CoL has likely split out of
  * this one — see lib/col-revision.
  *
@@ -168,7 +168,7 @@ export function getColRevisions(): Map<number, ColRevision> {
   const out = new Map<number, ColRevision>();
   if (fs.existsSync(COL_REVISIONS_PATH)) {
     // Short-keyed on disk (r/d/i/dc/k/c/n/s/lw/ln, absent fields omitted) — one entry per
-    // flagged species, so the shipped file stays small. See build-col-revisions.
+    // flagged species, so the shipped file stays small. See precomputed/col-revisions.ts.
     const file = JSON.parse(fs.readFileSync(COL_REVISIONS_PATH, "utf-8")) as {
       species: Record<string, { r?: string; d?: string; i?: number; dc?: string; c?: string; n?: string; k?: string;
         s?: [string, string, string, string][]; lw?: [string, string, string][]; ln?: string;
@@ -465,7 +465,7 @@ export interface NodeSummary {
   colBreakdown?: { name: string; count: number; neCount: number; trueAssessed: number; noMatchIds: number[]; noMatchDetails?: NoMatchDetail[]; splitDetails?: SplitDetail[] }[];
 }
 
-// See scripts/sync/outputs/build-taxa-summary.ts's classifyNoMatch for what each reason means and
+// See src/lib/data/col-breakdown.ts's classifyNoMatch for what each reason means and
 // how it's derived. Modular/additive on top of noMatchIds — safe to ignore or drop
 // without touching the count-only CoL Match / No CoL Match mechanism.
 // Re-exported from lib/data/col-breakdown, which is where classifyNoMatch
@@ -475,7 +475,7 @@ export interface NodeSummary {
 export type { NoMatchReason, NoMatchDetail };
 
 // Heuristic "split from" flag for Not Evaluated species — see
-// scripts/sync/outputs/build-taxa-summary.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
+// src/lib/data/col-breakdown.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
 // caveats. Keyed by col_id (NE species have no sis_taxon_id), additive on top of
 // colBreakdown, and independently droppable.
 export interface SplitDetail {

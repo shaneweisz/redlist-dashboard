@@ -40,7 +40,7 @@ export const GBIF_BACKBONE_CHECKLIST_KEY = "d7dddbf4-2cf0-4f39-9b2a-bb099caae36c
  * Flipping this constant is not by itself a migration — the stored keys have to
  * change with it, or every query asks one taxonomy about another's keys and gets
  * an empty result set back. The pipeline now derives its group keys from CoL
- * (scripts/sync/outputs/derive-gbif-taxon-keys.ts) and resolves species keys and names through
+ * (scripts/config/derive-gbif-taxon-keys.ts) and resolves species keys and names through
  * GBIF against this checklist, so the keys and this constant move together.
  */
 export const GBIF_CHECKLIST_KEY = COL_XR_CHECKLIST_KEY;

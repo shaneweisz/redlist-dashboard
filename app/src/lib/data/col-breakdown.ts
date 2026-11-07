@@ -1,16 +1,16 @@
 /**
  * Per-name CoL described/not-evaluated breakdown, with a "why doesn't this
  * assessed species have a clean 1:1 CoL match" diagnostic — shared between
- * scripts/sync/outputs/build-taxa-summary.ts (build time, the static tree's official/SSC
+ * scripts/sync/precomputed/summaries.ts (build time, the static tree's official/SSC
  * nodes) and src/lib/data/live-taxa-children.ts (request time, dynamic
  * taxonomic-drilldown nodes — see dynamic-taxon.ts). Extracted from
- * build-taxa-summary.ts so the two call sites can never silently drift apart,
+ * precomputed/summaries.ts so the two call sites can never silently drift apart,
  * mirroring how taxonomy-sql.ts's filterToSql was pulled out for the same
  * reason (see that file's doc comment).
  *
  * The diagnostic query needs three taxa.parquet-dependent temp tables
  * (split_candidates, synonym_assessed, col_to_assessed) built ONCE per caller — full
- * backbone scans/joins, not cheap to repeat per name. build-taxa-summary.ts
+ * backbone scans/joins, not cheap to repeat per name. precomputed/summaries.ts
  * builds them once per whole script run; live-taxa-children.ts memoizes them
  * once per warm server connection (see ensureColMatchHelpers there). This
  * module only *uses* them by name — building them is the caller's job, since
@@ -334,7 +334,7 @@ export const SPLIT_CANDIDATES_SQL = (bb: string, assessedPath: string, assessedC
  *
  * status = 'synonym' exactly, never LIKE '%synonym%': 'ambiguous synonym' is CoL
  * saying the name's application is UNCERTAIN, which is the opposite of evidence
- * that these two names are one taxon (same rule as build-taxa's, and the same
+ * that these two names are one taxon (same rule as sources/taxa.ts's, and the same
  * trap Pararge xiphia fell into there).
  *
  * One assessed species per NE species, or no claim — CoL can file two names IUCN
@@ -402,7 +402,7 @@ export interface BreakdownQueryContext {
 /**
  * The "which assessed species here have no clean 1:1 CoL match, and why"
  * diagnostic on its own — shared between computeBreakdownEntry (one breakdown
- * name at a time) and scripts/sync/outputs/build-col-revisions.ts, which runs it ONCE over
+ * name at a time) and scripts/sync/precomputed/col-revisions.ts, which runs it ONCE over
  * every assessed species to build the dashboard-wide flag. Both call sites must
  * classify identically, so the query lives here rather than being written twice.
  *

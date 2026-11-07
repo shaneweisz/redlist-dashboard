@@ -1,0 +1,77 @@
+/**
+ * The counting rule (scripts/sync/count/): a species counts its own, its
+ * synonyms' and its infraspecifics' records, not usages a lumped assessed
+ * species owns, and every usage counts for one species at most.
+ */
+import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { tables } from "../sync/paths";
+import { buildUsageOwners } from "../sync/count/usage-owners";
+import { buildRecordCounts } from "../sync/count/record-counts";
+
+type Link = { sis: number; usage: string; verdict: string; counted?: boolean };
+
+async function counts(links: Link[] = []) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "usage-owners-"));
+  const T = tables(tmp);
+  fs.mkdirSync(path.dirname(T.taxa), { recursive: true });
+  const c = await (await DuckDBInstance.create(":memory:")).connect();
+  const copy = (sql: string, file: string) => c.run(`COPY (${sql}) TO '${file}' (FORMAT parquet)`);
+  // LEO with a synonym, a subspecies, a BIN and a synonym LUMP; OAK with a synonym; a genus G.
+  await copy(`SELECT * FROM (VALUES
+      ('LEO', 'LEO', 'G'), ('SYN', 'LEO', 'LEO'), ('SSP', 'LEO', 'LEO'), ('BIN', 'LEO', 'SSP'),
+      ('LUMP', 'LEO', 'LEO'), ('OAK', 'OAK', NULL), ('OAKSYN', 'OAK', 'OAK'), ('G', NULL, NULL))
+      t(col_id, species_id, parent_id)`, T.taxa);
+  await copy(`SELECT * FROM (VALUES
+      ('LEO', 2020::SMALLINT, true, 140::BIGINT), ('LEO', 2020::SMALLINT, false, 5::BIGINT), ('SYN', 2001::SMALLINT, true, 7::BIGINT),
+      ('SSP', NULL::SMALLINT, true, 3::BIGINT), ('BIN', 2019::SMALLINT, true, 2::BIGINT), ('LUMP', 2010::SMALLINT, true, 11::BIGINT),
+      ('LEO', 2020::SMALLINT, true, 9::BIGINT), ('OAKSYN', 1900::SMALLINT, true, 30::BIGINT), ('OAK', 2024::SMALLINT, true, 1::BIGINT),
+      ('G', 2020::SMALLINT, true, 500::BIGINT))
+      t(usage_key, year, georef, n)`.replace("SELECT * FROM", "SELECT usage_key, year, NULL::TINYINT AS month, NULL::DATE AS event_date, georef, n FROM"), T.occurrences);
+  const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${l.verdict}', ${l.counted ?? true}, '${l.usage}')`);
+  await copy(links.length
+    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, usage_id, verdict, counted, col_id)`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS usage_id, NULL::VARCHAR AS verdict, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_id WHERE false`, T.link);
+  await copy(`SELECT sis::BIGINT AS sis_taxon_id, true AS is_latest, DATE '2015-01-01' AS assessment_date
+    FROM (VALUES (1), (2)) t(sis)`, T.assessments);
+
+  await buildUsageOwners({ taxa: T.taxa, link: T.link }, T.usageOwner);
+  await buildRecordCounts({ usageOwner: T.usageOwner, occurrences: T.occurrences, link: T.link, assessments: T.assessments, today: "2026-11-06" }, T.recordCounts);
+  const rows = (await c.runAndReadAll(`SELECT coalesce(CAST(sis_taxon_id AS VARCHAR), col_id) AS who, georef, all_records
+    FROM read_parquet('${T.recordCounts}')`)).getRowObjects();
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return Object.fromEntries(rows.map((r) => [String(r.who), { georef: Number(r.georef), all: Number(r.all_records) }]));
+}
+
+describe("usage_owner and record_counts", () => {
+  it("sums a species' own, synonym, infraspecific and BIN usages", async () => {
+    const r = await counts();
+    // 140 + 7 + 3 + 2 + 11 + 9 georeferenced; all adds the 5 ungeoreferenced.
+    expect(r.LEO).toEqual({ georef: 172, all: 177 });
+    expect(r.OAK).toEqual({ georef: 31, all: 31 });
+  });
+  it("gives a lumped species its own usage, and leaves it out of the species it is filed under", async () => {
+    const r = await counts([{ sis: 1, usage: "LUMP", verdict: "lumped" }]);
+    expect(r["1"]).toEqual({ georef: 11, all: 11 });
+    expect(r.LEO).toEqual({ georef: 161, all: 166 });
+  });
+  it("counts an assessed species' own species for it, not as unassessed", async () => {
+    const r = await counts([{ sis: 2, usage: "OAK", verdict: "own" }]);
+    expect(r["2"]).toEqual({ georef: 31, all: 31 });
+    expect(r.OAK).toBeUndefined();
+  });
+  it("counts a species linked only by a row that doesn't count for no one", async () => {
+    const r = await counts([{ sis: 2, usage: "OAK", verdict: "refused", counted: false }]);
+    expect(r["2"]).toBeUndefined();
+    expect(r.OAK).toBeUndefined();
+  });
+  it("credits nothing above species rank", async () => {
+    expect(Object.keys(await counts()).sort()).toEqual(["LEO", "OAK"]);
+  });
+  it("stops when a usage would count for two species", async () => {
+    await expect(counts([{ sis: 1, usage: "OAK", verdict: "own" }, { sis: 2, usage: "OAK", verdict: "own" }])).rejects.toThrow(/more than one species/);
+  });
+});

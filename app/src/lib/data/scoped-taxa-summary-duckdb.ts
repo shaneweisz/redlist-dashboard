@@ -8,7 +8,7 @@
  * (Country View), stored as a semicolon-joined varchar column on assessed.parquet.
  *
  * Precomputing one file per scope was rejected for countries (~150-200 of them): it
- * would multiply scripts/sync/outputs/build-taxa-summary.ts's runtime ~200x, add a staleness
+ * would multiply scripts/sync/precomputed/summaries.ts's runtime ~200x, add a staleness
  * window, and can't compose with other simultaneous filters. Instead this queries the
  * same assessed.parquet species-duckdb.ts already serves /api/redlist/species from,
  * adding the scope predicate to filterToSql()'s taxonomy-node predicate — computed
@@ -23,10 +23,9 @@
 import { getConn, parquetUri } from "./species-duckdb";
 import { getTaxaSummary, type TaxaSummaryRow, type NodeSummary } from "./species-store";
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
-import { filterToSql } from "@/lib/taxonomy-sql";
+import { childFilterSql } from "@/lib/taxonomy-sql";
 import { outdatedCutoffDate } from "@/lib/outdated";
 import { getDataSyncDate } from "@/lib/data-sync-date";
-import type { TaxonomyNode } from "@/config/taxonomy-tree";
 
 // list_contains needs an exact-case match; countries are stored upper-case 2-letter
 // codes (same convention as the countries= URL filter elsewhere in the app). Exported
@@ -66,7 +65,7 @@ export function outdatedSql(cutoffIso: string): string {
 
 /**
  * Scoped equivalent of getTaxaSummary() — one row per Table 1a taxon_group,
- * mirroring build-taxa-summary.ts's pass 1 (a group is its whole CSV file, no
+ * mirroring precomputed/summaries.ts's pass 1 (a group is its whole CSV file, no
  * class/order/etc. filter). Always emits a row for every known group (even an
  * all-zero one) so the route's per-node "available" check doesn't wrongly
  * mark a taxon unavailable just because zero of its species fall in this scope —
@@ -115,23 +114,11 @@ export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRo
   return [...byGroup.values()];
 }
 
-// Non-catch-all children whose filter defines classNames/orderNames "claim" their
-// matching rows away from a catch-all sibling (excludeClasses-bearing child) — see
-// computeChildrenSummaries' claim-tracking in build-taxa-summary.ts, which this
-// mirrors. families/genera/speciesNames-scoped siblings are deliberately NOT
-// claim-eligible (matching that function exactly). Exported for unit tests.
-export function claimEligibleSiblingsSql(children: TaxonomyNode[], excludeIdx: number): string | null {
-  const clauses = children
-    .filter((c, i) => i !== excludeIdx && (c.filter.classNames?.length || c.filter.orderNames?.length))
-    .map((c) => filterToSql(c.filter));
-  return clauses.length ? clauses.map((c) => `(${c})`).join(" OR ") : null;
-}
-
 /**
  * Scoped equivalent of getPrecomputedChildrenSummaries(parentNodeId) — one
- * NodeSummary per child of the given parent, mirroring build-taxa-summary.ts's pass
- * 2 (computeChildrenSummaries), including its catch-all claim-tracking, but computed
- * on demand for just this one parent instead of the whole tree.
+ * NodeSummary per child of the given parent, with the same child filter the
+ * precomputed summaries use (childFilterSql), computed on demand for just this one
+ * parent instead of the whole tree.
  *
  * `where` is a scope predicate — see getScopedTaxaSummary's doc comment.
  */
@@ -146,11 +133,7 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
   const summaries: NodeSummary[] = [];
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
-    let childWhere = filterToSql(child.filter);
-    if (child.filter.excludeClasses?.length) {
-      const claimed = claimEligibleSiblingsSql(children, i);
-      if (claimed) childWhere = `(${childWhere}) AND NOT (${claimed})`;
-    }
+    const childWhere = childFilterSql(children, i);
     const rows = (await conn.runAndReadAll(
       `SELECT iucn_category AS category, count(*) AS n,
               sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated

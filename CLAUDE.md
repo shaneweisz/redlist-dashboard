@@ -8,7 +8,7 @@ Treat the PR body as a living summary, not a one-time snapshot. Every time a com
 
 ## Always verify UI changes in a real browser
 
-For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done. Playwright is already an `app/` devDependency. If a view comes up empty or full of zeros, first check whether the precomputed `app/data/*.json` behind it is stale and needs regenerating (see the README's "How data reaches the dashboard" and docs/sync.md, e.g. `npx tsx scripts/sync/outputs/build-taxa-summary.ts`) before assuming the UI is broken.
+For any UI-facing change, complete an actual browser drive-through (navigate, interact, screenshot) before calling it done. Playwright is already an `app/` devDependency. If a view comes up empty or full of zeros, first check whether the precomputed `app/data/*.json` behind it is stale and needs regenerating (see the README's "How data reaches the dashboard" and docs/sync.md, e.g. `npm run fetch-data-from-r2` re-fetches the sync `latest-sync.txt` names) before assuming the UI is broken.
 
 ## Branch in the main checkout, unless it has work in progress
 

@@ -31,12 +31,12 @@ import { speciesEntryFromFiles } from "@/lib/species-lists/loader";
 import { treeChildrenFromFiles } from "@/lib/tree-children/loader";
 import { DEFAULT_GBIF_RECORD_MODE, type GbifRecordMode } from "@/lib/gbif-records";
 
-// See scripts/sync/outputs/build-taxa-summary.ts's classifyNoMatch for what each reason means.
+// See src/lib/data/col-breakdown.ts's classifyNoMatch for what each reason means.
 // Modular/additive on top of colBreakdown[].noMatchIds — safe to drop independently
 // of the count-only CoL Match / No CoL Match mechanism it rides alongside.
 type NoMatchDetail = { id: number; name: string; reason: string; detail?: string; detailId?: number; detailColId?: string; colId?: string; colName?: string; colGroup?: string };
 
-// See scripts/sync/outputs/build-taxa-summary.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
+// See src/lib/data/col-breakdown.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
 // caveats — a name-pattern heuristic (former-subspecies synonym → promoted species),
 // not a confirmed taxonomic changelog, so it's worded as "likely" rather than stated
 // as fact. Modular/additive on top of colBreakdown[].splitDetails — keyed by col_id

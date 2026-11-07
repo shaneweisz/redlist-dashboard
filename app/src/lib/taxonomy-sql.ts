@@ -5,7 +5,7 @@
  * which would otherwise drop such rows from both an include and its
  * complementary exclude).
  *
- * Originally lived inline in scripts/sync/outputs/build-taxa-summary.ts (used only against
+ * Originally lived inline in scripts/sync/precomputed/summaries.ts (used only against
  * the CoL species/ parquet, for colDescribed/colNe counts). Extracted so it can
  * also run against assessed.parquet at request time (src/lib/data/
  * scoped-taxa-summary-duckdb.ts) — the column names it references
@@ -117,7 +117,7 @@ export function canonicalClassColumnSql(col: string): string {
 // Sciadopityaceae into "Cupressales" (231 spp) and Podocarpaceae/Araucariaceae
 // into "Araucariales" (250 spp), keeping only Pinaceae under "Pinales" (300 spp)
 // — confirmed via family-level cross-check (2026-07-21).
-// Batch found by build-taxa-summary.ts's automated checkTaxonomyAliasDrift
+// Batch found by precomputed/summaries.ts's automated checkTaxonomyAliasDrift
 // (2026-07-23) — each confirmed via direct data query to be a clean fold (the
 // dominant or sole CoL target for every/nearly every assessed species under
 // that IUCN order), same verification standard as the entries above. Not
@@ -239,6 +239,31 @@ export function canonicalOrderColumnSql(col: string, sciNameCol?: string): strin
  *  its own: scientific_name is stored as-is (unlike the pre-lowercased
  *  class_name/order_name/family), hence the lower(). */
 export const GENUS_SQL = "lower(split_part(scientific_name, ' ', 1))";
+
+/**
+ * Non-catch-all siblings whose filter names classes or orders "claim" their rows
+ * away from a catch-all sibling (one with excludeClasses, "Other Mammals").
+ * Siblings scoped by family, genus or species name deliberately don't claim.
+ */
+export function claimEligibleSiblingsSql(children: TaxonomyNode[], excludeIdx: number): string | null {
+  const clauses = children
+    .filter((c, i) => i !== excludeIdx && (c.filter.classNames?.length || c.filter.orderNames?.length))
+    .map((c) => filterToSql(c.filter));
+  return clauses.length ? clauses.map((c) => `(${c})`).join(" OR ") : null;
+}
+
+/**
+ * The rows one child of a tree node counts, among its siblings: its own filter,
+ * minus, for a catch-all child, what its siblings claim. The precomputed
+ * children summaries (scripts/sync/precomputed/summaries.ts) and the live
+ * scoped ones (scoped-taxa-summary-duckdb.ts) both count with this.
+ */
+export function childFilterSql(children: TaxonomyNode[], index: number): string {
+  const own = filterToSql(children[index].filter);
+  if (!children[index].filter.excludeClasses?.length) return own;
+  const claimed = claimEligibleSiblingsSql(children, index);
+  return claimed ? `(${own}) AND NOT (${claimed})` : own;
+}
 
 export function sqlStrList(vals: string[]): string {
   return vals.map((v) => `'${v.toLowerCase().replace(/'/g, "''")}'`).join(", ");

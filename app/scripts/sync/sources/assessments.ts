@@ -1,0 +1,246 @@
+/**
+ * assessments: one row per global assessment of a species IUCN currently
+ * recognises, every year, read from the Red List Postgres database.
+ *
+ * Built from: the Red List database named by DB_NAME, opened read-only;
+ * seeds/forced-latest.tsv.
+ *
+ * Columns:
+ *   sis_taxon_id        the species (IUCN's SIS taxon id)
+ *   assessment_id       the assessment
+ *   is_latest           the species' latest assessment (one per species)
+ *   year_published, assessment_date, category, criteria
+ *   possibly_extinct, possibly_extinct_in_the_wild, population_trend, movement_pattern
+ *   countries           native, extant, country-level ISO codes
+ *   systems, growth_forms, threat_codes, habitat_codes
+ *                       lists; a habitat is code:season:suitability:major
+ *   assessors, reviewers, facilitators, contributors, institutions
+ *                       the credits, as IUCN prints them
+ *   scientific_name, authority, common_name
+ *                       the species' current taxon record, on each of its rows
+ *   kingdom_name … family
+ *                       IUCN's lineage, lowercase
+ *   taxon_group         the Table 1a group, from IUCN's lineage
+ *   synonyms            IUCN's synonyms: [{name, status}]
+ *
+ * Decisions:
+ *   - Global assessments only, not suppressed, of the species' current taxon
+ *     record (not a subspecies or subpopulation).
+ *   - is_latest is the database's latest flag, plus seeds/forced-latest.tsv;
+ *     one per species, the most recently dated.
+ *   - taxon_group is the Table 1a group from IUCN's own lineage
+ *     (scripts/lib/taxa.ts), so Table 1a's totals stay exact.
+ *   - Countries are native, extant and country-level. Lists stay lists.
+ *   - Dates are dates, never converted through a timezone.
+ *   - An IUCN synonym claimed by more than one current species is dropped: it
+ *     can't say which species it means.
+ *
+ * Checks: the session is read-only (the database is a colleague's); each
+ * species has one current taxon record; each falls in exactly one Table 1a group.
+ */
+
+import { type DuckDBConnection } from "@duckdb/node-api";
+import { TAXA_DEFINITIONS } from "../../lib/taxa";
+import { output } from "../paths";
+import { lit, openDuckDB } from "../sql";
+import { readSeed } from "../seeds/seeds";
+
+/** Assessments counted as latest although the database doesn't flag them so. */
+const FORCED_LATEST = readSeed("forced-latest.tsv").map((r) => Number(r.assessment_id));
+
+/** The Red List database a sync reads unless DB_NAME says otherwise. */
+export const REDLIST_DB = process.env.DB_NAME ?? "redlist_2026_1";
+
+/** assessment_credits.credit_type_id → the column it fills. */
+const CREDIT_TYPES = { 1: "assessors", 2: "reviewers", 3: "contributors", 4: "facilitators", 5: "institutions" } as const;
+
+/** A query run inside Postgres; DuckDB only sees its result. */
+const pg = (sql: string) => `postgres_query('pg', ${lit(sql)})`;
+
+/** A species' current taxon record (as alias t), and a global assessment of it (as alias a). */
+export const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
+export const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
+  SELECT 1 FROM assessment_scopes s WHERE s.assessment_id = a.id AND s.scope_lookup_id = 15)`;
+const IN_SCOPE = `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon_id WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`;
+
+/**
+ * IUCN's group definitions (scripts/lib/taxa.ts) as SQL over the uppercased
+ * columns k, p, c, o, plus a count of how many match (must be 1).
+ */
+const RANK_COL = { kingdom_name: "k", phylum_name: "p", class_name: "c", order_name: "o" } as const;
+function groupSql(): { caseSql: string; matchCount: string } {
+  const conds = TAXA_DEFINITIONS.map((t) => ({
+    id: t.id,
+    cond: t.redlist.map((q) => `${RANK_COL[q.filterColumn]} IN (${q.filterValues.map(lit).join(", ")})`).join(" OR "),
+  }));
+  return {
+    caseSql: `CASE ${conds.map((c) => `WHEN ${c.cond} THEN ${lit(c.id)}`).join(" ")} END`,
+    matchCount: conds.map((c) => `(CASE WHEN ${c.cond} THEN 1 ELSE 0 END)`).join(" + "),
+  };
+}
+
+export async function attachRedList(conn: DuckDBConnection): Promise<void> {
+  const env = (k: string, d?: string) => process.env[k] ?? d;
+  const parts = [
+    `host=${env("DB_HOST", "localhost")}`, `port=${env("DB_PORT", "5432")}`,
+    `dbname=${REDLIST_DB}`, `user=${env("DB_USER", process.env.USER)}`,
+    ...(env("DB_PASSWORD") ? [`password=${env("DB_PASSWORD")}`] : []),
+    `options='-c default_transaction_read_only=on -c statement_timeout=600000'`,
+  ];
+  await conn.run(`INSTALL postgres; LOAD postgres;`);
+  await conn.run(`ATTACH ${lit(parts.join(" "))} AS pg (TYPE postgres, READ_ONLY)`);
+  const [ro] = (await conn.runAndReadAll(
+    `SELECT * FROM ${pg("SELECT current_setting('default_transaction_read_only') AS ro")}`)).getRowObjects();
+  if (ro.ro !== "on") throw new Error("assessments: the Red List session is not read-only; refusing to continue.");
+}
+
+export async function buildAssessments(assessmentsFile: string): Promise<void> {
+  const conn = await openDuckDB();
+  await attachRedList(conn);
+  const out = output(assessmentsFile);
+  const { caseSql, matchCount } = groupSql();
+
+  const credits = Object.entries(CREDIT_TYPES).map(([id, col]) =>
+    `(SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = ${id} ORDER BY c.id LIMIT 1) AS ${col}`);
+
+  // The database's latest flag, plus seeds/forced-latest.tsv; is_latest picks one per species below.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE assessment AS SELECT * FROM ${pg(`
+    SELECT t.sis_id AS sis_taxon_id, a.id AS assessment_id,
+           (a.latest OR a.id IN (${FORCED_LATEST.join(", ")})) AS flagged_latest,
+           a.year_published, a.assessment_date::date AS assessment_date, rlc.code AS category, a.criteria,
+           coalesce(a.possibly_extinct, false) AS possibly_extinct,
+           coalesce(a.possibly_extinct_in_the_wild, false) AS possibly_extinct_in_the_wild,
+           pt.code AS trend_code,
+           ${credits.join(",\n           ")}
+    FROM taxons t
+    JOIN assessments a ON a.taxon_id = t.id
+    JOIN red_list_category_lookup rlc ON rlc.id = a.red_list_category_id
+    LEFT JOIN population_trend_lookup pt ON pt.id = a.population_trend_id
+    WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`)}`);
+
+  await conn.run(`CREATE OR REPLACE TEMP TABLE species AS SELECT * FROM ${pg(`
+    SELECT t.sis_id AS sis_taxon_id, t.scientific_name, t.authority,
+           lower(t.kingdom_name) AS kingdom_name, lower(t.phylum_name) AS phylum_name,
+           lower(t.class_name) AS class_name, lower(t.order_name) AS order_name, lower(t.family_name) AS family,
+           upper(t.kingdom_name) AS k, upper(t.phylum_name) AS p, upper(t.class_name) AS c, upper(t.order_name) AS o,
+           (SELECT n.name FROM taxon_common_names n WHERE n.taxon_id = t.id AND n.language_id = 609 AND n.main
+            ORDER BY n.id LIMIT 1) AS common_name
+    FROM taxons t WHERE ${CURRENT_TAXON}
+      -- A few species have a second, identical "latest" taxon record with no
+      -- assessments (Rhantus fennicus, Amolops daorum); keep the one assessed.
+      AND EXISTS (SELECT 1 FROM assessments a WHERE a.taxon_id = t.id AND ${GLOBAL_ASSESSMENT})`)}`);
+  const [dup] = (await conn.runAndReadAll(
+    `SELECT count(*) AS n FROM (SELECT sis_taxon_id FROM species GROUP BY 1 HAVING count(*) > 1)`)).getRowObjects();
+  if (Number(dup.n) > 0) throw new Error(`assessments: ${dup.n} species have more than one current assessed taxon record`);
+
+  // Native, extant, country-level (two-letter) locations only.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE assessment_lists AS
+    WITH countries AS (SELECT * FROM ${pg(`
+      SELECT al.assessment_id, array_agg(DISTINCT ll.code ORDER BY ll.code) AS countries
+      FROM assessment_locations al JOIN location_lookup ll ON ll.id = al.location_id
+      JOIN legend_lookup leg ON leg.id = al.legend_id
+      WHERE al.assessment_id IN (${IN_SCOPE}) AND leg.origin = 'Native' AND leg.presence = 'Extant' AND length(ll.code) = 2
+      GROUP BY 1`)}),
+    systems AS (SELECT * FROM ${pg(`
+      SELECT x.assessment_id, array_agg(DISTINCT regexp_replace(l.description->>'en', ' \\(=.*\\)', '')) AS systems
+      FROM assessment_systems x JOIN system_lookup l ON l.id = x.system_lookup_id
+      WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
+    growth_forms AS (SELECT * FROM ${pg(`
+      SELECT x.assessment_id, array_agg(DISTINCT l.description->>'en') AS growth_forms
+      FROM assessment_growth_forms x JOIN growth_form_lookup l ON l.id = x.growth_form_id
+      WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
+    movement AS (SELECT * FROM ${pg(`
+      SELECT assessment_id, max(supplementary_fields->>'MovementPatterns.pattern') AS movement_pattern
+      FROM assessment_supplementary_infos
+      WHERE assessment_id IN (${IN_SCOPE}) AND supplementary_fields->>'MovementPatterns.pattern' IS NOT NULL GROUP BY 1`)}),
+    threats AS (SELECT * FROM ${pg(`
+      SELECT x.assessment_id, array_agg(DISTINCT l.code) AS threat_codes
+      FROM assessment_threats x JOIN threat_lookup l ON l.id = x.threat_id
+      WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)}),
+    -- One code:season:suitability:major tuple per row, deduped on the whole
+    -- tuple: a habitat can appear twice under different seasons.
+    habitats AS (SELECT * FROM ${pg(`
+      SELECT x.assessment_id, array_agg(DISTINCT l.code || ':' ||
+               CASE x.supplementary_fields->>'season' WHEN 'Resident' THEN 'R' WHEN 'Breeding Season' THEN 'B'
+                 WHEN 'Non-Breeding Season' THEN 'N' WHEN 'Passage' THEN 'P' WHEN 'Seasonal Occurrence Unknown' THEN 'U' ELSE '-' END || ':' ||
+               CASE x.supplementary_fields->>'suitability' WHEN 'Suitable' THEN 'S' WHEN 'Marginal' THEN 'M' WHEN 'Unknown' THEN 'U' ELSE '-' END || ':' ||
+               CASE x.supplementary_fields->>'majorImportance' WHEN 'Yes' THEN '1' WHEN 'No' THEN '0' ELSE '-' END) AS habitat_codes
+      FROM assessment_habitats x JOIN habitat_lookup l ON l.id = x.habitat_id
+      WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)})
+    SELECT assessment_id, countries, systems, growth_forms, movement_pattern, threat_codes, habitat_codes
+    FROM assessment
+    LEFT JOIN countries USING (assessment_id) LEFT JOIN systems USING (assessment_id) LEFT JOIN growth_forms USING (assessment_id)
+    LEFT JOIN movement USING (assessment_id) LEFT JOIN threats USING (assessment_id) LEFT JOIN habitats USING (assessment_id)`);
+
+  // IUCN synonyms. A binomial claimed by more than one current species (as a
+  // synonym of one and the name of another, or a synonym of both halves of a
+  // split) is dropped: it can't say which species it means. The same name filed
+  // twice under different statuses (Bufo arunco, A and ADD) is kept once; the
+  // status is never read for meaning.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE synonyms AS
+    WITH raw AS (SELECT * FROM ${pg(`
+      SELECT t.sis_id, ts.genus_name AS g, ts.species_name AS s, ts.status
+      FROM taxon_synonyms ts JOIN taxons t ON t.id = ts.taxon_id
+      WHERE ${CURRENT_TAXON} AND ts.genus_name IS NOT NULL AND ts.species_name IS NOT NULL
+        AND ts.infra_name IS NULL AND ts.status NOT IN ('DELETE', 'D')`)}),
+    -- Every current taxon's name can claim, assessed or not. A claim is the
+    -- (genus, species) pair as IUCN stores it, stray whitespace included.
+    canon AS (SELECT * FROM ${pg(`
+      SELECT sis_id, split_part(scientific_name, ' ', 1) AS g, split_part(scientific_name, ' ', 2) AS s
+      FROM taxons t WHERE ${CURRENT_TAXON} AND scientific_name !~ ' [x×] ' AND position('(' in scientific_name) = 0`)}),
+    claims AS (SELECT g, s, count(DISTINCT sis_id) AS n FROM (
+                 SELECT sis_id, g, s FROM raw UNION ALL SELECT sis_id, g, s FROM canon) GROUP BY g, s),
+    one AS (SELECT r.sis_id, r.g || ' ' || r.s AS name, min(r.status) AS status
+            FROM raw r JOIN claims c ON c.g = r.g AND c.s = r.s WHERE c.n = 1 GROUP BY 1, 2)
+    SELECT o.sis_id AS sis_taxon_id, list({'name': o.name, 'status': o.status} ORDER BY o.name) AS synonyms
+    FROM one o JOIN species sp ON sp.sis_taxon_id = o.sis_id WHERE o.name <> sp.scientific_name GROUP BY 1`);
+
+  await conn.run(`ALTER TABLE species ADD COLUMN taxon_group VARCHAR; UPDATE species SET taxon_group = ${caseSql}`);
+
+  // Every current species must fall in exactly one Table 1a group.
+  const coverage = (await conn.runAndReadAll(`
+    SELECT k, p, c, o, ${matchCount} AS hits, count(*) AS n
+    FROM species WHERE sis_taxon_id IN (SELECT sis_taxon_id FROM assessment WHERE flagged_latest)
+    GROUP BY ALL HAVING hits <> 1 ORDER BY n DESC`)).getRowObjects();
+  if (coverage.length > 0) {
+    const lines = coverage.map((r) => `  ${r.k}/${r.p}/${r.c}/${r.o}: ${r.n} species in ${r.hits} groups`);
+    throw new Error(`assessments: species outside exactly one Table 1a group:\n${lines.join("\n")}`);
+  }
+
+  // Dotted codes sort numerically ("1.2" before "1.10"); a habitat tuple's
+  // suffix breaks ties.
+  const sortCodes = (col: string) => `CASE WHEN ${col} IS NULL THEN NULL ELSE (
+      SELECT list(x ORDER BY list_transform(string_split(split_part(x, ':', 1), '.'), lambda p: TRY_CAST(p AS INTEGER)), x)
+      FROM (SELECT unnest(${col}) AS x)) END`;
+
+  await conn.run(`COPY (
+    WITH latest AS (
+      SELECT assessment_id FROM (
+        SELECT assessment_id, row_number() OVER (PARTITION BY sis_taxon_id ORDER BY assessment_date DESC, assessment_id DESC) AS rn
+        FROM assessment WHERE flagged_latest) WHERE rn = 1)
+    SELECT a.sis_taxon_id, a.assessment_id, a.assessment_id IN (SELECT assessment_id FROM latest) AS is_latest,
+           a.year_published, a.assessment_date, a.category, nullif(a.criteria, '') AS criteria,
+           a.possibly_extinct, a.possibly_extinct_in_the_wild,
+           CASE a.trend_code WHEN '0' THEN 'Increasing' WHEN '1' THEN 'Decreasing' WHEN '2' THEN 'Stable' WHEN '3' THEN 'Unknown' END AS population_trend,
+           l.countries, list_sort(l.systems) AS systems, list_sort(l.growth_forms) AS growth_forms, l.movement_pattern,
+           ${sortCodes("l.threat_codes")} AS threat_codes, ${sortCodes("l.habitat_codes")} AS habitat_codes,
+           nullif(a.assessors, '') AS assessors, nullif(a.reviewers, '') AS reviewers, nullif(a.facilitators, '') AS facilitators,
+           nullif(a.contributors, '') AS contributors, nullif(a.institutions, '') AS institutions,
+           sp.scientific_name,
+           -- IUCN stores authorities with HTML entities ("Temminck &amp; Schlegel").
+           replace(replace(replace(replace(replace(replace(sp.authority,
+             '&amp;', '&'), '&lt;', '<'), '&gt;', '>'), '&quot;', '"'), '&#39;', ''''), '&apos;', '''') AS authority,
+           sp.common_name, sp.kingdom_name, sp.phylum_name, sp.class_name, sp.order_name, sp.family,
+           sp.taxon_group,
+           coalesce(syn.synonyms, []) AS synonyms
+    FROM assessment a
+    JOIN species sp USING (sis_taxon_id)
+    LEFT JOIN assessment_lists l USING (assessment_id)
+    LEFT JOIN synonyms syn USING (sis_taxon_id)
+    ORDER BY a.sis_taxon_id, a.year_published DESC, a.assessment_id DESC
+  ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
+  const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(*) FILTER (is_latest) AS latest,
+      count(DISTINCT sis_taxon_id) AS species, max(year_published) AS newest FROM read_parquet(${lit(out)})`)).getRowObjects();
+  console.log(`   ${Number(s.n).toLocaleString()} assessments, ${Number(s.latest).toLocaleString()} latest, ` +
+    `${Number(s.species).toLocaleString()} species, newest published ${s.newest}`);
+}

@@ -127,7 +127,7 @@ export function resolveWhere(taxonId: string): WhereParts {
 }
 
 // species/ is Hive-partitioned by `taxon_group` (the IUCN Table 1a group, assigned at
-// build time from the lineage — see build-taxa's TAXON_GROUP_CASE). So the NE
+// build time from the lineage — see sources/taxa.ts's TAXON_GROUP_CASE). So the NE
 // universe is filtered with the SAME `whereSql` resolveWhere() builds for the
 // assessed/unassessed parquets, and the partition prunes to the queried group(s). No
 // separate node→CoL lineage mapping or per-query partition logic is needed.
@@ -188,7 +188,7 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     taxon_id: mapTaxonId(taxonGroup),
     // Species description year from CoL (NE rows only; null for assessed species,
     // whose parquet has no such column). Coalesced upstream from the author-year
-    // columns with a cited-reference-year fallback — see build-taxa.
+    // columns with a cited-reference-year fallback — see scripts/sync/sources/taxa.ts.
     described_year: num(r.described_year),
     gbif_species_key: str(r.gbif_species_key),
     gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
@@ -499,7 +499,7 @@ export function nodeIdForSpecies(taxonGroup: string, lineage: Lineage): string |
 // to re-scan the name columns of assessed+unassessed straight off R2 — ~25MB pulled
 // and decompressed per request, with no pruning possible (a substring ILIKE can't use
 // row-group statistics, and both parquets are written ORDER BY class_name, order_name,
-// family, so names are scattered across every row group anyway — see build-read-models).
+// family, so names are scattered across every row group anyway — see scripts/sync/lists/).
 // Measured against production: ~2.2s per uncached query, essentially all of it this
 // scan, with searchSpecies and suggestTaxa serialized behind one another on the shared
 // connection. A cold no-match, which falls through to species/** and synonym-index,
@@ -603,7 +603,7 @@ export function toSearchResult(r: Record<string, unknown>, colIdOverride: string
 
 // dedupeByRowKey lives in lib/search-shards/rank.ts — shared with the browser's shard search.
 
-// Tier 0: prefix hits from the name-sorted index (scripts/sync/outputs/build-search-index.ts).
+// Tier 0: prefix hits from the name-sorted index (scripts/sync/precomputed/search-index.ts).
 //
 // name-index.parquet is one row per searchable name — scientific name, common name,
 // epithet, and each word of a multi-word common name — sorted by that name, so this
@@ -642,7 +642,7 @@ async function prefixSearch(conn: DuckDBConnection, q: string, lim: number): Pro
        -- off name_kind instead put Elephant Trunk Snake above Elephant's Foot for
        -- "elephant", which is the old order inverted.
        -- rank_name is the common name the row ranks by: the display one, or the
-       -- alternative common name the row was reached through (see build-search-index).
+       -- alternative common name the row was reached through (see precomputed/search-index.ts).
        ORDER BY (lower(${rc}) = $q) DESC,
                 (lower(${rc}) LIKE $q || '%') DESC,
                 (lower(scientific_name) LIKE $q || '%') DESC,
@@ -1003,7 +1003,7 @@ export async function getAssessedByGbifKeys(keys: readonly string[]): Promise<
       class_name: str(r.class_name),
       category: String(r.category ?? ""),
       criteria: (r.criteria as string) ?? null,
-      // ";"-separated in the parquet, written by build-assessments.
+      // ";"-separated in the parquet, written by sources/assessments.ts.
       threat_codes: String(r.threat_codes ?? "").split(";").filter(Boolean),
       // Free to carry: the row is already being read, so this is two more
       // columns off the same scan rather than another query.
@@ -1097,7 +1097,7 @@ export async function warmConnection(): Promise<void> {
 export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
   const conn = await getConn();
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
-  // rebuilt by a separate scheduled sync (scripts/sync/outputs/build-read-models.ts), not by this
+  // rebuilt by a separate scheduled sync (scripts/sync/lists/), not by this
   // deploy, so there's a window where the deployed code expects a column the
   // currently-synced parquet doesn't have yet. Naming it would throw a DuckDB
   // Binder Error for every request in that window — this deploy's whole history

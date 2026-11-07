@@ -8,7 +8,7 @@
  * tried and has failed.
  */
 import { describe, it, expect } from "vitest";
-import { sameOrganism, isSeparatelyAssessed, decideKey, epithetOf } from "../sync/core/species-key";
+import { sameOrganism, isSeparatelyAssessed, decideKey, epithetOf } from "../sync/link/species-key";
 
 const CASES: Array<{ a: [string, string?]; b: [string, string?]; same: boolean; why: string }> = [
   // --- the same organism, renamed -------------------------------------------

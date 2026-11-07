@@ -40,7 +40,7 @@ async function main() {
   fs.mkdirSync(path.join(outDir, "p3"), { recursive: true });
   const conn = await getConn();
   // Syncs built before every CoL common name was indexed lack these columns (see
-  // build-search-index); fall back to what they mean there, so code and data can ship
+  // precomputed/search-index.ts); fall back to what they mean there, so code and data can ship
   // in either order.
   const cols = async (f: string) => new Set((await conn.runAndReadAll(`DESCRIBE SELECT * FROM '${parquetUri(f)}'`))
     .getRowObjects().map((r) => String(r.column_name)));

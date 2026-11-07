@@ -1,6 +1,6 @@
 /**
  * The Table 1a groups, as IUCN defines them: each group's Red List kingdom,
- * phylum, class or order names. build-assessments assigns every assessed
+ * phylum, class or order names. sources/assessments.ts assigns every assessed
  * species to one; derive-gbif-taxon-keys turns them into the GBIF keys in
  * src/config/gbif-taxon-keys.json, which the app reads.
  */
@@ -30,7 +30,7 @@ export interface Taxon {
 // Butterflies & Moths, etc.) plus an "Other Insects" catch-all. Because the Red
 // List SQL is include-only (no NOT-IN), the catch-all is defined by positive
 // enumeration of every remaining order. Add new insect orders here as they
-// appear in the source data; the build-taxa-summary lossless-split check (sum of
+// appear in the source data; the summaries builder lossless-split check (sum of
 // the 8 groups == old single insecta total) will flag any drift.
 
 // Red List order_name values for insects NOT in the 7 named groups.

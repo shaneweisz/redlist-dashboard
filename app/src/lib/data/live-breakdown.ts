@@ -9,7 +9,7 @@
  *
  * The split_candidates/synonym_assessed/col_to_assessed temp tables are fully
  * determined by the data sync (never by which taxon/bucket a user is viewing),
- * so scripts/sync/outputs/build-taxa-summary.ts precomputes them into
+ * so scripts/sync/precomputed/summaries.ts precomputes them into
  * data/col-split-candidates.parquet, data/col-synonym-assessed.parquet and
  * data/col-to-assessed.parquet (~6K / ~173K rows), loaded here once per warm
  * server connection. If they can't be read, a breakdown degrades to no
@@ -47,7 +47,7 @@ async function ensureColMatchHelpers(conn: Awaited<ReturnType<typeof getConn>>):
 
 /**
  * Resolves each (rank, name) pair to its Catalogue of Life accepted taxon id via
- * taxa.parquet — the same match rule scripts/sync/outputs/build-col-taxon-ids.ts uses to
+ * taxa.parquet — the same match rule scripts/sync/precomputed/col-taxon-ids.ts uses to
  * build the precomputed static-tree snapshot (COL_TAXON_IDS in
  * col-taxon-ids.json), just run live for names that snapshot can't cover: a
  * dynamic node's own ancestor chain (e.g. "Genus: Chaetodipus") is reached
@@ -76,7 +76,7 @@ async function resolveLiveColTaxonIds(
 
 /**
  * One breakdown entry for a dynamic node's own (whole) filter — mirrors
- * build-taxa-summary.ts's isExcludeOnlyCatchAll case (a single bucket keyed by
+ * precomputed/summaries.ts's isExcludeOnlyCatchAll case (a single bucket keyed by
  * the node's own name), since a dynamic node's live-enumerated siblings are
  * already each their own separate node/request, not multiple names under one
  * parent the way a static multi-name SSC group is.

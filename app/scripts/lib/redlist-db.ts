@@ -4,7 +4,7 @@
  * It is a colleague's, and the login we have can write to it, so Postgres
  * won't stop a mistaken write: every session is opened with
  * default_transaction_read_only=on, and checked before it is used. The sync
- * reads it through DuckDB with the same settings (core/build-assessments.ts).
+ * reads it through DuckDB with the same settings (sync/sources/assessments.ts).
  * DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD in app/.env.local.
  */
 
