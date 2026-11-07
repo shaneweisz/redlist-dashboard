@@ -599,10 +599,12 @@ const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
 /** Where a species sits on the priority scatter; null when it has no assessment date or no record window. */
-function priorityOf(s: Species): { years: number; newRecords: number } | null {
-  if (s.category === "NE" || !s.assessment_date || s.gbif_records_since_assessment == null) return null;
+/** Where a species sits on the priority scatter for a y-axis key; null when it has no date or no value. */
+function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
+  if (s.category === "NE" || !s.assessment_date) return null;
   const years = yearsSince(s.assessment_date);
-  return isNaN(years) ? null : { years, newRecords: s.gbif_records_since_assessment };
+  const value = gbifMetricValue(s, key);
+  return isNaN(years) || value == null ? null : { years, value };
 }
 
 // Explain IUCN Red List criteria codes
@@ -1126,19 +1128,21 @@ function chipSelection<T>(prev: Set<T>, value: T, e: React.MouseEvent): Set<T> {
 }
 
 const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
-function GbifChartControls({ value, onChange, showMetric }: {
+function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
+  /** Names the control's subject in its aria-labels, where a page has two sets ("the scatter's y axis"). */
+  what?: string;
 }) {
   const { metric, mode } = gbifKeyParts(value);
   return (
     <div className="flex items-center gap-1">
       {showMetric && (
-        <select aria-label="Which GBIF metric the chart shows" value={metric} className={CHART_SELECT_CLASS}
+        <select aria-label={`Which GBIF metric ${what} shows`} value={metric} className={CHART_SELECT_CLASS}
           onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}>
           {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
         </select>
       )}
-      <select aria-label="Which GBIF records the chart counts" value={mode} className={CHART_SELECT_CLASS}
+      <select aria-label={`Which GBIF records ${what} counts`} value={mode} className={CHART_SELECT_CLASS}
         onChange={(e) => onChange(`${metric}.${e.target.value as GbifRecordMode}`)}>
         {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{GBIF_RECORD_MODE_LABEL[m]}</option>)}
       </select>
@@ -2244,6 +2248,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Reassessment priority scatter (prototype): the box dragged on it filters
   // the page like any chart. Local state for now, not in the URL.
   const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
+  // The scatter's y axis (Total / New / % New, all records / georeferenced),
+  // its own choice rather than the GBIF Records chart's. Starts on New in the
+  // page's record mode.
+  const [priorityKey, setPriorityKey] = useState<GbifRangeKey>(() => `new.${gbifRecordMode}`);
+  const changePriorityKey = useCallback((k: GbifRangeKey) => {
+    setPriorityKey(k);
+    setPriorityBox(null); // the box is in the old metric's units
+  }, []);
   const matchesPriorityBox = useCallback(
     (s: Species): boolean => !priorityBox || priorityBox.keys.has(s.species_key),
     [priorityBox],
@@ -2562,16 +2574,30 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const priorityPoints = useMemo((): PriorityPoint[] => {
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
+    const { mode } = gbifKeyParts(priorityKey);
     for (const s of taxaFilteredSpecies) {
-      const p = priorityOf(s);
+      const p = priorityOf(s, priorityKey);
       if (!p || !matchesFilters(s, SKIP_PRIORITY)) continue;
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
-        total: s.gbif_records ?? null, assessmentDate: s.assessment_date!, ...p,
+        total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
+        assessmentDate: s.assessment_date!, ...p,
       });
     }
     return out;
-  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments]);
+  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey]);
+  // The axes' extents from the whole taxon, filters ignored, so applying or
+  // changing a filter never rescales the chart and selections stay comparable.
+  const priorityExtent = useMemo(() => {
+    let maxYears = 0, maxValue = 0;
+    for (const s of taxaFilteredSpecies) {
+      const p = priorityOf(s, priorityKey);
+      if (!p) continue;
+      if (p.years > maxYears) maxYears = p.years;
+      if (p.value > maxValue) maxValue = p.value;
+    }
+    return { maxYears, maxValue };
+  }, [taxaFilteredSpecies, priorityKey]);
   const priorityInBox = useMemo(
     () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
@@ -5266,9 +5292,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Priority</span>
-                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Years since assessed vs GBIF records since · drag to select</span>
+                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Years since assessed vs GBIF records · drag to select</span>
                 </div>
                 <div className="flex items-center gap-1">
+                  <GbifChartControls value={priorityKey} onChange={changePriorityKey} showMetric what="the scatter's y axis" />
                   {priorityBox && (
                     <button type="button" onClick={() => setPriorityBox(null)}
                       className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
@@ -5287,6 +5314,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   onBoxChange={setPriorityBox}
                   onPointClick={openSpeciesFromScatter}
                   selectedKey={selectedSpeciesKey}
+                  yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                  maxYears={priorityExtent.maxYears}
+                  maxValue={priorityExtent.maxValue}
                 />
               )}
             </div>

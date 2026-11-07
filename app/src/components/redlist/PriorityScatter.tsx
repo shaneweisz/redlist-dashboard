@@ -2,15 +2,18 @@
 
 /**
  * Reassessment priority: one dot per assessed species, years since its latest
- * assessment across, GBIF records dated after that assessment up (log scale),
- * coloured by Red List category: the top right is outdated with plenty of new
- * evidence since. Drag a box to filter the page to the species inside it;
- * click a dot to open that species.
+ * assessment across, a GBIF value up (records in total or since the
+ * assessment, log scale; or % new, linear), coloured by Red List category: the
+ * top right is outdated with plenty of data since. Drag a box to filter the
+ * page to the species inside it; click a dot to open that species.
+ *
+ * The axes' extents come from the caller (the whole taxon, not the filtered
+ * points), so applying a filter never rescales the chart.
  *
  * Canvas rather than SVG: "All species" is ~175k dots. Hover and the drag box
  * are DOM overlays, so the canvas only redraws when the data or box changes.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { yearsMonthsSince } from "@/lib/outdated";
 
 export interface PriorityPoint {
@@ -20,15 +23,16 @@ export interface PriorityPoint {
   category: string;
   /** Years since the latest assessment. */
   years: number;
-  /** GBIF records dated after the assessment (current record mode). */
-  newRecords: number;
-  /** All GBIF records (current record mode). */
+  /** The plotted GBIF value: a record count, or a percentage for "pct". */
+  value: number;
+  /** GBIF records in total and since the assessment (the plotted record mode), for the tooltip. */
   total: number | null;
+  newRecords: number | null;
   assessmentDate: string;
 }
 
 /**
- * A selection: the box in data units (years, log10(newRecords + 1)), for
+ * A selection: the box in plot units (years; log10(value + 1), or %), for
  * drawing, and the species whose dots were inside it as drawn. Filtering by
  * the keys rather than re-testing the box keeps it exactly what you see: dots
  * are jittered a few pixels, so a tight box around one dot could miss its
@@ -36,7 +40,9 @@ export interface PriorityPoint {
  */
 export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
 
-const pointY = (newRecords: number) => Math.log10(newRecords + 1);
+export type YScale = "log" | "pct";
+/** Plot units up the y axis: log10(count + 1), or the percentage itself. */
+export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? value : Math.log10(value + 1));
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
@@ -57,8 +63,12 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, maxYears, maxValue }: {
   points: PriorityPoint[];
+  yScale: YScale;
+  /** The axes' extents: the oldest assessment and largest value in the whole taxon. */
+  maxYears: number;
+  maxValue: number;
   colors: Record<string, string>;
   box: PriorityBox | null;
   onBoxChange: (box: PriorityBox | null) => void;
@@ -79,17 +89,11 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     return () => ro.disconnect();
   }, []);
 
-  // Scales. X runs to the oldest assessment (rounded up to 5 years); Y to the
-  // largest count's power of ten.
+  // Scales. X runs to the taxon's oldest assessment (rounded up to 5 years); Y
+  // to its largest count's power of ten, or 100%.
   const scales = useMemo(() => {
-    let maxYears = 10, maxY = 3;
-    for (const p of points) {
-      if (p.years > maxYears) maxYears = p.years;
-      const y = pointY(p.newRecords);
-      if (y > maxY) maxY = y;
-    }
-    const xMax = Math.ceil(maxYears / 5) * 5;
-    const yMax = Math.ceil(maxY);
+    const xMax = Math.max(10, Math.ceil(maxYears / 5) * 5);
+    const yMax = yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log")));
     const plotW = Math.max(0, width - M.left - M.right);
     const plotH = HEIGHT - M.top - M.bottom;
     return {
@@ -99,7 +103,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ix: (px: number) => ((px - M.left) / plotW) * xMax,
       iy: (py: number) => ((M.top + plotH - py) / plotH) * yMax,
     };
-  }, [points, width]);
+  }, [width, maxYears, maxValue, yScale]);
 
   // Screen positions (with a little deterministic vertical jitter, so the many
   // species on the same count, above all 0, show as a band rather than a line),
@@ -113,14 +117,14 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       let h = 0;
       for (let c = 0; c < p.key.length; c++) h = (h * 31 + p.key.charCodeAt(c)) | 0;
       const jitter = ((h & 1023) / 1023 - 0.5) * 6;
-      const x = scales.sx(p.years), y = scales.sy(pointY(p.newRecords)) + jitter;
+      const x = scales.sx(Math.min(p.years, scales.xMax)), y = scales.sy(Math.min(toPlotY(p.value, yScale), scales.yMax)) + jitter;
       xy[i * 2] = x; xy[i * 2 + 1] = y;
       const k = Math.floor(x / cell) * 10007 + Math.floor(y / cell);
       const bucket = grid.get(k);
       if (bucket) bucket.push(i); else grid.set(k, [i]);
     });
     return { ordered, xy, grid, cell };
-  }, [points, scales]);
+  }, [points, scales, yScale]);
 
   // Draw.
   useEffect(() => {
@@ -140,10 +144,11 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     ctx.strokeStyle = "rgba(161, 161, 170, 0.18)";
     ctx.lineWidth = 1;
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    for (let e = 0; e <= yMax; e++) {
-      const y = Math.round(sy(e)) + 0.5;
+    const yTicks = yScale === "pct" ? [0, 25, 50, 75, 100] : Array.from({ length: yMax + 1 }, (_, e) => e);
+    for (const t of yTicks) {
+      const y = Math.round(sy(t)) + 0.5;
       ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(M.left + plotW, y); ctx.stroke();
-      ctx.fillText(e === 0 ? "0" : formatCount(10 ** e), M.left - 6, y);
+      ctx.fillText(yScale === "pct" ? `${t}%` : t === 0 ? "0" : formatCount(10 ** t), M.left - 6, y);
     }
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     for (let yr = 0; yr <= xMax; yr += 5) {
@@ -165,7 +170,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors]);
+  }, [layout, scales, width, box, colors, yScale]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -211,7 +216,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
         const px = xy[i * 2], py = xy[i * 2 + 1];
         if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
       }
-      onBoxChange({ x0: Math.max(0, ix(left)), x1: ix(right), y0: Math.max(0, iy(bottom)), y1: iy(top), keys });
+      onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
       return;
     }
     const i = hitTest(x, y);
@@ -228,9 +233,24 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     return { left, top, width: right - left, height: bottom - top };
   })() : null;
   const dragPx = drag ? {
-    left: Math.min(drag.x0, drag.x1), top: Math.min(drag.y0, drag.y1),
-    width: Math.abs(drag.x1 - drag.x0), height: Math.abs(drag.y1 - drag.y0),
+    left: Math.max(0, Math.min(drag.x0, drag.x1)), top: Math.max(0, Math.min(drag.y0, drag.y1)),
+    width: Math.min(width, Math.max(drag.x0, drag.x1)) - Math.max(0, Math.min(drag.x0, drag.x1)),
+    height: Math.min(HEIGHT, Math.max(drag.y0, drag.y1)) - Math.max(0, Math.min(drag.y0, drag.y1)),
   } : null;
+
+  // The tooltip, measured and kept inside the chart: right of and level with
+  // the dot where it fits, else left of it and/or nudged up from the bottom
+  // edge (the wrapper clips, so an unclamped tooltip near the bottom was cut off).
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = tipRef.current;
+    if (!hover || !el) { setTipPos(null); return; }
+    const w = el.offsetWidth, h = el.offsetHeight, gap = 10;
+    const left = hover.px + gap + w <= width ? hover.px + gap : Math.max(0, hover.px - gap - w);
+    const top = Math.min(Math.max(0, hover.py - h / 2), HEIGHT - h);
+    setTipPos({ left, top: Math.max(0, top) });
+  }, [hover, width]);
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
 
   return (
@@ -257,12 +277,10 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
           <div className="pointer-events-none absolute w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-1 ring-zinc-900 dark:ring-white"
             style={{ left: hover.px, top: hover.py }} />
           <div
+            ref={tipRef}
             className="pointer-events-none absolute z-10 max-w-[260px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]"
-            style={{
-              left: hover.px > width - 200 ? undefined : hover.px + 10,
-              right: hover.px > width - 200 ? width - hover.px + 10 : undefined,
-              top: Math.max(0, hover.py - 40),
-            }}
+            // Hidden for the one frame before it is measured, so it never flashes in the wrong place.
+            style={tipPos ? { left: tipPos.left, top: tipPos.top } : { left: 0, top: 0, visibility: "hidden" }}
           >
             <div className="italic text-zinc-900 dark:text-zinc-100">{hover.p.name}</div>
             {hover.p.commonName && <div className="text-zinc-500 dark:text-zinc-400">{hover.p.commonName}</div>}
@@ -273,8 +291,8 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
             <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
               <tbody>
                 <tr><td className="pr-3">GBIF records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">At assessment</td><td className="text-right">{hover.p.total != null ? Math.max(0, hover.p.total - hover.p.newRecords).toLocaleString() : "—"}</td></tr>
-                <tr><td className="pr-3">Since</td><td className="text-right">{hover.p.newRecords.toLocaleString()}</td></tr>
+                <tr><td className="pr-3">At assessment</td><td className="text-right">{hover.p.total != null && hover.p.newRecords != null ? Math.max(0, hover.p.total - hover.p.newRecords).toLocaleString() : "—"}</td></tr>
+                <tr><td className="pr-3">Since</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
               </tbody>
             </table>
             <div className="mt-0.5 text-zinc-400">Click to open · drag to select an area</div>
