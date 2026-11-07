@@ -223,10 +223,15 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     else if (box) onBoxChange(null);
   };
 
-  const boxPx = box && width > 0 ? {
-    left: scales.sx(box.x0), top: scales.sy(box.y1),
-    width: scales.sx(box.x1) - scales.sx(box.x0), height: scales.sy(box.y0) - scales.sy(box.y1),
-  } : null;
+  // Clamped to the plot: the corner shortcut's box runs to "any age, any count"
+  // (x1/y1 far past the axes), which unclamped drew across the whole page.
+  const boxPx = box && width > 0 ? (() => {
+    const cx = (v: number) => Math.min(Math.max(v, 0), scales.xMax);
+    const cy = (v: number) => Math.min(Math.max(v, 0), scales.yMax);
+    const left = scales.sx(cx(box.x0)), right = scales.sx(cx(box.x1));
+    const top = scales.sy(cy(box.y1)), bottom = scales.sy(cy(box.y0));
+    return { left, top, width: right - left, height: bottom - top };
+  })() : null;
   const dragPx = drag ? {
     left: Math.min(drag.x0, drag.x1), top: Math.min(drag.y0, drag.y1),
     width: Math.abs(drag.x1 - drag.x0), height: Math.abs(drag.y1 - drag.y0),
@@ -236,7 +241,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   return (
     <div
       ref={wrapRef}
-      className="relative select-none cursor-crosshair"
+      className="relative overflow-hidden select-none cursor-crosshair"
       style={{ height: HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
