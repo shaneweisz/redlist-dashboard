@@ -5,8 +5,9 @@
  * assessment across, a GBIF value up (records in total or since the
  * assessment, log scale; or % new, linear), coloured by Red List category: the
  * top right is outdated with plenty of data since. Drag a box to filter the
- * page to the species inside it. Hovering a dot shows a short summary;
- * clicking it pins a details card (the assessment, the GBIF split, links).
+ * page to the species inside it; click a dot to show that species in the
+ * table. The hover tooltip can be moused into and expanded for the assessment's
+ * details (criteria, trend, the credits) without leaving the chart.
  *
  * The axes' extents come from the caller (the whole taxon, not the filtered
  * points), so applying a filter never rescales the chart.
@@ -39,14 +40,17 @@ export interface PriorityPoint {
  * are jittered a few pixels, so a tight box around one dot could miss its
  * unjittered position and select nothing.
  */
-/** What the pinned card adds to the hover summary, looked up only for the one clicked species. */
+/** What the expanded tooltip adds, looked up only for the one species expanded. */
 export interface PriorityDetails {
   criteria: string | null;
   populationTrend: string | null;
+  possiblyExtinct: boolean;
   assessmentCount: number | null;
   assessors: string | null;
-  /** "All records" / "Georeferenced": which GBIF records the counts are. */
-  recordsLabel: string;
+  reviewers: string | null;
+  facilitators: string | null;
+  contributors: string | null;
+  institutions: string | null;
   redListUrl: string | null;
   gbifUrl: string | null;
 }
@@ -71,32 +75,37 @@ function ageText(date: string): string {
   return parts.length ? `${parts.join(", ")} ago` : "this month";
 }
 
-/** "11y 8m ago": the card's compact form of ageText, so the date row stays one line. */
-function shortAge(date: string): string {
-  const { years, months } = yearsMonthsSince(date);
-  const parts = [years ? `${years}y` : "", months ? `${months}m` : ""].filter(Boolean);
-  return parts.length ? `${parts.join(" ")} ago` : "this month";
-}
-
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 /**
  * Where a floating box of size w×h goes beside an anchor at (px, py): right of
  * and level with it where it fits, else left of it, and nudged up or down to
- * stay inside the chart (the wrapper clips, so an unclamped box near the
- * bottom was cut off). Null until measured, so it never flashes misplaced.
+ * stay inside the chart (an unclamped box near the bottom ran off it). A box
+ * taller than the chart starts at its top and runs on below it. Null until
+ * measured, so it never flashes misplaced.
  */
-function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px: number; py: number } | null, width: number, gap: number) {
+function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px: number; py: number } | null, width: number, gap: number, grown: boolean) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!anchor || !el) { setPos(null); return; }
     const w = el.offsetWidth, h = el.offsetHeight;
-    const left = anchor.px + gap + w <= width ? anchor.px + gap : Math.max(0, anchor.px - gap - w);
-    const top = Math.max(0, Math.min(anchor.py - h / 2, HEIGHT - h));
-    setPos((prev) => (prev && prev.left === left && prev.top === top ? prev : { left, top }));
-  }, [ref, anchor, width, gap]);
+    setPos((prev) => {
+      let left: number, top: number;
+      if (grown && prev) {
+        // Grown in place (expanded under the cursor): keep its top and only
+        // shift left as far as it must to fit. Re-placing it could flip it to
+        // the dot's other side, out from under the cursor, which closes it.
+        left = Math.max(0, Math.min(prev.left, width - w));
+        top = prev.top;
+      } else {
+        left = anchor.px + gap + w <= width ? anchor.px + gap : Math.max(0, anchor.px - gap - w);
+        top = Math.max(0, Math.min(anchor.py - h / 2, HEIGHT - h));
+      }
+      return prev && prev.left === left && prev.top === top ? prev : { left, top };
+    });
+  }, [ref, anchor, width, gap, grown]);
   return pos;
 }
 const placedStyle = (pos: { left: number; top: number } | null): React.CSSProperties =>
@@ -120,7 +129,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   categoryNames: Record<string, string>;
   box: PriorityBox | null;
   onBoxChange: (box: PriorityBox | null) => void;
-  /** "Show in table": page and scroll the species table to this species. */
+  /** Clicking a dot: page and scroll the species table to this species. */
   onPointClick: (key: string) => void;
   details: (key: string) => PriorityDetails | null;
   selectedKey?: string | null;
@@ -130,8 +139,8 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  /** The clicked species whose details card is open. */
-  const [pinnedKey, setPinnedKey] = useState<string | null>(null);
+  /** The tooltip shows the assessment's details too (its "More details" was clicked). */
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -263,12 +272,22 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     dragStart.current = { x0: x, y0: y };
     setDrag({ x0: x, y0: y, x1: x, y1: y });
   };
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelLeave = () => { if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; } };
+  useEffect(() => cancelLeave, []);
   const onMouseMove = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
     const start = dragStart.current;
     if (start) { setDrag({ ...start, x1: x, y1: y }); setHover(null); return; }
     const i = hitTest(x, y);
-    setHover(i == null ? null : { p: layout.ordered[i], px: layout.xy[i * 2], py: layout.xy[i * 2 + 1] });
+    if (i != null) {
+      cancelLeave();
+      if (hover?.p.key !== layout.ordered[i].key) setExpanded(false);
+      setHover({ p: layout.ordered[i], px: layout.xy[i * 2], py: layout.xy[i * 2 + 1] });
+    } else if (hover && !leaveTimer.current) {
+      // Off the dot: keep the tooltip a moment, so the mouse can cross the gap into it.
+      leaveTimer.current = setTimeout(() => { leaveTimer.current = null; setHover(null); setExpanded(false); }, 300);
+    }
   };
   const onMouseUp = (e: React.MouseEvent) => {
     const drag = dragStart.current;
@@ -290,11 +309,8 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
       return;
     }
-    // A click on a dot opens its card; on empty space it closes the card
-    // first, and only then (a second click) clears the box.
     const i = hitTest(x, y);
-    if (i != null) setPinnedKey(layout.ordered[i].key);
-    else if (pinnedKey) setPinnedKey(null);
+    if (i != null) onPointClick(layout.ordered[i].key);
     else if (box) onBoxChange(null);
   };
 
@@ -313,36 +329,23 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   } : null;
 
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
-  const pinnedIndex = pinnedKey ? layout.ordered.findIndex((p) => p.key === pinnedKey) : -1;
-  const pinned = pinnedIndex >= 0 ? { p: layout.ordered[pinnedIndex], px: layout.xy[pinnedIndex * 2], py: layout.xy[pinnedIndex * 2 + 1] } : null;
-  const pinnedDetails = useMemo(() => (pinnedKey ? details(pinnedKey) : null), [pinnedKey, details]);
-
-  // A filter that drops the pinned species closes its card; so does Escape.
-  useEffect(() => { if (pinnedKey && pinnedIndex < 0) setPinnedKey(null); }, [pinnedKey, pinnedIndex]);
-  useEffect(() => {
-    if (!pinnedKey) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPinnedKey(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pinnedKey]);
-
-  // While a card is open, hovering other dots only rings them: two floating boxes at once is noise.
-  const showTip = hover && !pinned;
+  const hoverDetails = useMemo(() => (hover && expanded ? details(hover.p.key) : null), [hover, expanded, details]);
   const tipRef = useRef<HTMLDivElement>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const tipPos = usePlacement(tipRef, showTip ? hover : null, width, 10);
-  const cardPos = usePlacement(cardRef, pinned, width, 12);
+  const tipPos = usePlacement(tipRef, hover, width, 10, expanded);
+  // Events inside the tooltip are its own: no drags, hit tests or dot clicks.
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
   return (
     <div
       ref={wrapRef}
-      className="relative overflow-hidden select-none cursor-crosshair"
+      // Not overflow-hidden: the drag box and selection are clamped to the plot
+      // themselves, and the expanded tooltip may run past the chart's bottom.
+      className="relative select-none cursor-crosshair"
       style={{ height: HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseUp={onMouseUp}
-      onMouseLeave={() => { setHover(null); setDrag(null); dragStart.current = null; }}
+      onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); setDrag(null); dragStart.current = null; }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
       {(dragPx ?? boxPx) && (
@@ -353,123 +356,95 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
         <div className="pointer-events-none absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full ring-2 ring-zinc-900 dark:ring-white"
           style={{ left: layout.xy[selected * 2], top: layout.xy[selected * 2 + 1] }} />
       )}
-      {pinned && (
-        <div className="pointer-events-none absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full ring-2 ring-zinc-900 dark:ring-white"
-          style={{ left: pinned.px, top: pinned.py }} />
-      )}
       {hover && (
-        <div className="pointer-events-none absolute w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-1 ring-zinc-900 dark:ring-white"
-          style={{ left: hover.px, top: hover.py }} />
-      )}
-      {showTip && (
-        <div ref={tipRef} role="tooltip"
-          className="pointer-events-none absolute z-10 max-w-[240px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1.5 text-[11px] leading-[15px]"
-          style={placedStyle(tipPos)}>
-          <div className="italic font-medium text-zinc-900 dark:text-zinc-100 truncate">{hover.p.name}</div>
-          <CategoryLine p={hover.p} colors={colors} className="mt-0.5">assessed {ageText(hover.p.assessmentDate)}</CategoryLine>
-          <div className="tabular-nums text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-            {hover.p.newRecords != null ? <><span className="text-zinc-900 dark:text-zinc-100">{hover.p.newRecords.toLocaleString()}</span> records since</> : "No records window"}
-            {hover.p.total != null && <> · {hover.p.total.toLocaleString()} total</>}
+        <>
+          <div className="pointer-events-none absolute w-2.5 h-2.5 -ml-[5px] -mt-[5px] rounded-full ring-1 ring-zinc-900 dark:ring-white"
+            style={{ left: hover.px, top: hover.py }} />
+          <div
+            ref={tipRef}
+            role="tooltip"
+            className={`absolute z-30 ${expanded ? "w-[280px]" : "max-w-[260px]"} max-w-full cursor-default select-text rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]`}
+            style={placedStyle(tipPos)}
+            onMouseEnter={cancelLeave}
+            onMouseLeave={() => { setHover(null); setExpanded(false); }}
+            onMouseDown={stop} onMouseUp={stop} onMouseMove={stop}
+          >
+            <div className="italic text-zinc-900 dark:text-zinc-100">{hover.p.name}</div>
+            {hover.p.commonName && <div className="text-zinc-500 dark:text-zinc-400">{hover.p.commonName}</div>}
+            <div className="mt-0.5 text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+              <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
+              {" · "}assessed {ageText(hover.p.assessmentDate)}
+            </div>
+            <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
+              <tbody>
+                <tr><td className="pr-3">GBIF records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">At assessment</td><td className="text-right">{hover.p.total != null && hover.p.newRecords != null ? Math.max(0, hover.p.total - hover.p.newRecords).toLocaleString() : "—"}</td></tr>
+                <tr><td className="pr-3">Since</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+              </tbody>
+            </table>
+            {expanded && hoverDetails && <TooltipDetails p={hover.p} d={hoverDetails} categoryNames={categoryNames} />}
+            <div className="mt-1 flex items-center justify-between gap-3 text-zinc-400">
+              <span>Click the dot to show in table</span>
+              <button type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
+                className="shrink-0 text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 font-medium">
+                {expanded ? "Less ▴" : "More ▾"}
+              </button>
+            </div>
           </div>
-          <div className="mt-1 text-zinc-400 dark:text-zinc-500">Click for details</div>
-        </div>
+        </>
       )}
-      {pinned && (
-        <div ref={cardRef} role="dialog" aria-label={`${pinned.p.name} details`}
-          className="absolute z-20 w-[264px] max-w-full cursor-default select-text rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg text-[11px] leading-[15px]"
-          style={placedStyle(cardPos)}
-          onMouseDown={stop} onMouseUp={stop} onMouseMove={stop}>
-          <PinnedCard p={pinned.p} d={pinnedDetails} colors={colors} categoryNames={categoryNames}
-            onClose={() => setPinnedKey(null)}
-            onShowInTable={() => { setPinnedKey(null); onPointClick(pinned.p.key); }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A category swatch and code, then whatever follows it: "● VU · assessed 3 years ago". */
-function CategoryLine({ p, colors, label, className = "", children }: { p: PriorityPoint; colors: Record<string, string>; label?: string; className?: string; children?: React.ReactNode }) {
-  return (
-    <div className={`flex items-center gap-1.5 min-w-0 text-zinc-700 dark:text-zinc-300 ${className}`}>
-      <span aria-hidden className="w-2 h-2 shrink-0 rounded-full" style={{ background: colors[p.category] || "#a1a1aa" }} />
-      <span className="font-semibold text-zinc-900 dark:text-zinc-100">{label ?? p.category}</span>
-      {children && <span className="truncate">· {children}</span>}
     </div>
   );
 }
 
 /**
- * The details card: who and what (name, category, criteria), when (the date
- * and how long ago), the GBIF split as numbers and one bar (before the
- * assessment vs since), and where to go next. Fields with no value are left
- * out rather than shown as dashes.
+ * The expanded tooltip's Red List details, grouped: the assessment itself,
+ * then who made it, then links out. Rows with no value are left out.
  */
-function PinnedCard({ p, d, colors, categoryNames, onClose, onShowInTable }: {
-  p: PriorityPoint; d: PriorityDetails | null; colors: Record<string, string>; categoryNames: Record<string, string>;
-  onClose: () => void; onShowInTable: () => void;
-}) {
-  const before = p.total != null && p.newRecords != null ? Math.max(0, p.total - p.newRecords) : null;
-  const sincePct = p.total && p.newRecords != null ? Math.round((p.newRecords / p.total) * 100) : null;
-  const facts: [string, React.ReactNode][] = [
-    ["Assessed", <span key="assessed" className="whitespace-nowrap">{formatDate(p.assessmentDate)} <span className="text-zinc-500 dark:text-zinc-400">· {shortAge(p.assessmentDate)}</span></span>],
+function TooltipDetails({ p, d, categoryNames }: { p: PriorityPoint; d: PriorityDetails; categoryNames: Record<string, string> }) {
+  const assessment: [string, React.ReactNode][] = [
+    ["Category", `${categoryNames[p.category] ?? p.category}${d.possiblyExtinct ? " (possibly extinct)" : ""}`],
+    ["Criteria", d.criteria],
+    ["Assessed", formatDate(p.assessmentDate)],
+    ["Population", d.populationTrend],
+    ["Assessments", d.assessmentCount ? `${d.assessmentCount} on record` : null],
   ];
-  if (d?.populationTrend) facts.push(["Population", d.populationTrend]);
-  if (d?.assessmentCount) facts.push(["Assessments", d.assessmentCount === 1 ? "First assessment" : `${d.assessmentCount} on record`]);
-  if (d?.assessors) facts.push(["Assessors", <span key="assessors" className="block truncate" title={d.assessors}>{d.assessors}</span>]);
-  const linkClass = "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:underline";
-
+  const credits: [string, React.ReactNode][] = [
+    ["Assessors", d.assessors],
+    ["Reviewers", d.reviewers],
+    ["Facilitators", d.facilitators],
+    ["Contributors", d.contributors],
+    ["Institutions", d.institutions],
+  ];
+  const linkClass = "text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 hover:underline";
   return (
     <>
-      <div className="flex items-start gap-2 px-3 pt-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="italic font-semibold text-[12px] leading-[16px] text-zinc-900 dark:text-zinc-100 break-words">{p.name}</div>
-          {p.commonName && <div className="text-zinc-500 dark:text-zinc-400 truncate">{p.commonName}</div>}
+      <DetailGroup title="Assessment" rows={assessment} />
+      <DetailGroup title="Credits" rows={credits} />
+      {(d.redListUrl || d.gbifUrl) && (
+        <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800 flex gap-3">
+          {d.redListUrl && <a href={d.redListUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>Red List ↗</a>}
+          {d.gbifUrl && <a href={d.gbifUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>GBIF ↗</a>}
         </div>
-        <button type="button" onClick={onClose} aria-label="Close details"
-          className="-mr-1 -mt-0.5 shrink-0 w-5 h-5 inline-flex items-center justify-center rounded text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-800">×</button>
-      </div>
-      <CategoryLine p={p} colors={colors} label={categoryNames[p.category] ?? p.category} className="px-3 mt-1.5">
-        {d?.criteria || null}
-      </CategoryLine>
+      )}
+    </>
+  );
+}
 
-      <dl className="px-3 mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        {facts.map(([k, v]) => (
+function DetailGroup({ title, rows }: { title: string; rows: [string, React.ReactNode][] }) {
+  const shown = rows.filter(([, v]) => v != null && v !== "");
+  if (!shown.length) return null;
+  return (
+    <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800">
+      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{title}</div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {shown.map(([k, v]) => (
           <div key={k} className="contents">
             <dt className="text-zinc-500 dark:text-zinc-400">{k}</dt>
-            <dd className="text-zinc-900 dark:text-zinc-100 min-w-0">{v}</dd>
+            <dd className="text-zinc-900 dark:text-zinc-100 min-w-0 break-words">{v}</dd>
           </div>
         ))}
       </dl>
-
-      <div className="mx-3 mt-2.5 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-        <div className="flex items-baseline justify-between text-zinc-500 dark:text-zinc-400">
-          <span>GBIF records{d ? ` · ${d.recordsLabel.toLowerCase()}` : ""}</span>
-          <span className="tabular-nums font-semibold text-zinc-900 dark:text-zinc-100">{p.total?.toLocaleString() ?? "—"}</span>
-        </div>
-        {before != null && p.newRecords != null && p.total ? (
-          <>
-            {/* One bar: the share recorded before the assessment vs since. */}
-            <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800" aria-hidden>
-              <div className="bg-zinc-300 dark:bg-zinc-600" style={{ width: `${(before / p.total) * 100}%` }} />
-              <div className="bg-emerald-500" style={{ width: `${(p.newRecords / p.total) * 100}%` }} />
-            </div>
-            <div className="mt-1 flex justify-between tabular-nums text-zinc-600 dark:text-zinc-400">
-              <span><span aria-hidden className="inline-block w-1.5 h-1.5 mr-1 rounded-full bg-zinc-300 dark:bg-zinc-600" />{before.toLocaleString()} before</span>
-              <span><span aria-hidden className="inline-block w-1.5 h-1.5 mr-1 rounded-full bg-emerald-500" />{p.newRecords.toLocaleString()} since{sincePct != null ? ` (${sincePct}%)` : ""}</span>
-            </div>
-          </>
-        ) : p.total === 0 ? <div className="mt-0.5 text-zinc-500 dark:text-zinc-400">None on GBIF</div> : null}
-      </div>
-
-      <div className="flex items-center gap-3 px-3 py-2 mt-2.5 border-t border-zinc-100 dark:border-zinc-800">
-        <button type="button" onClick={onShowInTable}
-          className="h-5 px-2 rounded-md bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300 font-medium">
-          Show in table
-        </button>
-        {d?.redListUrl && <a href={d.redListUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>Red List ↗</a>}
-        {d?.gbifUrl && <a href={d.gbifUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>GBIF ↗</a>}
-      </div>
-    </>
+    </div>
   );
 }

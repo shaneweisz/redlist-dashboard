@@ -2597,18 +2597,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return { maxYears, maxValue };
   }, [taxaFilteredSpecies, priorityKey]);
-  // The scatter's details card: looked up for the one clicked species only.
+  // The scatter tooltip's expanded details: looked up for the one species only.
   const priorityDetails = useCallback((key: string): PriorityDetails | null => {
     const s = taxaFilteredSpecies.find((x) => x.species_key === key);
     if (!s) return null;
     return {
-      criteria: s.criteria, populationTrend: s.population_trend, assessmentCount: s.assessment_count,
-      assessors: s.latest_assessors,
-      recordsLabel: GBIF_RECORD_MODE_LABEL[gbifKeyParts(priorityKey).mode],
+      criteria: s.criteria, populationTrend: s.population_trend, possiblyExtinct: s.possibly_extinct,
+      assessmentCount: s.assessment_count,
+      assessors: s.latest_assessors, reviewers: s.latest_reviewers, facilitators: s.latest_facilitators,
+      contributors: s.latest_contributors, institutions: s.latest_institutions,
       redListUrl: s.sis_taxon_id && s.assessment_id ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}` : null,
       gbifUrl: s.gbif_species_key ? `https://www.gbif.org/species/${s.gbif_species_key}` : null,
     };
-  }, [taxaFilteredSpecies, priorityKey]);
+  }, [taxaFilteredSpecies]);
   const priorityYLabel = useMemo(() => {
     const { metric, mode } = gbifKeyParts(priorityKey);
     const what = mode === "georeferenced" ? "georeferenced records" : "records";
@@ -5308,7 +5309,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot for details</span>
+                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <GbifChartControls value={priorityKey} onChange={changePriorityKey} showMetric what="the scatter's y axis" />
