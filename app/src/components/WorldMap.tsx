@@ -14,6 +14,7 @@ import { splitEmbeddedTerritories } from "@/lib/map-territories";
 import CountryStatsList from "./CountryStatsList";
 import type { MapViewMode, MapSortKey } from "@/hooks/useFilterParams";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, type GbifRecordMode } from "@/lib/gbif-records";
+import { CHART_SEARCH_CLASS, CHART_SEARCH_INPUT_CLASS, CHART_SEGMENTED_CLASS, CHART_SELECT_CLASS, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "@/components/redlist/chart-controls";
 
 // Using the recommended TopoJSON from react-simple-maps
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json";
@@ -452,8 +453,8 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           {/* Country search */}
           <div ref={searchContainerRef} className="relative">
-            <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-md">
-              <svg className="w-3 h-3 ml-1.5 text-zinc-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className={CHART_SEARCH_CLASS}>
+              <svg className="w-3 h-3 text-zinc-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <input
@@ -483,12 +484,12 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                     searchInputRef.current?.blur();
                   }
                 }}
-                className="bg-transparent text-[11px] text-zinc-700 dark:text-zinc-300 placeholder-zinc-400 px-1.5 py-1 w-28 focus:w-36 transition-all outline-none"
+                className={`${CHART_SEARCH_INPUT_CLASS} w-24`}
               />
             </div>
             {/* Search dropdown */}
             {searchOpen && filteredCountries.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-30 overflow-hidden">
+              <div className={`absolute top-full left-0 mt-1 w-52 ${CHART_MENU_PANEL_CLASS} z-30 overflow-hidden`}>
                 {filteredCountries.map(({ code, label }, i) => (
                   <button
                     key={code}
@@ -510,7 +511,8 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
             <select
               value={colorMode}
               onChange={(e) => setColorMode(e.target.value as ColorMode)}
-              className="text-[10px] bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-label="What the map colours by"
+              className={CHART_SELECT_CLASS}
             >
               <option value="species">{speciesLabel}</option>
               {showOutdatedMode && <option value="outdated">% Needs Updating</option>}
@@ -522,11 +524,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
               onClick={onEndemicsToggle}
               title="Show only species endemic to a single country"
               aria-pressed={endemicsOnly}
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium transition-colors border ${
-                endemicsOnly
-                  ? "bg-teal-500 text-white border-teal-500 shadow-sm"
-                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+              className={chartControlClass(endemicsOnly, "bg-teal-500 text-white border-teal-500")}
             >
               Endemics
             </button>
@@ -538,11 +536,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                 onClick={() => setRegionMenuOpen(prev => !prev)}
                 aria-expanded={regionMenuOpen}
                 title={activeRegions.length ? activeRegions.join(", ") : "Filter by IUCN region"}
-                className={`text-[10px] border rounded-md px-1.5 py-0.5 max-w-[110px] truncate focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                  activeRegions.length
-                    ? "bg-blue-500 text-white border-blue-500"
-                    : "bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
-                }`}
+                className={`max-w-[110px] truncate ${chartControlClass(activeRegions.length > 0, "bg-blue-500 text-white border-blue-500")}`}
               >
                 {activeRegions.length === 0
                   ? "All Regions"
@@ -551,7 +545,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
                     : `${activeRegions.length} regions`} ▾
               </button>
               {regionMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-56 max-h-72 overflow-y-auto">
+                <div className={`absolute right-0 top-full mt-1 z-30 ${CHART_MENU_PANEL_CLASS} py-1 w-56 max-h-72 overflow-y-auto`}>
                   {IUCN_REGION_ORDER.map(region => (
                     <label
                       key={region}
@@ -811,17 +805,13 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
           users who'd rather scan/sort a list than read a map. Bottom-left,
           overlaying whichever of the two is currently showing (see the shared
           relative wrapper above), mirroring the zoom controls' bottom-right spot. */}
-      <div className="absolute bottom-2 left-2 z-10 flex items-center bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md p-0.5 text-[10px] shadow-sm">
+      <div className={`absolute bottom-2 left-2 z-10 shadow-sm ${CHART_SEGMENTED_CLASS}`}>
         {(["map", "list"] as const).map((mode) => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
             aria-pressed={viewMode === mode}
-            className={`px-1.5 py-0.5 rounded capitalize transition-colors ${
-              viewMode === mode
-                ? "bg-zinc-800 dark:bg-zinc-200 text-white dark:text-zinc-900"
-                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-            }`}
+            className={`capitalize ${chartSegmentClass(viewMode === mode)}`}
           >
             {mode}
           </button>

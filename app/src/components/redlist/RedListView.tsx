@@ -19,6 +19,7 @@ import EolSummary from "../EolSummary";
 import TaxaIcon from "../TaxaIcon";
 import PhotoCredit from "../PhotoCredit";
 import { FaInfoCircle } from "react-icons/fa";
+import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
@@ -26,6 +27,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
+import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
 import COL_RELEASE from "@/config/col-release.json";
@@ -1054,21 +1056,52 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
  * stays on while another is shown. Independent of the table's toggle. The Not
  * Evaluated list has no assessment, so no metric toggle.
  */
+/** The Realm / Movement / Trend cards: a row of chips beside the title. */
+const CHIP_CARD = "flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3";
+const CHIP_CARD_TITLE = "text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20";
+const REALM_CHIPS = [
+  { value: "Terrestrial", icon: LuMountain, colors: "bg-amber-500 text-white border-amber-500" },
+  { value: "Freshwater", icon: LuDroplet, colors: "bg-cyan-500 text-white border-cyan-500" },
+  { value: "Marine", icon: LuWaves, colors: "bg-blue-600 text-white border-blue-600" },
+] as const;
+const MOVEMENT_CHIPS = [
+  { value: "Full Migrant", icon: LuRoute, title: "Moves between regions on a regular, predictable cycle" },
+  { value: "Altitudinal Migrant", icon: LuMountainSnow, title: "Moves up and down slopes with the seasons" },
+  { value: "Nomadic", icon: LuShuffle, title: "Moves irregularly, following resources" },
+  { value: "Not a Migrant", icon: LuMapPin, title: "Stays in the same area year-round" },
+  { value: "Unknown", icon: LuCircleHelp, title: "Movement pattern not recorded" },
+] as const;
+const TREND_CHIPS = [
+  { value: "Increasing", icon: LuTrendingUp },
+  { value: "Stable", icon: LuMoveRight },
+  { value: "Decreasing", icon: LuTrendingDown },
+  { value: "Unknown", icon: LuCircleHelp },
+] as const;
+/** A chip click: select just this one (or clear it if it was the only one); cmd/ctrl-click toggles it in a multi-selection. */
+function chipSelection<T>(prev: Set<T>, value: T, e: React.MouseEvent): Set<T> {
+  if (e.metaKey || e.ctrlKey) {
+    const next = new Set(prev);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    return next;
+  }
+  if (prev.size === 1 && prev.has(value)) return new Set();
+  return new Set([value]);
+}
+
 const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
 function GbifChartControls({ value, onChange, showMetric }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
 }) {
   const { metric, mode } = gbifKeyParts(value);
-  const select = "text-[11px] rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 px-1 py-0.5";
   return (
     <div className="flex items-center gap-1">
       {showMetric && (
-        <select aria-label="Which GBIF metric the chart shows" value={metric} className={select}
+        <select aria-label="Which GBIF metric the chart shows" value={metric} className={CHART_SELECT_CLASS}
           onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}>
           {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
         </select>
       )}
-      <select aria-label="Which GBIF records the chart counts" value={mode} className={select}
+      <select aria-label="Which GBIF records the chart counts" value={mode} className={CHART_SELECT_CLASS}
         onChange={(e) => onChange(`${metric}.${e.target.value as GbifRecordMode}`)}>
         {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{GBIF_RECORD_MODE_LABEL[m]}</option>)}
       </select>
@@ -1079,7 +1112,7 @@ function GbifChartControls({ value, onChange, showMetric }: {
 function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChange: (mode: GbifRecordMode) => void }) {
   return (
     <div role="radiogroup" aria-label="Which GBIF records to count"
-      className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-700 overflow-hidden text-[11px]">
+      className={CHART_SEGMENTED_CLASS}>
       {GBIF_RECORD_MODES.map((m) => (
         <button
           key={m}
@@ -1087,9 +1120,7 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
           role="radio"
           aria-checked={mode === m}
           onClick={() => onChange(m)}
-          className={`px-1.5 py-0.5 transition-colors ${mode === m
-            ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
-            : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+          className={chartSegmentClass(mode === m)}
         >
           {GBIF_RECORD_MODE_LABEL[m]}
         </button>
@@ -3735,22 +3766,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         .map(({ code, name }) => (
           <span
             key={code}
-            className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 max-w-full"
+            className="inline-flex items-center gap-1 pl-3 pr-2 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-sm font-medium text-zinc-700 dark:text-zinc-300 max-w-full"
           >
             <span className="truncate">{name}</span>
             <button
               onClick={() => handleCountryRemove(code)}
               className="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
               title={`Remove ${name}`}
+              aria-label={`Remove ${name}`}
             >
-              ✕
+              ×
             </button>
           </span>
         ))}
       {selectedCountries.size > 1 && (
         <button
           onClick={() => enterCountryDrilldown(new Set())}
-          className="text-sm text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 underline transition-colors"
+          className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted transition-colors"
         >
           Clear all
         </button>
@@ -3853,9 +3885,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const toggle = (value: "flagged" | "clean") => () =>
       setColMatch((value === "flagged" ? flaggedActive : colMatch === value) ? null : value);
     const toggleClass = (active: boolean, activeColor: string) =>
-      `px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-        active ? `${activeColor} text-white shadow-sm` : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-      }`;
+      chartControlClass(active, `${activeColor} text-white border-transparent`);
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
         <div className="flex items-center justify-between gap-2 mb-1 min-h-[24px]">
@@ -3959,7 +3989,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <button
                 type="button"
                 onClick={() => setColReasons(new Set<string>())}
-                className="self-start mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 underline"
+                className="self-start mt-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted"
               >
                 Clear reason filter
               </button>
@@ -4078,13 +4108,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     return new Set([child.code]);
                   });
                 }}
-                className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors cursor-pointer ${
-                  isSelected
-                    ? "bg-violet-500 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                }`}
+                className={chartControlClass(isSelected, "bg-violet-500 text-white border-violet-500")}
               >
-                {child.label} ({count.toLocaleString()}, {threatTotal > 0 ? Math.round((count / threatTotal) * 100) : 0}%)
+                {child.label} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()} · {threatTotal > 0 ? Math.round((count / threatTotal) * 100) : 0}%</span>
               </button>
             );
           })}
@@ -4105,18 +4131,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <button
               type="button"
               onClick={() => setThreatsScopeMenuOpen(prev => !prev)}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-                threatsScope === "threatened"
-                  ? "bg-orange-400 text-white shadow-sm"
-                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+              className={chartControlClass(threatsScope === "threatened", "bg-orange-400 text-white border-orange-400")}
               aria-expanded={threatsScopeMenuOpen}
               title="Which species these threat counts are drawn from"
             >
               {threatsScope === "threatened" ? "Threatened only" : "All species"} ▾
             </button>
             {threatsScopeMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-72">
+              <div className={`absolute right-0 top-full mt-1 z-20 ${CHART_MENU_PANEL_CLASS} py-1 w-72`}>
                 {([
                   { value: "threatened" as const, label: "Threatened only", hint: "Critically Endangered, Endangered and Vulnerable assessments" },
                   { value: "all" as const, label: "All species", hint: "Also count threats coded on non-threatened assessments" },
@@ -4223,22 +4245,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     return new Set([child.code]);
                   });
                 }}
-                className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors cursor-pointer ${
-                  isSelected
-                    ? "bg-teal-600 text-white"
-                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                }`}
+                className={chartControlClass(isSelected, "bg-teal-600 text-white border-teal-600")}
               >
-                {child.label} ({count.toLocaleString()}, {habitatTotal > 0 ? Math.round((count / habitatTotal) * 100) : 0}%)
+                {child.label} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()} · {habitatTotal > 0 ? Math.round((count / habitatTotal) * 100) : 0}%</span>
               </button>
             );
           })}
         </div>
       );
     };
-    const toggleClass = (active: boolean) => `px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-      active ? "bg-teal-600 text-white shadow-sm" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-    }`;
+    const toggleClass = (active: boolean) => chartControlClass(active, "bg-teal-600 text-white border-teal-600");
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
         <div className="flex items-center justify-between mb-1 min-h-[24px] flex-wrap gap-1">
@@ -4257,7 +4273,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 {habitatBreadth === "specialist" ? "Specialists" : habitatBreadth === "generalist" ? "Generalists" : "Breadth"} ▾
               </button>
               {habitatBreadthMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-60">
+                <div className={`absolute right-0 top-full mt-1 z-20 ${CHART_MENU_PANEL_CLASS} py-1 w-60`}>
                   {([
                     { value: null, label: "All species", hint: null },
                     { value: "specialist" as const, label: "Specialists", hint: "Exactly one known top-level habitat category" },
@@ -4303,7 +4319,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 Importance{habitatImportanceActive ? ` (${selectedHabitatImportance.size})` : ""} ▾
               </button>
               {habitatImportanceMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-48">
+                <div className={`absolute right-0 top-full mt-1 z-20 ${CHART_MENU_PANEL_CLASS} py-1 w-48`}>
                   {HABITAT_IMPORTANCE_OPTIONS.map(({ value, short }) => (
                     <label
                       key={value}
@@ -4339,7 +4355,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 Season{habitatSeasonsActive ? ` (${selectedHabitatSeasons.size})` : ""} ▾
               </button>
               {habitatSeasonMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-48">
+                <div className={`absolute right-0 top-full mt-1 z-20 ${CHART_MENU_PANEL_CLASS} py-1 w-48`}>
                   {HABITAT_SEASON_OPTIONS.map(({ value, short }) => (
                     <label
                       key={value}
@@ -4375,7 +4391,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 Suitability{habitatSuitabilityActive ? ` (${selectedHabitatSuitability.size})` : ""} ▾
               </button>
               {habitatSuitabilityMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 w-48">
+                <div className={`absolute right-0 top-full mt-1 z-20 ${CHART_MENU_PANEL_CLASS} py-1 w-48`}>
                   {HABITAT_SUITABILITY_OPTIONS.map(({ value, short }) => (
                     <label
                       key={value}
@@ -4430,22 +4446,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               }
             )}
             {habitatTotalPages > 1 && (
-              <div className="shrink-0 flex items-center justify-between pt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
-                <button
-                  onClick={() => setHabitatPage(p => Math.max(0, p - 1))}
-                  disabled={safeHabitatPage === 0}
-                  className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Prev
-                </button>
-                <span className="tabular-nums">Page {safeHabitatPage + 1} of {habitatTotalPages}</span>
-                <button
-                  onClick={() => setHabitatPage(p => Math.min(habitatTotalPages - 1, p + 1))}
-                  disabled={safeHabitatPage >= habitatTotalPages - 1}
-                  className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
+              <div className="shrink-0 flex justify-center pt-1">
+                <ChartPager
+                  label={`Page ${safeHabitatPage + 1} of ${habitatTotalPages}`}
+                  canPrev={safeHabitatPage > 0}
+                  canNext={safeHabitatPage < habitatTotalPages - 1}
+                  onPrev={() => setHabitatPage(p => Math.max(0, p - 1))}
+                  onNext={() => setHabitatPage(p => Math.min(habitatTotalPages - 1, p + 1))}
+                  noun="habitats"
+                />
               </div>
             )}
           </>
@@ -4494,14 +4503,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 setExpandedCriteria(prev => { const next = new Set(prev); if (next.has(node.code)) next.delete(node.code); else next.add(node.code); return next; });
               }
             }}
-            className={`px-1.5 py-0.5 text-[11px] rounded-full transition-colors cursor-pointer ${
-              isSelected
-                ? "bg-indigo-500 text-white"
-                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-            }`}
+            className={chartControlClass(isSelected, "bg-indigo-500 text-white border-indigo-500")}
             title={node.label}
           >
-            {node.code} ({count.toLocaleString()}, {criteriaTotal > 0 ? Math.round((count / criteriaTotal) * 100) : 0}%)
+            {node.code} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()} · {criteriaTotal > 0 ? Math.round((count / criteriaTotal) * 100) : 0}%</span>
           </button>
         );
       })}
@@ -4885,11 +4890,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <button
                     type="button"
                     onClick={handleThreatenedClick}
-                    className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-                      isThreatenedSelected
-                        ? "bg-red-600 text-white shadow-sm"
-                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-                    }`}
+                    className={chartControlClass(isThreatenedSelected, "bg-red-600 text-white border-red-600")}
                     aria-pressed={isThreatenedSelected}
                     title="Select Critically Endangered, Endangered and Vulnerable"
                   >
@@ -4937,12 +4938,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
             {/* Years Since Assessed / Year of Latest Assessment */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
-              {/* The charts row is a fixed-width 3-up grid, so this header always has
-                  ~305px to work with, whatever the viewport. Title + the "10+ yrs old"
-                  button + the view select came to ~341px, which wrapped the two controls onto
-                  a row of their own; the sizes below (and on both controls) are what
-                  fits them beside the title instead. It still wraps rather than
-                  overflowing if a platform's text runs wider than the ~6px to spare. */}
+              {/* Little room here: the title, the "10+ yrs old" button and the view
+                  select only just fit on one line at the 3-up grid's widest (the
+                  tight gaps below are what make them fit). Narrower than that, the
+                  controls wrap onto a row of their own rather than overflowing. */}
               <div className="flex flex-wrap items-center justify-between mb-1 gap-x-1.5 gap-y-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap">
                   {yearsChartMode === "range" ? "Years Since Assessed" : "Year of Latest Assessment"}
@@ -4955,11 +4954,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <button
                       type="button"
                       onClick={handleOutdatedClick}
-                      className={`px-1 py-0.5 text-[11px] font-semibold rounded transition-colors ${
-                        isOutdatedSelected
-                          ? "bg-red-600 text-white shadow-sm"
-                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-                      }`}
+                      className={chartControlClass(isOutdatedSelected, "bg-red-600 text-white border-red-600")}
                       aria-pressed={isOutdatedSelected}
                       title={`Filter to species last assessed before ${outdatedCutoffDate(dataAsOf).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
                     >
@@ -4976,53 +4971,27 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     const canPrev = yearsPage > 0;
                     const canNext = yearsPage < yearsTotalPages - 1;
                     return (
-                      <div className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-                        <button
-                          type="button"
-                          onClick={() => canPrev && setYearsPage(p => Math.max(0, p - 1))}
-                          disabled={!canPrev}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Previous years"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="15 18 9 12 15 6" />
-                          </svg>
-                        </button>
-                        <span className="tabular-nums min-w-[64px] text-center" aria-live="polite" aria-atomic="true">{label}</span>
-                        <button
-                          type="button"
-                          onClick={() => canNext && setYearsPage(p => Math.min(yearsTotalPages - 1, p + 1))}
-                          disabled={!canNext}
-                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                          aria-label="Next years"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="9 18 15 12 9 6" />
-                          </svg>
-                        </button>
-                      </div>
+                      <ChartPager
+                        label={label}
+                        canPrev={canPrev}
+                        canNext={canNext}
+                        onPrev={() => setYearsPage(p => Math.max(0, p - 1))}
+                        onNext={() => setYearsPage(p => Math.min(yearsTotalPages - 1, p + 1))}
+                        noun="years"
+                        minLabelWidth={56}
+                      />
                     );
                   })()}
                   {!(isSingleSpecies && singleSpecies) && (
-                    // appearance-none + our own chevron: a native select reserves a
-                    // chunk of width for the platform's own arrow (wider still on
-                    // macOS) that no amount of padding reclaims. The chevron is an SVG
-                    // rather than a "▾" glyph so its width doesn't vary by platform
-                    // font either — see the header's note on how little room there is.
-                    <div className="relative">
-                      <select
-                        value={yearsChartMode}
-                        onChange={(e) => setYearsChartMode(e.target.value as "range" | "year")}
-                        aria-label="Year chart view"
-                        className="appearance-none text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 rounded-md pl-1 pr-3 py-0.5 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                      >
-                        <option value="range">Range</option>
-                        <option value="year">Year</option>
-                      </select>
-                      <svg aria-hidden className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 w-2 h-2 text-zinc-500 dark:text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </div>
+                    <select
+                      value={yearsChartMode}
+                      onChange={(e) => setYearsChartMode(e.target.value as "range" | "year")}
+                      aria-label="Year chart view"
+                      className={CHART_SELECT_CLASS}
+                    >
+                      <option value="range">Range</option>
+                      <option value="year">Year</option>
+                    </select>
                   )}
                 </div>
               </div>
@@ -5334,13 +5303,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   return new Set([gf]);
                                 });
                               }}
-                              className={`px-2 py-1 text-xs rounded-full transition-colors cursor-pointer ${
-                                isSelected
-                                  ? "bg-lime-500 text-white"
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                              }`}
+                              className={chartControlClass(isSelected, "bg-lime-600 text-white border-lime-600")}
                             >
-                              {gf} ({count.toLocaleString()})
+                              {gf} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()}</span>
                             </button>
                           );
                         })}
@@ -5381,11 +5346,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         <button
                           type="button"
                           onClick={handleReassessedClick}
-                          className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-                            isReassessedSelected
-                              ? "bg-red-600 text-white shadow-sm"
-                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-                          }`}
+                          className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
                           aria-pressed={isReassessedSelected}
                           title="Filter to species assessed 2 or more times (reassessed at least once)"
                         >
@@ -5416,109 +5377,73 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   )}
                 </div>
 
-                {/* Realm, Movement, and Trend as three columns in one row. */}
+                {/* Realm, Movement, and Trend as three columns in one row. Plain
+                    single-select chips (cmd/ctrl-click adds to the selection). */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Realm */}
-                  <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2">
-                    <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20">Realm</span>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className={CHIP_CARD}>
+                    <span className={CHIP_CARD_TITLE}>Realm</span>
+                    <div className="flex flex-wrap gap-1">
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
-                      ) : (["Terrestrial", "Freshwater", "Marine"] as const).map(system => {
-                        const isSelected = selectedSystems.has(system);
-                        const count = realmCounts[system] ?? 0;
-                        return (
-                          <button
-                            key={system}
-                            onClick={(e) => {
-                              const isMulti = e.metaKey || e.ctrlKey;
-                              setSelectedSystems(prev => {
-                                if (isMulti) { const next = new Set(prev); if (next.has(system)) next.delete(system); else next.add(system); return next; }
-                                if (prev.size === 1 && prev.has(system)) return new Set();
-                                return new Set([system]);
-                              });
-                            }}
-                            className={`px-2 py-1 text-xs rounded-full transition-colors cursor-pointer ${
-                              isSelected
-                                ? system === "Terrestrial" ? "bg-amber-500 text-white"
-                                : system === "Freshwater" ? "bg-cyan-500 text-white"
-                                : "bg-blue-600 text-white"
-                                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-                            }`}
-                          >
-                            {system} ({count.toLocaleString()})
-                          </button>
-                        );
-                      })}
+                      ) : REALM_CHIPS.map(({ value: system, icon, colors }) => (
+                        <ChartChip
+                          key={system}
+                          icon={icon}
+                          label={system}
+                          count={realmCounts[system] ?? 0}
+                          active={selectedSystems.has(system)}
+                          activeColors={colors}
+                          onClick={(e) => setSelectedSystems(prev => chipSelection(prev, system, e))}
+                        />
+                      ))}
                     </div>
                   </div>
 
                   {/* Movement Patterns */}
                   {!isNewAssessments && (
-                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2">
-                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20">Movement</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {speciesLoading && assessedSpecies.length === 0 ? (
-                            <Spinner className="h-4 w-4" />
-                          ) : (["Full Migrant", "Altitudinal Migrant", "Nomadic", "Not a Migrant", "Unknown"] as const).map(pattern => {
-                            const isSelected = selectedMovementPatterns.has(pattern);
-                            const count = movementPatternCounts[pattern] ?? 0;
-                            if (count === 0) return null;
-                            return (
-                              <button
-                                key={pattern}
-                                onClick={(e) => {
-                                  const isMulti = e.metaKey || e.ctrlKey;
-                                  setSelectedMovementPatterns(prev => {
-                                    if (isMulti) { const next = new Set(prev); if (next.has(pattern)) next.delete(pattern); else next.add(pattern); return next; }
-                                    if (prev.size === 1 && prev.has(pattern)) return new Set();
-                                    return new Set([pattern]);
-                                  });
-                                }}
-                                className={`px-2 py-1 text-xs rounded-full transition-colors cursor-pointer ${
-                                  isSelected
-                                    ? "bg-teal-500 text-white"
-                                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-                                }`}
-                              >
-                                {pattern} ({count.toLocaleString()})
-                              </button>
-                            );
-                          })}
-                        </div>
+                    <div className={CHIP_CARD}>
+                      <span className={CHIP_CARD_TITLE}>Movement</span>
+                      <div className="flex flex-wrap gap-1">
+                        {speciesLoading && assessedSpecies.length === 0 ? (
+                          <Spinner className="h-4 w-4" />
+                        ) : MOVEMENT_CHIPS.map(({ value: pattern, icon, title }) => {
+                          const count = movementPatternCounts[pattern] ?? 0;
+                          if (count === 0) return null;
+                          return (
+                            <ChartChip
+                              key={pattern}
+                              icon={icon}
+                              label={pattern}
+                              title={title}
+                              count={count}
+                              active={selectedMovementPatterns.has(pattern)}
+                              activeColors="bg-teal-600 text-white border-teal-600"
+                              onClick={(e) => setSelectedMovementPatterns(prev => chipSelection(prev, pattern, e))}
+                            />
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
                   {/* Trend */}
-                  <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2">
-                    <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20">Trend</span>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className={CHIP_CARD}>
+                    <span className={CHIP_CARD_TITLE}>Trend</span>
+                    <div className="flex flex-wrap gap-1">
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
-                      ) : (["Increasing", "Stable", "Decreasing", "Unknown"] as const).map(trend => {
-                        const isSelected = selectedPopulationTrends.has(trend);
-                        const count = populationTrendCounts[trend] ?? 0;
-                        return (
-                          <button
-                            key={trend}
-                            onClick={(e) => {
-                              const isMulti = e.metaKey || e.ctrlKey;
-                              setSelectedPopulationTrends(prev => {
-                                if (isMulti) { const next = new Set(prev); if (next.has(trend)) next.delete(trend); else next.add(trend); return next; }
-                                if (prev.size === 1 && prev.has(trend)) return new Set();
-                                return new Set([trend]);
-                              });
-                            }}
-                            className={`px-2 py-1 text-xs rounded-full transition-colors cursor-pointer ${
-                              isSelected
-                                ? "bg-orange-500 text-white"
-                                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-                            }`}
-                          >
-                            {trend === "Increasing" ? "↑" : trend === "Decreasing" ? "↓" : trend === "Stable" ? "→" : "?"} {trend} ({count.toLocaleString()})
-                          </button>
-                        );
-                      })}
+                      ) : TREND_CHIPS.map(({ value: trend, icon }) => (
+                        <ChartChip
+                          key={trend}
+                          icon={icon}
+                          label={trend}
+                          count={populationTrendCounts[trend] ?? 0}
+                          active={selectedPopulationTrends.has(trend)}
+                          activeColors="bg-orange-500 text-white border-orange-500"
+                          onClick={(e) => setSelectedPopulationTrends(prev => chipSelection(prev, trend, e))}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -5558,7 +5483,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <DebouncedSearchInput
                 onSearch={handleSearch}
                 initialValue={searchFilter}
-                className="w-full px-3 md:px-4 py-2 pl-9 md:pl-10 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                className="w-full px-3 md:px-4 py-2 pl-9 md:pl-10 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:focus:ring-zinc-500 text-sm"
               />
               <svg
                 className="absolute left-2.5 md:left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none"
@@ -6447,14 +6372,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
                                 <button
-                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "gbif" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "gbif" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("gbif")}
                                 >
                                   {gbifSpeciesKey ? "GBIF" : "iNaturalist"}
                                 </button>
                                 {(assessmentYear || s.category === "NE") && (
                                   <button
-                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "literature" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "literature" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("literature")}
                                   >
                                     Literature
@@ -6462,7 +6387,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 )}
                                 {s.category !== "NE" && (
                                   <button
-                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "redlist" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "redlist" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("redlist")}
                                   >
                                     {/* The full name costs a phone most of the
@@ -6472,13 +6397,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   </button>
                                 )}
                                 <button
-                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "cites" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "cites" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("cites")}
                                 >
                                   CITES
                                 </button>
                                 <button
-                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "col" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                  className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "col" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                   onClick={() => setActiveDetailTab("col")}
                                 >
                                   {/* The full name is a third of a phone's tab strip. */}
@@ -6487,7 +6412,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 </button>
                                 {SHOW_EOL_TAB && (
                                   <button
-                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "eol" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "eol" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("eol")}
                                   >
                                     Encyclopedia of Life
@@ -6495,7 +6420,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 )}
                                 {SHOW_WIKIPEDIA_TAB && (
                                   <button
-                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "wikipedia" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "wikipedia" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("wikipedia")}
                                   >
                                     Wikipedia
@@ -6503,7 +6428,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 )}
                                 {s.category === "NE" && (
                                   <button
-                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "candidates" ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
+                                    className={`shrink-0 px-2 sm:px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${activeDetailTab === "candidates" ? "text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-800 dark:border-zinc-200" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"}`}
                                     onClick={() => setActiveDetailTab("candidates")}
                                   >
                                     Suggested Experts
@@ -6697,25 +6622,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               </label>
             </div>
             {totalPages > 1 && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Prev
-                </button>
-                <span className="text-xs md:text-sm text-zinc-600 dark:text-zinc-400">
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Next
-                </button>
-              </div>
+              <ChartPager
+                size="toolbar"
+                label={`${currentPage.toLocaleString()} / ${totalPages.toLocaleString()}`}
+                canPrev={currentPage > 1}
+                canNext={currentPage < totalPages}
+                onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onNext={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                noun="page"
+              />
             )}
           </div>
         )}

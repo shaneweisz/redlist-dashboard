@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { generateNameVariants } from "@/lib/nameVariants";
+import { ChartPager } from "@/components/redlist/chart-controls";
 
 /**
  * The Literature tab: one chronological table of everything published about a
@@ -499,27 +500,26 @@ export default function LiteratureTimeline({
       )}
 
       {data && data.totalPages > 1 && (
-        <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-800">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); goToPage(data.page - 1); }}
-            disabled={data.page <= 1 || loading}
-            className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            ← Newer
-          </button>
-          <span className="flex items-center gap-1.5 text-xs tabular-nums text-zinc-500">
-            {loading && <Spinner className="h-3 w-3" />}
-            Page {data.page} of {data.totalPages}
-          </span>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); goToPage(data.page + 1); }}
-            disabled={data.page >= data.totalPages || loading}
-            className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            Older →
-          </button>
+        // The tab sits inside the species row, whose click collapses it, so a
+        // page turn mustn't reach it (ChartPager doesn't hand over the event).
+        <div
+          className="mt-2 flex items-center justify-center border-t border-zinc-100 pt-2 dark:border-zinc-800"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ChartPager
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                {loading && <Spinner className="h-3 w-3" />}
+                Page {data.page} of {data.totalPages}
+              </span>
+            }
+            canPrev={data.page > 1 && !loading}
+            canNext={data.page < data.totalPages && !loading}
+            onPrev={() => goToPage(data.page - 1)}
+            onNext={() => goToPage(data.page + 1)}
+            prevLabel="Newer"
+            nextLabel="Older"
+          />
         </div>
       )}
 

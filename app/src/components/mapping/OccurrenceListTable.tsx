@@ -16,6 +16,19 @@ import {
   type LocalityNote,
 } from "@/lib/mapping/georeferences";
 import { gbifImageCredit } from "@/lib/image-credit";
+import {
+  CHART_INPUT_CLASS,
+  CHART_MENU_PANEL_CLASS,
+  chartControlClass,
+  FOCUS_RING,
+} from "@/components/redlist/chart-controls";
+
+/**
+ * An inline cell editor's box: the compact control size, with the border
+ * colour left to the caller, since it says whether what's typed is valid.
+ */
+const CELL_EDITOR_BOX = `text-[11px] leading-[14px] rounded-md border bg-white dark:bg-zinc-900 px-1.5 py-0.5 ${FOCUS_RING}`;
+const RESET_LINK_CLASS = "text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted";
 
 /**
  * A single GBIF occurrence, as returned by /api/occurrences. Shared with
@@ -417,7 +430,7 @@ function DateCellEditor({
             ? "The date as the label gives it: yyyy, yyyy-mm or yyyy-mm-dd. Enter to keep, Escape to cancel."
             : (parsed as { error: string }).error
         }
-        className={`w-24 rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] tabular-nums ${
+        className={`w-24 ${CELL_EDITOR_BOX} tabular-nums ${
           ok || empty
             ? "border-violet-400 text-violet-700 dark:text-violet-300"
             : "border-red-400 text-red-600 dark:text-red-400"
@@ -446,7 +459,7 @@ function DateCellEditor({
         }}
         placeholder="why — the label, a note, a paper"
         title="Where this date comes from, in your words. Kept with the date."
-        className="w-40 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-600 dark:text-zinc-300"
+        className={`w-40 ${CHART_INPUT_CLASS}`}
       />
     </div>
   );
@@ -526,7 +539,7 @@ function CoordinateCellEditor({
         }}
         placeholder="lat, lon"
         title="Latitude, longitude in decimal degrees. A third number is read as the uncertainty radius in metres. Enter to keep, Escape to cancel."
-        className={`w-32 rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] tabular-nums ${
+        className={`w-32 ${CELL_EDITOR_BOX} tabular-nums ${
           parsed || empty
             ? "border-violet-400 text-violet-700 dark:text-violet-300"
             : "border-red-400 text-red-600 dark:text-red-400"
@@ -559,7 +572,7 @@ function CoordinateCellEditor({
           placeholder="metres"
           title="How far the true position could be from this one, in metres. A locality is an area; the radius is what says how big."
           aria-label="Uncertainty radius in metres"
-          className={`w-16 rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] text-right tabular-nums ${
+          className={`w-16 ${CELL_EDITOR_BOX} text-right tabular-nums ${
             radiusValid
               ? "border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-200"
               : "border-red-400 text-red-600 dark:text-red-400"
@@ -583,7 +596,7 @@ function CoordinateCellEditor({
         }}
         placeholder="why — how you read the locality"
         title="How you arrived at this position, in your words. Saved as the georeference's remarks."
-        className="w-40 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-600 dark:text-zinc-300"
+        className={`w-40 ${CHART_INPUT_CLASS}`}
       />
     </div>
   );
@@ -613,7 +626,7 @@ function RadiusCellEditor({
       onBlur={() => onCommit(valid ? value : null)}
       placeholder="metres"
       title="Radius in metres. Enter to keep, Escape to cancel."
-      className={`w-16 rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] text-right tabular-nums ${
+      className={`w-16 ${CELL_EDITOR_BOX} text-right tabular-nums ${
         valid ? "border-violet-400 text-violet-700 dark:text-violet-300" : "border-red-400 text-red-600"
       }`}
     />
@@ -1265,7 +1278,7 @@ export default function OccurrenceListTable({
                     onInclude?.([p.gbifID]);
                   }}
                   title="Put this record back"
-                  className="px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 text-[10px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:border-zinc-300 dark:hover:border-zinc-500"
+                  className={chartControlClass(false, "")}
                 >
                   Put back
                 </button>
@@ -1887,7 +1900,7 @@ export default function OccurrenceListTable({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[300px] sm:min-h-[450px] rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
+      <div className="flex items-center justify-center h-[300px] sm:min-h-[450px] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800">
         <div className="flex items-center gap-2 text-zinc-400 text-sm">
           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1900,7 +1913,7 @@ export default function OccurrenceListTable({
   }
 
   return (
-    <div className={`flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden${
+    <div className={`flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden${
       fillHeight ? " flex-1 min-h-0" : ""
     }`}>
       {/* Always scrolls horizontally — there are more Darwin Core fields than
@@ -2131,7 +2144,7 @@ export default function OccurrenceListTable({
             }}
             onBlur={saveNote}
             placeholder="why"
-            className="w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] text-zinc-700 dark:text-zinc-200"
+            className={`w-full ${CHART_INPUT_CLASS}`}
           />
         </div>,
         document.body
@@ -2272,7 +2285,7 @@ export default function OccurrenceListTable({
             }}
             placeholder="Find in table…"
             title="Search every shown column. Matches are highlighted; Enter steps to the next one."
-            className="w-36 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-[11px] text-zinc-700 dark:text-zinc-200"
+            className={`w-36 ${CHART_INPUT_CLASS}`}
           />
           {search.trim() !== "" && (
             <>
@@ -2308,7 +2321,7 @@ export default function OccurrenceListTable({
             ref={columnButtonRef}
             onClick={() => setColumnPickerOpen((v) => !v)}
             title="Choose which GBIF fields to show, and in what order. Remembered in this browser."
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className={`inline-flex items-center gap-1 ${chartControlClass(columnPickerOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h6" />
@@ -2320,13 +2333,13 @@ export default function OccurrenceListTable({
             <div
               ref={columnPickerRef}
               style={{ position: "fixed", right: pickerAnchor.right, bottom: pickerAnchor.bottom, zIndex: 10002 }}
-              className="w-80 max-h-[70vh] overflow-y-auto bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-xl py-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+              className={`w-80 max-h-[70vh] overflow-y-auto ${CHART_MENU_PANEL_CLASS} py-1 text-[11px] text-zinc-500 dark:text-zinc-400`}>
               <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 sticky top-0 bg-white dark:bg-zinc-900">
-                <button onClick={() => setVisible(orderedColumns.map((c) => c.key))} className="hover:underline">
+                <button onClick={() => setVisible(orderedColumns.map((c) => c.key))} className={RESET_LINK_CLASS}>
                   Show all
                 </button>
                 <span className="text-zinc-300 dark:text-zinc-600">·</span>
-                <button onClick={resetPrefs} className="hover:underline">
+                <button onClick={resetPrefs} className={RESET_LINK_CLASS}>
                   Reset to default
                 </button>
                 <span className="ml-auto">Drag a row to reorder</span>

@@ -18,6 +18,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { countryName, fmtQty } from "./cites-utils";
+import { CHART_INPUT_CLASS, CHART_SELECT_CLASS, ChartPager } from "@/components/redlist/chart-controls";
 import type { CountryAnnotation, TradeFlow } from "./TradeFlowMap";
 
 const TradeFlowMap = dynamic(() => import("./TradeFlowMap"), { ssr: false });
@@ -328,24 +329,14 @@ function Pager({
   const totalPages = Math.ceil(total / pageSize);
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
-      <button
-        onClick={() => onPage(Math.max(0, page - 1))}
-        disabled={page === 0}
-        className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        Prev
-      </button>
-      <span className="tabular-nums">
-        {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}
-      </span>
-      <button
-        onClick={() => onPage(Math.min(totalPages - 1, page + 1))}
-        disabled={page >= totalPages - 1}
-        className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        Next
-      </button>
+    <div className="flex items-center justify-center mt-1">
+      <ChartPager
+        label={`${page * pageSize + 1}–${Math.min((page + 1) * pageSize, total)} of ${total}`}
+        canPrev={page > 0}
+        canNext={page < totalPages - 1}
+        onPrev={() => onPage(Math.max(0, page - 1))}
+        onNext={() => onPage(Math.min(totalPages - 1, page + 1))}
+      />
     </div>
   );
 }
@@ -402,7 +393,7 @@ function FilterBarChart({
             value={search ?? ""}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={searchPlaceholder}
-            className="ml-auto w-32 px-2 py-0.5 text-xs rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+            className={`ml-auto w-32 ${CHART_INPUT_CLASS}`}
           />
         )}
       </div>
@@ -841,7 +832,7 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
             ({rows.length.toLocaleString()})
           </span>
         </h5>
-        <label className="flex items-center gap-1 text-[10px] text-zinc-400 dark:text-zinc-500">
+        <label className="flex items-center gap-1 text-[11px] text-zinc-400 dark:text-zinc-500">
           <span>Rows</span>
           <select
             value={pageSize}
@@ -849,7 +840,7 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
               setPageSize(Number(e.target.value));
               setPage(0);
             }}
-            className="rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:outline-none cursor-pointer"
+            className={CHART_SELECT_CLASS}
           >
             {RECORDS_PAGE_SIZE_OPTIONS.map((n) => (
               <option key={n} value={n}>
@@ -1364,7 +1355,8 @@ export default function CitesTradeSummary({
       </span>
       {hasActiveFilters && (
         <button
-          className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+          type="button"
+          className="text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted"
           onClick={clearFilters}
         >
           Clear filters

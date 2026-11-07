@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import CitesTradeSummary from "./CitesTradeSummary";
+import { ChartPager } from "@/components/redlist/chart-controls";
 import type { CountryAnnotation } from "./TradeFlowMap";
 
 interface CitesListing {
@@ -127,24 +128,14 @@ function PagedList<T>({
     <>
       {children(slice)}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
-          <button
-            onClick={() => setPage(Math.max(0, safePage - 1))}
-            disabled={safePage === 0}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Prev
-          </button>
-          <span className="tabular-nums">
-            {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, items.length)} of {items.length}
-          </span>
-          <button
-            onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-            disabled={safePage >= totalPages - 1}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Next
-          </button>
+        <div className="flex items-center justify-center mt-1">
+          <ChartPager
+            label={`${safePage * PAGE_SIZE + 1}–${Math.min((safePage + 1) * PAGE_SIZE, items.length)} of ${items.length}`}
+            canPrev={safePage > 0}
+            canNext={safePage < totalPages - 1}
+            onPrev={() => setPage(Math.max(0, safePage - 1))}
+            onNext={() => setPage(Math.min(totalPages - 1, safePage + 1))}
+          />
         </div>
       )}
     </>

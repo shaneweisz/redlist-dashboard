@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FaArrowLeft, FaChevronDown, FaChevronRight } from "react-icons/fa";
+import { ChartPager } from "@/components/redlist/chart-controls";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CitationProse } from "@/components/redlist/CitationProse";
 import { NARRATIVE_LABELS, type NarrativeField } from "@/lib/redlist/narrative-fields";
@@ -258,14 +259,14 @@ export default function NarrativeSearchPage() {
             placeholder='limestone quarrying, "cave roost", guano OR dung, quarr*'
             aria-label="Search assessment text"
             autoFocus
-            className="min-w-[18rem] flex-1 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
+            className="min-w-[18rem] flex-1 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:focus:ring-zinc-500 text-sm"
           />
           <select
             value={taxa}
             onChange={(e) => chooseTaxa(e.target.value)}
             aria-label="Filter by taxonomic group"
             title="Search only the assessments of one taxonomic group"
-            className="px-2 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
+            className="px-2 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-400 dark:focus:ring-zinc-500 text-sm"
           >
             <option value="">All taxonomic groups</option>
             {/* A group the dropdown has no row for, because it is deeper than
@@ -450,28 +451,16 @@ export default function NarrativeSearchPage() {
             )}
 
             {data.total > PAGE && (
-              <div className="mt-4 flex items-center gap-3 text-sm">
-                <button
-                  type="button"
-                  onClick={() => search(asked?.q ?? "", page - 1)}
-                  disabled={page === 0}
-                  className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-30 text-zinc-600 dark:text-zinc-300"
-                >
-                  Previous
-                </button>
-                <span className="text-zinc-500 dark:text-zinc-400">
-                  {(page * PAGE + 1).toLocaleString()}–
-                  {Math.min((page + 1) * PAGE, data.total).toLocaleString()} of{" "}
-                  {data.total.toLocaleString()}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => search(asked?.q ?? "", page + 1)}
-                  disabled={(page + 1) * PAGE >= data.total}
-                  className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-30 text-zinc-600 dark:text-zinc-300"
-                >
-                  Next
-                </button>
+              <div className="mt-4">
+                <ChartPager
+                  size="toolbar"
+                  label={`${(page * PAGE + 1).toLocaleString()}–${Math.min((page + 1) * PAGE, data.total).toLocaleString()} of ${data.total.toLocaleString()}`}
+                  canPrev={page > 0}
+                  canNext={(page + 1) * PAGE < data.total}
+                  onPrev={() => search(asked?.q ?? "", page - 1)}
+                  onNext={() => search(asked?.q ?? "", page + 1)}
+                  noun="results"
+                />
               </div>
             )}
           </>

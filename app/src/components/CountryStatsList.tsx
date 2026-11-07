@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { FaFilter } from "react-icons/fa";
+import { CHART_INPUT_CLASS, ChartPager } from "@/components/redlist/chart-controls";
 import { type CountryStats } from "./WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { iucnRegionCountries } from "@/lib/regions";
@@ -432,26 +433,14 @@ export default function CountryStatsList({
         // of the Country filter card's height, i.e. two more countries on
         // screen, now that it can't.
         <div className={`flex items-center justify-end gap-3 px-3 py-1.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0 text-zinc-500 dark:text-zinc-400 ${dense ? "text-xs" : "text-sm"}`}>
-          <span>
-            {clampedPage * pageSize + 1}–{Math.min((clampedPage + 1) * pageSize, sorted.length)} of {sorted.length}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={clampedPage === 0}
-              className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent"
-            >
-              Prev
-            </button>
-            <span className="tabular-nums">{clampedPage + 1} / {pageCount}</span>
-            <button
-              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-              disabled={clampedPage >= pageCount - 1}
-              className="px-2 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent"
-            >
-              Next
-            </button>
-          </div>
+          <ChartPager
+            label={`${(clampedPage * pageSize + 1).toLocaleString()}–${Math.min((clampedPage + 1) * pageSize, sorted.length).toLocaleString()} of ${sorted.length.toLocaleString()}`}
+            canPrev={clampedPage > 0}
+            canNext={clampedPage < pageCount - 1}
+            onPrev={() => setPage((p) => Math.max(0, p - 1))}
+            onNext={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            noun="countries"
+          />
         </div>
       )}
       {openFilterKey && openFilterConfig && typeof document !== "undefined" && createPortal(
@@ -468,7 +457,7 @@ export default function CountryStatsList({
             placeholder="min"
             aria-label="Minimum"
             autoFocus
-            className="w-16 text-xs px-1.5 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            className={`w-16 ${CHART_INPUT_CLASS} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
           />
           <span className="text-zinc-400 dark:text-zinc-500">–</span>
           <input
@@ -478,7 +467,7 @@ export default function CountryStatsList({
             onChange={(e) => openFilterConfig.onChange({ ...openFilterConfig.value, max: e.target.value })}
             placeholder="max"
             aria-label="Maximum"
-            className="w-16 text-xs px-1.5 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            className={`w-16 ${CHART_INPUT_CLASS} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
           />
         </div>,
         document.body

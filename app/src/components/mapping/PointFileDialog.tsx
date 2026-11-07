@@ -11,6 +11,7 @@ import {
   type PointFileComparison,
   type PointFileImport,
 } from "@/lib/mapping/iucn-point-file";
+import { chartControlClass } from "@/components/redlist/chart-controls";
 
 interface PointFileDialogProps {
   /** The file loaded for this species, if one has been. */
@@ -162,7 +163,7 @@ export default function PointFileDialog({
                 </span>
                 <button
                   onClick={onRemove}
-                  className="ml-auto shrink-0 px-2 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[11px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  className={`ml-auto shrink-0 ${chartControlClass(false, "")}`}
                   title="Take this file off the map. Your own georeferences are untouched."
                 >
                   Remove

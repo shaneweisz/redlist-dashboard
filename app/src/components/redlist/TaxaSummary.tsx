@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from "react";
+import { CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { FaInfoCircle, FaChevronRight, FaFlag } from "react-icons/fa";
@@ -1783,7 +1784,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           }
           onLayoutModeChange(v === "taxonomic" ? null : (v as LayoutMode));
         }}
-        className="text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
         <option value="taxonomic">By Taxonomic Group</option>
         <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
@@ -3019,7 +3020,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
     {!countryMode && showColumnMenu && createPortal(
       <div
         ref={menuRef}
-        className="fixed bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg z-[9999] py-1 min-w-[180px]"
+        className={`fixed ${CHART_MENU_PANEL_CLASS} z-[9999] py-1 min-w-[180px]`}
         style={{ top: menuPos.top, left: menuPos.left }}
       >
         <>
@@ -3027,13 +3028,13 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             <div className="mx-3 mb-1.5 flex rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-600">
               <button
                 onClick={() => switchFocus("redlist")}
-                className={`flex-1 text-xs py-1 font-medium transition-colors ${focusMode === "redlist" ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900" : "bg-white text-zinc-500 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"}`}
+                className={`flex-1 text-xs py-1 font-medium transition-colors ${focusMode === "redlist" ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900" : "bg-white text-zinc-500 hover:bg-zinc-50 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
                 Red List
               </button>
               <button
                 onClick={() => switchFocus("gbif")}
-                className={`flex-1 text-xs py-1 font-medium transition-colors ${focusMode === "gbif" ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900" : "bg-white text-zinc-500 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"}`}
+                className={`flex-1 text-xs py-1 font-medium transition-colors ${focusMode === "gbif" ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900" : "bg-white text-zinc-500 hover:bg-zinc-50 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
                 GBIF
               </button>
@@ -3112,7 +3113,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               onChange={(e) => setGroupFilter(e.target.value)}
               placeholder="Filter specialist groups — e.g. sponge"
               aria-label="Filter specialist groups"
-              className="w-full max-w-xs text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-3 py-1.5 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full max-w-xs text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-3 py-1.5 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
             />
             {groupFilterActive && (
               <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
