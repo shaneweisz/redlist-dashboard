@@ -4694,7 +4694,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         const rowPending = !selectedRow && singleSelection && !speciesListFetched;
         const inCard = !!selectedRow || rowPending;
         const toggle = (
-          <div role="tablist" aria-label="View" className={`flex rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
+          // A raised card on a recessed track: the chosen view is a white card,
+          // the other sinks into the grey track. At this size an inverted
+          // (solid black) fill outweighed the page, so selection is elevation,
+          // border and full-contrast text instead. Small switches keep the fill.
+          <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
             {([
               ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
@@ -4705,15 +4709,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 role="tab"
                 aria-selected={viewMode === mode}
                 onClick={() => onViewModeChange(mode)}
-                className={`flex-1 px-3 py-2 transition-colors first:rounded-l-[7px] last:rounded-r-[7px] ${
+                className={`flex-1 px-3 py-1.5 rounded-lg border transition-colors ${
                   viewMode === mode
-                    ? "bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900"
-                    : "bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700"
+                    ? "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 shadow-sm text-zinc-900 dark:text-zinc-100"
+                    : "border-transparent text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200"
                 }`}
               >
                 {/* Card-style: a small header, the count big underneath (as
                     the single-species stat cards do). */}
-                <span className={`flex items-center justify-center gap-1 text-xs font-medium whitespace-nowrap ${viewMode === mode ? "text-zinc-300 dark:text-zinc-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+                <span className={`flex items-center justify-center gap-1 text-xs font-medium whitespace-nowrap ${viewMode === mode ? "text-zinc-500 dark:text-zinc-400" : ""}`}>
                   {label}
                   {/* The Not Evaluated count is the CoL backbone's described
                       species minus those matched to an assessment, so it
