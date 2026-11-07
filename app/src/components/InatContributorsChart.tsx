@@ -11,6 +11,7 @@ import {
   Cell,
   LabelList,
 } from "recharts";
+import { ChartTooltip, ChartValueLabel, CHART_HOVER_CURSOR, CHART_TOOLTIP_WRAPPER } from "@/components/redlist/chart-tooltip";
 import { CHART_SEGMENTED_CLASS, chartSegmentClass, ChartPager } from "@/components/redlist/chart-controls";
 
 interface Contributor {
@@ -219,31 +220,20 @@ export default function InatContributorsChart({
                 )}
               />
               <Tooltip
-                formatter={(value) => [
-                  Number(value ?? 0).toLocaleString(),
-                  countLabel,
-                ]}
-                labelFormatter={(login) => {
-                  const c = activeData.find((o) => o.login === login);
-                  return c?.name || String(login);
-                }}
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #3f3f46",
-                  borderRadius: "8px",
-                }}
-                itemStyle={{ color: "#fff" }}
-                labelStyle={{ color: "#a1a1aa" }}
+                content={
+                  <ChartTooltip
+                    noun={countLabel.toLowerCase()}
+                    title={(login) => activeData.find((o) => o.login === login)?.name || login}
+                  />
+                }
+                cursor={CHART_HOVER_CURSOR}
+                wrapperStyle={CHART_TOOLTIP_WRAPPER}
               />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} cursor="pointer">
                 {chartData.map((_entry, index) => (
                   <Cell key={`cell-${index}`} fill="#22c55e" />
                 ))}
-                <LabelList
-                  dataKey="label"
-                  position="right"
-                  style={{ fontSize: 11, fill: "#a1a1aa" }}
-                />
+                <LabelList dataKey="label" content={ChartValueLabel} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>

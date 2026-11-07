@@ -1056,6 +1056,14 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
  * stays on while another is shown. Independent of the table's toggle. The Not
  * Evaluated list has no assessment, so no metric toggle.
  */
+/**
+ * A count in the species table that links out (to GBIF). Every row has two, so
+ * blue + underline on each made the table a grid of links. In the table's own
+ * text colour with a faint dotted underline, it still reads as clickable, and
+ * turns blue on hover.
+ */
+const TABLE_NUMBER_LINK = "text-zinc-700 dark:text-zinc-300 underline decoration-dotted decoration-zinc-300 dark:decoration-zinc-600 underline-offset-2 hover:text-blue-600 dark:hover:text-blue-400 hover:decoration-solid hover:decoration-current";
+
 /** The Realm / Movement / Trend cards: a row of chips beside the title. */
 const CHIP_CARD = "flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3";
 const CHIP_CARD_TITLE = "text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20";
@@ -6311,7 +6319,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
+                          className={TABLE_NUMBER_LINK}
+                          title="Open these records on GBIF"
                           onClick={(e) => e.stopPropagation()}
                         >
                           {s.gbif_records.toLocaleString()}
@@ -6345,7 +6354,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline decoration-dotted hover:decoration-solid"
+                              className={TABLE_NUMBER_LINK}
+                              title="Open the new records on GBIF"
                               onClick={(e) => e.stopPropagation()}
                             >
                               {newObs.toLocaleString()}

@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { ChartTooltip, CHART_HOVER_CURSOR, CHART_TOOLTIP_WRAPPER } from "./chart-tooltip";
 
 // Plot-area insets, mirroring the margins and axis sizes set on the chart
 // below. Kept in sync by hand so the drag band can be positioned in CSS
@@ -188,20 +189,9 @@ export default function YearBarChart({
             // Held off during a drag — it otherwise sits on top of the band
             // being dragged out, hiding exactly what the drag is selecting
             active={drag ? false : undefined}
-            formatter={(value, _name, item) => [
-              // Prefer the precomputed "count (pct%)" label if present, otherwise fall back to raw count
-              (item?.payload as { label?: string } | undefined)?.label ?? Number(value ?? 0).toLocaleString(),
-              "Species",
-            ]}
-            labelFormatter={(year) => `Assessed ${String(year)}`}
-            contentStyle={{
-              backgroundColor: "#18181b",
-              border: "1px solid #3f3f46",
-              borderRadius: "8px",
-            }}
-            itemStyle={{ color: "#fff" }}
-            labelStyle={{ color: "#a1a1aa" }}
-            cursor={{ fill: "#3f3f46", opacity: 0.2 }}
+            content={<ChartTooltip title={(year) => `Assessed ${year}`} />}
+            cursor={CHART_HOVER_CURSOR}
+            wrapperStyle={CHART_TOOLTIP_WRAPPER}
           />
           <Bar
             dataKey="count"
