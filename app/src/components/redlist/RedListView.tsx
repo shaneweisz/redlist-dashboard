@@ -5258,11 +5258,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           {/* Reassessment priority (prototype): years since assessment against
               GBIF records since, so "outdated AND new evidence" is one corner. */}
           {showPriority && (
-            <div className="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* countryMapCard is wrapped in a plain div; making that a flex column
                 lets the card inside fill the row's height beside the scatter. */}
-            <div className="lg:col-span-2 min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
-            <div className="lg:col-span-3 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+            <div className="min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
+            <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Priority</span>
