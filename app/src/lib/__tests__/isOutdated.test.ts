@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isOutdated, outdatedCutoffDate } from "../outdated";
+import { isOutdated, outdatedCutoffDate, yearsSince, yearsMonthsSince } from "../outdated";
 
 describe("isOutdated", () => {
   // Fixed reference point so tests don't depend on wall-clock time.
@@ -57,20 +57,57 @@ describe("isOutdated", () => {
 });
 
 describe("outdatedCutoffDate", () => {
-  it("returns the date 10 * 365.25 days before now", () => {
+  it("is the day before the date 10 calendar years ago", () => {
     const now = new Date("2026-07-16T00:00:00Z");
-    const cutoff = outdatedCutoffDate(now);
-    // 3652.5 days before 2026-07-16 — half a day short of the calendar
-    // "10 years ago" date, since 365.25 is an average, not this window's
-    // actual leap-day count.
-    expect(cutoff.toISOString()).toBe("2016-07-15T12:00:00.000Z");
+    expect(outdatedCutoffDate(now).toISOString()).toBe("2016-07-15T00:00:00.000Z");
+  });
+
+  it("ignores the time of day", () => {
+    expect(outdatedCutoffDate(new Date("2026-07-16T18:30:00Z")).toISOString()).toBe("2016-07-15T00:00:00.000Z");
   });
 
   it("agrees with isOutdated at the boundary", () => {
     const now = new Date("2026-07-16T00:00:00Z");
     const cutoff = outdatedCutoffDate(now);
-    expect(isOutdated(cutoff.toISOString(), now)).toBe(false);
-    const dayBefore = new Date(cutoff.getTime() - 24 * 60 * 60 * 1000);
-    expect(isOutdated(dayBefore.toISOString(), now)).toBe(true);
+    expect(isOutdated(cutoff.toISOString(), now)).toBe(true);
+    const dayAfter = new Date(cutoff.getTime() + 24 * 60 * 60 * 1000);
+    expect(isOutdated(dayAfter.toISOString(), now)).toBe(false);
+  });
+});
+
+describe("yearsSince", () => {
+  const now = new Date("2026-11-07T15:00:00Z");
+
+  it("is a whole number on the anniversary, whatever the time of day", () => {
+    expect(yearsSince("2016-11-07", now)).toBe(10);
+  });
+
+  it("is just under on the day before the anniversary", () => {
+    const y = yearsSince("2016-11-08", now);
+    expect(y).toBeLessThan(10);
+    expect(y).toBeGreaterThan(9.99);
+  });
+
+  it("counts leap years by the calendar, not an average", () => {
+    // 365.25-day years put 2016-11-07 at 9.9986 years on 2026-11-07.
+    expect(yearsSince("2016-11-07", new Date("2026-11-07T00:00:00Z"))).toBe(10);
+    expect(yearsSince("2024-02-29", new Date("2025-03-01T00:00:00Z"))).toBe(1);
+  });
+
+  it("is halfway through a year at its midpoint", () => {
+    expect(yearsSince("2025-01-01", new Date("2025-07-02T12:00:00Z"))).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe("yearsMonthsSince", () => {
+  const now = new Date("2026-11-07T00:00:00Z");
+
+  it("counts whole calendar months", () => {
+    expect(yearsMonthsSince("2016-08-07", now)).toEqual({ years: 10, months: 3 });
+    expect(yearsMonthsSince("2016-08-08", now)).toEqual({ years: 10, months: 2 });
+  });
+
+  it("is zero for today", () => {
+    expect(yearsMonthsSince("2026-11-07", now)).toEqual({ years: 0, months: 0 });
   });
 });
