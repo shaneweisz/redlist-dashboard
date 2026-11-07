@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { ChartPager } from "@/components/redlist/chart-controls";
 
 interface EolImage {
   url: string;
@@ -98,21 +99,13 @@ function CommonNamesList({ names, englishCount, languageCount }: { names: EolCom
           {languageCount > 1 && <span className="normal-case tracking-normal"> · {languageCount} languages</span>}
         </div>
         {pageCount > 1 && (
-          <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-            <button
-              onClick={() => setPage(safePage - 1)}
-              disabled={safePage === 0}
-              className="px-1.5 py-0.5 rounded disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:hover:bg-transparent"
-              aria-label="Previous page"
-            >‹</button>
-            <span className="tabular-nums">{start + 1}–{Math.min(start + NAMES_PER_PAGE, names.length)} of {names.length}</span>
-            <button
-              onClick={() => setPage(safePage + 1)}
-              disabled={safePage >= pageCount - 1}
-              className="px-1.5 py-0.5 rounded disabled:opacity-30 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:hover:bg-transparent"
-              aria-label="Next page"
-            >›</button>
-          </div>
+          <ChartPager
+            label={`${start + 1}–${Math.min(start + NAMES_PER_PAGE, names.length)} of ${names.length}`}
+            canPrev={safePage > 0}
+            canNext={safePage < pageCount - 1}
+            onPrev={() => setPage(safePage - 1)}
+            onNext={() => setPage(safePage + 1)}
+          />
         )}
       </div>
       <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">

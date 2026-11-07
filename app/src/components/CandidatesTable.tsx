@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { countriesToRegions, regionColor, countryToRegion } from "@/lib/regions";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
+import { CHART_SEGMENTED_CLASS, chartSegmentClass, chartControlClass, ChartPager } from "@/components/redlist/chart-controls";
 import { candidateScopeToken } from "@/lib/candidate-scope";
 import { CREDIT_ROLES, type CandidateRank, type CandidateTier, type CreditCandidate, type CreditRole } from "@/lib/credit-candidates";
 
@@ -137,12 +138,10 @@ export default function CandidatesTable({ role, onRoleChange, species }: Candida
         <button
           key={r}
           title={RANK_TITLE[r]}
+          type="button"
           onClick={() => { setRank(r); setPage(0); }}
-          className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
-            r === activeRank
-              ? "bg-blue-600 text-white dark:bg-blue-500"
-              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-          }`}
+          aria-pressed={r === activeRank}
+          className={chartControlClass(r === activeRank, "bg-blue-600 text-white border-blue-600")}
         >
           {data.labels[r] ?? r}
         </button>
@@ -156,16 +155,14 @@ export default function CandidatesTable({ role, onRoleChange, species }: Candida
   // the way back to one that has some.
   const rolePicker = (
     <div className="flex flex-wrap items-center gap-2 mb-2">
-      <div className="inline-flex rounded-md bg-zinc-100 dark:bg-zinc-800 p-0.5 shrink-0">
+      <div className={`${CHART_SEGMENTED_CLASS} shrink-0`}>
         {CREDIT_ROLES.map((r) => (
           <button
             key={r}
+            type="button"
             onClick={() => onRoleChange(r)}
-            className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-              r === role
-                ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-            }`}
+            aria-pressed={r === role}
+            className={chartSegmentClass(r === role)}
           >
             {COPY[r].label}
           </button>
@@ -279,24 +276,14 @@ export default function CandidatesTable({ role, onRoleChange, species }: Candida
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-2 text-[10px] text-zinc-400">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Prev
-          </button>
-          <span>
-            {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
-          </span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Next
-          </button>
+        <div className="flex items-center justify-center mt-2">
+          <ChartPager
+            label={`${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, sorted.length)} of ${sorted.length}`}
+            canPrev={page > 0}
+            canNext={page < totalPages - 1}
+            onPrev={() => setPage((p) => Math.max(0, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+          />
         </div>
       )}
     </>

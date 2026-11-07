@@ -37,6 +37,7 @@ import MapOverlayMenu from "@/components/mapping/overlays/MapOverlayMenu";
 import MapOverlayLegend from "@/components/mapping/overlays/MapOverlayLegend";
 import { MAP_LAYER_SLOTS, slotId } from "@/components/mapping/overlays/layer-slots";
 import { useMapOverlays } from "@/hooks/mapping/useMapOverlays";
+import { CHART_MENU_PANEL_CLASS, chartControlClass } from "@/components/redlist/chart-controls";
 import { BASEMAP_STYLES, type BasemapKey } from "@/lib/mapping/basemaps";
 import { uncertaintyCircle } from "@/lib/mapping/georeferences";
 import { nearbyPointFields } from "@/lib/mapping/nearby-point-fields";
@@ -664,11 +665,7 @@ export default function NearbyMapView({
           <button
             onClick={() => setOverlaysOpen(!overlaysOpen)}
             aria-label="Overlays"
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
-              overlaysOpen
-                ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
-                : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-            } text-zinc-700 dark:text-zinc-300`}
+            className={`inline-flex items-center gap-1 ${chartControlClass(overlaysOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
             title="Context layers: protected areas, tree cover loss, IUCN habitat types, terrestrial ecoregions, GBIF sampling effort"
           >
             <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -684,7 +681,7 @@ export default function NearbyMapView({
             </svg>
           </button>
           {overlaysOpen && (
-            <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
+            <div className={`absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] ${CHART_MENU_PANEL_CLASS}`}>
               <div className="flex flex-col py-1 w-[20rem] max-w-full">
                 <MapOverlayMenu overlays={overlays} />
               </div>

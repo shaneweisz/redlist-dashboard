@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { chartControlClass } from "@/components/redlist/chart-controls";
 import { EXCLUSION_REASONS } from "@/lib/mapping/georeferences";
 
 interface ExclusionDialogProps {
@@ -127,15 +128,13 @@ export default function ExclusionDialog({
             {EXCLUSION_REASONS.map((reason) => (
               <button
                 key={reason}
+                type="button"
+                aria-pressed={justification === reason}
                 onClick={() => {
                   setJustification(reason);
                   setShowError(false);
                 }}
-                className={`px-1.5 py-0.5 rounded border text-[11px] transition-colors ${
-                  justification === reason
-                    ? "bg-zinc-200 dark:bg-zinc-700 border-zinc-400 dark:border-zinc-500 text-zinc-800 dark:text-zinc-100"
-                    : "border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                }`}
+                className={chartControlClass(justification === reason, "bg-blue-600 text-white border-blue-600")}
               >
                 {reason}
               </button>
@@ -166,14 +165,16 @@ export default function ExclusionDialog({
 
         <div className="flex items-center gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
           <button
+            type="button"
             onClick={onCancel}
-            className="ml-auto px-3 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            className={`ml-auto ${chartControlClass(false, "")}`}
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={confirm}
-            className="px-3 py-1 rounded bg-zinc-800 dark:bg-zinc-200 hover:bg-zinc-900 dark:hover:bg-white text-xs text-white dark:text-zinc-900 font-medium transition-colors"
+            className="text-[11px] leading-[14px] px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200 dark:hover:bg-zinc-300 font-medium transition-colors"
           >
             {existingJustification
               ? "Save reason"

@@ -11,6 +11,8 @@ import {
   Cell,
   LabelList,
 } from "recharts";
+import { ChartTooltip, ChartValueLabel, CHART_HOVER_CURSOR, CHART_TOOLTIP_WRAPPER } from "@/components/redlist/chart-tooltip";
+import { CHART_SEGMENTED_CLASS, chartSegmentClass, ChartPager } from "@/components/redlist/chart-controls";
 
 interface Contributor {
   login: string;
@@ -154,24 +156,20 @@ export default function InatContributorsChart({
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           {/* Toggle between Observers and Identifiers */}
-          <div className="inline-flex rounded-md bg-zinc-100 dark:bg-zinc-800 p-0.5">
+          <div className={CHART_SEGMENTED_CLASS}>
             <button
+              type="button"
               onClick={() => handleViewModeChange("observers")}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-                viewMode === "observers"
-                  ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                  : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+              aria-pressed={viewMode === "observers"}
+              className={chartSegmentClass(viewMode === "observers")}
             >
               Observers
             </button>
             <button
+              type="button"
               onClick={() => handleViewModeChange("identifiers")}
-              className={`px-2 py-0.5 text-xs font-semibold rounded transition-colors ${
-                viewMode === "identifiers"
-                  ? "bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                  : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+              aria-pressed={viewMode === "identifiers"}
+              className={chartSegmentClass(viewMode === "identifiers")}
             >
               Identifiers
             </button>
@@ -222,31 +220,20 @@ export default function InatContributorsChart({
                 )}
               />
               <Tooltip
-                formatter={(value) => [
-                  Number(value ?? 0).toLocaleString(),
-                  countLabel,
-                ]}
-                labelFormatter={(login) => {
-                  const c = activeData.find((o) => o.login === login);
-                  return c?.name || String(login);
-                }}
-                contentStyle={{
-                  backgroundColor: "#18181b",
-                  border: "1px solid #3f3f46",
-                  borderRadius: "8px",
-                }}
-                itemStyle={{ color: "#fff" }}
-                labelStyle={{ color: "#a1a1aa" }}
+                content={
+                  <ChartTooltip
+                    noun={countLabel.toLowerCase()}
+                    title={(login) => activeData.find((o) => o.login === login)?.name || login}
+                  />
+                }
+                cursor={CHART_HOVER_CURSOR}
+                wrapperStyle={CHART_TOOLTIP_WRAPPER}
               />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} cursor="pointer">
                 {chartData.map((_entry, index) => (
                   <Cell key={`cell-${index}`} fill="#22c55e" />
                 ))}
-                <LabelList
-                  dataKey="label"
-                  position="right"
-                  style={{ fontSize: 11, fill: "#a1a1aa" }}
-                />
+                <LabelList dataKey="label" content={ChartValueLabel} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -257,26 +244,14 @@ export default function InatContributorsChart({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-1 text-[10px] text-zinc-400">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Prev
-          </button>
-          <span>
-            {page * PAGE_SIZE + 1}-
-            {Math.min((page + 1) * PAGE_SIZE, activeData.length)} of{" "}
-            {activeData.length}
-          </span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            Next
-          </button>
+        <div className="flex items-center justify-center mt-1">
+          <ChartPager
+            label={`${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, activeData.length)} of ${activeData.length}`}
+            canPrev={page > 0}
+            canNext={page < totalPages - 1}
+            onPrev={() => setPage((p) => Math.max(0, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+          />
         </div>
       )}
       </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { InatObservation, InatPhotoWithPreview } from "./InatPhotoCard";
+import { ChartPager } from "@/components/redlist/chart-controls";
 
 const InatContributorsChart = dynamic(() => import("./InatContributorsChart"), {
   ssr: false,
@@ -148,38 +149,22 @@ export default function InatObservationsPanel({ scientificName, mounted, onEmpty
                 </div>
                 {/* Pagination */}
                 {totalCount > PAGE_SIZE && (
-                  <div className="flex items-center justify-center gap-1 px-1.5 py-1 border-t border-zinc-100 dark:border-zinc-800">
-                    <button
-                      onClick={() => {
+                  <div className="flex items-center justify-center px-1.5 py-1 border-t border-zinc-100 dark:border-zinc-800">
+                    <ChartPager
+                      label={`${page + 1}/${totalPages}`}
+                      canPrev={page > 0 && !loading}
+                      canNext={(page + 1) * PAGE_SIZE < totalCount && !loading}
+                      onPrev={() => {
                         const newPage = page - 1;
                         setPage(newPage);
                         fetchObservations(newPage);
                       }}
-                      disabled={page === 0 || loading}
-                      className="p-1.5 sm:p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Previous page"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <span className="text-xs sm:text-[10px] text-zinc-400 tabular-nums">
-                      {page + 1}/{totalPages}
-                    </span>
-                    <button
-                      onClick={() => {
+                      onNext={() => {
                         const newPage = page + 1;
                         setPage(newPage);
                         fetchObservations(newPage);
                       }}
-                      disabled={(page + 1) * PAGE_SIZE >= totalCount || loading}
-                      className="p-1.5 sm:p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="Next page"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
+                    />
                   </div>
                 )}
               </>

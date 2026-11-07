@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { CHART_SEARCH_CLASS, CHART_SEARCH_INPUT_CLASS, CHART_SELECT_CLASS, ChartPager } from "./chart-controls";
 
 const FilterBarChart = dynamic(
   () => import("./FilterBarChart"),
@@ -117,51 +118,38 @@ export default function AssessorChart({
         {showToggle ? (
           /* Credit-type picker. A segmented control fitted three modes beside the
              search box; at five it no longer fits, so this is a select. */
-          <div className="relative shrink-0">
-            <select
-              value={viewMode}
-              onChange={(e) => handleViewModeChange(e.target.value as ViewMode)}
-              aria-label="Credit type"
-              className="appearance-none pl-1.5 pr-5 py-0.5 text-xs font-semibold rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-transparent hover:border-zinc-300 dark:hover:border-zinc-600 focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
-            >
-              {MODES.map(({ mode, label }) => (
-                <option key={mode} value={mode}>{label}</option>
-              ))}
-            </select>
-            <svg
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <select
+            value={viewMode}
+            onChange={(e) => handleViewModeChange(e.target.value as ViewMode)}
+            aria-label="Credit type"
+            className={`shrink-0 ${CHART_SELECT_CLASS}`}
+          >
+            {MODES.map(({ mode, label }) => (
+              <option key={mode} value={mode}>{label}</option>
+            ))}
+          </select>
         ) : (
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0">{title}</span>
         )}
 
         {/* Search input, in the header row alongside the toggle */}
-        <div className="relative flex-1 min-w-0">
+        <div className={`flex-1 min-w-0 ${CHART_SEARCH_CLASS}`}>
+          <svg className="w-3 h-3 text-zinc-400 shrink-0 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
           <input
             type="text"
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder={`Search ${activeLabel}...`}
-            className="w-full px-2.5 py-1 pl-7 pr-14 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+            className={`flex-1 ${CHART_SEARCH_INPUT_CLASS}`}
           />
-          <svg
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
           {search && (
-            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] text-zinc-400">
+            <div className="shrink-0 flex items-center gap-1 text-[10px] text-zinc-400">
               <span>{searchResults.length} result{searchResults.length !== 1 ? "s" : ""}</span>
               <button
                 onClick={() => handleSearchChange("")}
-                className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                className="rounded hover:bg-zinc-200 dark:hover:bg-zinc-700"
                 title="Clear search"
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -244,24 +232,15 @@ export default function AssessorChart({
         const setActivePage = search ? setSearchPage : setPage;
         if (activePages <= 1) return null;
         return (
-          <div className="flex items-center justify-between mt-1 text-[10px] text-zinc-400">
-            <button
-              onClick={() => setActivePage(p => Math.max(0, p - 1))}
-              disabled={activePage === 0}
-              className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              Prev
-            </button>
-            <span>
-              {activePage * PAGE_SIZE + 1}-{Math.min((activePage + 1) * PAGE_SIZE, activeTotal)} of {activeTotal}
-            </span>
-            <button
-              onClick={() => setActivePage(p => Math.min(activePages - 1, p + 1))}
-              disabled={activePage >= activePages - 1}
-              className="px-1.5 py-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
+          <div className="flex justify-center mt-1">
+            <ChartPager
+              label={`${(activePage * PAGE_SIZE + 1).toLocaleString()}–${Math.min((activePage + 1) * PAGE_SIZE, activeTotal).toLocaleString()} of ${activeTotal.toLocaleString()}`}
+              canPrev={activePage > 0}
+              canNext={activePage < activePages - 1}
+              onPrev={() => setActivePage(p => Math.max(0, p - 1))}
+              onNext={() => setActivePage(p => Math.min(activePages - 1, p + 1))}
+              noun={activeLabel}
+            />
           </div>
         );
       })()}

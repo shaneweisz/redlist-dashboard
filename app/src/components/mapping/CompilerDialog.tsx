@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { CHART_INPUT_CLASS } from "@/components/redlist/chart-controls";
 
 /** Where the compiler's name is kept between saves, so it's typed once. */
 const COMPILER_KEY = "redlist-point-file-compiler:v1";
@@ -100,7 +101,7 @@ export default function CompilerDialog({
                 if (e.key === "Escape") onClose();
               }}
               placeholder="who compiled this file"
-              className="mt-1 w-full rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-2 py-1 text-xs text-zinc-800 dark:text-zinc-100"
+              className={`mt-1 w-full ${CHART_INPUT_CLASS}`}
             />
           </label>
           <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
@@ -117,14 +118,16 @@ export default function CompilerDialog({
             {count.toLocaleString()} record{count === 1 ? "" : "s"}
           </span>
           <button
+            type="button"
             onClick={onClose}
-            className="ml-auto px-2 py-1 rounded text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="ml-auto text-[11px] leading-[14px] px-2 py-0.5 rounded-md text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={save}
-            className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            className="text-[11px] leading-[14px] px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200 dark:hover:bg-zinc-300 transition-colors"
           >
             Save CSV
           </button>

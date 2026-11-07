@@ -12,6 +12,7 @@
 import type { ReactNode } from "react";
 import type { MapOverlays } from "@/hooks/mapping/useMapOverlays";
 import SourceCitation from "./SourceCitation";
+import { CHART_SELECT_CLASS } from "@/components/redlist/chart-controls";
 import {
   FOREST_LOSS_CAVEAT,
   FOREST_LOSS_DATASET_URL,
@@ -188,7 +189,7 @@ export default function MapOverlayMenu({
             <select
               value={o.effortGroup ?? o.defaultEffortGroup}
               onChange={(e) => o.setEffortGroup(e.target.value as EffortGroup)}
-              className="mx-2 mb-1 w-[calc(100%-1rem)] rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-1.5 py-1 text-[11px] text-zinc-700 dark:text-zinc-200"
+              className={`mx-2 mb-1 w-[calc(100%-1rem)] ${CHART_SELECT_CLASS}`}
               title="Which taxon's collecting effort to show. All taxa is dominated by birds and casual observation, so the matching group is usually the honest comparison."
             >
               {EFFORT_GROUPS.map((g) => (

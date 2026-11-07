@@ -6,6 +6,7 @@ import {
   type PointComparison,
   type PointFileComparison,
 } from "@/lib/mapping/iucn-point-file";
+import { CHART_INPUT_CLASS } from "@/components/redlist/chart-controls";
 
 /**
  * The imported point file as a table of its own.
@@ -98,7 +99,7 @@ export default function PointFileTable({
 
   return (
     <div
-      className={`flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden${
+      className={`flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden${
         fillHeight ? " flex-1 min-h-0" : ""
       }`}
     >
@@ -221,7 +222,7 @@ export default function PointFileTable({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Find in file…"
-          className="ml-auto w-40 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+          className={`ml-auto w-40 ${CHART_INPUT_CLASS}`}
         />
       </div>
     </div>

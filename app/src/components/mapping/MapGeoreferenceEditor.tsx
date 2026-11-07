@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { parseCoordinateEntry } from "@/lib/mapping/georeferences";
+import { CHART_INPUT_CLASS, FOCUS_RING } from "@/components/redlist/chart-controls";
 
 interface MapGeoreferenceEditorProps {
   /** What the record already has, where the assessor has supplied it. */
@@ -128,7 +129,7 @@ export default function MapGeoreferenceEditor({
         placeholder="lat, lon"
         title="Latitude, longitude in decimal degrees. A third number is read as the uncertainty radius in metres."
         aria-label="Coordinates"
-        className={`w-full rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] tabular-nums ${
+        className={`w-full text-[11px] leading-[14px] rounded-md border bg-white dark:bg-zinc-900 px-1.5 py-0.5 ${FOCUS_RING} tabular-nums ${
           parsed || text.trim() === ""
             ? "border-violet-400 text-violet-700 dark:text-violet-300"
             : "border-red-400 text-red-600 dark:text-red-400"
@@ -143,7 +144,7 @@ export default function MapGeoreferenceEditor({
           placeholder={String(defaultRadius)}
           title="How far the true position could be from this one, in metres. A locality is an area; the radius is what says how big."
           aria-label="Uncertainty radius in metres"
-          className={`w-16 rounded border bg-white dark:bg-zinc-900 px-1 py-0.5 text-[11px] text-right tabular-nums ${
+          className={`w-16 text-[11px] leading-[14px] rounded-md border bg-white dark:bg-zinc-900 px-1.5 py-0.5 ${FOCUS_RING} text-right tabular-nums ${
             radiusValid
               ? "border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-200"
               : "border-red-400 text-red-600 dark:text-red-400"
@@ -160,7 +161,7 @@ export default function MapGeoreferenceEditor({
                 ? "Keep how you read this locality, without a position for it"
                 : "Type a position as “lat, lon”, or just how you read the locality"
           }
-          className="ml-auto px-1.5 py-0.5 rounded bg-violet-600 hover:bg-violet-700 disabled:opacity-30 disabled:hover:bg-violet-600 text-white text-[10px]"
+          className="ml-auto text-[11px] leading-[14px] px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200 dark:hover:bg-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-zinc-800 dark:disabled:hover:bg-zinc-200"
         >
           Save
         </button>
@@ -181,7 +182,7 @@ export default function MapGeoreferenceEditor({
         placeholder="why — how you read the locality"
         title="How you arrived at this position, in your words. Enter starts a new line; ⌘/Ctrl-Enter saves. Drag the corner to make the box bigger."
         aria-label="Why — how you read the locality"
-        className="w-full min-h-[2.5rem] resize-y rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[10px] leading-snug text-zinc-600 dark:text-zinc-300"
+        className={`w-full min-h-[2.5rem] resize-y ${CHART_INPUT_CLASS}`}
       />
     </div>
   );

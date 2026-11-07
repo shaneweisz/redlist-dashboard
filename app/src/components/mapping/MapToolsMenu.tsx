@@ -104,7 +104,7 @@ export default function MapToolsMenu({
           {children}
           <button
             onClick={onMeasureToggle}
-            className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded text-[11px] transition-colors ${
+            className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded-md text-[11px] leading-[14px] transition-colors ${
               measuring
                 ? "bg-blue-600 text-white"
                 : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
@@ -123,7 +123,7 @@ export default function MapToolsMenu({
             onClick={onUncertaintyToggle}
             title="Draw each record's stated GPS uncertainty as a circle on the ground, to scale"
             aria-pressed={uncertainty}
-            className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded text-[11px] transition-colors ${
+            className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded-md text-[11px] leading-[14px] transition-colors ${
               uncertainty
                 ? "bg-blue-600 text-white"
                 : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"

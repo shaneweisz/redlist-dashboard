@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
 import { stripHtml, truncateSections } from "@/lib/html-text";
 import { CitationProse } from "@/components/redlist/CitationProse";
+import { chartControlClass } from "@/components/redlist/chart-controls";
 import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
 
 interface PreviousAssessment {
@@ -467,11 +468,9 @@ export default function RedListAssessments({
           {/* Compare toggle */}
           {allAssessments.length >= 2 && (
             <button
-              className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
-                compareMode
-                  ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400"
-                  : "border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+              type="button"
+              aria-pressed={compareMode}
+              className={chartControlClass(compareMode, "bg-blue-600 text-white border-blue-600")}
               onClick={() => setCompareMode(!compareMode)}
             >
               {compareMode ? "Exit comparison" : "Compare"}

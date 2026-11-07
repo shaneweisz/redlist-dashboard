@@ -50,6 +50,12 @@ import {
   type NearbySpecies,
 } from "@/lib/mapping/nearby-species";
 import PhotoCredit from "@/components/PhotoCredit";
+import {
+  CHART_MENU_PANEL_CLASS,
+  CHART_SEGMENTED_CLASS,
+  chartControlClass,
+  chartSegmentClass,
+} from "@/components/redlist/chart-controls";
 
 interface Props {
   lat: number;
@@ -218,12 +224,9 @@ function SpeciesDetail({
           <button
             key={key}
             onClick={() => setSection(key)}
-            className={`rounded px-1.5 py-0.5 ${
-              section === key
-                ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                : `text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 ${
-                    a[key] ? "" : "opacity-50"
-                  }`
+            aria-pressed={section === key}
+            className={`rounded-md ${chartSegmentClass(section === key)} ${
+              section !== key && !a[key] ? "opacity-50" : ""
             }`}
           >
             {label}
@@ -409,22 +412,21 @@ function FilterMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         title={chosen.length ? chosen.map((o) => o[1]).join(", ") : `All ${label.toLowerCase()}`}
-        className={`flex max-w-[11rem] items-center gap-1 rounded border px-1.5 py-0.5 ${
-          chosen.length
-            ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-            : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
-        }`}
+        className={`flex max-w-[11rem] items-center gap-1 ${chartControlClass(
+          open || chosen.length > 0,
+          "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100",
+        )}`}
       >
         <span className="truncate">{summary}</span>
         <svg
-          className={`h-2.5 w-2.5 shrink-0 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-[10001] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <div className={`absolute left-0 top-full z-[10001] mt-1 max-h-64 w-56 overflow-y-auto py-1 ${CHART_MENU_PANEL_CLASS}`}>
           <button
             onClick={() => onChange(new Set())}
             className="w-full px-2 pb-1 text-left text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
@@ -842,18 +844,14 @@ export default function NearbySpeciesPanel({
             difference between them is the whole meaning of the list, and it
             should be readable without opening anything. */}
         {onScopeChange && (
-          <span className="flex shrink-0 items-center overflow-hidden rounded border border-zinc-300 dark:border-zinc-600">
+          <span className={`${CHART_SEGMENTED_CLASS} shrink-0 items-center`}>
             {NEARBY_SCOPES.map((option) => (
               <button
                 key={option}
                 onClick={() => onScopeChange(option)}
                 title={NEARBY_SCOPE_HINTS[option]}
                 aria-pressed={option === scope}
-                className={`px-1.5 py-0.5 ${
-                  option === scope
-                    ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                }`}
+                className={chartSegmentClass(option === scope)}
               >
                 {NEARBY_SCOPE_LABELS[option]}
               </button>
@@ -900,7 +898,7 @@ export default function NearbySpeciesPanel({
           {area ? (
             <button
               onClick={onClearArea}
-              className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              className={chartControlClass(false, "")}
             >
               Search a radius instead
             </button>
@@ -910,11 +908,8 @@ export default function NearbySpeciesPanel({
             <button
               key={r}
               onClick={() => onRadiusChange(r)}
-              className={`px-1.5 py-0.5 rounded border tabular-nums ${
-                r === radiusKm
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
-                  : "border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700"
-              }`}
+              aria-pressed={r === radiusKm}
+              className={`tabular-nums ${chartControlClass(r === radiusKm, "bg-blue-600 text-white border-blue-600")}`}
             >
               {r} km
             </button>
@@ -945,7 +940,7 @@ export default function NearbySpeciesPanel({
               top: Math.min(rowMenu.y, window.innerHeight - 120),
               zIndex: 10002,
             }}
-            className="w-56 rounded-lg border border-zinc-200 bg-white p-1 text-[11px] shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+            className={`w-56 p-1 text-[11px] ${CHART_MENU_PANEL_CLASS}`}
           >
             {(() => {
               const s = result?.species.find((x) => x.gbif_species_key === rowMenu.key);

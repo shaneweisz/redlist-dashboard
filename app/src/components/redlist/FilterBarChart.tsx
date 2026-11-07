@@ -11,6 +11,7 @@ import {
   Cell,
   LabelList,
 } from "recharts";
+import { ChartTooltip, ChartValueLabel, CHART_HOVER_CURSOR, CHART_TOOLTIP_WRAPPER } from "./chart-tooltip";
 
 const CHART_TOP_MARGIN = 5;
 const CHART_BOTTOM_MARGIN = 5;
@@ -187,28 +188,9 @@ export default function FilterBarChart({
             // Held off during a drag — it otherwise sits on top of the band
             // being dragged out, hiding exactly what the drag is selecting
             active={drag ? false : undefined}
-            formatter={(value) => [Number(value ?? 0).toLocaleString(), "Species"]}
-            labelFormatter={labelFormatter && ((label) => labelFormatter(String(label)))}
-            contentStyle={{
-              backgroundColor: "#18181b",
-              border: "1px solid #3f3f46",
-              borderRadius: "8px",
-              // Recharts lays the label out on ONE line, so a chart whose
-              // labelFormatter returns a sentence gets a tooltip wider than the
-              // card it sits in — 635px inside a 506px card for the CoL
-              // differences chart, covering every bar and clipping its own text.
-              // Hovering to find out what a bar is then hides which bar you are
-              // about to click. Wrapping costs a few lines of height and gives
-              // the width back. Short labels never reach the cap.
-              maxWidth: 280,
-              whiteSpace: "normal",
-            }}
-            // Belt and braces with the width cap: the box must never swallow a
-            // click aimed at the bar underneath it.
-            wrapperStyle={{ pointerEvents: "none" }}
-
-            itemStyle={{ color: "#fff" }}
-            labelStyle={{ color: "#a1a1aa" }}
+            content={<ChartTooltip title={labelFormatter} />}
+            cursor={CHART_HOVER_CURSOR}
+            wrapperStyle={CHART_TOOLTIP_WRAPPER}
           />
           {/* No animation: Recharts hides a bar's LabelList until its animation
               ends, so every filter change blanked all the counts for ~0.5s and
@@ -228,11 +210,7 @@ export default function FilterBarChart({
                 />
               );
             })}
-            <LabelList
-              dataKey="label"
-              position="right"
-              style={{ fontSize: 11, fill: "#a1a1aa" }}
-            />
+            <LabelList dataKey="label" content={ChartValueLabel} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

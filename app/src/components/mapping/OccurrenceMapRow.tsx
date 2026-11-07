@@ -20,6 +20,15 @@ import {
 import { duplicatesByPrimary as groupDuplicates, keepRecord as keepRecordIn } from "@/lib/mapping/duplicates";
 import { taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
+import {
+  CHART_INPUT_CLASS,
+  CHART_MENU_PANEL_CLASS,
+  CHART_SEGMENTED_CLASS,
+  CHART_SELECT_CLASS,
+  ChartPager,
+  chartControlClass,
+  chartSegmentClass,
+} from "@/components/redlist/chart-controls";
 import { FaInfoCircle } from "react-icons/fa";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
@@ -4630,7 +4639,7 @@ export default function OccurrenceMapRow({
                           }
                         }}
                         placeholder="Label a pin here"
-                        className="flex-1 min-w-0 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-[11px] text-zinc-800 dark:text-zinc-100"
+                        className={`flex-1 min-w-0 ${CHART_INPUT_CLASS}`}
                       />
                       <button
                         onClick={() => {
@@ -4639,7 +4648,7 @@ export default function OccurrenceMapRow({
                           setPointQuery(null);
                         }}
                         title="Drop a pin at this spot"
-                        className="shrink-0 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        className={`shrink-0 ${chartControlClass(false, "")}`}
                       >
                         Pin
                       </button>
@@ -4653,7 +4662,7 @@ export default function OccurrenceMapRow({
                           setPointQuery(null);
                         }}
                         title="Measure from here — click the map for the far end"
-                        className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        className={`shrink-0 flex items-center gap-1 ${chartControlClass(false, "")}`}
                       >
                         <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" d="M3 21L21 3M7 13l2 2M11 9l2 2M15 5l2 2" />
@@ -4673,7 +4682,7 @@ export default function OccurrenceMapRow({
                           setPointQuery(null);
                         }}
                         title="Threatened species (CR, EN, VU) with GBIF records around this point"
-                        className="w-full flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left"
+                        className={`w-full flex items-center gap-1 text-left ${chartControlClass(false, "")}`}
                       >
                         <svg className="w-2.5 h-2.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                           <circle cx="12" cy="12" r="3" />
@@ -5000,7 +5009,7 @@ export default function OccurrenceMapRow({
             // back to its button rather than sitting open over the map.
             if (showRangeMetrics) setToolsOpen(false);
           }}
-          className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded text-[11px] transition-colors ${
+          className={`flex items-center gap-1.5 w-full px-1.5 py-1 rounded-md text-[11px] leading-[14px] transition-colors ${
             showRangeMetrics
               ? "bg-blue-600 text-white"
               : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700"
@@ -5071,7 +5080,7 @@ export default function OccurrenceMapRow({
                       const next = Number(e.target.value);
                       if (Number.isFinite(next) && next > 0) setAooCellKm(next);
                     }}
-                    className="w-14 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-1 py-0.5 text-[10px] tabular-nums"
+                    className={`w-14 tabular-nums ${CHART_INPUT_CLASS}`}
                   />
                   <span>km</span>
                   {aooCellKm !== 2 && (
@@ -6497,7 +6506,7 @@ export default function OccurrenceMapRow({
       {/* Undo, redo, and what they'd act on. The count opens the history: the
           table can hide the very rows an edit touched, so an undo with nothing
           to say for itself would act off screen. */}
-      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+      <div className="inline-flex items-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden text-[11px] leading-[14px]">
         <button
           onClick={undoEdit}
           disabled={!canUndo}
@@ -6524,7 +6533,7 @@ export default function OccurrenceMapRow({
           <button
             onClick={() => setHistoryOpen((v) => !v)}
             title="Everything you've changed this session"
-            className="px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+            className="px-1.5 py-0.5 tabular-nums text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
           >
             {editHistory.filter((h) => !h.undone).length}
           </button>
@@ -6532,7 +6541,7 @@ export default function OccurrenceMapRow({
       </div>
 
       {/* The point file: records, as CSV. */}
-      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+      <div className="inline-flex items-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden text-[11px] leading-[14px]">
         <span
           className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500"
           style={pointFile ? { color: POINT_FILE_COLOR } : undefined}
@@ -6546,7 +6555,7 @@ export default function OccurrenceMapRow({
               ? `${pointFile.fileName} — ${pointFile.points.length.toLocaleString()} records on the map. Click to compare them against your own, or load a different file.`
               : "Import a CSV of point records — one row per record, with decimal latitude and longitude columns. It goes on the map as its own layer, to compare against."
           }
-          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
         >
           Import
         </button>
@@ -6554,14 +6563,14 @@ export default function OccurrenceMapRow({
           onClick={() => setCompilerPrompt(true)}
           disabled={exportablePoints.length === 0}
           title={`Save the ${exportablePoints.length.toLocaleString()} counted records that have a position as an IUCN point file (CSV)`}
-          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700 disabled:opacity-40 disabled:hover:bg-transparent"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700 disabled:opacity-40 disabled:hover:bg-transparent"
         >
           Export
         </button>
       </div>
 
       {/* The work: this browser's edits, as JSON. */}
-      <div className="inline-flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden">
+      <div className="inline-flex items-center rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden text-[11px] leading-[14px]">
         <span className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
           Work
         </span>
@@ -6575,7 +6584,7 @@ export default function OccurrenceMapRow({
                   lastSavedAt ? `, last saved ${lastSavedAt.slice(11, 16)}` : ", never saved"
                 }`
           }
-          className={`px-1.5 py-0.5 text-[10px] border-l border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent ${
+          className={`px-1.5 py-0.5 border-l border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent ${
             hasWorkToSave && !lastSavedAt
               ? "text-amber-600 dark:text-amber-500"
               : "text-zinc-500 dark:text-zinc-400"
@@ -6586,7 +6595,7 @@ export default function OccurrenceMapRow({
         <button
           onClick={() => restoreInputRef.current?.click()}
           title="Put back the work from a JSON file you saved earlier — it replaces what this browser holds for this species"
-          className="px-1.5 py-0.5 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
+          className="px-1.5 py-0.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700"
         >
           Restore
         </button>
@@ -6687,7 +6696,7 @@ export default function OccurrenceMapRow({
         <div className={`flex flex-col gap-2${fullscreen ? " flex-1 min-h-0" : ""}`}>
           {/* Filter dropdowns + sample-size summary, merged into one row (summary on
               the left) — sit above the map itself, not a separate header bar */}
-          <div className="p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700">
+          <div className="p-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
             {/* `relative` here is what the dropdowns anchor to below lg — see
                 the `lg:relative` on each control's wrapper. */}
             <div className="relative flex flex-wrap items-center gap-2">
@@ -6697,11 +6706,7 @@ export default function OccurrenceMapRow({
                   onClick={() => setFiltersOpen(!filtersOpen)}
                   title="Basis of Record — which kinds of evidence to include"
                   aria-label="Basis of Record"
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
-                    filtersOpen
-                      ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
-                      : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  } text-zinc-700 dark:text-zinc-300`}
+                  className={`inline-flex items-center gap-1 ${chartControlClass(filtersOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
                 >
                   <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
@@ -6717,7 +6722,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {filtersOpen && !loadingBreakdown && (
-                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-[25rem] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className={`absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-[25rem] max-w-[calc(100vw-1.5rem)] ${CHART_MENU_PANEL_CLASS} py-1`}>
                     <div className="flex items-center gap-2 px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                       <span className="flex-1 min-w-0 flex items-center gap-2">
                         <button
@@ -6827,11 +6832,7 @@ export default function OccurrenceMapRow({
                 <button
                   onClick={() => setCleaningFilterOpen(!cleaningFilterOpen)}
                   aria-label="Coordinate cleaning"
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
-                    cleaningFilterOpen
-                      ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
-                      : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  } text-zinc-700 dark:text-zinc-300`}
+                  className={`inline-flex items-center gap-1 ${chartControlClass(cleaningFilterOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
                   title="Filter by GPS uncertainty and hide records flagged by coordinate-cleaning checks (e.g. zero coordinates, GBIF headquarters, duplicates)"
                 >
                   {/* A crosshair, not the funnel Basis of Record uses: with the
@@ -6851,7 +6852,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {cleaningFilterOpen && (
-                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg py-1">
+                  <div className={`absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] ${CHART_MENU_PANEL_CLASS} py-1`}>
                     <div className="flex items-center px-3 pb-1 text-[10px] font-medium text-zinc-400 dark:text-zinc-500">
                       <button
                         onClick={() => {
@@ -7001,7 +7002,7 @@ export default function OccurrenceMapRow({
                               species, since they can genuinely disagree (issue #82 follow-up:
                               "we need the powo one for plants too and user can choose") */}
                           {hasBothNativeRangeSources && (
-                            <div className="flex items-center rounded border border-zinc-300 dark:border-zinc-600 overflow-hidden text-[10px] shrink-0">
+                            <div className={`${CHART_SEGMENTED_CLASS} shrink-0`}>
                               <button
                                 onClick={(e) => {
                                   e.preventDefault();
@@ -7009,11 +7010,7 @@ export default function OccurrenceMapRow({
                                   setNativeRangeSource("wcvp");
                                 }}
                                 title="Native range per Kew's World Checklist of Vascular Plants (POWO)"
-                                className={`px-1.5 py-0.5 transition-colors ${
-                                  nativeRangeSource === "wcvp"
-                                    ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 font-medium"
-                                    : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                }`}
+                                className={chartSegmentClass(nativeRangeSource === "wcvp")}
                               >
                                 POWO
                               </button>
@@ -7024,11 +7021,7 @@ export default function OccurrenceMapRow({
                                   setNativeRangeSource("redlist");
                                 }}
                                 title="Native range per the IUCN Red List assessment's locations"
-                                className={`px-1.5 py-0.5 transition-colors border-l border-zinc-300 dark:border-zinc-600 ${
-                                  nativeRangeSource === "redlist"
-                                    ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 font-medium"
-                                    : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                }`}
+                                className={chartSegmentClass(nativeRangeSource === "redlist")}
                               >
                                 IUCN
                               </button>
@@ -7066,7 +7059,7 @@ export default function OccurrenceMapRow({
                               const n = raw === "" ? null : Math.max(0, parseInt(raw));
                               setMaxUncertainty(n != null && !Number.isNaN(n) ? n : null);
                             }}
-                            className="w-16 text-xs px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                            className={`w-16 ${CHART_INPUT_CLASS}`}
                           />
                           <span className="text-zinc-400">m</span>
                           <button
@@ -7095,7 +7088,7 @@ export default function OccurrenceMapRow({
                               setMaxUncertainty(e.target.value ? parseInt(e.target.value) : null);
                             }
                           }}
-                          className="ml-auto text-xs px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                          className={`ml-auto ${CHART_SELECT_CLASS}`}
                         >
                           {UNCERTAINTY_OPTIONS.map((opt) => (
                             <option key={opt.label} value={opt.value ?? ""}>
@@ -7120,11 +7113,7 @@ export default function OccurrenceMapRow({
                 <button
                   onClick={() => setDateRangeOpen(!dateRangeOpen)}
                   aria-label="Date range"
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
-                    dateRangeOpen
-                      ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
-                      : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  } text-zinc-700 dark:text-zinc-300`}
+                  className={`inline-flex items-center gap-1 ${chartControlClass(dateRangeOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
                   title="Filter the loaded sample to an observation date range"
                 >
                   <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -7142,7 +7131,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {dateRangeOpen && (
-                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg p-3">
+                  <div className={`absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 lg:w-80 max-w-[calc(100vw-1.5rem)] ${CHART_MENU_PANEL_CLASS} p-3`}>
                     {sliderMinDate === sliderMaxDate ? (
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">Not enough dated records loaded to filter by range.</p>
                     ) : (
@@ -7323,7 +7312,7 @@ export default function OccurrenceMapRow({
                             {(dateRangeFrom != null || dateRangeTo != null) && (
                               <button
                                 onClick={() => { setDateRangeFrom(null); setDateRangeTo(null); }}
-                                className="self-start text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:underline"
+                                className="self-start text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted"
                               >
                                 Reset to all dates
                               </button>
@@ -7343,11 +7332,7 @@ export default function OccurrenceMapRow({
                 <button
                   onClick={() => setOverlaysOpen(!overlaysOpen)}
                   aria-label="Overlays"
-                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs transition-colors ${
-                    overlaysOpen
-                      ? "bg-zinc-100 dark:bg-zinc-800 border-zinc-400 dark:border-zinc-500"
-                      : "border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  } text-zinc-700 dark:text-zinc-300`}
+                  className={`inline-flex items-center gap-1 ${chartControlClass(overlaysOpen, "bg-zinc-100 border-zinc-400 text-zinc-800 dark:bg-zinc-800 dark:border-zinc-500 dark:text-zinc-100")}`}
                   title="Context layers: protected areas, tree cover loss, IUCN habitat types, terrestrial ecoregions, POWO/IUCN native countries, GBIF sampling effort"
                 >
                   <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -7363,7 +7348,7 @@ export default function OccurrenceMapRow({
                   </svg>
                 </button>
                 {overlaysOpen && (
-                  <div className="absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-lg">
+                  <div className={`absolute left-0 right-0 lg:right-auto top-full mt-1 z-50 max-w-[calc(100vw-1.5rem)] ${CHART_MENU_PANEL_CLASS}`}>
                     {renderOverlayLayers()}
                   </div>
                 )}
@@ -7401,7 +7386,7 @@ export default function OccurrenceMapRow({
                   <Link
                     href={dashboardHref}
                     title="Back to this species on the dashboard"
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                    className={`inline-flex items-center gap-1 shrink-0 ${chartControlClass(false, "")}`}
                   >
                     <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 4H6a2 2 0 00-2 2v3m0 6v3a2 2 0 002 2h3m6 0h3a2 2 0 002-2v-3m0-6V6a2 2 0 00-2-2h-3" />
@@ -7414,7 +7399,7 @@ export default function OccurrenceMapRow({
                       nearbyParam ? `?near=${encodeURIComponent(nearbyParam)}` : ""
                     }`}
                     title="Open the map and record list fullscreen, on their own shareable page"
-                    className="hidden sm:inline-flex items-center gap-1.5 px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                    className={`hidden sm:inline-flex items-center gap-1 shrink-0 ${chartControlClass(false, "")}`}
                   >
                     <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V5a1 1 0 011-1h3m8 0h3a1 1 0 011 1v3m0 8v3a1 1 0 01-1 1h-3m-8 0H5a1 1 0 01-1-1v-3" />
@@ -7450,7 +7435,7 @@ export default function OccurrenceMapRow({
             <div className="order-2 sm:order-none sm:w-44 shrink-0 flex flex-col gap-2">
               {/* iNat photo grid — only shown when photos exist or loading */}
               {(inatPhotos.length > 0 || loadingInatPhotos || inatPhotosFailed) && (
-                <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden relative z-10">
+                <div className="flex flex-col bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden relative z-10">
                   {/* Header */}
                   <div className="px-2 py-1.5 text-xs sm:text-[10px] font-medium text-zinc-500 dark:text-zinc-400 text-center border-b border-zinc-100 dark:border-zinc-800">
                     iNaturalist Observations
@@ -7473,38 +7458,22 @@ export default function OccurrenceMapRow({
                       </div>
                       {/* Pagination */}
                       {inatTotalCount > pageSize && (
-                        <div className="flex items-center justify-center gap-1 px-1.5 py-1 border-t border-zinc-100 dark:border-zinc-800">
-                          <button
-                            onClick={() => {
+                        <div className="flex items-center justify-center px-1.5 py-1 border-t border-zinc-100 dark:border-zinc-800">
+                          <ChartPager
+                            label={`${inatPage + 1}/${Math.ceil(inatTotalCount / pageSize)}`}
+                            canPrev={inatPage > 0 && !loadingInatPhotos}
+                            canNext={(inatPage + 1) * pageSize < inatTotalCount && !loadingInatPhotos}
+                            onPrev={() => {
                               const newPage = inatPage - 1;
                               setInatPage(newPage);
                               fetchInatPhotos(newPage, pageSize);
                             }}
-                            disabled={inatPage === 0 || loadingInatPhotos}
-                            className="p-1.5 sm:p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Previous page"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                            </svg>
-                          </button>
-                          <span className="text-xs sm:text-[10px] text-zinc-400 tabular-nums">
-                            {inatPage + 1}/{Math.ceil(inatTotalCount / pageSize)}
-                          </span>
-                          <button
-                            onClick={() => {
+                            onNext={() => {
                               const newPage = inatPage + 1;
                               setInatPage(newPage);
                               fetchInatPhotos(newPage, pageSize);
                             }}
-                            disabled={(inatPage + 1) * pageSize >= inatTotalCount || loadingInatPhotos}
-                            className="p-1.5 sm:p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Next page"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                            </svg>
-                          </button>
+                          />
                         </div>
                       )}
                     </>
@@ -7565,7 +7534,7 @@ export default function OccurrenceMapRow({
                       {assessmentDate && splitDate !== assessmentDate.split("T")[0] && (
                         <button
                           onClick={() => setSplitDate(assessmentDate.split("T")[0])}
-                          className="text-xs sm:text-[10px] px-2 py-1 sm:px-1.5 sm:py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-white dark:hover:bg-zinc-700 transition-colors whitespace-nowrap"
+                          className={`whitespace-nowrap max-sm:px-2 max-sm:py-1 ${chartControlClass(false, "")}`}
                         >
                           Reset to assessment date
                         </button>
@@ -7705,7 +7674,7 @@ export default function OccurrenceMapRow({
                       title={tab.title}
                       className={`flex shrink-0 items-center gap-1.5 px-2 py-1 -mb-px border-b-2 max-w-[16rem] ${
                         listTab === tab.key
-                          ? "border-blue-500 text-zinc-700 dark:text-zinc-200"
+                          ? "border-zinc-800 dark:border-zinc-200 text-zinc-700 dark:text-zinc-200"
                           : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
                       }`}
                     >
@@ -7787,7 +7756,7 @@ export default function OccurrenceMapRow({
                         <button
                           onClick={() => setConfirmPutAllBack(true)}
                           title="Count every excluded record again, forgetting the reasons given"
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 text-[10px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                          className={`inline-flex items-center gap-1 ${chartControlClass(false, "")}`}
                         >
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M4 10a8 8 0 1 1 2 5.3" />
@@ -7887,13 +7856,13 @@ export default function OccurrenceMapRow({
                   <div className="flex items-center gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
                     <button
                       onClick={() => setPendingRestore(null)}
-                      className="ml-auto px-3 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                      className={`ml-auto ${chartControlClass(false, "")}`}
                     >
                       Cancel
                     </button>
                     <button
                       onClick={() => applyRestore(pendingRestore)}
-                      className="px-3 py-1 rounded bg-zinc-800 dark:bg-zinc-200 hover:bg-zinc-900 dark:hover:bg-white text-xs text-white dark:text-zinc-900 font-medium transition-colors"
+                      className="text-[11px] leading-[14px] px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200 dark:hover:bg-zinc-300 font-medium transition-colors"
                     >
                       Restore
                     </button>
@@ -7934,7 +7903,7 @@ export default function OccurrenceMapRow({
                   <div className="flex items-center gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
                     <button
                       onClick={() => setConfirmPutAllBack(false)}
-                      className="ml-auto px-3 py-1 rounded border border-zinc-300 dark:border-zinc-600 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                      className={`ml-auto ${chartControlClass(false, "")}`}
                     >
                       Cancel
                     </button>
@@ -7943,7 +7912,7 @@ export default function OccurrenceMapRow({
                         setConfirmPutAllBack(false);
                         putAllBack();
                       }}
-                      className="px-3 py-1 rounded bg-zinc-800 dark:bg-zinc-200 hover:bg-zinc-900 dark:hover:bg-white text-xs text-white dark:text-zinc-900 font-medium transition-colors"
+                      className="text-[11px] leading-[14px] px-2 py-0.5 rounded-md border border-zinc-800 bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200 dark:hover:bg-zinc-300 font-medium transition-colors"
                     >
                       Put all back
                     </button>
@@ -7964,7 +7933,7 @@ export default function OccurrenceMapRow({
                   top: Math.min(rowMenu.y, window.innerHeight - 140),
                   zIndex: 10002,
                 }}
-                className="w-52 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-lg p-1 space-y-0.5 text-[11px] text-zinc-700 dark:text-zinc-200"
+                className={`w-52 ${CHART_MENU_PANEL_CLASS} p-1 space-y-0.5 text-[11px] text-zinc-700 dark:text-zinc-200`}
               >
                 {renderRecordActions(rowMenu.gbifID, { showOnMap: true })}
               </div>,
