@@ -23,12 +23,12 @@ import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRi
 import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
-import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
+import { CATEGORY_COLORS, CATEGORY_NAMES, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { type PriorityBox, type PriorityDetails, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -598,8 +598,7 @@ const SKIP_CREDITS = skipSet("assessors", "reviewers", "facilitators", "contribu
 const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
-/** Where a species sits on the priority scatter; null when it has no assessment date or no record window. */
-/** Where a species sits on the priority scatter for a y-axis key; null when it has no date or no value. */
+/** Where a species sits on the triage scatter for a y-axis key; null when it has no date or no value. */
 function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
   if (s.category === "NE" || !s.assessment_date) return null;
   const years = yearsSince(s.assessment_date);
@@ -2245,7 +2244,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // because a row from the NE list was keyed on its CoL id while the same species from
   // search was keyed on its GBIF one — two different keys for one species. Both sides
   // resolve through assessment_link to the same `col-…` key now, so the keys match.
-  // Reassessment priority scatter (prototype): the box dragged on it filters
+  // Reassessment triage scatter: the box dragged on it filters
   // the page like any chart. Local state for now, not in the URL.
   const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
   // The scatter's y axis (Total / New / % New, all records / georeferenced),
@@ -2570,7 +2569,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }));
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
 
-  // Priority scatter: every assessed species passing every filter but its own box.
+  // Triage scatter: every assessed species passing every filter but its own box.
   const priorityPoints = useMemo((): PriorityPoint[] => {
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
@@ -2598,6 +2597,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return { maxYears, maxValue };
   }, [taxaFilteredSpecies, priorityKey]);
+  // The scatter's details card: looked up for the one clicked species only.
+  const priorityDetails = useCallback((key: string): PriorityDetails | null => {
+    const s = taxaFilteredSpecies.find((x) => x.species_key === key);
+    if (!s) return null;
+    return {
+      criteria: s.criteria, populationTrend: s.population_trend, assessmentCount: s.assessment_count,
+      assessors: s.latest_assessors,
+      recordsLabel: GBIF_RECORD_MODE_LABEL[gbifKeyParts(priorityKey).mode],
+      redListUrl: s.sis_taxon_id && s.assessment_id ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}` : null,
+      gbifUrl: s.gbif_species_key ? `https://www.gbif.org/species/${s.gbif_species_key}` : null,
+    };
+  }, [taxaFilteredSpecies, priorityKey]);
+  const priorityYLabel = useMemo(() => {
+    const { metric, mode } = gbifKeyParts(priorityKey);
+    const what = mode === "georeferenced" ? "georeferenced records" : "records";
+    return metric === "total" ? `GBIF ${what}` : metric === "new" ? `GBIF ${what} since` : `% of GBIF ${what} since`;
+  }, [priorityKey]);
   const priorityInBox = useMemo(
     () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
@@ -3144,7 +3160,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
 
-  // Clicking a dot on the priority scatter opens that species in the table and
+  // Clicking a dot on the triage scatter opens that species in the table and
   // scrolls to it: turn to the page it is on, then scroll once the row renders.
   // A dot outside the scatter's own box is faded but still clickable; its
   // species isn't in the table, so the box is cleared first.
@@ -5291,8 +5307,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                 <div className="min-w-0">
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Priority</span>
-                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Years since assessed vs GBIF records · drag to select</span>
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot for details</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <GbifChartControls value={priorityKey} onChange={changePriorityKey} showMetric what="the scatter's y axis" />
@@ -5305,11 +5321,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
               </div>
               {speciesLoading && assessedSpecies.length === 0 ? (
-                <div className="h-[280px] flex items-center justify-center"><Spinner /></div>
+                <div className="h-[292px] flex items-center justify-center"><Spinner /></div>
               ) : (
                 <PriorityScatter
                   points={priorityPoints}
                   colors={CATEGORY_COLORS}
+                  categoryNames={CATEGORY_NAMES}
+                  details={priorityDetails}
+                  yLabel={priorityYLabel}
                   box={priorityBox}
                   onBoxChange={setPriorityBox}
                   onPointClick={openSpeciesFromScatter}
@@ -5431,7 +5450,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           {!isNewAssessments && moreFiltersOpen && (
             <>
                 {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
-                {/* With the priority scatter showing, Country sits beside it above,
+                {/* With the triage scatter showing, Country sits beside it above,
                     so the CoL differences card takes its place here. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {!showPriority && countryMapCard}
