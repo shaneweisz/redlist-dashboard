@@ -23,7 +23,7 @@ import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRi
 import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
-import { CATEGORY_COLORS, CATEGORY_NAMES, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
+import { CATEGORY_COLORS, CATEGORY_NAMES, TAXA, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
@@ -1389,10 +1389,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     setSelectedInstitutions(new Set());
     setSort(null, "desc");
     setShowOnlyStarred(false);
-    // Clear "all" taxa selection when switching to new-assessments (NE dataset too large for "all")
-    if (viewMode === "new-assessments") {
-      setSelectedTaxa(prev => prev.has("all") ? new Set<string>() : prev);
-    }
   }, [viewMode, setSelectedTaxa, setSelectedCategories, setSelectedYearRanges, setSelectedAssessmentYears, setSelectedDescribedYears, setSelectedCountries, setGbifRanges, setSelectedAssessmentCounts, setSelectedSystems, setSelectedPopulationTrends, setSelectedMovementPatterns, setSelectedThreats, setSelectedCriteria, setSelectedHabitat, setHabitatBreadth, setSelectedHabitatImportance, setSelectedHabitatSeasons, setSelectedHabitatSuitability, setEndemicsOnly, setSelectedGrowthForms, setSelectedAssessors, setSelectedReviewers, setSelectedFacilitators, setSelectedContributors, setSelectedInstitutions, setSort]);
 
   // Set by the navigations that already produce a complete, fully-specified
@@ -1425,7 +1421,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // "all" row behavior:
     // - If anything is selected (nested view), return to landing page
     // - Only select "all" when clicking from the landing page itself (nothing selected)
-    // Disabled in new-assessments mode (NE dataset too large for "all")
     if (taxonId === "all") {
       if (selectedTaxa.size > 0 || selectedSubgroups.size > 0) {
         if (isScopeLayout(originLayout)) {
@@ -1456,8 +1451,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         setShowOnlyStarred(false);
         return;
       }
-      // On landing page: toggle "all" on/off (disabled in new-assessments — NE dataset too large)
-      if (isNewAssessments) return;
+      // On landing page: toggle "all" on/off. In new-assessments the API answers "all"
+      // with tooLarge (no rows), so it shows the drill-down prompt rather than ~2M rows.
       setSelectedTaxa(prev => {
         if (prev.has("all")) return new Set<string>();
         return new Set(["all"]);
@@ -1686,7 +1681,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
     for (const t of fetchSet) {
-      if (isNewAssessments && t === "all") continue;
       const err = cache.errors[speciesApiUrl(t, categoryParam)];
       if (err) return err;
     }
@@ -1706,10 +1700,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const categoryParam = isNewAssessments ? "&category=NE" : "";
 
     // If "all" is already cached, no individual fetches needed — "all" data covers everything.
-    if (cache.entries[speciesApiUrl("all", categoryParam)] && !selectedTaxa.has("all")) return;
+    // Not a tooLarge "all" (new-assessments): that has no rows, so each taxon is still fetched.
+    const allCached = cache.entries[speciesApiUrl("all", categoryParam)];
+    if (allCached && !allCached.tooLarge && !selectedTaxa.has("all")) return;
 
     for (const taxonId of fetchSet) {
-      if (isNewAssessments && taxonId === "all") continue; // NE dataset too large for "all"
       cache.request(speciesApiUrl(taxonId, categoryParam));
     }
   // cache.entries (for the "all" fast-path check above) + cache.request
@@ -1727,16 +1722,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (selectedTaxa.size === 0) return false;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    return fetchSet.some(t => !(isNewAssessments && t === "all") && cache.loadingUrls.has(speciesApiUrl(t, categoryParam)));
+    return fetchSet.some(t => cache.loadingUrls.has(speciesApiUrl(t, categoryParam)));
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.loadingUrls, speciesApiUrl]);
 
   // Merge species from all fetched taxa relevant to current selection
   const assessedSpecies = useMemo(() => {
     if (selectedTaxa.size === 0) return [];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    // If "all" is cached for this mode, use it directly
+    // If "all" is cached for this mode, use it directly (unless it's a tooLarge "all",
+    // which has no rows and so covers nothing).
     const allEntry = cache.entries[speciesApiUrl("all", categoryParam)];
-    if (allEntry) return allEntry.species;
+    if (allEntry && !allEntry.tooLarge) return allEntry.species;
     // In new-assessments mode a drill-down is fetched per sub-group, so merge those caches
     // when sub-groups are selected; otherwise merge the per-taxon caches.
     const sourceIds = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -1840,7 +1836,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const speciesListFetched = useMemo(() => {
     if (selectedTaxa.size === 0) return false;
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    if (cache.entries[speciesApiUrl("all", categoryParam)]) return true;
+    const allEntry = cache.entries[speciesApiUrl("all", categoryParam)];
+    if (allEntry && !allEntry.tooLarge) return true;
     const ids = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     return ids.every((t) => cache.entries[speciesApiUrl(t, categoryParam)]);
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, speciesApiUrl]);
@@ -5053,9 +5050,24 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <p className="text-base font-medium text-zinc-700 dark:text-zinc-200">
             {neTooLarge.names.join(" & ")} has {neTooLarge.neTotal.toLocaleString()} not-evaluated species — too many to load at once.
           </p>
-          <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-            Open a sub-group (a class or order — e.g. Beetles, Crustaceans) above to view its charts and species list.
-          </p>
+          {selectedTaxa.has("all") ? (
+            // All Species: the table above is just its own row, so offer the landing table's groups here.
+            <>
+              <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Pick a group to view its charts and species list.</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {TAXA.filter((g) => g.id !== "all").map((g) => (
+                  <button key={g.id} type="button" onClick={(e) => handleToggleTaxon(g.id, e)}
+                    className="px-3 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              Open a sub-group (a class or order — e.g. Beetles, Crustaceans) above to view its charts and species list.
+            </p>
+          )}
         </div>
       ) : (
       <div className="space-y-3">
