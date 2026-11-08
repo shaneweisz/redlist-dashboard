@@ -39,6 +39,15 @@ export function runDbt(opts: { buildDir: string; today: string; select?: string;
   dbt(opts, ["test", "--select", ...units]);
 }
 
+/** The environment and arguments dbt runs with for the build in `buildDir`. */
+export function dbtInvocation(buildDir: string, today: string, command: string[]): { args: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    args: ["run", "--project", DBT_DIR, "--quiet", "dbt", ...command, "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
+      "--target-path", path.join(buildDir, "dbt-target")],
+    env: { ...process.env, SYNC_BUILD_DIR: buildDir, SYNC_DATE: today, SYNC_DUCKDB_TMP: DUCKDB_TMP, DBT_LOG_PATH: path.join(buildDir, "dbt-logs") },
+  };
+}
+
 /**
  * One model's SQL as dbt compiles it for the build in `buildDir`: its sources and
  * refs become that build's files and tables. Lets a test run the real model over
@@ -59,13 +68,9 @@ export function compileDbtModel(model: string, buildDir: string): string {
 }
 
 function dbt(opts: { buildDir: string; today: string; quiet?: boolean }, command: string[]): void {
-  const args = ["run", "--project", DBT_DIR, "--quiet", "dbt", ...command, "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
-    "--target-path", path.join(opts.buildDir, "dbt-target")];
+  const { args, env } = dbtInvocation(opts.buildDir, opts.today, command);
   // Piped rather than inherited, so dbt's output reaches sync.log too.
-  const r = spawnSync("uv", args, {
-    cwd: DBT_DIR, encoding: "utf-8",
-    env: { ...process.env, SYNC_BUILD_DIR: opts.buildDir, SYNC_DATE: opts.today, SYNC_DUCKDB_TMP: DUCKDB_TMP, DBT_LOG_PATH: path.join(opts.buildDir, "dbt-logs") },
-  });
+  const r = spawnSync("uv", args, { cwd: DBT_DIR, encoding: "utf-8", env });
   if (r.error) throw new Error(`dbt: could not run uv (${r.error.message}); install it: brew install uv`);
   if (!opts.quiet || r.status !== 0) {
     process.stdout.write(r.stdout ?? "");

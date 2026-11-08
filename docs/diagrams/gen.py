@@ -132,7 +132,7 @@ def build():
     S["duck"] = box("duck", 0, 5.6, "extensions.duckdb.org\n(httpfs for Linux)", "source")
 
     S["s_fetch"] = box("s_fetch", 1, 0.55, "fetch-data-from-r2", "step")
-    S["f_data"] = box("f_data", 2, 0.55, "app/data/sync/\nthe sync, 447 MB", "out")
+    S["f_data"] = box("f_data", 2, 0.55, "app/data/sync/\nthe sync, 458 MB", "out")
     S["s_pre"] = box("s_pre", 2, 2.6, "build-prebuilt\n(cache key: sync +\nthe builders' code)", "step", h=86)
     S["s_sl"] = box("s_sl", 3, 1.6, "build-species-lists", "step")
     S["s_ss"] = box("s_ss", 3, 2.7, "build-search-shards", "step")
@@ -165,7 +165,7 @@ def build():
 def routes():
     """The API routes, grouped: what each group reads, and which part of the app calls it."""
     heading(0, -170, "The API routes: what they read, and who calls them", 34)
-    heading(0, -118, "42 route handlers in app/src/app, grouped. Dashed: unused, or mostly answered by the prebuilt files "
+    heading(0, -118, "38 route handlers in app/src/app, grouped. Dashed: unused, or mostly answered by the prebuilt files "
             "(see docs/app.md).", 17, "#495057")
     S = {}
     W1, X1 = 380, 1.05
@@ -186,7 +186,7 @@ def routes():
 
     group("g_list", 0.0, "Species lists and summaries", [
         "/api/redlist/species  (fallback: prebuilt lists)",
-        "/api/redlist/species/history, /synonyms",
+        "/api/redlist/species/history, /api/redlist/synonyms",
         "/api/redlist/taxa-summary, /taxa-subgroups",
         "/api/redlist/country-stats",
         "/api/redlist/credit-candidates, /api/data-sync-date"])
@@ -209,11 +209,12 @@ def routes():
         "/api/species/[key]/inat-top-observers"])
     group("g_iucn", 11.6, "Red List assessment, literature", [
         "/api/redlist/assessment/[id], /api/literature"])
-    group("g_misc", 12.8, "CITES, native range", [
+    group("g_misc", 12.8, "CITES, native range, EOL traits", [
         "/api/cites, /api/cites/trade",
-        "/api/wcvp-native-range  (bundled parquet)"])
+        "/api/wcvp-native-range  (bundled parquet)",
+        "/api/eol/traits"])
     group("g_auth", 14.3, "Sign-in", ["/api/auth/me, /auth/callback"])
-    group("g_dead", 15.4, "No callers", ["/api/taxa/species, /api/eol, /api/eol/traits"], dashed=True)
+    group("g_dead", 15.4, "No callers", ["/api/taxa/species, /api/eol"], dashed=True)
 
     # consumers
     S["c_tbl"] = box("c_tbl", 2.75, 0.3, "species table, charts,\nfilters, summary table", "app")
