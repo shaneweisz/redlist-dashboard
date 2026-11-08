@@ -179,7 +179,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   }
   if (!opts.skipCompare) {
     const baseline = opts.baseline ? path.resolve(opts.baseline) : await ensureBaseline(prodSync());
-    const summary = await compare({ baseline, candidate: OUT_DIR, out: T.compare });
+    const summary = await compare({ baseline, candidate: OUT_DIR, out: T.compare, candidateSnapshot: snapshot.snapshot });
     manifest.compare = { baseline: path.basename(baseline), report: path.join(T.compare, "report.md"), ...summary };
     console.log(`   ${summary.total.toLocaleString()} differences against ${path.basename(baseline)}, ` +
       `${summary.unexplained.toLocaleString()} unexplained — ${path.join(T.compare, "report.md")}`);

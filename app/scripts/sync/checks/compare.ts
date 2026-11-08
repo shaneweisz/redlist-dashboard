@@ -33,12 +33,18 @@ export interface CompareOptions {
   candidate: string;
   out: string;
   rules?: ReasonRule[];
+  /**
+   * The GBIF snapshot the candidate counted. A sync passes it: it compares before
+   * writing the candidate's sync.json, so the file can't say yet.
+   */
+  candidateSnapshot?: string;
 }
 
 /** What the reason rules can read besides the diff: each side's GBIF snapshot. */
-async function loadContext(conn: DuckDBConnection, baseline: string, candidate: string): Promise<void> {
+async function loadContext(conn: DuckDBConnection, baseline: string, candidate: string, candidateSnapshot?: string): Promise<void> {
   const lit = (v: string | null) => (v === null ? "NULL" : `'${v.replace(/'/g, "''")}'`);
-  await conn.run(`CREATE TABLE snapshots AS SELECT ${lit(snapshotOf(baseline))}::VARCHAR AS b, ${lit(snapshotOf(candidate))}::VARCHAR AS a`);
+  await conn.run(`CREATE TABLE snapshots AS SELECT ${lit(snapshotOf(baseline))}::VARCHAR AS b,
+    ${lit(candidateSnapshot ?? snapshotOf(candidate))}::VARCHAR AS a`);
 }
 
 export async function compare(opts: CompareOptions): Promise<CompareSummary> {
@@ -46,7 +52,7 @@ export async function compare(opts: CompareOptions): Promise<CompareSummary> {
   await loadFacts(conn, "b", opts.baseline);
   await loadFacts(conn, "a", opts.candidate);
   const notes = await diffFacts(conn);
-  await loadContext(conn, opts.baseline, opts.candidate);
+  await loadContext(conn, opts.baseline, opts.candidate, opts.candidateSnapshot);
   await applyReasons(conn, opts.rules ?? REASONS);
   const { markdown, summary } = await buildReport(conn, { baseline: opts.baseline, candidate: opts.candidate }, notes);
 
