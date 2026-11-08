@@ -5477,9 +5477,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <>
                 {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
                 {/* With the triage scatter showing, Country sits beside it above,
-                    so the CoL differences card takes its place here. */}
+                    so the CoL differences card takes its place here, left of the credits. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {!showPriority && countryMapCard}
+                  {showPriority ? taxonomicRevisionCard : countryMapCard}
                   {isSingleSpecies && singleSpecies ? (() => {
                     // Facilitators are absent on ~62% of latest assessments, and
                     // contributors (~67%) and institutions (~81%) more often still —
@@ -5535,7 +5535,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       loading={speciesLoading && assessedSpecies.length === 0}
                     />
                   )}
-                  {showPriority && taxonomicRevisionCard}
                 </div>
 
                 {/* Growth Form (plants/fungi only) */}
