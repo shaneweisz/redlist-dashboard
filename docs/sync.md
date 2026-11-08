@@ -1193,7 +1193,7 @@ Matching is two questions, answered separately so each can be explained on its o
 
 Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/matching-ws)**, the service GBIF interprets occurrence records with, with its authority and IUCN's kingdom, phylum, class, order and family as hints. It runs locally in Docker (`inputs/matcher.ts`), pinned to the matching-ws release GBIF's hosted service reports (v1.0.12) and built from the exact XR the sync uses, so a name matched here lands where GBIF filed that name's records. The index takes about 15 minutes to build, once per XR; all 175,909 names take about a minute, and answers are cached by query, release and matcher version, so an unchanged month asks nothing.
 
-![How matching-ws picks a CoL name](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/02-matcher-flow.png)
+![How matching-ws picks a CoL name](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/02-matcher-flow-v2.png)
 
 What the matcher does with a query, step by step from its source (`MatchingService` at the pinned release): it finds up to 50 CoL usages spelled the same or nearly so, scores each on the name, the authority, the hints, the rank and the usage's status, takes the best, and goes up a rank when nothing at the name's own rank is good enough. The examples are live answers with the scores the matcher itself reports (`verbose=true`): `python3 -I docs/diagrams/matcher_flow.py <matcher url> <build dir> <out.dot>`, with the sync's matcher serving. Like the matching diagram, it stops if an example no longer answers the way its box says.
 

@@ -34,13 +34,11 @@ def cap(s):
     return s[:1].upper() + s[1:].lower() if s else None
 
 
-def ask(name, authority=True, hints=True):
-    """Ask the matcher about an assessed species the way the sync does, optionally without its authority or hints."""
+def ask(name, hints=True):
+    """Ask the matcher about an assessed species the way the sync does (no authority: docs/sync.md says why), optionally without hints."""
     [a] = duck(f"""SELECT scientific_name, authority, kingdom_name, phylum_name, class_name, order_name, family
       FROM read_parquet('{CORE}/assessments.parquet') WHERE is_latest AND scientific_name = {q(name)}""")
     p = {"verbose": "true", "scientificName": a["scientific_name"]}
-    if authority and a["authority"]:
-        p["scientificNameAuthorship"] = a["authority"]
     if hints:
         for k, col in [("kingdom", "kingdom_name"), ("phylum", "phylum_name"), ("class", "class_name"),
                        ("order", "order_name"), ("family", "family")]:
@@ -84,17 +82,14 @@ expect(variant, "Saprosma corymbosum", "VARIANT", "Saprosma corymbosa")
 
 _, hinted = ask("Solenopsis bicolor")
 expect(hinted, "Solenopsis bicolor", "EXACT", "Solenopsis bicolor")
-_, unhinted = ask("Solenopsis bicolor", authority=False, hints=False)
+_, unhinted = ask("Solenopsis bicolor", hints=False)
 if unhinted["diagnostics"]["matchType"] != "NONE":
     sys.exit("matcher_flow: Solenopsis bicolor without hints is no longer a tie; pick another example")
 plant, ant = hinted, hinted["diagnostics"]["alternatives"][0]
 
-_, authored = ask("Ocotea gardneri")
-expect(authored, "Ocotea gardneri", "EXACT", "Ocotea gardneri")
-rival = authored["diagnostics"]["alternatives"][0]
 
-_, tie = ask("Xylopia laevigata", authority=False)
-expect(tie, "Annonaceae", "HIGHERRANK", "Xylopia laevigata without its authority")
+_, tie = ask("Xylopia laevigata")
+expect(tie, "Annonaceae", "HIGHERRANK", "Xylopia laevigata")
 
 _, higher = ask("Diospyros sp. nov. 'mahaboensis'")
 expect(higher, "Diospyros", "HIGHERRANK", "Diospyros sp. nov. 'mahaboensis'")
@@ -138,11 +133,11 @@ out = ['digraph matcher {',
        '<FONT POINT-SIZE="14" COLOR="#495057">The steps are its source\'s (MatchingService). Examples in blue are live answers, with the scores the matcher reports for them.</FONT><BR ALIGN="LEFT"/>>];',
        '  node [shape=plaintext, fontname="Helvetica"]; edge [color="#868e96", fontname="Helvetica", fontsize=12, fontcolor="#495057", arrowsize=0.7];']
 
-out.append(f'  query [label={box("src", "The query, one per assessed species", ["the Red List name, its authority (<I>scientificNameAuthorship</I>),", "and IUCN\'s kingdom, phylum, class, order and family as hints"])}];')
+out.append(f'  query [label={box("src", "The query, one per assessed species", ["the Red List name, with IUCN\'s kingdom, phylum, class, order and family as hints", "no authority: the acceptance rule compares it afterwards (docs/sync.md says why)"])}];')
 out.append(f'  parse [label={box("step", "1. Parse the name", ["name-parser reduces it to its canonical form, and a binomial is read as a species", "an informal name (<I>sp. nov.</I>, <I>aff.</I>) keeps only what parses; hybrid formulas and codes get no fuzzy search"])}];')
 out.append(f'  find [label={box("step", "2. Find candidates in the XR", ["up to 50 CoL usages: the same spelling (EXACT), or a VARIANT: the same once normalised", "(accents, Latin gender endings, doubled letters), or a letter away (two, for names over 10 letters)"], [eg(f"<I>Saprosma corymbosa</I> → {usage(variant['usage'])}, VARIANT, {E(scores(d(variant)))}")])}];')
-out.append(f'  score [label={box("step", "3. Score every candidate", ["name: the same spelling 100, +10 for a binomial; a variant by its similarity, −10 if the genus differs", "authority: agrees +12, the identical string +8 more, differs −36; nothing if none was sent", "hints: kingdom +5 (plant against animal −51), phylum +10, class +15, order +15, family +25,", "   each mismatch −10 to −15, the total held to −60…+50", "status: accepted +1, synonym 0, ambiguous synonym −1, provisional −5, misapplied −10; rank a few points"], [eg(f"<I>Solenopsis bicolor</I> {E(plant['usage'].get('authorship') or '')}, a bellflower: {E(scores(d(plant)))}"), f"   against the ant of that name, {E(ant['usage'].get('authorship') or '')}: {E(scores(d(ant)))}", "   with neither hints nor authority the two tie, and nothing is returned", eg(f"<I>Ocotea gardneri</I> (Meisn.) Mez, two names in CoL: (Meisn.) Mez, {E(scores(d(authored)))}"), f"   against {E(rival['usage'].get('authorship') or '')}, {E(scores(d(rival)))}"])}];')
-out.append(f'  pick [label={box("step", "4. Pick the best", ["the top score, plus up to 5 for its lead over the next, rescaled to a confidence of 0–100 (a raw 175 or more is 100)", "a tie: if the candidates share a classification, the oldest CoL id (CoL holding one name twice);", "   if not, the lowest taxon they share (HIGHERRANK), or nothing", "below 80 confidence: nothing"], [eg(f"<I>Xylopia laevigata</I>, asked without its authority: two ambiguous synonyms tie at {tie_score} → the family {usage(tie['usage'])}")])}];')
+out.append(f'  score [label={box("step", "3. Score every candidate", ["name: the same spelling 100, +10 for a binomial; a variant by its similarity, −10 if the genus differs", "authority, when one is sent (the sync sends none): agrees +12, the identical string +8 more, differs −36", "hints: kingdom +5 (plant against animal −51), phylum +10, class +15, order +15, family +25,", "   each mismatch −10 to −15, the total held to −60…+50", "status: accepted +1, synonym 0, ambiguous synonym −1, provisional −5, misapplied −10; rank a few points"], [eg(f"<I>Solenopsis bicolor</I> {E(plant['usage'].get('authorship') or '')}, a bellflower: {E(scores(d(plant)))}"), f"   against the ant of that name, {E(ant['usage'].get('authorship') or '')}: {E(scores(d(ant)))}", "   with no hints the two tie, and nothing is returned"])}];')
+out.append(f'  pick [label={box("step", "4. Pick the best", ["the top score, plus up to 5 for its lead over the next, rescaled to a confidence of 0–100 (a raw 175 or more is 100)", "a tie: if the candidates share a classification, the oldest CoL id (CoL holding one name twice);", "   if not, the lowest taxon they share (HIGHERRANK), or nothing", "below 80 confidence: nothing"], [eg(f"<I>Xylopia laevigata</I>: two ambiguous synonyms, by different authors, tie at {tie_score} → the family {usage(tie['usage'])}")])}];')
 out.append(f'  up [label={box("step", "5. No match at its own rank? Go up", ["a subspecies tries its species, then the genus, then the hints from family up to kingdom", "each a HIGHERRANK answer, which needs 90 confidence"], [eg(f"<I>Diospyros</I> sp. nov. \'mahaboensis\' → the genus {usage(higher['usage'])}")])}];')
 out.append(f'  ans [label={box("out", "The answer", ["one CoL usage, which may be a synonym, with the accepted name it points to;", "its match type and confidence, and every alternative with its score",
             f"this build: EXACT {counts.get('EXACT', 0):,}, VARIANT {counts.get('VARIANT', 0):,}, HIGHERRANK {counts.get('HIGHERRANK', 0):,}, none {counts.get('NONE', 0):,}"], [eg(f"<I>Glossopsitta porphyrocephala</I>: a synonym, of {usage(syn['acceptedUsage'])}")])}];')
