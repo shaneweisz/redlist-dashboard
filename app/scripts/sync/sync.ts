@@ -121,7 +121,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     // written out as files. All of it runs from any of those stages: it takes
     // seconds, and each model reads the ones before it.
     done = step("3 count, 4 lists, 5 precomputed SQL (dbt)");
-    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
+    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10),
+      versions: { redlist: REDLIST_DB, colXr: col.xr.alias, colChecklist: col.checklist.alias } });
     await exportDbtTables(T, BUILD_DIR);
     done();
   }

@@ -9,6 +9,11 @@
  * assessment_link (the primary row), taxa, rank_aliases.
  *
  * Columns:
+ *   redlist_release, col_xr, col_checklist
+ *                    the versions linked: a link holds between one Red List
+ *                    release and one CoL release (the XR GBIF's snapshot is keyed
+ *                    to; checks against the curated release), so a review of it
+ *                    names the versions it holds for
  *   sis_taxon_id, iucn_name, iucn_authority, taxon_group, assessment_date
  *   stratum          how the link was made, the unit the accuracy is measured
  *                    per: 'exact' (the Red List name is an accepted CoL species),
@@ -106,7 +111,8 @@ signals AS (
       AND col_described_year > year(assessment_date) AS described_after_assessment
   FROM joined
 )
-SELECT sis_taxon_id, iucn_name, iucn_authority, taxon_group, assessment_date, stratum, decided_by,
+SELECT '{{ var("redlist_release") }}' AS redlist_release, '{{ var("col_xr") }}' AS col_xr, '{{ var("col_checklist") }}' AS col_checklist,
+       sis_taxon_id, iucn_name, iucn_authority, taxon_group, assessment_date, stratum, decided_by,
        col_id, col_name, col_authorship, matched_name, matched_authorship, col_described_year, lumped_with,
        genus_differs, epithet_differs, class_differs, order_differs, family_differs, author_year_differs,
        iucn_lists_col_name, described_after_assessment,
