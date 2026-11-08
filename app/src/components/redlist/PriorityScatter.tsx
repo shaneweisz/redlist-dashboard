@@ -351,12 +351,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
               <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
               {" · "}assessed {ageText(hover.p.assessmentDate)}
             </div>
-            {/* GBIF records in the species table's terms: Total / New / % New, New being since the assessment. */}
+            {/* GBIF records in the species table's terms, spelt out: Total / New (since the assessment) / % new records. */}
             <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
               <tbody>
-                <tr><td className="pr-3">Total</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">New</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">% New</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
+                <tr><td className="pr-3">Total records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">New records</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">% new records</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
               </tbody>
             </table>
           </div>
