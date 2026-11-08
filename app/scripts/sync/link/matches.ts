@@ -2,7 +2,7 @@
  * matches: one row per assessed species, with GBIF's matcher's answer for its
  * Red List name.
  *
- * Built from: assessments (each species' latest name, authority and lineage),
+ * Built from: assessments (each species' latest name and lineage),
  * and matching-ws, GBIF's own name matcher, run locally against the XR
  * (inputs/matcher.ts).
  *
@@ -17,10 +17,18 @@
  *                  [{usage_id, name, authorship, rank, status, confidence, match_type}]
  *
  * Decisions:
- *   - Each name is asked as GBIF sees one on a record: the name, its authority,
- *     and IUCN's kingdom, phylum, class, order and family as hints. The matcher
- *     is the one GBIF files records with, so a name matched here is where GBIF
- *     put that name's records.
+ *   - Each name is asked as GBIF sees most records: the name, with IUCN's
+ *     kingdom, phylum, class, order and family as hints, and no authority. The
+ *     matcher is the one GBIF files records with, so a name matched here is
+ *     where GBIF put that name's records.
+ *   - The authority is left out on purpose. Most records carry none, so GBIF
+ *     files them on CoL's accepted record; asked with it, the matcher prefers
+ *     whichever CoL record has the identical author string, often a provisional
+ *     duplicate the records aren't on (Melospiza melodia (Wilson, 1810), not the
+ *     accepted "(A. Wilson, 1810)"). Measured on COL26.6 XR: 301 species lost
+ *     42.6M records that way, 9 gained 404. The authority is used after the
+ *     match instead: accept-match.ts compares it against the alternatives to
+ *     tell homonyms apart.
  *   - Nothing here decides anything; assessment-link.ts does.
  *   - Answers are cached by query, matcher version and XR under
  *     ~/.cache/redlist-dashboard/matching/<xr>-<version>/, so a month in which
@@ -44,7 +52,16 @@ export interface Answer {
   alternatives: (Usage & { confidence: number | null; match_type: string | null })[];
 }
 
-interface Query { scientificName: string; authorship?: string; kingdom?: string; phylum?: string; class?: string; order?: string; family?: string }
+// No authority, on purpose (see Decisions). matching-ws reads it only as
+// `scientificNameAuthorship`; this once sent `authorship`, which it ignores.
+export interface Query { scientificName: string; kingdom?: string; phylum?: string; class?: string; order?: string; family?: string }
+
+/** The query for one assessed species: its name, and IUCN's lineage as hints. */
+export function matcherQuery(s: { scientific_name: string; kingdom_name: string | null; phylum_name: string | null;
+  class_name: string | null; order_name: string | null; family: string | null }): Query {
+  return { scientificName: s.scientific_name, kingdom: cap(s.kingdom_name),
+    phylum: cap(s.phylum_name), class: cap(s.class_name), order: cap(s.order_name), family: cap(s.family) };
+}
 
 const cap = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : undefined);
 
@@ -83,9 +100,9 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
   const conn = await openDuckDB();
   const out = output(matchesFile);
   const species = (await conn.runAndReadAll(`
-    SELECT sis_taxon_id::INTEGER AS sis, scientific_name, authority, kingdom_name, phylum_name, class_name, order_name, family
+    SELECT sis_taxon_id::INTEGER AS sis, scientific_name, kingdom_name, phylum_name, class_name, order_name, family
     FROM ${parquet(inputs.assessments)} WHERE is_latest ORDER BY sis`)).getRowObjects() as unknown as {
-      sis: number; scientific_name: string; authority: string | null; kingdom_name: string | null; phylum_name: string | null;
+      sis: number; scientific_name: string; kingdom_name: string | null; phylum_name: string | null;
       class_name: string | null; order_name: string | null; family: string | null }[];
 
   const cacheDir = path.join(CACHE_ROOT, "matching", `${matcher.datasetKey}-${matcher.version}`);
@@ -100,8 +117,7 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
   }
 
   const jobs = species.map((s) => {
-    const q: Query = { scientificName: s.scientific_name, authorship: s.authority ?? undefined, kingdom: cap(s.kingdom_name),
-      phylum: cap(s.phylum_name), class: cap(s.class_name), order: cap(s.order_name), family: cap(s.family) };
+    const q = matcherQuery(s);
     return { sis: s.sis, q, hash: createHash("sha1").update(JSON.stringify(q)).digest("hex") };
   });
   const missing = [...new Map(jobs.filter((j) => !cache.has(j.hash)).map((j) => [j.hash, j])).values()];
