@@ -36,7 +36,7 @@ import { DEFAULT_GBIF_RECORD_MODE, type GbifRecordMode } from "@/lib/gbif-record
 // of the count-only CoL Match / No CoL Match mechanism it rides alongside.
 type NoMatchDetail = { id: number; name: string; reason: string; detail?: string; detailId?: number; detailColId?: string; colId?: string; colName?: string; colGroup?: string };
 
-// See src/lib/data/col-breakdown.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
+// See the sync's col_split_candidates model (scripts/sync/dbt/models/precomputed/) for the mechanism and its
 // caveats — a name-pattern heuristic (former-subspecies synonym → promoted species),
 // not a confirmed taxonomic changelog, so it's worded as "likely" rather than stated
 // as fact. Modular/additive on top of colBreakdown[].splitDetails — keyed by col_id
@@ -45,7 +45,7 @@ type SplitDetail = { colId: string; parentId: number; parentName: string; parent
 
 // The second Not-Evaluated explanation: CoL files an IUCN-ASSESSED name among
 // this species' synonyms, so the taxon IS assessed — under a name CoL doesn't
-// accept. See col-breakdown.ts's SYNONYM_ASSESSED_SQL. Keyed by col_id and
+// accept. See the sync's col_synonym_assessed model (scripts/sync/dbt/models/precomputed/). Keyed by col_id and
 // droppable, exactly like SplitDetail.
 type NeSynonymDetail = { colId: string; assessedId: number; assessedName: string; assessedCategory: string };
 

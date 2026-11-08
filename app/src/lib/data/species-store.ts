@@ -475,7 +475,7 @@ export interface NodeSummary {
 export type { NoMatchReason, NoMatchDetail };
 
 // Heuristic "split from" flag for Not Evaluated species — see
-// src/lib/data/col-breakdown.ts's SPLIT_CANDIDATES_SQL for the mechanism and its
+// the sync's col_split_candidates model (scripts/sync/dbt/models/precomputed/) for the mechanism and its
 // caveats. Keyed by col_id (NE species have no sis_taxon_id), additive on top of
 // colBreakdown, and independently droppable.
 export interface SplitDetail {

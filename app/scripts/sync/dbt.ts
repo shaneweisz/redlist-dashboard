@@ -1,6 +1,7 @@
 /**
- * The dbt step: the SQL stages (count, lists) run as dbt models (dbt/), between
- * the TypeScript stages before and after them.
+ * The dbt step: the SQL stages (count, lists, and the precomputed stage's SQL
+ * tables) run as dbt models (dbt/), between the TypeScript stages before and
+ * after them.
  *
  * dbt reads the tables the sources and link stages wrote (dbt/models/sources.yml)
  * and builds its models as tables in one DuckDB file, core/sync.duckdb. The
@@ -87,6 +88,14 @@ function exports(T: Tables) {
     // By col_id, so a lookup by id skips row groups.
     { model: "app_taxa", file: T.appTaxa, orderBy: "col_id" },
     { model: "specialist_group_species", file: T.specialistGroupSpecies, orderBy: "group_id, sis_taxon_id, col_id" },
+    { model: "col_split_candidates", file: T.splitCandidates, orderBy: "ne_col_id, rn" },
+    { model: "col_synonym_assessed", file: T.synonymAssessed, orderBy: "ne_col_id" },
+    { model: "col_to_assessed", file: T.colToAssessed, orderBy: "col_id" },
+    // The search indexes are read by name prefix: sorted by it, in row groups small
+    // enough that a prefix query reads one or two.
+    { model: "name_index", file: T.nameIndex, orderBy: "name_lo", options: "ROW_GROUP_SIZE 20000" },
+    { model: "rank_index", file: T.rankIndex, orderBy: "name", options: "ROW_GROUP_SIZE 20000" },
+    { model: "synonym_index", file: T.synonymIndex, orderBy: "synonym_name_lower", options: "ROW_GROUP_SIZE 50000" },
   ];
 }
 
@@ -98,9 +107,11 @@ export async function exportDbtTables(T: Tables, buildDir: string, only?: string
   const conn = await openDuckDB();
   await conn.run(`ATTACH ${lit(path.join(buildDir, "core", "sync.duckdb"))} AS dbt (READ_ONLY)`);
   for (const e of exports(T).filter((x) => !only || only.includes(x.model))) {
-    if (e.options) fs.rmSync(e.file, { recursive: true, force: true });
+    // A partitioned file is a folder, rewritten whole.
+    const partitioned = e.options?.includes("PARTITION_BY");
+    if (partitioned) fs.rmSync(e.file, { recursive: true, force: true });
     await conn.run(`COPY (SELECT * FROM dbt.main.${e.model} ORDER BY ${e.orderBy})
-      TO ${lit(e.options ? e.file : output(e.file))} (FORMAT parquet, COMPRESSION zstd${e.options ? `, ${e.options}` : ""})`);
+      TO ${lit(partitioned ? e.file : output(e.file))} (FORMAT parquet, COMPRESSION zstd${e.options ? `, ${e.options}` : ""})`);
   }
   if (only) return;
   // The links as built, under the name the app reads them by.

@@ -43,7 +43,7 @@ Count and lists are SQL models run by [dbt](#dbt), one `.sql` file per table und
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
 | 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
 | 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels, and `specialist_group_species`: which Specialist Groups each species is in |
-| 5 precomputed | `precomputed/` | the app's own queries, run ahead of time: the CoL-differences tables and flags, the summaries, the search indexes |
+| 5 precomputed | `dbt/models/precomputed/`, `precomputed/` | the app's own queries, run ahead of time: the CoL-differences tables and the search indexes in SQL (dbt), then the summaries and the CoL revision flags with the app's own code, so a precomputed number is the one its live view computes |
 | 6 checks | `checks/` | the fixtures and data tests (either stops the sync), then the comparison with production |
 
 Two more folders hold what the stages apply:
@@ -59,7 +59,7 @@ The SQL stages run as a [dbt](https://docs.getdbt.com/) project in `dbt/`: `dbt-
 
 - **`runDbt`** runs `dbt build` on the build: every model, then its tests, in dependency order. A failing test stops the sync, and dbt skips whatever depends on the model it tested.
 - dbt reads the tables the sources and link stages wrote as **sources** (`dbt/models/sources.yml`), and builds each model as a table in one DuckDB file, `core/sync.duckdb`.
-- **`exportDbtTables`** then writes the files everything after it reads, from those tables: the app's lists, and the count tables for the precomputed stage. How a file is sorted or partitioned is decided there, not in the models, so a model says only what its rows are.
+- **`exportDbtTables`** then writes the files everything after it reads, from those tables: the app's lists and search indexes, the CoL-differences tables, and the count tables for the precomputed stage's TypeScript. How a file is sorted or partitioned is decided there, not in the models, so a model says only what its rows are.
 
 Shared SQL lives in `dbt/macros/`. A data test is a line in a model's `.yml` (`unique`, `not_null`) and checks the build's own rows. A unit test (`unit_tests:` in a `.yml`) gives a model a few input rows and the rows it must return, one per rule, so a rule is pinned down without real data: `specialist_group_rules` is the example. `runDbt` runs the unit tests after the models, since dbt reads their column types from the tables upstream; the count/lists vitest suites run them in CI. Run dbt by hand from `app/scripts/sync/dbt`, against a build:
 
@@ -69,7 +69,7 @@ uv run dbt build --profiles-dir . --select record_counts+    # a model and every
 uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
 ```
 
-The precomputed stage and the link are still TypeScript. Which Specialist Group a species is in is decided once, by `specialist_group_species`, and carried on `assessed` and `species/` as `specialist_group`: the summaries count from it and the app filters on it. Only the CoL breakdown popovers still apply a remit themselves (`col-breakdown.ts` narrows one to a single family or order), and they move here with the precomputed stage.
+The rest of the precomputed stage (the summaries and the CoL revision flags) and the link are still TypeScript: the summaries and flags run the app's own logic (`col-breakdown.ts`, `col-revision.ts`), which the live API routes use too, so they stay one copy rather than a SQL twin. Which Specialist Group a species is in is decided once, by `specialist_group_species`, and carried on `assessed` and `species/` as `specialist_group`: the summaries count from it and the app filters on it. Only the CoL breakdown popovers still apply a remit themselves (`col-breakdown.ts` narrows one to a single family or order), and they move here with the precomputed stage.
 
 `publish.ts` uploads the result. Every builder opens DuckDB through `sql.ts`'s `openDuckDB` (spilling to `~/.cache/redlist-dashboard/duckdb-tmp/`) on its own connection, so no builder reads another's temporary tables. `paths.ts` names every file a sync builds.
 
@@ -753,57 +753,203 @@ Decisions:
 
 ### Precomputed
 
-#### `precomputed/col-differences.ts`
+#### `dbt/models/precomputed/col_split_candidates.sql`
 
 ```text
-The CoL-differences card's tables, precomputed because each is a full scan
-and self-join of taxa (8M rows) that the app's live breakdown would otherwise
-redo after every cold start. The queries are the app's own
-(src/lib/data/col-breakdown.ts), and the app loads the files exactly as
-loadColDifferences does here.
+taxonomy/col-split-candidates: one row per Not Evaluated species CoL likely
+split from an assessed one: an infraspecific name, now a synonym, that
+resolves to it. The CoL-differences card reads it ("likely split from …").
 
 Built from: taxonomy/taxa, lists/assessed, assessment_link.
 
-  taxonomy/col-split-candidates: one row per Not Evaluated species CoL likely
-    split from an assessed one (an infraspecific name, now a synonym, that
-    resolves to it). ne_col_id, parent_id, parent_name, parent_category, rn
-    (1 for the likeliest parent).
-  taxonomy/col-synonym-assessed: one row per Not Evaluated species that an
-    assessed species names as its synonym. ne_col_id, assessed_id,
-    assessed_name, assessed_category.
-  taxonomy/col-to-assessed: one row per CoL species and assessed species linked
-    to it. col_id, assessed_id, assessed_name.
+Decisions:
+  - A heuristic: CoL keeps an old infraspecific name as a synonym when it
+    promotes one to a species, so the card words it as likely, never as fact.
+  - It catches only the "was a named subspecies, got promoted" pattern, the
+    common one in recent Bovidae and Giraffidae splits.
+  - One hop further where CoL points the old name at the new species' own
+    nominate subspecies rather than the species (Giraffa camelopardalis
+    tippelskirchi → Giraffa tippelskirchi tippelskirchi): an accepted
+    infraspecific parent resolves to its species.
 
-Decisions: a split is a heuristic (CoL keeps the old infraspecific name as a
-synonym when it promotes one), so the card words it as likely, never as fact.
+Worked example: Vallonia costata (IUCN LC, CoL 7FDLW). CoL holds six old
+infraspecific names under it, each a synonym. Three now point at other
+accepted species IUCN hasn't assessed (V. patens, V. parvula, V. gracilicosta),
+so those three are flagged; two resolve back to V. costata itself (assessed,
+so not Not Evaluated) and one to an extinct species (outside the universe).
+CoL shows the evidence only from the new species' page: V. gracilicosta lists
+"Vallonia costata var. montana Sterki, 1893" among its synonyms.
 ```
 
-`taxonomy/col-split-candidates.parquet` · 5,665 rows · 133 kB
+`taxonomy/col-split-candidates.parquet` · 5,665 rows · 78 kB
 
 | column | type | |
 |---|---|---|
-| `ne_col_id` | text |  |
-| `parent_id` | integer |  |
-| `parent_name` | text |  |
-| `parent_category` | text |  |
-| `rn` | integer |  |
+| `ne_col_id` | text | the Not Evaluated CoL species |
+| `parent_id` | integer | the assessed species the old name belonged to |
+| `parent_name` | text | the assessed species the old name belonged to |
+| `parent_category` | text | the assessed species the old name belonged to |
+| `rn` | integer | 1 for the likeliest parent (the lowest SIS id) when several |
 
-`taxonomy/col-synonym-assessed.parquet` · 1,212 rows · 34 kB
+#### `dbt/models/precomputed/col_synonym_assessed.sql`
+
+```text
+taxonomy/col-synonym-assessed: one row per Not Evaluated species that an
+assessed species names as its synonym. The other half of "why is this species
+Not Evaluated": CoL files an IUCN-assessed name among this species' synonyms,
+so IUCN has assessed the taxon, under a name CoL doesn't accept.
+
+Built from: taxonomy/taxa, lists/assessed, assessment_link.
+
+Decisions:
+  - col_split_candidates catches a promoted subspecies; this is the same shape
+    one rank up: a species-rank synonym IUCN has assessed (CoL files Epidendrum
+    paniculatum, assessed DD, as a synonym of the unassessed E. diffusum).
+  - status = 'synonym' exactly: 'ambiguous synonym' is CoL saying the name's
+    application is uncertain, the opposite of evidence they are one taxon.
+  - One assessed species per Not Evaluated one, or no claim: CoL can file two
+    names IUCN assesses separately under one species, and picking one would
+    present a coin toss as a finding.
+```
+
+`taxonomy/col-synonym-assessed.parquet` · 1,212 rows · 22 kB
 
 | column | type | |
 |---|---|---|
-| `ne_col_id` | text |  |
-| `assessed_id` | integer |  |
-| `assessed_name` | text |  |
-| `assessed_category` | text |  |
+| `ne_col_id` | text | the Not Evaluated CoL species |
+| `assessed_id` | integer | the assessed species filed among its synonyms |
+| `assessed_name` | text | the assessed species filed among its synonyms |
+| `assessed_category` | text | the assessed species filed among its synonyms |
 
-`taxonomy/col-to-assessed.parquet` · 172,677 rows · 4 MB
+#### `dbt/models/precomputed/col_to_assessed.sql`
+
+```text
+taxonomy/col-to-assessed: one row per CoL species an assessed species is
+linked to, naming that species. The "infraspecific" no-match reason uses it to
+name the assessed species a demoted subspecies now sits under (Arctocephalus
+townsendi → A. philippii).
+
+Built from: assessment_link, lists/assessed.
+
+Decisions: primary links only; where two share a col_id, an accepted-name
+match before others, then the lowest SIS id.
+```
+
+`taxonomy/col-to-assessed.parquet` · 172,677 rows · 2 MB
 
 | column | type | |
 |---|---|---|
 | `col_id` | text |  |
-| `assessed_id` | integer |  |
-| `assessed_name` | text |  |
+| `assessed_id` | integer | the assessed species linked to it |
+| `assessed_name` | text | the assessed species linked to it |
+
+#### `dbt/models/precomputed/name_index.sql`
+
+```text
+search/name-index: one row per searchable name of a species, sorted by it, so
+the search bar's prefix query
+
+  WHERE name_lo >= 'panth' AND name_lo < 'panth' || chr(1114111)
+
+reads a row group or two instead of scanning the species lists (which are
+sorted for browsing, by class, order and family).
+
+Built from: lists/assessed, lists/ne, assessment_link, common_names (every CoL
+and iNaturalist name).
+
+Decisions:
+  - One row per name, not per species: "panthera", "lion" and "leo" all reach
+    Panthera leo by prefix, and "elephant" finds African Elephant.
+  - Assessed species and the Not Evaluated ones GBIF has records for; the
+    CoL-only and synonym tiers are searched only when nothing here matches.
+  - Sorted by name_lo in row groups of 20,000 when written: about a megabyte,
+    so a prefix query reads about a megabyte, fast even on a cold container.
+```
+
+`search/name-index.parquet` · 3,796,772 rows · 168 MB
+
+| column | type | |
+|---|---|---|
+| `name_lo` | text | the name, lowercased: what the prefix query ranges over |
+| `matched_name` | text | the name as written |
+| `name_kind` | integer | which name it is, the search's ranking tiers: 0 scientific name, 1 common name, 2 epithet, 3 a later word of the common name, 4 another common name, 5 a later word of one (searchSpecies in species-duckdb.ts ranks by these; keep in step) |
+| `rank_name` | text | the common name the row ranks by: the display one, or the other name it was reached through |
+| `id` | integer |  |
+| `scientific_name` | text |  |
+| `common_name` | text |  |
+| `taxon_group` | text |  |
+| `category` | text |  |
+| `gbif_species_key` | text |  |
+| `gbif_georeferenced_records_count` | integer |  |
+| `assessment_id` | integer |  |
+| `assessment_date` | text |  |
+| `countries` | text |  |
+| `class_name` | text | the search result itself, so a hit needs no join back |
+| `order_name` | text | the search result itself, so a hit needs no join back |
+| `family` | text | the search result itself, so a hit needs no join back |
+| `assessed` | boolean | the search result itself, so a hit needs no join back |
+| `col_id` | text | the search result itself, so a hit needs no join back |
+
+#### `dbt/models/precomputed/rank_index.sql`
+
+```text
+search/rank-index: one row per class, order, family or genus name, and per
+common name of one, sorted by name: the search bar's "Browse Felidae →"
+suggestions, read by prefix like name-index.
+
+Built from: lists/assessed, lists/ne, the tree's labels (vernacular_names).
+
+Decisions:
+  - One row per name, aggregated here, so a suggestion is a pruned range read.
+  - A name in several groups (the genus "×" is in mosses and flowering plants)
+    goes to the coarsest rank, then the alphabetically first group: min() of a
+    struct compares field by field, so the choice is total and stable. A plain
+    arg_min's tie-break varied between runs on identical data.
+  - A common name that is itself some rank's scientific name is left out (the
+    scientific row wins); one shared by several ranks follows the same rule.
+```
+
+`search/rank-index.parquet` · 179,378 rows · 3 MB
+
+| column | type | |
+|---|---|---|
+| `name` | text | the name searched, lowercased: a rank's scientific name, or one of its common names |
+| `rp` | integer | its rank: 0 class, 1 order, 2 family, 3 genus (SUGGEST_RANKS in species-duckdb.ts; keep in step) |
+| `taxon_group` | text | where to browse it |
+| `class_name` | text | where to browse it |
+| `order_name` | text | where to browse it |
+| `family` | text | where to browse it |
+| `taxon` | text | the rank's scientific name |
+| `common` | text | its common name, if it has one ("baobab" offers "Browse Adansonia (Baobabs)") |
+
+#### `dbt/models/precomputed/synonym_index.sql`
+
+```text
+search/synonym-index: one row per CoL synonym of a described species, so a
+search for an old name finds the current species.
+
+Built from: taxonomy/taxa, species/, assessment_link, lists/assessed.
+
+Decisions:
+  - Only synonyms of described species, so a hit routes like a direct one: to
+    the assessed species, or to the Not Evaluated list.
+  - The species whose own link it is, not one merely covering it; the lowest
+    SIS id when two share it, so a rebuild picks the same one.
+  - Sorted by synonym_name_lower when written, so a prefix search reads about
+    one row group.
+```
+
+`search/synonym-index.parquet` · 2,300,401 rows · 55 MB
+
+| column | type | |
+|---|---|---|
+| `synonym_name` | text |  |
+| `synonym_name_lower` | text |  |
+| `accepted_name` | text | the described species it is a synonym of |
+| `accepted_col_id` | text | the described species it is a synonym of |
+| `taxon_group` | text | the described species it is a synonym of |
+| `sis_id` | integer | the assessed species linked to it, else NULL (Not Evaluated) |
+| `category` | text | its category, 'NE' when not assessed |
 
 #### `precomputed/col-revisions.ts`
 
@@ -884,110 +1030,6 @@ name, which reads as "0% assessed" until an alias is added.
 `summaries/table1a-children-summaries.json` · 7 kB
 
 `summaries/ssc-group-children-summaries.json` · 2 MB
-
-#### `precomputed/search-index.ts`
-
-```text
-search/name-index and search/rank-index: the two name-sorted indexes the search bar reads, one over
-species names and one over higher-rank taxon names, so a typeahead prefix query
-reads a row group or two instead of scanning the species lists (which are sorted
-for browsing, by class, order and family).
-
-Sorted by name_lo, so
-
-  WHERE name_lo >= 'panth' AND name_lo < 'panth' || chr(1114111)
-
-touches one row group. ROW_GROUP_SIZE is tuned for that read: 20k rows puts
-about a megabyte in a group, so a prefix query reads about a megabyte (measured
-locally at 9-13 ms) and needs no warm container to be fast.
-
-One row per SEARCHABLE NAME, not per species — a species contributes its scientific
-name, its common name, and its epithet, so "panthera", "lion" and "leo" all reach
-Panthera leo by prefix. name_kind carries which, because the dropdown's ranking is
-defined in those terms (exact common name > common-name prefix > scientific prefix).
-
-Rows carry the whole SearchResult payload, including the col_id the NE list keys on,
-so a hit needs no join back to the species parquets and no link lookup.
-
-Covers the fast path only (assessed ∪ GBIF-observed). The CoL-only and synonym tiers
-are reached solely when nothing here matches, and they already have their own answer:
-synonym-index.parquet is name-sorted, and species-duckdb primes both at warm-up.
-
-The second output, rank-index.parquet, is the same idea for the "Browse Felidae →"
-suggestions: the DISTINCT class/order/family/genus names, pre-aggregated to ONE ROW
-PER NAME and sorted, so suggestTaxa is a pruned range read rather than eight DISTINCT
-scans of both parquets. Pre-aggregating here rather than at query time is also what
-makes the answer deterministic — see the comment on the struct min below.
-
-Built from: lists/assessed, lists/ne, assessment_link, common_names (every
-CoL and iNaturalist name), vernacular-names.json.
-```
-
-`search/name-index.parquet` · 3,796,772 rows · 168 MB
-
-| column | type | |
-|---|---|---|
-| `name_lo` | text |  |
-| `matched_name` | text |  |
-| `name_kind` | integer |  |
-| `rank_name` | text |  |
-| `id` | integer |  |
-| `scientific_name` | text |  |
-| `common_name` | text |  |
-| `taxon_group` | text |  |
-| `category` | text |  |
-| `gbif_species_key` | text |  |
-| `gbif_georeferenced_records_count` | integer |  |
-| `assessment_id` | integer |  |
-| `assessment_date` | text |  |
-| `countries` | text |  |
-| `class_name` | text |  |
-| `order_name` | text |  |
-| `family` | text |  |
-| `assessed` | boolean |  |
-| `col_id` | text |  |
-
-`search/rank-index.parquet` · 179,378 rows · 3 MB
-
-| column | type | |
-|---|---|---|
-| `name` | text |  |
-| `rp` | integer |  |
-| `taxon_group` | text |  |
-| `class_name` | text |  |
-| `order_name` | text |  |
-| `family` | text |  |
-| `taxon` | text |  |
-| `common` | text |  |
-
-#### `precomputed/synonym-index.ts`
-
-```text
-search/synonym-index: one row per CoL synonym of a described species, sorted
-by name, so a search for an old name finds the current species.
-
-taxa.parquet has ~3.8M synonyms (status='synonym', parent_id → the accepted taxon).
-We keep only those whose accepted name is a described species (species/: described), and carry whether that accepted species is IUCN-assessed (sis_id via
-assessment_link) + its category — so a synonym hit routes to reassessments (assessed) or
-new-assessments/leaf-node (NE), exactly like a direct hit.
-
-Sorted by synonym_name_lower so searchSpecies' prefix-range query prunes to ~1 row group
-(fast even cold).
-
-Built from: taxonomy/taxa, species/, assessment_link, lists/assessed.
-```
-
-`search/synonym-index.parquet` · 2,300,401 rows · 82 MB
-
-| column | type | |
-|---|---|---|
-| `synonym_name` | text |  |
-| `synonym_name_lower` | text |  |
-| `accepted_name` | text |  |
-| `accepted_col_id` | text |  |
-| `taxon_group` | text |  |
-| `sis_id` | integer |  |
-| `category` | text |  |
 
 #### `precomputed/col-taxon-ids.ts`
 
@@ -1242,7 +1284,7 @@ Each comparison then explains one source's changes. Publish the second (or both,
 
 ### Running parts
 
-`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count` and `lists` are one dbt run, so either reruns both), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count`, `lists` and the precomputed stage's SQL tables are one dbt run, so any of them reruns it all), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 

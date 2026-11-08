@@ -17,7 +17,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { computeNoMatchDetails, COL_TO_ASSESSED_SQL, SYNONYM_ASSESSED_SQL, type BreakdownQueryContext } from "../col-breakdown";
+import { computeNoMatchDetails, type BreakdownQueryContext } from "../col-breakdown";
 
 let tmp: string;
 let conn: DuckDBConnection;
@@ -63,16 +63,7 @@ beforeAll(async () => {
       ('AMBX', NULL, 'accepted', 'species', 'Ambiguous target', false, NULL, NULL),
       ('AMB1', 'IN1', 'synonym', 'species', 'Ambiguous target', true, 'IN1', NULL),
       ('AMB2', 'LUMP', 'synonym', 'species', 'Ambiguous target', true, 'LUMP', NULL),
-      ('SPELL', 'LUMP', 'synonym', 'species', 'Spelling case', true, 'LUMP', NULL),
-      -- An UNASSESSED accepted species under which CoL files an assessed name:
-      -- IUCN has assessed this taxon, as 'Clean species'. SYNONYM_ASSESSED_SQL.
-      ('NEACC', NULL, 'accepted', 'species', 'Ne accepta', true, NULL, NULL),
-      ('NESYN', 'NEACC', 'synonym', 'species', 'Clean species', true, NULL, NULL),
-      -- Two names IUCN assesses separately, both synonyms of one unassessed
-      -- species: naming either would present a coin toss as a finding.
-      ('NEAMB', NULL, 'accepted', 'species', 'Ne ambigua', true, NULL, NULL),
-      ('NEAMB1', 'NEAMB', 'synonym', 'species', 'Lump winner', true, NULL, NULL),
-      ('NEAMB2', 'NEAMB', 'synonym', 'species', 'Demoted one', true, NULL, NULL)
+      ('SPELL', 'LUMP', 'synonym', 'species', 'Spelling case', true, 'LUMP', NULL)
     ) v(col_id, parent_id, status, rank, scientific_name, in_checklist, checklist_parent_id, checklist_name)`, "taxa.parquet");
 
   // family/order_name are the assessment's own placement, which the
@@ -104,8 +95,14 @@ beforeAll(async () => {
       (10::BIGINT, 'primary', 'XR1', 'accepted')
     ) v(sis_taxon_id, role, col_id, method)`, "assessment_link.parquet");
 
-  // The same temp tables the real caller builds before running the diagnostic.
-  await conn.run(COL_TO_ASSESSED_SQL(path.join(tmp, "assessment_link.parquet"), path.join(tmp, "assessed.parquet")));
+  // The same temp tables the real caller loads before running the diagnostic:
+  // col_to_assessed as the sync builds it from the links above
+  // (dbt/models/precomputed/col_to_assessed.sql: an accepted-name match first,
+  // then the lowest SIS id).
+  await conn.run(`CREATE TEMP TABLE col_to_assessed AS SELECT * FROM (VALUES
+      ('IN1', 1::BIGINT, 'Clean species'), ('XR1', 2::BIGINT, 'Xr onlyus'), ('SUB1', 4::BIGINT, 'Demoted one'),
+      ('LUMP', 5::BIGINT, 'Lump winner'), ('ANS', 8::BIGINT, 'Anselli test'), ('AMBX', 9::BIGINT, 'Ambiguous target')
+    ) t(col_id, assessed_id, assessed_name)`);
   await conn.run(`CREATE TEMP TABLE assessed_cids AS
     SELECT DISTINCT col_id FROM read_parquet('${path.join(tmp, "assessment_link.parquet")}')
     WHERE col_id IS NOT NULL`);
@@ -189,24 +186,4 @@ describe("computeNoMatchDetails — the query, not just the classifier", () => {
     expect(outsideGroup.map((d) => d.reason)).toEqual(["classified_elsewhere"]);
   });
 
-});
-
-describe("SYNONYM_ASSESSED_SQL — why a Not Evaluated species may already be assessed", () => {
-  it("names the assessed species CoL files as a synonym, and refuses when there are two", async () => {
-    await conn.run(SYNONYM_ASSESSED_SQL(path.join(tmp, "taxa.parquet"), path.join(tmp, "assessed.parquet"), "assessed_cids"));
-    const rows = await (await conn.run("SELECT * FROM synonym_assessed ORDER BY ne_col_id")).getRowObjects();
-    const by = new Map(rows.map((r) => [String(r.ne_col_id), r]));
-
-    // CoL files the assessed 'Clean species' as a synonym of the unassessed
-    // 'Ne accepta' — the assessment exists, under a name CoL doesn't accept.
-    expect(by.get("NEACC")?.assessed_name).toBe("Clean species");
-    expect(Number(by.get("NEACC")?.assessed_id)).toBe(1);
-
-    // Two separately-assessed names under one unassessed species: no claim.
-    expect(by.has("NEAMB")).toBe(false);
-
-    // A synonym under an ASSESSED accepted record explains no gap — there is
-    // none. ('Renamed away' is a synonym of IN1, which IUCN has assessed.)
-    expect(by.has("IN1")).toBe(false);
-  });
 });

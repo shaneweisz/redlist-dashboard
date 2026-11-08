@@ -49,7 +49,7 @@ export interface NoMatchDetail {
   colGroup?: string;
 }
 
-// Heuristic "split from" flag for Not Evaluated species — see SPLIT_CANDIDATES_SQL
+// Heuristic "split from" flag for Not Evaluated species — see the sync's col_split_candidates.sql
 // below for the mechanism and its caveats. Keyed by col_id (NE species have no
 // sis_taxon_id), additive on top of a breakdown entry, independently droppable.
 export interface SplitDetail {
@@ -62,7 +62,7 @@ export interface SplitDetail {
 /**
  * "Not Evaluated, but IUCN has assessed it under another name" — an NE species
  * for which CoL files an IUCN-ASSESSED name among its synonyms. See
- * SYNONYM_ASSESSED_SQL. Keyed by col_id like SplitDetail, and equally droppable.
+ * the sync's col_synonym_assessed.sql. Keyed by col_id like SplitDetail, and equally droppable.
  */
 export interface NeSynonymDetail {
   colId: string;
@@ -234,157 +234,11 @@ export function classifyNoMatch(row: Record<string, unknown>): NoMatchDetail {
   return { id, name, reason: "classified_elsewhere", ...(colGroup ? { colGroup } : {}), ...ref };
 }
 
-// Precomputes a col_id -> likely-former-parent lookup, once per caller lifetime
-// (not once per breakdown name — taxa.parquet is ~3.8M rows, so re-scanning
-// it per name would be wasteful). The heuristic: CoL keeps a subspecies/
-// infraspecific synonym record when a subspecies is promoted to full species
-// status (e.g. "Gazella gazella acaciae" survives as a synonym once "Gazella
-// acaciae" becomes its own accepted species) — so a synonym whose first two name
-// tokens (genus + species) match an IUCN-assessed species is very likely that
-// promoted species' former parent.
-//
-// One extra wrinkle, found via Giraffa tippelskirchi (a masai giraffe, promoted
-// from subspecies to species — genuinely NE, split from the assessed Giraffa
-// camelopardalis): CoL doesn't always point the old synonym straight at the new
-// species. When the promoted species also got its own nominate subspecies (an
-// "autonym" — here "Giraffa tippelskirchi tippelskirchi"), the OLD synonym
-// ("Giraffa camelopardalis tippelskirchi") points at that new nominate SUBSPECIES,
-// not at the species itself. So a direct synonym->parent hop isn't enough — this
-// resolves one extra hop up (subspecies -> its own parent) whenever the synonym's
-// immediate parent turns out to be an accepted subspecies/infraspecific rank
-// rather than the species itself.
-//
-// Worked example — Vallonia costata (IUCN LC, CoL 7FDLW). CoL holds six
-// historical infraspecific names under it, every one status='synonym'. What each
-// one now POINTS AT is the whole signal:
-//
-//   Vallonia costata euryomphalus     -> 7FDN4  V. subcyclophorella  extinct -> dropped
-//   Vallonia costata var. amurensis   -> 7TKP8  V. patens            SPLIT
-//   Vallonia costata var. helvetica   -> 7FDLW  V. costata itself            -> dropped
-//   Vallonia costata var. minor       -> 7TKP7  V. parvula           SPLIT
-//   Vallonia costata var. montana     -> 7FDMB  V. gracilicosta      SPLIT
-//   Vallonia costata var. pyrenaica   -> 7FDLW  V. costata itself            -> dropped
-//
-// Three point at other accepted species that IUCN has not assessed, so those are
-// the three the flag names. The other three are dropped by the filters below:
-// two resolve back to V. costata (already assessed, so not an NE candidate) and
-// one to an extinct species (outside the extant universe).
-//
-// The evidence is visible on CoL's site, but only from the NEW species' page —
-// V. gracilicosta (7FDMB) lists "Vallonia costata var. montana Sterki, 1893"
-// among its synonyms. There is no view from V. costata's own page showing names
-// that used to sit under it and now resolve elsewhere, which is why this has to
-// be derived rather than read off.
-//
-// This only catches the "was a named subspecies, got promoted" pattern (the
-// common case in recent Bovidae/Giraffidae splits) — it won't catch a split into
-// a segregate with no prior CoL subspecies record. One arbitrary (but
-// deterministic) candidate is kept per NE species via row_number when more than
-// one subspecies-rank synonym implies a different parent.
-export const SPLIT_CANDIDATES_SQL = (bb: string, assessedPath: string, assessedCidsTable: string) => `
-  CREATE TEMP TABLE split_candidates AS
-  WITH synonym_rows AS (
-    SELECT
-      b.parent_id AS direct_parent_id,
-      split_part(b.scientific_name, ' ', 1) || ' ' || split_part(b.scientific_name, ' ', 2) AS parent_binomial
-    FROM read_parquet('${bb}') b
-    WHERE b.status = 'synonym' AND b.rank IN ('subspecies', 'infraspecific name', 'variety')
-  ),
-  resolved AS (
-    SELECT
-      CASE
-        WHEN p.rank = 'species' THEN p.col_id
-        WHEN p.rank IN ('subspecies', 'infraspecific name', 'variety')
-             AND p.status IN ('accepted', 'provisionally accepted') THEN p.parent_id
-        ELSE NULL
-      END AS ne_col_id,
-      sr.parent_binomial
-    FROM synonym_rows sr
-    JOIN read_parquet('${bb}') p ON p.col_id = sr.direct_parent_id
-  ),
-  candidate_synonyms AS (
-    SELECT ne_col_id, parent_binomial FROM resolved
-    WHERE ne_col_id IS NOT NULL AND ne_col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
-  ),
-  matched AS (
-    SELECT DISTINCT cs.ne_col_id, a.id AS parent_id, a.scientific_name AS parent_name, a.iucn_category AS parent_category
-    FROM candidate_synonyms cs
-    JOIN read_parquet('${assessedPath}') a ON lower(a.scientific_name) = lower(cs.parent_binomial)
-  )
-  SELECT ne_col_id, parent_id, parent_name, parent_category,
-         row_number() OVER (PARTITION BY ne_col_id ORDER BY parent_id) AS rn
-  FROM matched`;
-
-/**
- * The other half of "why is this species Not Evaluated": CoL files an
- * IUCN-ASSESSED name among this species' synonyms, so IUCN has assessed the
- * taxon — under a name CoL doesn't accept.
- *
- * SPLIT_CANDIDATES_SQL catches the promoted-subspecies case ("Gazella gazella
- * acaciae" survives as a synonym of the now-accepted Gazella acaciae). This is
- * the same shape one rank up: a SPECIES-rank synonym whose own name IUCN has
- * assessed (CoL files Epidendrum paniculatum, assessed DD, as a synonym of the
- * unassessed Epidendrum diffusum). 491 NE species across the current data.
- *
- * Both databases hold both names; they disagree only on which one is accepted,
- * and the matcher linked the assessment to CoL's other record for it — so the
- * assessment is not missing, it is filed under a name this NE row doesn't carry.
- * A reader can check the claim on CoL's page for the NE species: the assessed
- * name is listed there, under Synonyms.
- *
- * status = 'synonym' exactly, never LIKE '%synonym%': 'ambiguous synonym' is CoL
- * saying the name's application is UNCERTAIN, which is the opposite of evidence
- * that these two names are one taxon (same rule as sources/taxa.ts's, and the same
- * trap Pararge xiphia fell into there).
- *
- * One assessed species per NE species, or no claim — CoL can file two names IUCN
- * assesses separately under one accepted species, and picking one of them would
- * present a coin toss as a finding. Same refusal as syn_in_checklist's.
- */
-export const SYNONYM_ASSESSED_SQL = (bb: string, assessedPath: string, assessedCidsTable: string) => `
-  CREATE TEMP TABLE synonym_assessed AS
-  WITH species_synonyms AS (
-    SELECT b.parent_id AS ne_col_id, lower(b.scientific_name) AS lname
-    FROM read_parquet('${bb}') b
-    WHERE b.status = 'synonym' AND b.rank = 'species' AND b.parent_id IS NOT NULL
-  ),
-  -- Only names IUCN has assessed, and only under accepted records we count as NE
-  -- (an assessed parent would make this a match, not an explanation for a gap).
-  matched AS (
-    SELECT ss.ne_col_id, a.id AS assessed_id, a.scientific_name AS assessed_name,
-           a.iucn_category AS assessed_category
-    FROM species_synonyms ss
-    JOIN read_parquet('${assessedPath}') a ON lower(a.scientific_name) = ss.lname
-    WHERE ss.ne_col_id NOT IN (SELECT col_id FROM ${assessedCidsTable})
-  )
-  SELECT ne_col_id,
-         any_value(assessed_id) AS assessed_id,
-         any_value(assessed_name) AS assessed_name,
-         any_value(assessed_category) AS assessed_category
-  FROM matched
-  GROUP BY ne_col_id
-  HAVING count(DISTINCT assessed_id) = 1`;
-
-// Precomputes a global col_id -> IUCN-assessed-species lookup, once per caller
-// lifetime. Used by the "infraspecific" no-match reason (classifyNoMatch) to
-// name/link the currently-assessed species a demoted subspecies/variety is now
-// classified under (e.g. Arctocephalus townsendi -> Arctocephalus philippii) — a
-// plain global lookup, not scoped to any one breakdown name, since the parent can
-// fall in a different name within the same node (rare, but there's no reason to
-// miss it). Same accepted-preferred tie-break as the per-name "winners" CTE below.
-export const COL_TO_ASSESSED_SQL = (link: string, assessedPath: string) => `
-  CREATE TEMP TABLE col_to_assessed AS
-  WITH links AS (
-    SELECT l.col_id AS col_id, l.sis_taxon_id AS assessed_id, a.scientific_name AS assessed_name,
-           row_number() OVER (
-             PARTITION BY l.col_id
-             ORDER BY (CASE WHEN l.method = 'accepted' THEN 0 ELSE 1 END), l.sis_taxon_id
-           ) AS rn
-    FROM read_parquet('${link}') l
-    JOIN read_parquet('${assessedPath}') a ON a.id = l.sis_taxon_id
-    WHERE l.col_id IS NOT NULL AND l.role = 'primary'
-  )
-  SELECT col_id, assessed_id, assessed_name FROM links WHERE rn = 1`;
+// split_candidates, synonym_assessed and col_to_assessed, which the queries
+// below join, are built by the sync as dbt models
+// (scripts/sync/dbt/models/precomputed/col_split_candidates.sql and its
+// siblings, each explaining its heuristic) and loaded as temp tables of those
+// names (species-store.ts; the sync's precomputed/col-differences.ts).
 
 export interface BreakdownQueryContext {
   conn: DuckDBConnection;
