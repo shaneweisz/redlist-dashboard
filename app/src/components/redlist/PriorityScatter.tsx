@@ -9,7 +9,7 @@
  * table. The hover tooltip can be moused into and expanded for the assessment's
  * details (criteria, trend, the credits) without leaving the chart.
  *
- * Quiet grey bars along the bottom and left edges are the dots' distribution
+ * Quiet grey bars along the top and right edges are the dots' distribution
  * along each axis, in even bins lined up with the ticks: 5 years across, one
  * power of ten (or 10%) up. Clicking a bar is a real page filter (years=, or
  * the y metric's gbif…= in the URL; ⌘/Ctrl-click adds one), and the dots
@@ -83,13 +83,13 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// The edge bars' depth. Outward from the plot on the left: tick labels, the
-// bars (growing leftward), the y title. Below it: tick labels, the bars
-// (growing down), the x title.
-const BOTTOM_HIST = 28;
-const LEFT_HIST = 36;
-const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 16, X_TITLE = 18;
-const M = { left: Y_TITLE + LEFT_HIST + 4 + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + 4 + BOTTOM_HIST + X_TITLE };
+// The edge bars sit opposite the axes, top and right, as marginal
+// distributions conventionally do: the tick labels and axis titles stay next
+// to the plot, and the bars grow away from it. Their bands' depth:
+const TOP_HIST = 28;
+const RIGHT_HIST = 36;
+const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 16, X_TITLE = 18, GAP = 4;
+const M = { left: Y_TITLE + Y_TICKS, right: GAP + RIGHT_HIST + 8, top: 6 + TOP_HIST + GAP, bottom: X_TICKS + X_TITLE };
 /** The chart fills its card's height (beside Status and Country), but never less than this. */
 const MIN_HEIGHT = 380;
 const HIT_RADIUS = 6;
@@ -441,13 +441,13 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const bars = width > 0 ? [
     ...bins.x.map((bin) => {
       const left = scales.sx(bin.lo), right = scales.sx(Math.min(bin.hi, scales.xMax));
-      const h = bin.count ? Math.max(1, (bin.count / xMaxCount) * BOTTOM_HIST) : 0;
-      return { bin, axis: "x" as const, selected: xSelected?.(bin.mid) ?? null, rect: { left: left + 1, width: right - left - 2, top: M.top + scales.plotH + X_TICKS + 4, height: h } };
+      const h = bin.count ? Math.max(1, (bin.count / xMaxCount) * TOP_HIST) : 0;
+      return { bin, axis: "x" as const, selected: xSelected?.(bin.mid) ?? null, rect: { left: left + 1, width: right - left - 2, top: M.top - GAP - h, height: h } };
     }),
     ...bins.y.map((bin) => {
       const top = scales.sy(Math.min(toPlotY(bin.hi, yScale), scales.yMax)), bottom = scales.sy(toPlotY(bin.lo, yScale));
-      const w = bin.count ? Math.max(1, (bin.count / yMaxCount) * LEFT_HIST) : 0;
-      return { bin, axis: "y" as const, selected: ySelected?.(bin.mid) ?? null, rect: { top: top + 1, height: bottom - top - 2, left: M.left - Y_TICKS - 4 - w, width: w } };
+      const w = bin.count ? Math.max(1, (bin.count / yMaxCount) * RIGHT_HIST) : 0;
+      return { bin, axis: "y" as const, selected: ySelected?.(bin.mid) ?? null, rect: { top: top + 1, height: bottom - top - 2, left: M.left + scales.plotW + GAP, width: w } };
     }),
   ].filter((b) => b.rect.width > 0 && b.rect.height > 0) : [];
   const hoverBar = hoverBin ? bars.find((b) => `${b.axis}-${b.bin.key}` === hoverBin.key) ?? null : null;
