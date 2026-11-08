@@ -9,6 +9,11 @@
  * table. The hover tooltip can be moused into and expanded for the assessment's
  * details (criteria, trend, the credits) without leaving the chart.
  *
+ * Bars along the bottom and left edges are the two distributions it sits
+ * between, the Years Since Assessed and GBIF Records charts, drawn on the
+ * scatter's own axes: click a bar to filter by it, as those charts did. A dot
+ * outside a bar selection is faded rather than dropped.
+ *
  * The axes' extents come from the caller (the whole taxon, not the filtered
  * points), so applying a filter never rescales the chart.
  *
@@ -17,6 +22,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { yearsMonthsSince } from "@/lib/outdated";
+import { formatCountLabel } from "./chart-tooltip";
 
 export interface PriorityPoint {
   key: string;
@@ -31,6 +37,21 @@ export interface PriorityPoint {
   total: number | null;
   newRecords: number | null;
   assessmentDate: string;
+  /** Outside an edge-bar selection: drawn faded, not selectable by a box. */
+  dim?: boolean;
+}
+
+/** One edge bar, spanning [from, to] in its axis's data units (years, or the raw GBIF value). */
+export interface HistBin {
+  key: string;
+  from: number;
+  to: number;
+  count: number;
+  /** The bar's name ("10-20 years", "Assessed in 2016", "1K-10K records"). */
+  title: string;
+  /** "3,871 (64%)", as the bar charts label their bars. */
+  label: string;
+  selected: boolean;
 }
 
 /**
@@ -65,9 +86,17 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// Left and bottom leave room for the tick labels and the axis titles.
-const M = { left: 60, right: 12, top: 10, bottom: 40 };
-const HEIGHT = 316;
+// The edge bars: their band's depth, and colours matching the charts they replace.
+const BOTTOM_HIST = 44;
+const LEFT_HIST = 60;
+const X_COLOR = "#3b82f6";
+const Y_COLOR = "#10b981";
+// Outward from the plot on the left: tick labels, the GBIF bars (growing
+// leftward), the y title. Below it: tick labels, the years bars (growing
+// down), the x title.
+const Y_TICKS = 38, X_TICKS = 18, Y_TITLE = 30, X_TITLE = 26;
+const M = { left: Y_TITLE + LEFT_HIST + 4 + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + 4 + BOTTOM_HIST + X_TITLE };
+const HEIGHT = 420;
 const HIT_RADIUS = 6;
 
 /** "10 years, 3 months ago", "4 months ago", "this month". */
@@ -129,14 +158,26 @@ function pctNewText(p: PriorityPoint): string {
   return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;
 }
 
+/** "2,911 species · 48%": the bar's count, with the share its label carries ("2,911 (48%)"). */
+function binCountText(bin: HistBin): string {
+  const pct = /\((\d+%)\)/.exec(bin.label)?.[1];
+  return `${bin.count.toLocaleString()} species${pct ? ` · ${pct}` : ""}`;
+}
+
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${+(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yAxis, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yAxis, xAxis, maxYears, maxValue, xBins, yBins, onXBin, onYBin }: {
   points: PriorityPoint[];
+  /** The x axis title, below the axis; may hold controls. */
+  xAxis: React.ReactNode;
+  xBins: HistBin[];
+  yBins: HistBin[];
+  onXBin: (key: string, e: React.MouseEvent) => void;
+  onYBin: (key: string, e: React.MouseEvent) => void;
   yScale: YScale;
   /** The y axis title, rotated beside the axis; may hold controls (the metric and record-mode selects). */
   yAxis: React.ReactNode;
@@ -157,6 +198,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [hoverBin, setHoverBin] = useState<{ bin: HistBin; px: number; py: number } | null>(null);
   /** The tooltip shows the assessment's details too (its "More details" was clicked). */
   const [expanded, setExpanded] = useState(false);
 
@@ -188,7 +230,9 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   // species on the same count, above all 0, show as a band rather than a line),
   // plus a coarse grid for hover hit-testing.
   const layout = useMemo(() => {
-    const ordered = [...points].sort((a, b) => (DRAW_RANK[a.category] ?? 0) - (DRAW_RANK[b.category] ?? 0));
+    // Faded dots first, then least concerning, so selected and threatened dots sit on top.
+    const ordered = [...points].sort((a, b) =>
+      (a.dim === b.dim ? 0 : a.dim ? -1 : 1) || (DRAW_RANK[a.category] ?? 0) - (DRAW_RANK[b.category] ?? 0));
     const xy = new Float32Array(ordered.length * 2);
     const grid = new Map<number, number[]>();
     const cell = 12;
@@ -235,10 +279,6 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       ctx.fillText(`${yr}`, x, M.top + plotH + 6);
     }
 
-    // The x axis title (the y one is an HTML overlay: it holds the y-axis selects).
-    ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillStyle = "#71717a";
-    ctx.fillText("Years since latest assessment", M.left + plotW / 2, HEIGHT - 14);
 
     // Dots.
     const { ordered, xy } = layout;
@@ -246,8 +286,8 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const r = big ? 1.2 : 2.4;
     for (let i = 0; i < ordered.length; i++) {
       const p = ordered[i];
-      const dim = box ? !box.keys.has(p.key) : false;
-      ctx.globalAlpha = dim ? 0.12 : big ? 0.5 : 0.75;
+      const dim = p.dim || (box ? !box.keys.has(p.key) : false);
+      ctx.globalAlpha = dim ? 0.1 : big ? 0.5 : 0.75;
       ctx.fillStyle = colors[p.category] || "#a1a1aa";
       const x = xy[i * 2], y = xy[i * 2 + 1];
       if (big) ctx.fillRect(x - r, y - r, r * 2, r * 2);
@@ -279,8 +319,11 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   // back to back, before React re-renders, and mouseup reading the state alone
   // would see no drag and drop the click.
   const dragStart = useRef<{ x0: number; y0: number } | null>(null);
+  const inPlot = (x: number, y: number) =>
+    x >= M.left - 4 && x <= M.left + scales.plotW + 4 && y >= M.top - 4 && y <= M.top + scales.plotH + 4;
   const onMouseDown = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
+    if (!inPlot(x, y)) return;
     dragStart.current = { x0: x, y0: y };
     setDrag({ x0: x, y0: y, x1: x, y1: y });
   };
@@ -291,7 +334,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const { x, y } = localXY(e);
     const start = dragStart.current;
     if (start) { setDrag({ ...start, x1: x, y1: y }); setHover(null); return; }
-    const i = hitTest(x, y);
+    const i = inPlot(x, y) ? hitTest(x, y) : null;
     if (i != null) {
       cancelLeave();
       if (hover?.p.key !== layout.ordered[i].key) setExpanded(false);
@@ -316,7 +359,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       const { ordered, xy } = layout;
       for (let i = 0; i < ordered.length; i++) {
         const px = xy[i * 2], py = xy[i * 2 + 1];
-        if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
+        if (!ordered[i].dim && px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
       }
       onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
       return;
@@ -334,11 +377,41 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const top = scales.sy(cy(box.y1)), bottom = scales.sy(cy(box.y0));
     return { left, top, width: right - left, height: bottom - top };
   })() : null;
-  const dragPx = drag ? {
-    left: Math.max(0, Math.min(drag.x0, drag.x1)), top: Math.max(0, Math.min(drag.y0, drag.y1)),
-    width: Math.min(width, Math.max(drag.x0, drag.x1)) - Math.max(0, Math.min(drag.x0, drag.x1)),
-    height: Math.min(HEIGHT, Math.max(drag.y0, drag.y1)) - Math.max(0, Math.min(drag.y0, drag.y1)),
-  } : null;
+  const dragPx = drag ? (() => {
+    const { plotW, plotH } = scales;
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const x0 = clamp(Math.min(drag.x0, drag.x1), M.left, M.left + plotW), x1 = clamp(Math.max(drag.x0, drag.x1), M.left, M.left + plotW);
+    const y0 = clamp(Math.min(drag.y0, drag.y1), M.top, M.top + plotH), y1 = clamp(Math.max(drag.y0, drag.y1), M.top, M.top + plotH);
+    return { left: x0, top: y0, width: x1 - x0, height: y1 - y0 };
+  })() : null;
+
+  // Edge bars on the scatter's own axes: the bottom band's bars span their
+  // years, the left band's their GBIF values (through the same y transform as the dots).
+  const xAny = xBins.some((b) => b.selected), yAny = yBins.some((b) => b.selected);
+  const xMaxCount = Math.max(1, ...xBins.map((b) => b.count));
+  const yMaxCount = Math.max(1, ...yBins.map((b) => b.count));
+  const clampX = (v: number) => Math.min(Math.max(v, 0), scales.xMax);
+  const clampY = (v: number) => Math.min(Math.max(v, 0), scales.yMax);
+  const xBars = width > 0 ? xBins.map((bin) => {
+    const left = scales.sx(clampX(bin.from)), right = scales.sx(clampX(bin.to));
+    const h = Math.max(bin.count > 0 ? 1 : 0, (bin.count / xMaxCount) * BOTTOM_HIST);
+    return { bin, axis: "x" as const, left: left + 0.5, width: right - left - 1, top: M.top + scales.plotH + X_TICKS + 4, height: h };
+  }).filter((b) => b.width > 0) : [];
+  const yBars = width > 0 ? yBins.map((bin) => {
+    const top = scales.sy(clampY(toPlotY(bin.to, yScale))), bottom = scales.sy(clampY(toPlotY(bin.from, yScale)));
+    const w = Math.max(bin.count > 0 ? 1 : 0, (bin.count / yMaxCount) * LEFT_HIST);
+    return { bin, axis: "y" as const, top: top + 0.5, height: bottom - top - 1, left: M.left - Y_TICKS - 4 - w, width: w };
+  }).filter((b) => b.height > 0) : [];
+  const xTitleRef = useRef<HTMLDivElement>(null);
+  const [xTitleLeft, setXTitleLeft] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = xTitleRef.current;
+    if (!el || width === 0) return;
+    const w = el.offsetWidth;
+    setXTitleLeft(Math.max(0, Math.min(M.left + scales.plotW / 2 - w / 2, width - w)));
+  }, [width, scales.plotW, xAxis]);
+  const binTipRef = useRef<HTMLDivElement>(null);
+  const binTipPos = usePlacement(binTipRef, hoverBin, width, 8, false);
 
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
   const hoverDetails = useMemo(() => (hover && expanded ? details(hover.p.key) : null), [hover, expanded, details]);
@@ -360,6 +433,42 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); setDrag(null); dragStart.current = null; }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
+      {/* The edge bars: the Years Since Assessed and GBIF Records charts, on this chart's axes. */}
+      {[...xBars, ...yBars].map(({ bin, axis, ...r }) => {
+        const any = axis === "x" ? xAny : yAny;
+        return (
+          <button
+            key={`${axis}-${bin.key}`}
+            type="button"
+            aria-pressed={bin.selected}
+            aria-label={`${bin.title}: ${formatCountLabel(bin.label)}`}
+            className="absolute z-10 cursor-pointer rounded-[2px] transition-opacity hover:brightness-110"
+            style={{ ...r, backgroundColor: axis === "x" ? X_COLOR : Y_COLOR, opacity: any && !bin.selected ? 0.3 : 1 }}
+            onMouseDown={stop}
+            onMouseUp={stop}
+            onMouseMove={(e) => { stop(e); setHover(null); setHoverBin({ bin, px: r.left + r.width / 2, py: r.top + r.height / 2 }); }}
+            onMouseLeave={() => setHoverBin(null)}
+            onClick={(e) => (axis === "x" ? onXBin : onYBin)(bin.key, e)}
+          />
+        );
+      })}
+      {hoverBin && (
+        <div ref={binTipRef} role="tooltip"
+          className="pointer-events-none absolute z-30 whitespace-nowrap rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]"
+          style={placedStyle(binTipPos)}>
+          <div className="text-zinc-900 dark:text-zinc-100 font-medium">{hoverBin.bin.title}</div>
+          <div className="tabular-nums text-zinc-600 dark:text-zinc-400">
+            {binCountText(hoverBin.bin)}
+          </div>
+        </div>
+      )}
+      {/* The x axis title, centred under the plot but kept inside the chart (on a
+          phone the plot's centre is too far right for the title to fit around it). */}
+      <div ref={xTitleRef} className="absolute z-20 whitespace-nowrap cursor-default"
+        style={{ left: xTitleLeft ?? M.left, bottom: 2, visibility: xTitleLeft == null ? "hidden" : undefined }}
+        onMouseDown={stop} onMouseUp={stop} onMouseMove={(e) => { stop(e); setHover(null); }}>
+        {xAxis}
+      </div>
       {/* The y axis title, rotated, centred on the plot's height. */}
       <div className="absolute z-20 whitespace-nowrap cursor-default"
         style={{ left: 11, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
@@ -381,7 +490,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
           <div
             ref={tipRef}
             role="tooltip"
-            className={`absolute z-30 w-[260px] max-w-full cursor-default select-text rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]`}
+            className={`absolute z-30 w-[260px] max-w-full ${expanded ? "max-h-[480px] overflow-y-auto overscroll-contain" : ""} cursor-default select-text rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]`}
             style={placedStyle(tipPos)}
             onMouseEnter={cancelLeave}
             onMouseLeave={() => { setHover(null); setExpanded(false); }}
