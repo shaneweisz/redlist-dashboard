@@ -499,7 +499,7 @@ export function nodeIdForSpecies(taxonGroup: string, lineage: Lineage): string |
 // to re-scan the name columns of assessed+unassessed straight off R2 — ~25MB pulled
 // and decompressed per request, with no pruning possible (a substring ILIKE can't use
 // row-group statistics, and both parquets are written ORDER BY class_name, order_name,
-// family, so names are scattered across every row group anyway — see scripts/sync/lists/).
+// family, so names are scattered across every row group anyway — see scripts/sync/dbt/models/lists/).
 // Measured against production: ~2.2s per uncached query, essentially all of it this
 // scan, with searchSpecies and suggestTaxa serialized behind one another on the shared
 // connection. A cold no-match, which falls through to species/** and synonym-index,
@@ -1097,7 +1097,7 @@ export async function warmConnection(): Promise<void> {
 export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
   const conn = await getConn();
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
-  // rebuilt by a separate scheduled sync (scripts/sync/lists/), not by this
+  // rebuilt by a separate scheduled sync (scripts/sync/dbt/models/lists/), not by this
   // deploy, so there's a window where the deployed code expects a column the
   // currently-synced parquet doesn't have yet. Naming it would throw a DuckDB
   // Binder Error for every request in that window — this deploy's whole history

@@ -1,5 +1,5 @@
 /**
- * Loads data/vernacular-names.json (built by scripts/sync/lists/vernacular-names.ts from the
+ * Loads data/vernacular-names.json (built by scripts/sync/dbt/models/lists/vernacular_names.sql from the
  * CoL XR export's VernacularName.tsv — see that script's file comment) into
  * dynamic-taxon.ts's EXTRA_VERNACULAR_NAMES, once per warm server process.
  *

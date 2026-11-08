@@ -32,7 +32,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Hylatomus pileatus",
     why: "IUCN's genus for the Pileated Woodpecker; GBIF files its 5.4M records under Dryocopus pileatus. Ranking keys by match order showed 156.",
-    source: "species-key.ts sameOrganism; count/record-counts.ts (the GBIF key)",
+    source: "species-key.ts sameOrganism; dbt/models/count/record_counts.sql (the GBIF key)",
     expect: { gbifKeyName: "Dryocopus pileatus", minRecords: 1_000_000, neListed: { "Dryocopus pileatus": false } },
   },
   {
@@ -123,31 +123,31 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Malus sieversii",
     why: "CoL lumps it into Malus domestica; it showed 146,340 of the apple's records instead of its own ~8,000.",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     expect: { linkedTo: "Malus domestica", gbifKeyName: "Malus sieversii", hasRecords: true, maxRecords: 30_000 },
   },
   {
     name: "Thymallus aeliani",
     why: "Lumped; showed 73,641 records instead of its own handful.",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     expect: { gbifKeyName: "Thymallus aeliani", maxRecords: 1_000 },
   },
   {
     name: "Epilobium numidicum",
     why: "Lumped; showed 295,698 records instead of its own (none georeferenced).",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     expect: { maxRecords: 100 },
   },
   {
     name: "Pararge xiphioides",
     why: "Lumped into Pararge aegeria; its own usage sat outside every facet and it showed 0.",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     expect: { linkedTo: "Pararge aegeria", gbifKeyName: "Pararge xiphioides", hasRecords: true },
   },
   {
     name: "Fringilla polatzeki",
     why: "A subspecies of F. teydea in CoL, so no species facet emits its key; it showed 0.",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     // Its own records (about 715), not the 7,000+ of F. teydea, and not its
     // synonym's records twice (it showed 1,430 when the synonym sat under both
     // of its roots).
@@ -216,7 +216,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Zosterops simplex",
     why: "Owns the subspecies Z. japonicus simplex and the synonym Z. simplex filed under it; walking down from both counted the synonym's 571k records twice (1.14M).",
-    source: "count/usage-owners.ts",
+    source: "dbt/models/count/usage_owner.sql",
     expect: { linkedTo: "Zosterops japonicus", minRecords: 500_000, maxRecords: 700_000 },
   },
   {
@@ -261,7 +261,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Catapodium borgesii",
     why: "Azores endemic once matched via a synonym onto Catapodium marinum and shown its 19,901 records.",
-    source: "count/usage-owners.ts; species-key.ts decideKey",
+    source: "dbt/models/count/usage_owner.sql; species-key.ts decideKey",
     expect: { maxRecords: 100 },
   },
   {
@@ -326,7 +326,7 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Canis familiaris",
     why: "Domestic forms have a wild sibling counted separately; goat, sheep, yak, dromedary and guinea pig were once counted as Not Evaluated by one list and left out by another.",
-    source: "seeds/ne-excluded.tsv; lists/species.ts described",
+    source: "seeds/ne-excluded.tsv; dbt/models/lists/species.sql described",
     expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false,
       "Capra hircus": false, "Ovis aries": false, "Bos grunniens": false, "Camelus dromedarius": false, "Cavia porcellus": false } },
   },

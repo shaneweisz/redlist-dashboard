@@ -1,0 +1,10 @@
+[project]
+name = "redlist-sync-dbt"
+version = "0.1.0"
+description = "The sync's SQL transforms, run by sync.ts (docs/sync.md)"
+requires-python = ">=3.12"
+# dbt v2's Apache-licensed distribution; its DuckDB support is built in.
+dependencies = ["dbt-oss==2.0.11"]
+
+[tool.uv]
+package = false

@@ -23,6 +23,9 @@ jobs:
         run: npm ci
         working-directory: app
 
+      # The sync's count and lists tests run its dbt models (app/scripts/sync/dbt), through uv.
+      - uses: astral-sh/setup-uv@v6
+
       - name: Run tests with coverage
         run: npm run test:coverage
         working-directory: app

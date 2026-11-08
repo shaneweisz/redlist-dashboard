@@ -18,7 +18,7 @@
  *
  * Which source's display name is shown is decided where a list is built: an
  * assessed species shows IUCN's name, else iNaturalist's; a Not Evaluated
- * species iNaturalist's, else CoL's (lists/assessed.ts, lists/ne.ts).
+ * species iNaturalist's, else CoL's (dbt/models/lists/assessed.sql, ne.sql).
  *
  * Decisions:
  *   - A name that is just the scientific name relisted ("Acacia") is dropped.

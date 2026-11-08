@@ -1,0 +1,21 @@
+# The tables the TypeScript stages before dbt write (sources/, link/), read
+# where they lie in the build.
+sources:
+  - name: core
+    description: The sources and link stages' tables (app/scripts/sync/sources/, link/)
+    config:
+      meta:
+        external_location: "read_parquet('{{ env_var('SYNC_BUILD_DIR') }}/core/{name}.parquet')"
+    tables:
+      - name: taxa
+        description: sources/taxa.ts
+      - name: assessments
+        description: sources/assessments.ts
+      - name: occurrences
+        description: sources/occurrences.ts
+      - name: occurrence_countries
+        description: sources/occurrences.ts
+      - name: common_names
+        description: sources/common-names.ts
+      - name: assessment_link
+        description: link/assessment-link.ts

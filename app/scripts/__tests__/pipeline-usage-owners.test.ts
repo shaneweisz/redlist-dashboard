@@ -1,5 +1,5 @@
 /**
- * The counting rule (scripts/sync/count/): a species counts its own, its
+ * The counting rule (scripts/sync/dbt/models/count/): a species counts its own, its
  * synonyms' and its infraspecifics' records, not usages a lumped assessed
  * species owns, and every usage counts for one species at most.
  */
@@ -9,8 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { tables } from "../sync/paths";
-import { buildUsageOwners } from "../sync/count/usage-owners";
-import { buildRecordCounts } from "../sync/count/record-counts";
+import { runDbt, exportDbtTables } from "../sync/dbt";
 
 type Link = { sis: number; usage: string; verdict: string; counted?: boolean };
 
@@ -38,15 +37,21 @@ async function counts(links: Link[] = []) {
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, true AS is_latest, DATE '2015-01-01' AS assessment_date
     FROM (VALUES (1), (2)) t(sis)`, T.assessments);
 
-  await buildUsageOwners({ taxa: T.taxa, link: T.link }, T.usageOwner);
-  await buildRecordCounts({ usageOwner: T.usageOwner, occurrences: T.occurrences, link: T.link, assessments: T.assessments, today: "2026-11-06" }, T.recordCounts);
+  try {
+    runDbt({ buildDir: tmp, today: "2026-11-06", select: "usage_owner record_counts", quiet: true });
+    await exportDbtTables(T, tmp, ["usage_owner", "record_counts"]);
+  } catch (e) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
   const rows = (await c.runAndReadAll(`SELECT coalesce(CAST(sis_taxon_id AS VARCHAR), col_id) AS who, georef, all_records
     FROM read_parquet('${T.recordCounts}')`)).getRowObjects();
   fs.rmSync(tmp, { recursive: true, force: true });
   return Object.fromEntries(rows.map((r) => [String(r.who), { georef: Number(r.georef), all: Number(r.all_records) }]));
 }
 
-describe("usage_owner and record_counts", () => {
+// Each case runs dbt, which takes a few seconds to start.
+describe("usage_owner and record_counts", { timeout: 60_000 }, () => {
   it("sums a species' own, synonym, infraspecific and BIN usages", async () => {
     const r = await counts();
     // 140 + 7 + 3 + 2 + 11 + 9 georeferenced; all adds the 5 ungeoreferenced.
@@ -72,6 +77,6 @@ describe("usage_owner and record_counts", () => {
     expect(Object.keys(await counts()).sort()).toEqual(["LEO", "OAK"]);
   });
   it("stops when a usage would count for two species", async () => {
-    await expect(counts([{ sis: 1, usage: "OAK", verdict: "own" }, { sis: 2, usage: "OAK", verdict: "own" }])).rejects.toThrow(/more than one species/);
+    await expect(counts([{ sis: 1, usage: "OAK", verdict: "own" }, { sis: 2, usage: "OAK", verdict: "own" }])).rejects.toThrow(/unique_usage_owner_usage_key/);
   });
 });

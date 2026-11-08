@@ -30,17 +30,19 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 ## The stages
 
-The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `count/`, or in a seed.
+The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
 
 `app/scripts/sync/sync.ts` is the whole sync, read top to bottom: one section per stage, and in each a call per table, given the tables it reads. Each builder writes one table (or a few files of one kind), and the top of its file says what a row is, what it is built from, what each column means, and the decisions it makes. [The tables](#the-tables) collects those headers.
+
+Count and lists are SQL models run by [dbt](#dbt), one `.sql` file per table under `dbt/models/`, with the same header. There a model's `ref()`s and `source()`s are what it reads, and dbt runs them in that order.
 
 | Stage | Folder | What it does |
 |---|---|---|
 | inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher |
 | 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names` |
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
-| 3 count | `count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
-| 4 lists | `lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels |
+| 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
+| 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels |
 | 5 precomputed | `precomputed/` | the app's own queries, run ahead of time: the CoL-differences tables and flags, the summaries, the search indexes |
 | 6 checks | `checks/` | the fixtures and data tests (either stops the sync), then the comparison with production |
 
@@ -50,6 +52,24 @@ Two more folders hold what the stages apply:
 - **`checks/fixtures/`**: the named cases the matching must keep getting right.
 
 Stages meet at a single table: `assessment_link` out of link, `usage_owner` out of count. Their columns are each stage's contract with the rest, so the inside of a stage can be rewritten (the link is due to be) without touching the others.
+
+### dbt
+
+The SQL stages run as a [dbt](https://docs.getdbt.com/) project in `dbt/`: `dbt-oss`, dbt v2's Apache-licensed distribution, with DuckDB built in, pinned in `dbt/pyproject.toml` and run through [uv](https://docs.astral.sh/uv/), which installs it on first use. `dbt.ts` is the glue:
+
+- **`runDbt`** runs `dbt build` on the build: every model, then its tests, in dependency order. A failing test stops the sync, and dbt skips whatever depends on the model it tested.
+- dbt reads the tables the sources and link stages wrote as **sources** (`dbt/models/sources.yml`), and builds each model as a table in one DuckDB file, `core/sync.duckdb`.
+- **`exportDbtTables`** then writes the files everything after it reads, from those tables: the app's lists, and the count tables for the precomputed stage. How a file is sorted or partitioned is decided there, not in the models, so a model says only what its rows are.
+
+Shared SQL lives in `dbt/macros/`. A test is a line in a model's `.yml` (`unique`, `not_null`), or a query in `dbt/tests/` returning the rows that break a rule. Run dbt by hand from `app/scripts/sync/dbt`, against a build:
+
+```bash
+export SYNC_BUILD_DIR=~/.cache/redlist-dashboard/build SYNC_DATE=$(date +%F) SYNC_DUCKDB_TMP=~/.cache/redlist-dashboard/duckdb-tmp
+uv run dbt build --profiles-dir . --select record_counts+    # a model and everything downstream of it
+uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
+```
+
+The precomputed stage and the link are still TypeScript; they move into dbt next, after the taxonomy tree's species membership becomes a table the summaries can read.
 
 `publish.ts` uploads the result. Every builder opens DuckDB through `sql.ts`'s `openDuckDB` (spilling to `~/.cache/redlist-dashboard/duckdb-tmp/`) on its own connection, so no builder reads another's temporary tables. `paths.ts` names every file a sync builds.
 
@@ -350,7 +370,7 @@ Decisions, in two steps kept apart so each can be explained on its own:
 
 ### Count
 
-#### `count/usage-owners.ts`
+#### `dbt/models/count/usage_owner.sql`
 
 ```text
 usage_owner: one row per CoL usage whose GBIF records count for a species,
@@ -386,7 +406,7 @@ somewhere is inflated, so the sync stops.
 | `link_usage_id` | text | the assessment_link row it counts through (that row's usage_id), for an assessed species |
 | `col_id` | text | the unassessed CoL species its records count for, else NULL |
 
-#### `count/record-counts.ts`
+#### `dbt/models/count/record_counts.sql`
 
 ```text
 record_counts: one row per species with GBIF records, assessed or not, with
@@ -425,7 +445,7 @@ Decisions:
 
 ### Lists
 
-#### `lists/assessed.ts`
+#### `dbt/models/lists/assessed.sql`
 
 ```text
 lists/assessed: one row per assessed species: its latest assessment, its GBIF
@@ -477,7 +497,7 @@ Decisions:
 | `latest_institutions` | text |  |
 | `assessment_count` | integer | years with a published assessment |
 
-#### `lists/assessment-history.ts`
+#### `dbt/models/lists/assessment_history.sql`
 
 ```text
 lists/assessments: one row per assessed species per year it was published
@@ -509,7 +529,7 @@ Decisions:
 | `contributors` | text |  |
 | `institutions` | text |  |
 
-#### `lists/species.ts`
+#### `dbt/models/lists/species.sql`
 
 ```text
 lists/species/: one row per accepted CoL species the curated checklist keeps,
@@ -545,7 +565,7 @@ Decisions:
 | `described` | boolean | the dashboard's universe (below) |
 | `taxon_group` | text | the partition |
 
-#### `lists/ne.ts`
+#### `dbt/models/lists/ne.sql`
 
 ```text
 lists/ne: one row per Not Evaluated species GBIF has records for, keyed by
@@ -580,7 +600,7 @@ Decisions:
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
 
-#### `lists/app-taxonomy.ts`
+#### `dbt/models/lists/app_taxa.sql`
 
 ```text
 taxonomy/taxa and taxonomy/assessment_link: the taxonomy and the links as the
@@ -626,7 +646,7 @@ taxonomy/assessment_link: assessment_link as built (see link/assessment-link.ts)
 | `reason` | text |  |
 | `counted` | boolean |  |
 
-#### `lists/vernacular-names.ts`
+#### `dbt/models/lists/vernacular_names.sql`
 
 ```text
 taxonomy/vernacular-names.json: one common name per class, order, family and
@@ -636,7 +656,8 @@ Built from: common_names (CoL's display names above species rank).
 
 Shape: { "<lowercased scientific name>": "<common name>" }
 
-One name per scientific name, chosen in sources/common-names.ts.
+One name per scientific name, chosen in sources/common-names.ts. dbt keeps
+the pairs as a table; the export step writes them as one JSON object.
 ```
 
 `taxonomy/vernacular-names.json` · 482 kB
@@ -668,7 +689,7 @@ Decisions: a split is a heuristic (CoL keeps the old infraspecific name as a
 synonym when it promotes one), so the card words it as likely, never as fact.
 ```
 
-`taxonomy/col-split-candidates.parquet` · 5,665 rows · 133 kB
+`taxonomy/col-split-candidates.parquet` · 5,665 rows · 132 kB
 
 | column | type | |
 |---|---|---|
@@ -922,7 +943,7 @@ Since October 2026 GBIF indexes records against the CoL XR, so **a GBIF taxon ke
 
 ## The counting rule
 
-`count/`. The rule is a table: `usage_owner` names, for every CoL usage whose records count, the one species they count for. Every GBIF number on the dashboard is `occurrences` joined to it, with a different filter: georeferenced or all records, since the assessment date, by country, by group. `record_counts` holds each species' totals.
+`dbt/models/count/`. The rule is a table: `usage_owner` names, for every CoL usage whose records count, the one species they count for. Every GBIF number on the dashboard is `occurrences` joined to it, with a different filter: georeferenced or all records, since the assessment date, by country, by group. `record_counts` holds each species' totals.
 
 **Two record modes.** Every count is published twice, and the dashboard's Georeferenced / All records toggle (`records=all` in the URL, `src/lib/gbif-records.ts`) picks one for every number on the page at once:
 
@@ -1021,7 +1042,7 @@ What the chosen CoL usage makes the species. `assessment_link.method` says what 
 
 ## The Not Evaluated list
 
-`lists/ne.parquet`, built by `lists/ne.ts`. A CoL species is on it when all of these hold:
+`lists/ne.parquet`, built by `dbt/models/lists/ne.sql`. A CoL species is on it when all of these hold:
 
 - it is *described* (`species/`'s `described`, the one definition every count and list uses): accepted in the XR and not demoted by the checklist, in a curated Base source (not the XR's tail of single fossil papers), not extinct, and not domesticated or human (`seeds/ne-excluded.tsv`: 17 names; the build fails if CoL ever stops accepting one of them, since its wild sibling would then absorb its records)
 - **no assessed species links to it**, by any row: primary, covered, even refused
@@ -1066,7 +1087,7 @@ Four layers, from strict to advisory.
 - the Red List session is read-only; the snapshot is complete
 - every domesticated-species name is an accepted CoL species
 - each assessed species has one current taxon record
-- **each GBIF usage counts towards at most one species, once** (`count/usage-owners.ts` refuses to write `usage_owner` otherwise). A violation means some number is inflated.
+- **each GBIF usage counts towards at most one species, once** (the `unique` test on `usage_owner.usage_key`; dbt builds nothing downstream if it fails). A violation means some number is inflated.
 - the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
 
 **2. Matching fixtures, which stop the build.** `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `link/assessment-link.ts` is the quickest way to see what each matching rule is for.
@@ -1103,7 +1124,7 @@ npm run sync:publish
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.
 ```
 
-Needs: Docker (for the matcher), the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the README), and R2 credentials (the comparison downloads production's sync once; publishing uploads).
+Needs: Docker (for the matcher), uv (`brew install uv`, for dbt), the Red List Postgres reachable (see `DB_*` in `app/.env.local`, and the README), and R2 credentials (the comparison downloads production's sync once; publishing uploads).
 
 **What to look for in the report.** The table at the top gives differences and unexplained per kind. The first sync's unexplained differences were mostly NE country lists, which move with each snapshot; per-group assessed totals don't change unless IUCN published. Look closely at:
 - unexplained count changes larger than a few percent on well-known species

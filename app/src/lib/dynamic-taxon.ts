@@ -168,7 +168,7 @@ export function dynamicNodeMatchValue(id: string): string {
 // CoL-derived vernacular names (class/order/family/genus rank — species already
 // have their own common name from our Red List/GBIF data), populated once per
 // warm server process by vernacular-names.ts's ensureVernacularNamesLoaded()
-// (see scripts/sync/lists/vernacular-names.ts). Empty on the
+// (see scripts/sync/dbt/models/lists/vernacular_names.sql). Empty on the
 // client and before that call — dynamicNodeDisplayName then just shows the
 // capitalized scientific name alone, same as before this existed. Kept as a
 // plain settable Record (not an import from vernacular-names.ts) so this module

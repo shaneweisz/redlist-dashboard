@@ -1,6 +1,6 @@
 /**
- * GBIF counts, from the count stage to the lists (scripts/sync/count/,
- * scripts/sync/lists/): both record modes, and since-assessment windows that
+ * GBIF counts, from the count stage to the lists (scripts/sync/dbt/models/count/,
+ * lists/): both record modes, and since-assessment windows that
  * start the day after the assessment date rather than the year after it.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -9,12 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { tables } from "../sync/paths";
-import { buildUsageOwners } from "../sync/count/usage-owners";
-import { buildRecordCounts } from "../sync/count/record-counts";
-import { buildAssessmentHistory } from "../sync/lists/assessment-history";
-import { buildAssessed } from "../sync/lists/assessed";
-import { buildSpecies } from "../sync/lists/species";
-import { buildNotEvaluated } from "../sync/lists/ne";
+import { runDbt, exportDbtTables } from "../sync/dbt";
 
 let tmp: string;
 let conn: DuckDBConnection;
@@ -22,6 +17,7 @@ const rows: Record<string, Record<string, unknown>> = {};
 const ne: Record<string, Record<string, unknown>> = {};
 
 beforeAll(async () => {
+  // Fixture rows for every table count and lists read, then dbt over them.
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "read-models-gbif-"));
   const core = path.join(tmp, "core");
   fs.mkdirSync(core, { recursive: true });
@@ -75,20 +71,15 @@ beforeAll(async () => {
 
   const T = tables(tmp);
   const today = "2026-11-06";
-  await buildUsageOwners({ taxa: T.taxa, link: T.link }, T.usageOwner);
-  await buildRecordCounts({ usageOwner: T.usageOwner, occurrences: T.occurrences, link: T.link, assessments: T.assessments, today }, T.recordCounts);
-  await buildAssessmentHistory({ assessments: T.assessments }, T.assessmentHistory);
-  await buildAssessed({ assessments: T.assessments, recordCounts: T.recordCounts, assessmentHistory: T.assessmentHistory, commonNames: T.commonNames, today }, T.assessed);
-  await buildSpecies({ taxa: T.taxa, link: T.link, assessments: T.assessments }, T.species);
-  await buildNotEvaluated({ species: T.species, link: T.link, recordCounts: T.recordCounts, occurrenceCountries: T.occurrenceCountries,
-    usageOwner: T.usageOwner, commonNames: T.commonNames }, T.ne);
+  runDbt({ buildDir: tmp, today, quiet: true });
+  await exportDbtTables(T, tmp);
   for (const r of (await conn.runAndReadAll(`SELECT * FROM read_parquet('${tables(tmp).assessed}')`)).getRowObjects()) {
     rows[String(r.id)] = r;
   }
   for (const r of (await conn.runAndReadAll(`SELECT * FROM read_parquet('${tables(tmp).ne}')`)).getRowObjects()) {
     ne[String(r.col_id)] = r;
   }
-});
+}, 120_000);
 
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
