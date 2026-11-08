@@ -31,6 +31,8 @@ export function tables(buildDir = BUILD_DIR) {
     occurrences: core("occurrences.parquet"),
     occurrenceCountries: core("occurrence_countries.parquet"),
     commonNames: core("common_names.parquet"),
+    treeNodes: core("tree_nodes.parquet"),
+    treeAliases: core("tree_aliases.parquet"),
     // 2. Link
     matches: core("matches.parquet"),
     link: core("assessment_link.parquet"),
@@ -38,6 +40,7 @@ export function tables(buildDir = BUILD_DIR) {
     // 3. Count
     usageOwner: core("usage_owner.parquet"),
     recordCounts: core("record_counts.parquet"),
+    treeMembership: core("tree_membership.parquet"),
     // 4. Lists
     assessed: data("assessed.parquet"),
     assessmentHistory: data("assessments.parquet"),

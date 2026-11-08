@@ -10,6 +10,7 @@ import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { tables } from "../sync/paths";
 import { runDbt, exportDbtTables } from "../sync/dbt";
+import { buildTree } from "../sync/sources/tree";
 
 let tmp: string;
 let conn: DuckDBConnection;
@@ -71,6 +72,9 @@ beforeAll(async () => {
 
   const T = tables(tmp);
   const today = "2026-11-06";
+  // The real tree's rules; dbt's unit test (dbt/models/lists/_lists.yml) checks
+  // tree_membership's rules on its own rows once the models are built.
+  await buildTree({ treeNodes: T.treeNodes, treeAliases: T.treeAliases });
   runDbt({ buildDir: tmp, today, quiet: true });
   await exportDbtTables(T, tmp);
   for (const r of (await conn.runAndReadAll(`SELECT * FROM read_parquet('${tables(tmp).assessed}')`)).getRowObjects()) {
@@ -100,6 +104,12 @@ describe("GBIF counts in the lists", () => {
   it("has no window for an assessment dated after today", () => {
     expect(rows["2"].gbif_georeferenced_records_since_assessment).toBeNull();
     expect(rows["2"].gbif_all_records_since_assessment).toBeNull();
+  });
+
+  it("puts each species in the tree's nodes", async () => {
+    const r = (await conn.runAndReadAll(`SELECT DISTINCT node_id FROM read_parquet('${tables(tmp).treeMembership}')
+      WHERE sis_taxon_id = 1 OR col_id = 'N1' ORDER BY ALL`)).getRowObjects().map((x) => String(x.node_id));
+    expect(r).toContain("birds");
   });
 
   it("writes 0, not NULL, for a Not Evaluated species with no georeferenced records", () => {

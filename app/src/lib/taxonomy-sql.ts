@@ -44,7 +44,7 @@ export type NodeFilter = TaxonomyNode["filter"];
 //    classes needing a coarser IUCN label expanded to CoL's finer real one,
 //    just the canonical/alias roles swapped since CoL's name is the more
 //    precise, correct one here.
-const COL_CLASS_ALIASES: Record<string, string[]> = {
+export const COL_CLASS_ALIASES: Record<string, string[]> = {
   actinopterygii: ["teleostei", "chondrostei", "cladistii", "holostei"],
   sarcopterygii: ["dipneusti", "coelacanthi"],
   chondrichthyes: ["elasmobranchii", "holocephali"],
@@ -131,7 +131,7 @@ export function canonicalClassColumnSql(col: string): string {
 // Stylommatophora & co., several Crustacea/Other-Invertebrate orders) is a
 // genuine CoL data gap, not an alias-fixable mismatch — see the
 // DYNAMIC_DRILLDOWN_ROOTS comment in dynamic-taxon.ts.
-const COL_ORDER_ALIASES: Record<string, string[]> = {
+export const COL_ORDER_ALIASES: Record<string, string[]> = {
   artiodactyla: ["cetacea"],
   caprimulgiformes: ["apodiformes", "nyctibiiformes", "steatornithiformes"],
   struthioniformes: ["tinamiformes", "rheiformes", "casuariiformes", "apterygiformes"],

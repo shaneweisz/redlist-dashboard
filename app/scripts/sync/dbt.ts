@@ -21,15 +21,26 @@ import { lit, openDuckDB } from "./sql";
 export const DBT_DIR = path.join(__dirname, "dbt");
 
 /**
- * Run `dbt build` (models, then their tests) on the build in `buildDir`. `select`
- * narrows it (dbt's selection syntax: "path:models/lists"); `today` is the date
- * "since the assessment" counts up to. Throws if a model or test fails.
+ * Run `dbt build` (models, then their tests) on the build in `buildDir`, then
+ * the unit tests of what it built. `select` narrows it (dbt's selection syntax:
+ * "path:models/lists"); `today` is the date "since the assessment" counts up to.
+ * Throws if a model or test fails.
+ *
+ * Unit tests run after the models, not first as `dbt build` would run them: dbt
+ * reads a unit test's column types from the tables upstream of its model, which a
+ * fresh build doesn't have yet.
  */
 export function runDbt(opts: { buildDir: string; today: string; select?: string; quiet?: boolean }): void {
   fs.mkdirSync(path.join(opts.buildDir, "core"), { recursive: true });
   fs.mkdirSync(DUCKDB_TMP, { recursive: true });
-  const args = ["run", "--project", DBT_DIR, "--quiet", "dbt", "build", "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
-    "--target-path", path.join(opts.buildDir, "dbt-target"), ...(opts.select ? ["--select", opts.select] : [])];
+  const units = opts.select ? opts.select.split(/\s+/).map((s) => `test_type:unit,${s}`) : ["test_type:unit"];
+  dbt(opts, ["build", "--exclude", "test_type:unit", ...(opts.select ? ["--select", ...opts.select.split(/\s+/)] : [])]);
+  dbt(opts, ["test", "--select", ...units]);
+}
+
+function dbt(opts: { buildDir: string; today: string; quiet?: boolean }, command: string[]): void {
+  const args = ["run", "--project", DBT_DIR, "--quiet", "dbt", ...command, "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
+    "--target-path", path.join(opts.buildDir, "dbt-target")];
   // Piped rather than inherited, so dbt's output reaches sync.log too.
   const r = spawnSync("uv", args, {
     cwd: DBT_DIR, encoding: "utf-8",
@@ -40,7 +51,7 @@ export function runDbt(opts: { buildDir: string; today: string; select?: string;
     process.stdout.write(r.stdout ?? "");
     process.stderr.write(r.stderr ?? "");
   }
-  if (r.status !== 0) throw new Error(`dbt build failed (output above):\n${(r.stdout ?? "").split("\n").filter((l) => /fail|error/i.test(l)).join("\n")}`);
+  if (r.status !== 0) throw new Error(`dbt ${command[0]} failed (output above):\n${(r.stdout ?? "").split("\n").filter((l) => /fail|error/i.test(l)).join("\n")}`);
 }
 
 /** Each dbt model the rest of the sync or the app reads, and how its file is laid out. */
@@ -56,6 +67,7 @@ function exports(T: Tables) {
     { model: "ne", file: T.ne, orderBy: "taxon_group, class_name, order_name, family, scientific_name" },
     // By col_id, so a lookup by id skips row groups.
     { model: "app_taxa", file: T.appTaxa, orderBy: "col_id" },
+    { model: "tree_membership", file: T.treeMembership, orderBy: "node_id, sis_taxon_id, col_id" },
   ];
 }
 

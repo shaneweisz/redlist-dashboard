@@ -1,0 +1,54 @@
+unit_tests:
+  - name: tree_membership_rules
+    description: >
+      One species per rule tree_membership applies: an alias (CoL's Cupressales
+      under a node naming Pinales), the class standing in for a missing order, a
+      catch-all leaving out what a claiming sibling holds, extra names, and the
+      bison override held by its own node and left out of every other.
+    model: tree_membership
+    given:
+      - input: source('core', 'tree_nodes')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('all', NULL, ['plants', 'mammals'], [], [], [], [], [], [], [], [], [], [], [], [], false, false),
+            ('conifers', 'all', ['plants'], [], [], ['pinales'], [], [], [], [], [], [], [], [], [], false, true),
+            ('other-plants', 'all', ['plants'], [], ['mammalia'], [], [], [], [], [], [], [], [], [], [], true, false),
+            ('carnivores', 'all', ['mammals'], [], [], ['carnivora'], [], [], [], [], [], [], [], ['ailurus fulgens'], [], false, true),
+            ('bison', 'all', ['mammals'], [], [], [], [], [], [], ['bison'], [], [], [], [], ['bos bison'], false, false),
+            ('bovids', 'all', ['mammals'], [], [], [], [], ['bovidae'], [], [], [], [], [], [], [], false, false)
+          ) t(node_id, parent_id, taxon_groups, class_in, class_out, order_in, order_out, family_in, family_out,
+              genus_in, genus_out, name_in, name_out, extra_names, override_names, catch_all, claims)
+      - input: source('core', 'tree_aliases')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES ('order', 'pinales', 'cupressales'), ('excluded', 'bos bison', 'bos bison')) t(rank, name, alias)
+      - input: ref('assessed')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            (1::BIGINT, 'plants', 'PINOPSIDA', 'PINALES', 'PINACEAE', 'Pinus nigra'),
+            (2, 'mammals', 'MAMMALIA', 'CARNIVORA', 'FELIDAE', 'Panthera leo'),
+            (3, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'AILURIDAE', 'Ailurus fulgens'),
+            (4, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'BOVIDAE', 'Bison bison')
+          ) t(id, taxon_group, class_name, order_name, family, scientific_name)
+      - input: ref('species')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('C1', 'plants', 'Pinopsida', 'Cupressales', 'Cupressaceae', 'Juniperus communis'),
+            ('C2', 'plants', 'Pinales', NULL, NULL, 'Pinus orphana'),
+            ('C3', 'plants', 'Magnoliopsida', 'Rosales', 'Rosaceae', 'Rosa canina'),
+            ('C4', 'mammals', 'Mammalia', 'Artiodactyla', 'Bovidae', 'Bos bison')
+          ) t(col_id, taxon_group, class_name, order_name, family, scientific_name)
+    expect:
+      rows:
+        - {sis_taxon_id: 1, col_id: null, node_id: conifers}
+        - {sis_taxon_id: 2, col_id: null, node_id: carnivores}
+        - {sis_taxon_id: 3, col_id: null, node_id: carnivores}
+        - {sis_taxon_id: 4, col_id: null, node_id: bison}
+        - {sis_taxon_id: 4, col_id: null, node_id: bovids}
+        - {sis_taxon_id: null, col_id: C1, node_id: conifers}
+        - {sis_taxon_id: null, col_id: C2, node_id: conifers}
+        - {sis_taxon_id: null, col_id: C3, node_id: other-plants}
+        - {sis_taxon_id: null, col_id: C4, node_id: bison}

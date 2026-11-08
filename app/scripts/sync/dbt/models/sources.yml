@@ -19,3 +19,7 @@ sources:
         description: sources/common-names.ts
       - name: assessment_link
         description: link/assessment-link.ts
+      - name: tree_nodes
+        description: sources/tree.ts (the taxonomy tree's rules)
+      - name: tree_aliases
+        description: sources/tree.ts (IUCN/CoL class and order aliases)

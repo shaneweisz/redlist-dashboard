@@ -39,10 +39,10 @@ Count and lists are SQL models run by [dbt](#dbt), one `.sql` file per table und
 | Stage | Folder | What it does |
 |---|---|---|
 | inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher |
-| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names` |
+| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, and the taxonomy tree's rules (`tree_nodes`, `tree_aliases`) |
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
 | 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
-| 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels |
+| 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels, and `tree_membership`: which tree nodes each species is in |
 | 5 precomputed | `precomputed/` | the app's own queries, run ahead of time: the CoL-differences tables and flags, the summaries, the search indexes |
 | 6 checks | `checks/` | the fixtures and data tests (either stops the sync), then the comparison with production |
 
@@ -61,7 +61,7 @@ The SQL stages run as a [dbt](https://docs.getdbt.com/) project in `dbt/`: `dbt-
 - dbt reads the tables the sources and link stages wrote as **sources** (`dbt/models/sources.yml`), and builds each model as a table in one DuckDB file, `core/sync.duckdb`.
 - **`exportDbtTables`** then writes the files everything after it reads, from those tables: the app's lists, and the count tables for the precomputed stage. How a file is sorted or partitioned is decided there, not in the models, so a model says only what its rows are.
 
-Shared SQL lives in `dbt/macros/`. A test is a line in a model's `.yml` (`unique`, `not_null`), or a query in `dbt/tests/` returning the rows that break a rule. Run dbt by hand from `app/scripts/sync/dbt`, against a build:
+Shared SQL lives in `dbt/macros/`. A data test is a line in a model's `.yml` (`unique`, `not_null`) and checks the build's own rows. A unit test (`unit_tests:` in a `.yml`) gives a model a few input rows and the rows it must return, one per rule, so a rule is pinned down without real data: `tree_membership_rules` is the example. `runDbt` runs the unit tests after the models, since dbt reads their column types from the tables upstream; the count/lists vitest suites run them in CI. Run dbt by hand from `app/scripts/sync/dbt`, against a build:
 
 ```bash
 export SYNC_BUILD_DIR=~/.cache/redlist-dashboard/build SYNC_DATE=$(date +%F) SYNC_DUCKDB_TMP=~/.cache/redlist-dashboard/duckdb-tmp
@@ -69,7 +69,7 @@ uv run dbt build --profiles-dir . --select record_counts+    # a model and every
 uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
 ```
 
-The precomputed stage and the link are still TypeScript; they move into dbt next, after the taxonomy tree's species membership becomes a table the summaries can read.
+The precomputed stage and the link are still TypeScript. The tree's membership is a table now (`tree_membership`), which the summaries count from; next the app's live views read it too, and the class and order aliases move into seeds, after which the precomputed stage moves here.
 
 `publish.ts` uploads the result. Every builder opens DuckDB through `sql.ts`'s `openDuckDB` (spilling to `~/.cache/redlist-dashboard/duckdb-tmp/`) on its own connection, so no builder reads another's temporary tables. `paths.ts` names every file a sync builds.
 
@@ -249,7 +249,7 @@ and name), and iNaturalist's taxonomy (inputs/inat-names.ts).
 
 Which source's display name is shown is decided where a list is built: an
 assessed species shows IUCN's name, else iNaturalist's; a Not Evaluated
-species iNaturalist's, else CoL's (lists/assessed.ts, lists/ne.ts).
+species iNaturalist's, else CoL's (dbt/models/lists/assessed.sql, ne.sql).
 
 Decisions:
   - A name that is just the scientific name relisted ("Acacia") is dropped.
@@ -280,6 +280,49 @@ Decisions:
 | `scientific_name` | text | the name it is a common name for; iNaturalist's names join on it, within kingdom |
 | `kingdom` | text | iNaturalist's kingdom (iNaturalist names only) |
 | `name` | text | first letter capitalised |
+
+#### `sources/tree.ts`
+
+```text
+tree_nodes, tree_aliases: the taxonomy tree's rules, as tables the SQL stages
+can read. The tree itself stays in src/config/taxonomy-tree.ts, where the app
+renders it; this writes out what decides which species each node holds.
+
+tree_nodes: one row per static tree node.
+
+tree_aliases: one row per name IUCN and CoL spell differently at class or
+order rank (taxonomy-sql.ts says why each is there).
+```
+
+`core/tree_nodes.parquet` · 139 rows · 25 kB
+
+| column | type | |
+|---|---|---|
+| `node_id` | text | the node, and the node whose children it is among |
+| `parent_id` | text | the node, and the node whose children it is among |
+| `taxon_groups` | list of text | the Table 1a groups its species come from |
+| `class_in` | list of text |  |
+| `class_out` | list of text |  |
+| `order_in` | list of text |  |
+| `order_out` | list of text |  |
+| `family_in` | list of text |  |
+| `family_out` | list of text |  |
+| `genus_in` | list of text | its filter's include and exclude lists, lowercased (taxonomy-tree.ts's SpeciesFilter); empty means no rule |
+| `genus_out` | list of text | its filter's include and exclude lists, lowercased (taxonomy-tree.ts's SpeciesFilter); empty means no rule |
+| `name_in` | list of text | its filter's include and exclude lists, lowercased (taxonomy-tree.ts's SpeciesFilter); empty means no rule |
+| `name_out` | list of text | its filter's include and exclude lists, lowercased (taxonomy-tree.ts's SpeciesFilter); empty means no rule |
+| `extra_names` | list of text | species it holds whatever the rules above say |
+| `override_names` | list of text | CoL names it holds besides (col-described-overrides.ts: CoL lumps Bison into Bos, so the Bison SG names them) |
+| `catch_all` | boolean | a catch-all ("Other Mammals": it excludes classes), which leaves out what its class- or order-scoped siblings hold |
+| `claims` | boolean | a sibling a catch-all leaves out (it names classes or orders) |
+
+`core/tree_aliases.parquet` · 42 rows · 2 kB
+
+| column | type | |
+|---|---|---|
+| `rank` | text | 'class', 'order', or 'excluded' (a name every node but the one overriding it leaves out: Bison's CoL names) |
+| `name` | text | a filter naming `name` also matches rows naming `alias` |
+| `alias` | text | a filter naming `name` also matches rows naming `alias` |
 
 ### Link
 
@@ -662,6 +705,42 @@ the pairs as a table; the export step writes them as one JSON object.
 
 `taxonomy/vernacular-names.json` · 482 kB
 
+#### `dbt/models/lists/tree_membership.sql`
+
+```text
+tree_membership: one row per species and static taxonomy-tree node it is in,
+assessed (IUCN's names) or not (CoL's). Every count a tree node shows is a
+count of its rows here.
+
+Built from: tree_nodes and tree_aliases (the tree's rules, sources/tree.ts),
+assessed, species/.
+
+Decisions:
+  - A species is in a node when it is in one of the node's groups and its
+    filter holds: each include list names its class, order, family, genus or
+    name, and no exclude list does. Names are compared lowercased, a missing
+    one as ''.
+  - Class and order names match through tree_aliases both ways IUCN and CoL
+    disagree: a node naming Pinales holds CoL's Cupressales too.
+  - A species with no order matches an order rule by its class (GBIF's
+    taxonomy files a few so).
+  - extra_names are held whatever the rules say; override_names (CoL's names
+    for the bison) are held by their node only, and left out of every other.
+  - A catch-all ("Other Mammals") holds what its filter matches less what a
+    sibling naming classes or orders holds, so siblings never share a species.
+    The same for assessed and CoL species, and the same override for both:
+    before this table, CoL counts skipped the first and assessed counts the
+    second.
+```
+
+`core/tree_membership.parquet` · 11,641,391 rows · 26 MB
+
+| column | type | |
+|---|---|---|
+| `sis_taxon_id` | integer | the assessed species, else NULL |
+| `col_id` | text | the CoL species (species/), else NULL |
+| `node_id` | text | a tree node it is in (never the root, "all") |
+
 ### Precomputed
 
 #### `precomputed/col-differences.ts`
@@ -689,7 +768,7 @@ Decisions: a split is a heuristic (CoL keeps the old infraspecific name as a
 synonym when it promotes one), so the card words it as likely, never as fact.
 ```
 
-`taxonomy/col-split-candidates.parquet` · 5,665 rows · 132 kB
+`taxonomy/col-split-candidates.parquet` · 5,665 rows · 133 kB
 
 | column | type | |
 |---|---|---|
@@ -769,13 +848,15 @@ tree need no query:
 Every other level of the tree is answered live (live-taxa-children.ts).
 
 Built from: lists/assessed, lists/ne, lists/species, assessment_link,
-taxonomy/taxa and the CoL-differences tables; the taxonomy tree
-(src/config/taxonomy-tree.ts).
+taxonomy/taxa, tree_membership and the CoL-differences tables; the taxonomy
+tree (src/config/taxonomy-tree.ts).
 
 Decisions:
   - Assessed species count in IUCN's group, so Table 1a stays exact; Not
     Evaluated species in their CoL group.
-  - A node's species are the app's own SQL filter for it (childFilterSql in
+  - A node's species are its rows in tree_membership (dbt/models/lists/), the
+    one definition of which species a tree node holds. The sync's checks
+    confirm it agrees with the app's live filter (childFilterSql in
     taxonomy-sql.ts), so these numbers are the ones the live views compute.
   - Outdated: assessed more than ten years before the sync, or undated.
   - "all" isn't summarised: its children mix the top-level taxa with the SSC
@@ -1088,6 +1169,7 @@ Four layers, from strict to advisory.
 - every domesticated-species name is an accepted CoL species
 - each assessed species has one current taxon record
 - **each GBIF usage counts towards at most one species, once** (the `unique` test on `usage_owner.usage_key`; dbt builds nothing downstream if it fails). A violation means some number is inflated.
+- **tree_membership agrees with the app's live tree filter** (`checks/tree-membership.ts`): the same species in every node, assessed and CoL. The summaries count from the table, the live views (the country-scoped tree, drill-downs) still from `taxonomy-sql.ts`, so a disagreement would show one number on the tree and another once scoped. The check goes once the app reads the table too.
 - the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
 
 **2. Matching fixtures, which stop the build.** `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `link/assessment-link.ts` is the quickest way to see what each matching rule is for.
