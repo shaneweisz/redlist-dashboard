@@ -9,10 +9,12 @@
  * table. The hover tooltip can be moused into and expanded for the assessment's
  * details (criteria, trend, the credits) without leaving the chart.
  *
- * Bars along the bottom and left edges are the two distributions it sits
- * between, the Years Since Assessed and GBIF Records charts, drawn on the
- * scatter's own axes: click a bar to filter by it, as those charts did. A dot
- * outside a bar selection is faded rather than dropped.
+ * Quiet grey bars along the bottom and left edges are the dots' distribution
+ * along each axis, in even bins lined up with the ticks: 5 years across, one
+ * power of ten (or 10%) up. With a box drawn, each bar's share inside it is
+ * shaded darker. Clicking a bar selects that band, the same box filter as a
+ * drag, so there is one way to select here. A dot outside another filter that
+ * this chart ignores (an age or GBIF range, 10+ yrs old) is faded, not dropped.
  *
  * The axes' extents come from the caller (the whole taxon, not the filtered
  * points), so applying a filter never rescales the chart.
@@ -22,7 +24,6 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { yearsMonthsSince } from "@/lib/outdated";
-import { formatCountLabel } from "./chart-tooltip";
 
 export interface PriorityPoint {
   key: string;
@@ -41,18 +42,8 @@ export interface PriorityPoint {
   dim?: boolean;
 }
 
-/** One edge bar, spanning [from, to] in its axis's data units (years, or the raw GBIF value). */
-export interface HistBin {
-  key: string;
-  from: number;
-  to: number;
-  count: number;
-  /** The bar's name ("10-20 years", "Assessed in 2016", "1K-10K records"). */
-  title: string;
-  /** "3,871 (64%)", as the bar charts label their bars. */
-  label: string;
-  selected: boolean;
-}
+/** One edge bar: a band of its axis, [lo, hi) in data units (years, or the raw GBIF value). */
+interface Bin { key: string; lo: number; hi: number; label: string; count: number; inBox: number }
 
 /**
  * A selection: the box in plot units (years; log10(value + 1), or %), for
@@ -78,7 +69,11 @@ export interface PriorityDetails {
   gbifUrl: string | null;
 }
 
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
+export interface PriorityBox {
+  x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string>;
+  /** Set when the box is an edge bar's band (clicking that bar again clears it). */
+  band?: string;
+}
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
@@ -86,17 +81,15 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// The edge bars: their band's depth, and colours matching the charts they replace.
-const BOTTOM_HIST = 44;
-const LEFT_HIST = 60;
-const X_COLOR = "#3b82f6";
-const Y_COLOR = "#10b981";
-// Outward from the plot on the left: tick labels, the GBIF bars (growing
-// leftward), the y title. Below it: tick labels, the years bars (growing
-// down), the x title.
-const Y_TICKS = 38, X_TICKS = 18, Y_TITLE = 30, X_TITLE = 26;
+// The edge bars' depth. Outward from the plot on the left: tick labels, the
+// bars (growing leftward), the y title. Below it: tick labels, the bars
+// (growing down), the x title.
+const BOTTOM_HIST = 28;
+const LEFT_HIST = 36;
+const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 16, X_TITLE = 18;
 const M = { left: Y_TITLE + LEFT_HIST + 4 + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + 4 + BOTTOM_HIST + X_TITLE };
-const HEIGHT = 420;
+/** The chart fills its card's height (beside Status and Country), but never less than this. */
+const MIN_HEIGHT = 380;
 const HIT_RADIUS = 6;
 
 /** "10 years, 3 months ago", "4 months ago", "this month". */
@@ -121,7 +114,7 @@ const formatDate = (date: string) =>
  * from under the cursor, which closes it. Null until measured.
  */
 type Placement = { left: number; top: number; side: "right" | "left" | "below" | "above" };
-function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px: number; py: number } | null, width: number, gap: number, grown: boolean) {
+function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px: number; py: number } | null, width: number, height: number, gap: number, grown: boolean) {
   const [pos, setPos] = useState<Placement | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -136,16 +129,16 @@ function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px:
         next = {
           side: right ? "right" : "left",
           left: right ? anchor.px + gap : anchor.px - gap - w,
-          top: Math.max(0, Math.min(anchor.py - h / 2, HEIGHT - h)),
+          top: Math.max(0, Math.min(anchor.py - h / 2, height - h)),
         };
       } else {
         const left = Math.max(0, Math.min(anchor.px - w / 2, width - w));
-        const above = anchor.py + gap + h > HEIGHT && anchor.py - gap - h >= 0;
+        const above = anchor.py + gap + h > height && anchor.py - gap - h >= 0;
         next = { side: above ? "above" : "below", left, top: above ? anchor.py - gap - h : anchor.py + gap };
       }
       return prev && prev.left === next.left && prev.top === next.top && prev.side === next.side ? prev : next;
     });
-  }, [ref, anchor, width, gap, grown]);
+  }, [ref, anchor, width, height, gap, grown]);
   return pos;
 }
 const placedStyle = (pos: { left: number; top: number } | null): React.CSSProperties =>
@@ -158,29 +151,17 @@ function pctNewText(p: PriorityPoint): string {
   return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;
 }
 
-/** "2,911 species · 48%": the bar's count, with the share its label carries ("2,911 (48%)"). */
-function binCountText(bin: HistBin): string {
-  const pct = /\((\d+%)\)/.exec(bin.label)?.[1];
-  return `${bin.count.toLocaleString()} species${pct ? ` · ${pct}` : ""}`;
-}
-
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${+(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yAxis, xAxis, maxYears, maxValue, xBins, yBins, onXBin, onYBin }: {
+export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yLabel, maxYears, maxValue }: {
   points: PriorityPoint[];
-  /** The x axis title, below the axis; may hold controls. */
-  xAxis: React.ReactNode;
-  xBins: HistBin[];
-  yBins: HistBin[];
-  onXBin: (key: string, e: React.MouseEvent) => void;
-  onYBin: (key: string, e: React.MouseEvent) => void;
   yScale: YScale;
-  /** The y axis title, rotated beside the axis; may hold controls (the metric and record-mode selects). */
-  yAxis: React.ReactNode;
+  /** The y axis title, e.g. "New GBIF records". */
+  yLabel: string;
   /** The axes' extents: the oldest assessment and largest value in the whole taxon. */
   maxYears: number;
   maxValue: number;
@@ -196,16 +177,21 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(MIN_HEIGHT);
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const [hoverBin, setHoverBin] = useState<{ bin: HistBin; px: number; py: number } | null>(null);
+  // The hovered edge bar, by key: its counts are read live, so the tooltip follows a box drawn meanwhile.
+  const [hoverBin, setHoverBin] = useState<{ key: string; px: number; py: number } | null>(null);
   /** The tooltip shows the assessment's details too (its "More details" was clicked). */
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => {
+      setWidth(Math.floor(e.contentRect.width));
+      setHeight(Math.max(MIN_HEIGHT, Math.floor(e.contentRect.height)));
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -216,7 +202,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const xMax = Math.max(10, Math.ceil(maxYears / 5) * 5);
     const yMax = yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log")));
     const plotW = Math.max(0, width - M.left - M.right);
-    const plotH = HEIGHT - M.top - M.bottom;
+    const plotH = height - M.top - M.bottom;
     return {
       xMax, yMax, plotW, plotH,
       sx: (years: number) => M.left + (years / xMax) * plotW,
@@ -224,7 +210,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       ix: (px: number) => ((px - M.left) / plotW) * xMax,
       iy: (py: number) => ((M.top + plotH - py) / plotH) * yMax,
     };
-  }, [width, maxYears, maxValue, yScale]);
+  }, [width, height, maxYears, maxValue, yScale]);
 
   // Screen positions (with a little deterministic vertical jitter, so the many
   // species on the same count, above all 0, show as a band rather than a line),
@@ -254,11 +240,11 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const canvas = canvasRef.current;
     if (!canvas || width === 0) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr; canvas.height = HEIGHT * dpr;
+    canvas.width = width * dpr; canvas.height = height * dpr;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, HEIGHT);
+    ctx.clearRect(0, 0, width, height);
     const { sx, sy, xMax, yMax, plotW, plotH } = scales;
 
     // Grid and ticks.
@@ -276,9 +262,20 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     for (let yr = 0; yr <= xMax; yr += 5) {
       const x = Math.round(sx(yr)) + 0.5;
-      ctx.fillText(`${yr}`, x, M.top + plotH + 6);
+      ctx.fillText(`${yr}`, x, M.top + plotH + 5);
     }
 
+    // Axis titles, outside the edge bars.
+    ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillStyle = "#71717a";
+    ctx.textBaseline = "bottom";
+    ctx.fillText("Years since latest assessment", M.left + plotW / 2, height - 2);
+    ctx.save();
+    ctx.translate(Y_TITLE / 2 + 1, M.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textBaseline = "middle";
+    ctx.fillText(yLabel, 0, 0);
+    ctx.restore();
 
     // Dots.
     const { ordered, xy } = layout;
@@ -294,7 +291,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors, yScale]);
+  }, [layout, scales, width, height, box, colors, yScale, yLabel]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -409,38 +406,71 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const dragPx = drag
     ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;
 
-  // Edge bars on the scatter's own axes: the bottom band's bars span their
-  // years, the left band's their GBIF values (through the same y transform as the dots).
-  const xAny = xBins.some((b) => b.selected), yAny = yBins.some((b) => b.selected);
-  const xMaxCount = Math.max(1, ...xBins.map((b) => b.count));
-  const yMaxCount = Math.max(1, ...yBins.map((b) => b.count));
-  const clampX = (v: number) => Math.min(Math.max(v, 0), scales.xMax);
-  const clampY = (v: number) => Math.min(Math.max(v, 0), scales.yMax);
-  const xBars = width > 0 ? xBins.map((bin) => {
-    const left = scales.sx(clampX(bin.from)), right = scales.sx(clampX(bin.to));
-    const h = Math.max(bin.count > 0 ? 1 : 0, (bin.count / xMaxCount) * BOTTOM_HIST);
-    return { bin, axis: "x" as const, left: left + 0.5, width: right - left - 1, top: M.top + scales.plotH + X_TICKS + 4, height: h };
-  }).filter((b) => b.width > 0) : [];
-  const yBars = width > 0 ? yBins.map((bin) => {
-    const top = scales.sy(clampY(toPlotY(bin.to, yScale))), bottom = scales.sy(clampY(toPlotY(bin.from, yScale)));
-    const w = Math.max(bin.count > 0 ? 1 : 0, (bin.count / yMaxCount) * LEFT_HIST);
-    return { bin, axis: "y" as const, top: top + 0.5, height: bottom - top - 1, left: M.left - Y_TICKS - 4 - w, width: w };
-  }).filter((b) => b.height > 0) : [];
-  const xTitleRef = useRef<HTMLDivElement>(null);
-  const [xTitleLeft, setXTitleLeft] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = xTitleRef.current;
-    if (!el || width === 0) return;
-    const w = el.offsetWidth;
-    setXTitleLeft(Math.max(0, Math.min(M.left + scales.plotW / 2 - w / 2, width - w)));
-  }, [width, scales.plotW, xAxis]);
+  // The edge bars: even bins lined up with the ticks (5 years; a power of ten,
+  // or 10%), counting the dots in view and, with a box drawn, those inside it.
+  const bins = useMemo(() => {
+    const x: Bin[] = [];
+    for (let lo = 0; lo < scales.xMax; lo += 5) x.push({ key: `x${lo}`, lo, hi: lo + 5, label: `${lo}–${lo + 5} years since assessed`, count: 0, inBox: 0 });
+    const y: Bin[] = yScale === "pct"
+      ? Array.from({ length: 10 }, (_, i) => ({ key: `y${i}`, lo: i * 10, hi: (i + 1) * 10, label: `${i * 10}–${(i + 1) * 10}% new records`, count: 0, inBox: 0 }))
+      : [{ key: "y0", lo: 0, hi: 1, label: "No records", count: 0, inBox: 0 },
+        ...Array.from({ length: scales.yMax }, (_, k) => ({
+          key: `y${k + 1}`, lo: 10 ** k, hi: 10 ** (k + 1),
+          label: `${(10 ** k).toLocaleString()}–${(10 ** (k + 1) - 1).toLocaleString()} records`, count: 0, inBox: 0,
+        }))];
+    const xIndex = (p: PriorityPoint) => Math.min(Math.floor(p.years / 5), x.length - 1);
+    const yIndex = (p: PriorityPoint) => Math.min(y.length - 1, yScale === "pct"
+      ? Math.floor(p.value / 10)
+      : p.value < 1 ? 0 : Math.floor(Math.log10(p.value) + 1e-9) + 1);
+    for (const p of points) {
+      if (p.dim) continue;
+      const inBox = box?.keys.has(p.key) ? 1 : 0;
+      const bx = x[xIndex(p)], by = y[yIndex(p)];
+      bx.count++; by.count++; bx.inBox += inBox; by.inBox += inBox;
+    }
+    return { x, y, xIndex, yIndex };
+  }, [points, box, scales.xMax, scales.yMax, yScale]);
+
+  /** An edge bar's click: select its band (the same box filter as a drag), or clear it if it is the box. */
+  const selectBand = (axis: "x" | "y", bin: Bin) => {
+    if (box?.band === bin.key) { onBoxChange(null); return; }
+    const index = axis === "x" ? bins.xIndex : bins.yIndex;
+    const list = axis === "x" ? bins.x : bins.y;
+    const keys = new Set<string>();
+    for (const p of points) if (!p.dim && list[index(p)] === bin) keys.add(p.key);
+    const { xMax, yMax } = scales;
+    onBoxChange(axis === "x"
+      ? { x0: bin.lo, x1: bin.hi, y0: -1, y1: yMax + 1, keys, band: bin.key }
+      : { x0: -1, x1: xMax + 1, y0: bin.lo === 0 ? -1 : toPlotY(bin.lo, yScale), y1: toPlotY(bin.hi, yScale), keys, band: bin.key });
+  };
+
+  const share = (bin: Bin, length: number) => (bin.inBox ? Math.max(2, (bin.inBox / Math.max(1, bin.count)) * length) : 0);
+  const xMaxCount = Math.max(1, ...bins.x.map((b) => b.count));
+  const yMaxCount = Math.max(1, ...bins.y.map((b) => b.count));
+  const bars = width > 0 ? [
+    ...bins.x.map((bin) => {
+      const left = scales.sx(bin.lo), right = scales.sx(Math.min(bin.hi, scales.xMax));
+      const h = bin.count ? Math.max(1, (bin.count / xMaxCount) * BOTTOM_HIST) : 0;
+      return { bin, axis: "x" as const, rect: { left: left + 1, width: right - left - 2, top: M.top + scales.plotH + X_TICKS + 4, height: h },
+        // The in-box share, from the bar's base (its top edge, the axis side);
+        // at least 2px, so a small selection still shows where it falls.
+        inner: { left: 0, top: 0, width: "100%", height: share(bin, h) } };
+    }),
+    ...bins.y.map((bin) => {
+      const top = scales.sy(Math.min(toPlotY(bin.hi, yScale), scales.yMax)), bottom = scales.sy(toPlotY(bin.lo, yScale));
+      const w = bin.count ? Math.max(1, (bin.count / yMaxCount) * LEFT_HIST) : 0;
+      return { bin, axis: "y" as const, rect: { top: top + 1, height: bottom - top - 2, left: M.left - Y_TICKS - 4 - w, width: w },
+        inner: { right: 0, top: 0, height: "100%", width: share(bin, w) } };
+    }),
+  ].filter((b) => b.rect.width > 0 && b.rect.height > 0) : [];
+  const hoverBinLive = hoverBin ? [...bins.x, ...bins.y].find((b) => b.key === hoverBin.key) ?? null : null;
   const binTipRef = useRef<HTMLDivElement>(null);
-  const binTipPos = usePlacement(binTipRef, hoverBin, width, 8, false);
+  const binTipPos = usePlacement(binTipRef, hoverBinLive ? hoverBin : null, width, height, 8, false);
 
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
   const hoverDetails = useMemo(() => (hover && expanded ? details(hover.p.key) : null), [hover, expanded, details]);
   const tipRef = useRef<HTMLDivElement>(null);
-  const tipPos = usePlacement(tipRef, hover, width, 10, expanded);
+  const tipPos = usePlacement(tipRef, hover, width, height, 10, expanded);
   // Events inside the tooltip are its own: no drags, hit tests or dot clicks.
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -450,54 +480,46 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       // Not overflow-hidden: the drag box and selection are clamped to the plot
       // themselves, and the expanded tooltip may run past the chart's bottom.
       className={`relative select-none ${hover && !drag ? "cursor-pointer" : "cursor-crosshair"}`}
-      style={{ height: HEIGHT }}
+      style={{ flex: 1, minHeight: MIN_HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); }}
     >
-      <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
-      {/* The edge bars: the Years Since Assessed and GBIF Records charts, on this chart's axes. */}
-      {[...xBars, ...yBars].map(({ bin, axis, ...r }) => {
-        const any = axis === "x" ? xAny : yAny;
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height, display: "block" }} />
+      {/* The edge bars: grey, with the in-box share darker; a click selects the band. */}
+      {bars.map(({ bin, axis, rect, inner }) => {
+        const isBand = box?.band === bin.key;
         return (
           <button
-            key={`${axis}-${bin.key}`}
+            key={bin.key}
             type="button"
-            aria-pressed={bin.selected}
-            aria-label={`${bin.title}: ${formatCountLabel(bin.label)}`}
-            className="absolute z-10 cursor-pointer rounded-[2px] transition-opacity hover:brightness-110"
-            style={{ ...r, backgroundColor: axis === "x" ? X_COLOR : Y_COLOR, opacity: any && !bin.selected ? 0.3 : 1 }}
+            aria-pressed={isBand}
+            aria-label={`${bin.label}: ${bin.count.toLocaleString()} species. Select this band`}
+            className="group absolute z-10 cursor-pointer overflow-hidden rounded-[2px] bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+            style={rect}
             onMouseDown={stop}
             onMouseUp={stop}
-            onMouseMove={(e) => { stop(e); setHover(null); setHoverBin({ bin, px: r.left + r.width / 2, py: r.top + r.height / 2 }); }}
+            onMouseMove={(e) => { stop(e); setHover(null); setHoverBin({ key: bin.key, px: rect.left + rect.width / 2, py: rect.top + rect.height / 2 }); }}
             onMouseLeave={() => setHoverBin(null)}
-            onClick={(e) => (axis === "x" ? onXBin : onYBin)(bin.key, e)}
-          />
+            onClick={() => selectBand(axis, bin)}
+          >
+            {box && bin.inBox > 0 && (
+              <span className="absolute bg-zinc-500 dark:bg-zinc-400" style={isBand ? { inset: 0 } : inner} />
+            )}
+          </button>
         );
       })}
-      {hoverBin && (
+      {hoverBinLive && (
         <div ref={binTipRef} role="tooltip"
           className="pointer-events-none absolute z-30 whitespace-nowrap rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]"
           style={placedStyle(binTipPos)}>
-          <div className="text-zinc-900 dark:text-zinc-100 font-medium">{hoverBin.bin.title}</div>
+          <div className="text-zinc-900 dark:text-zinc-100 font-medium">{hoverBinLive.label}</div>
           <div className="tabular-nums text-zinc-600 dark:text-zinc-400">
-            {binCountText(hoverBin.bin)}
+            {hoverBinLive.count.toLocaleString()} species{box && box.band !== hoverBinLive.key ? ` · ${hoverBinLive.inBox.toLocaleString()} selected` : ""}
           </div>
+          <div className="text-zinc-400">{box?.band === hoverBinLive.key ? "Click to clear" : "Click to select this band"}</div>
         </div>
       )}
-      {/* The x axis title, centred under the plot but kept inside the chart (on a
-          phone the plot's centre is too far right for the title to fit around it). */}
-      <div ref={xTitleRef} className="absolute z-20 whitespace-nowrap cursor-default"
-        style={{ left: xTitleLeft ?? M.left, bottom: 2, visibility: xTitleLeft == null ? "hidden" : undefined }}
-        onMouseDown={stop} onMouseUp={stop} onMouseMove={(e) => { stop(e); setHover(null); }}>
-        {xAxis}
-      </div>
-      {/* The y axis title, rotated, centred on the plot's height. */}
-      <div className="absolute z-20 whitespace-nowrap cursor-default"
-        style={{ left: 11, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
-        onMouseDown={stop} onMouseUp={stop} onMouseMove={(e) => { stop(e); setHover(null); }}>
-        {yAxis}
-      </div>
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />
