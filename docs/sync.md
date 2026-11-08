@@ -1182,6 +1182,8 @@ The diagram is generated from a build, with a real species on every branch: `pyt
 - The checks against CoL's curated release (demotions, the CoL-differences card's accepted names) use the newer curated release. So a difference there can be CoL itself changing between the two releases, not IUCN and CoL disagreeing.
 - "The Red List lags CoL" is measured against a CoL a few months old.
 
+How big the gap is, measured once (the 2026-11-01 snapshot on COL26.6 XR, against COL26.10 XR): 96.7% of the snapshot's records sit on CoL records the newer release leaves unchanged, and about 0.5% would count for a different species, gain one or lose one if refiled against it (*Corvus corone* → *C. cornix*, 1.4M records; but also CoL's own new errors, a truncated *Artamus leucoryn*). Refiling the mirror ourselves by each record's written name would take minutes, and was decided against: the dashboard's counts would stop matching GBIF's for the same snapshot, and CoL's newest errors would arrive here before anywhere else. The gap closes when GBIF re-indexes.
+
 Matching is two questions, answered separately so each can be explained on its own:
 
 1. **Name: which CoL name is the Red List name?** Answered by GBIF's own matcher, and by people where the matcher's answer isn't certain.
