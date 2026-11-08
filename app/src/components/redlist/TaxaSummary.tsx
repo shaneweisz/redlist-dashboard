@@ -16,7 +16,7 @@ import {
   type FilterRank, type DescribeFilterSegment,
 } from "@/lib/taxonomy-utils";
 import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
-import { IUCN_SOURCE_URL } from "@/config/taxonomy-tree";
+import { IUCN_SOURCE_URL } from "@/config/taxonomy-groups";
 import { isLiveDrilldownNode, nextDynamicRank, isDynamicNodeId, dynamicNodeDisplayName, dynamicNodeFilter, dynamicNodeRankInfo, parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import type { RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { prettifyQs } from "@/lib/query-string";

@@ -148,7 +148,7 @@ const ASSESSED_SELECT = `
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
-  assessment_count`;
+  assessment_count, specialist_group`;
 
 const splitList = (s: unknown): string[] => (typeof s === "string" && s ? s.split(";").filter(Boolean) : []);
 const num = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -219,6 +219,9 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     // Count of distinct assessment years on record (>=2 means reassessed at
     // least once). null for NE rows, which have no assessment history.
     assessment_count: num(r.assessment_count),
+    // The SSC Specialist Group whose remit holds it, if any (the sync's
+    // specialist_group_species): what a Specialist Group's species list filters on.
+    specialist_group: str(r.specialist_group),
   };
 }
 
@@ -335,11 +338,11 @@ export async function querySpecies(opts: {
       // NE list equals the col_ne count exactly and excludes fossils CoL keeps out of the
       // universe (woolly mammoth in_base=false; American mastodon CoL-unmatched).
       const univSql = `
-        SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year,
+        SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year, u.specialist_group,
                g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
                g.countries, g.gbif_all_records_countries, g.common_name
         FROM (
-          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year
+          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
         ) u
         LEFT JOIN ne_gbif_by_col g ON g.col_id = u.col_id`;
@@ -382,6 +385,7 @@ export async function querySpecies(opts: {
           taxon_group: String(r.taxon_group),
           taxon_id: taxonId,
           described_year: num(r.described_year),
+          specialist_group: str(r.specialist_group),
           gbif_species_key: str(r.gbif_species_key),
           gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
           gbif_all_records_count: num(r.gbif_all_records_count),

@@ -18,6 +18,8 @@
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,
  *   latest_institutions
  *   assessment_count         years with a published assessment
+ *   specialist_group         the SSC Specialist Group whose remit holds it, if any
+ *                            (specialist_group_species)
  *
  * Decisions:
  *   - Common name: IUCN's, else iNaturalist's.
@@ -48,8 +50,10 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        {{ semicolon_list("latest.threat_codes") }} AS threat_codes, {{ semicolon_list("latest.habitat_codes") }} AS habitat_codes,
        latest.assessors AS latest_assessors, latest.reviewers AS latest_reviewers, latest.facilitators AS latest_facilitators,
        latest.contributors AS latest_contributors, latest.institutions AS latest_institutions,
-       coalesce(history.n, 1)::BIGINT AS assessment_count
+       coalesce(history.n, 1)::BIGINT AS assessment_count,
+       sg.group_id AS specialist_group
 FROM {{ source('core', 'assessments') }} latest
+LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
   ON history.sis_taxon_id = latest.sis_taxon_id

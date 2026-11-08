@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { taxonGroupCountsPreservedSpecimens } from "../gbif";
-import { ALL_TAXON_GROUPS } from "@/config/taxonomy-tree";
+import { ALL_TAXON_GROUPS } from "@/config/taxonomy-groups";
 
 // ---------------------------------------------------------------------------
 // taxonGroupCountsPreservedSpecimens — decides whether PRESERVED_SPECIMEN is

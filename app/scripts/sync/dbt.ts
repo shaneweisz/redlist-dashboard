@@ -38,6 +38,25 @@ export function runDbt(opts: { buildDir: string; today: string; select?: string;
   dbt(opts, ["test", "--select", ...units]);
 }
 
+/**
+ * One model's SQL as dbt compiles it for the build in `buildDir`: its sources and
+ * refs become that build's files and tables. Lets a test run the real model over
+ * rows of its own (src/config/__tests__/helpers/specialist-groups.ts).
+ */
+export function compileDbtModel(model: string, buildDir: string): string {
+  dbt({ buildDir, today: new Date().toISOString().slice(0, 10), quiet: true }, ["compile", "--select", model]);
+  const find = (dir: string): string | null => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { const f = find(p); if (f) return f; } else if (e.name === `${model}.sql`) return p;
+    }
+    return null;
+  };
+  const file = find(path.join(buildDir, "dbt-target", "compiled"));
+  if (!file) throw new Error(`dbt: compiling ${model} wrote no SQL`);
+  return fs.readFileSync(file, "utf-8");
+}
+
 function dbt(opts: { buildDir: string; today: string; quiet?: boolean }, command: string[]): void {
   const args = ["run", "--project", DBT_DIR, "--quiet", "dbt", ...command, "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
     "--target-path", path.join(opts.buildDir, "dbt-target")];

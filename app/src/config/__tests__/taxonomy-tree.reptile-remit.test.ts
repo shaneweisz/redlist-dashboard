@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findNode, speciesMatchesNode } from "@/lib/taxonomy-utils";
+import { findNode } from "@/lib/taxonomy-utils";
+import { groupsOf } from "./helpers/specialist-groups";
 import remit from "./fixtures/gra-reptile-remit.json";
 
 // The reptile SSC nodes must reproduce the "Specialist Group" column of the
@@ -11,9 +12,10 @@ import remit from "./fixtures/gra-reptile-remit.json";
 
 const reptileGroupIds = (findNode("ssc-reptile-groups")?.children ?? []).map((c) => c.id);
 
-function claimedBy(family: string, scientificName: string): string[] {
+// The Specialist Groups the sync puts a species of this family in.
+async function claimedBy(family: string, scientificName: string): Promise<string[]> {
   const row = { class_name: "Reptilia", order_name: "Squamata", family, scientific_name: scientificName, taxon_group: "reptiles" };
-  return reptileGroupIds.filter((id) => speciesMatchesNode(row, id));
+  return (await groupsOf([row]))[0].filter((id) => reptileGroupIds.includes(id));
 }
 
 describe("reptile SSC remits match the GRA master list", () => {
@@ -23,12 +25,12 @@ describe("reptile SSC remits match the GRA master list", () => {
     for (const id of named) expect(reptileGroupIds, id).toContain(id);
   });
 
-  it.each(remit.examples as [string, string][])("%s (%s) is claimed by exactly its GRA group", (family, name) => {
-    expect(claimedBy(family, name)).toEqual([(remit.families as Record<string, string>)[family]]);
+  it.each(remit.examples as [string, string][])("%s (%s) is claimed by exactly its GRA group", async (family, name) => {
+    expect(await claimedBy(family, name)).toEqual([(remit.families as Record<string, string>)[family]]);
   });
 
-  it.each(Object.entries(remit.elapidaeGenera))("Elapidae genus %s belongs to %s only", (genus, group) => {
-    expect(claimedBy("elapidae", `${genus} sp`)).toEqual([group]);
+  it.each(Object.entries(remit.elapidaeGenera))("Elapidae genus %s belongs to %s only", async (genus, group) => {
+    expect(await claimedBy("elapidae", `${genus} sp`)).toEqual([group]);
   });
 });
 
@@ -41,7 +43,7 @@ describe("CoL-only reptile family names follow their GRA counterpart", () => {
     ["bolyeriidae", "Bolyeria multocarinata", "ssc-snake"],          // GRA: Bolyeridae
     ["trogonophidae", "Agamodon anguliceps", "ssc-lizard-tuatara-rla"], // GRA: Trogonophiidae
     ["leiocephalidae", "Leiocephalus altavelensis", "ssc-lizard-tuatara-rla"], // GRA: within Tropiduridae
-  ])("%s (%s) is claimed by %s only", (family, name, group) => {
-    expect(claimedBy(family, name)).toEqual([group]);
+  ])("%s (%s) is claimed by %s only", async (family, name, group) => {
+    expect(await claimedBy(family, name)).toEqual([group]);
   });
 });

@@ -27,6 +27,8 @@ export interface RedListSpecies {
   order_name: string | null;
   taxon_group: string;
   taxon_id: string;
+  /** The SSC Specialist Group whose remit holds it, if any (the sync's specialist_group_species). */
+  specialist_group?: string | null;
   // CoL species description year — populated for Not Evaluated (NE) rows only;
   // null for assessed species and for NE names with no datable CoL source.
   described_year: number | null;
