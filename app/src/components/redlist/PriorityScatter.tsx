@@ -51,6 +51,8 @@ export interface PriorityDetails {
   facilitators: string | null;
   contributors: string | null;
   institutions: string | null;
+  /** Countries of occurrence (names, sorted). */
+  countries: string[];
   redListUrl: string | null;
   gbifUrl: string | null;
 }
@@ -64,8 +66,8 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
 // Left and bottom leave room for the tick labels and the axis titles.
-const M = { left: 56, right: 12, top: 10, bottom: 40 };
-const HEIGHT = 292;
+const M = { left: 60, right: 12, top: 10, bottom: 40 };
+const HEIGHT = 316;
 const HIT_RADIUS = 6;
 
 /** "10 years, 3 months ago", "4 months ago", "this month". */
@@ -79,31 +81,40 @@ const formatDate = (date: string) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 /**
- * Where a floating box of size w×h goes beside an anchor at (px, py): right of
- * and level with it where it fits, else left of it, and nudged up or down to
- * stay inside the chart (an unclamped box near the bottom ran off it). A box
- * taller than the chart starts at its top and runs on below it. Null until
- * measured, so it never flashes misplaced.
+ * Where a floating box of size w×h goes so it never covers its dot at (px, py):
+ * right of the dot where it fits, else left of it, level with the dot and
+ * nudged to stay within the chart's height (a box taller than the chart
+ * starts at its top and runs on below). Where neither side fits (a narrow
+ * chart), it goes below the dot, or above it if there is room only there.
+ *
+ * Grown (expanded under the cursor), it keeps its place and grows away from
+ * the dot: down, or up when it sits above. Re-placing it could move it out
+ * from under the cursor, which closes it. Null until measured.
  */
+type Placement = { left: number; top: number; side: "right" | "left" | "below" | "above" };
 function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px: number; py: number } | null, width: number, gap: number, grown: boolean) {
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<Placement | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!anchor || !el) { setPos(null); return; }
     const w = el.offsetWidth, h = el.offsetHeight;
     setPos((prev) => {
-      let left: number, top: number;
+      let next: Placement;
       if (grown && prev) {
-        // Grown in place (expanded under the cursor): keep its top and only
-        // shift left as far as it must to fit. Re-placing it could flip it to
-        // the dot's other side, out from under the cursor, which closes it.
-        left = Math.max(0, Math.min(prev.left, width - w));
-        top = prev.top;
+        next = prev.side === "above" ? { ...prev, top: anchor.py - gap - h } : prev;
+      } else if (anchor.px + gap + w <= width || anchor.px - gap - w >= 0) {
+        const right = anchor.px + gap + w <= width;
+        next = {
+          side: right ? "right" : "left",
+          left: right ? anchor.px + gap : anchor.px - gap - w,
+          top: Math.max(0, Math.min(anchor.py - h / 2, HEIGHT - h)),
+        };
       } else {
-        left = anchor.px + gap + w <= width ? anchor.px + gap : Math.max(0, anchor.px - gap - w);
-        top = Math.max(0, Math.min(anchor.py - h / 2, HEIGHT - h));
+        const left = Math.max(0, Math.min(anchor.px - w / 2, width - w));
+        const above = anchor.py + gap + h > HEIGHT && anchor.py - gap - h >= 0;
+        next = { side: above ? "above" : "below", left, top: above ? anchor.py - gap - h : anchor.py + gap };
       }
-      return prev && prev.left === left && prev.top === top ? prev : { left, top };
+      return prev && prev.left === next.left && prev.top === next.top && prev.side === next.side ? prev : next;
     });
   }, [ref, anchor, width, gap, grown]);
   return pos;
@@ -111,17 +122,24 @@ function usePlacement(ref: React.RefObject<HTMLDivElement | null>, anchor: { px:
 const placedStyle = (pos: { left: number; top: number } | null): React.CSSProperties =>
   pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" };
 
+/** % New as the species table shows it: "<1%" for a sliver, "—" with no records or no window. */
+function pctNewText(p: PriorityPoint): string {
+  if (!p.total || p.newRecords == null) return "—";
+  const pct = (p.newRecords / p.total) * 100;
+  return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;
+}
+
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${+(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yLabel, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yAxis, maxYears, maxValue }: {
   points: PriorityPoint[];
   yScale: YScale;
-  /** The y axis title, e.g. "GBIF records since assessment". */
-  yLabel: string;
+  /** The y axis title, rotated beside the axis; may hold controls (the metric and record-mode selects). */
+  yAxis: React.ReactNode;
   /** The axes' extents: the oldest assessment and largest value in the whole taxon. */
   maxYears: number;
   maxValue: number;
@@ -217,16 +235,10 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       ctx.fillText(`${yr}`, x, M.top + plotH + 6);
     }
 
-    // Axis titles.
+    // The x axis title (the y one is an HTML overlay: it holds the y-axis selects).
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#71717a";
     ctx.fillText("Years since latest assessment", M.left + plotW / 2, HEIGHT - 14);
-    ctx.save();
-    ctx.translate(12, M.top + plotH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textBaseline = "middle";
-    ctx.fillText(yLabel, 0, 0);
-    ctx.restore();
 
     // Dots.
     const { ordered, xy } = layout;
@@ -242,7 +254,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors, yScale, yLabel]);
+  }, [layout, scales, width, box, colors, yScale]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -340,7 +352,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       ref={wrapRef}
       // Not overflow-hidden: the drag box and selection are clamped to the plot
       // themselves, and the expanded tooltip may run past the chart's bottom.
-      className="relative select-none cursor-crosshair"
+      className={`relative select-none ${hover && !drag ? "cursor-pointer" : "cursor-crosshair"}`}
       style={{ height: HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
@@ -348,6 +360,12 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); setDrag(null); dragStart.current = null; }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
+      {/* The y axis title, rotated, centred on the plot's height. */}
+      <div className="absolute z-20 whitespace-nowrap cursor-default"
+        style={{ left: 11, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
+        onMouseDown={stop} onMouseUp={stop} onMouseMove={(e) => { stop(e); setHover(null); }}>
+        {yAxis}
+      </div>
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />
@@ -363,7 +381,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
           <div
             ref={tipRef}
             role="tooltip"
-            className={`absolute z-30 ${expanded ? "w-[280px]" : "max-w-[260px]"} max-w-full cursor-default select-text rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]`}
+            className={`absolute z-30 w-[260px] max-w-full cursor-default select-text rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]`}
             style={placedStyle(tipPos)}
             onMouseEnter={cancelLeave}
             onMouseLeave={() => { setHover(null); setExpanded(false); }}
@@ -375,11 +393,13 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
               <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
               {" · "}assessed {ageText(hover.p.assessmentDate)}
             </div>
-            <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
+            {/* GBIF records in the app's own terms (the table's Total / New / % New, New being since the assessment). */}
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">GBIF records</div>
+            <table className="tabular-nums text-zinc-700 dark:text-zinc-300">
               <tbody>
-                <tr><td className="pr-3">GBIF records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">At assessment</td><td className="text-right">{hover.p.total != null && hover.p.newRecords != null ? Math.max(0, hover.p.total - hover.p.newRecords).toLocaleString() : "—"}</td></tr>
-                <tr><td className="pr-3">Since</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">Total</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">New</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+                <tr><td className="pr-3">% New</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
               </tbody>
             </table>
             {expanded && hoverDetails && <TooltipDetails p={hover.p} d={hoverDetails} categoryNames={categoryNames} />}
@@ -420,6 +440,13 @@ function TooltipDetails({ p, d, categoryNames }: { p: PriorityPoint; d: Priority
   return (
     <>
       <DetailGroup title="Assessment" rows={assessment} />
+      {d.countries.length > 0 && (
+        <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Countries of occurrence · {d.countries.length}</div>
+          {/* Scrolls on its own (some species occur in 100+ countries) without scrolling the page. */}
+          <div className="max-h-[58px] overflow-y-auto overscroll-contain pr-1 text-zinc-900 dark:text-zinc-100">{d.countries.join(", ")}</div>
+        </div>
+      )}
       <DetailGroup title="Credits" rows={credits} />
       {(d.redListUrl || d.gbifUrl) && (
         <div className="mt-1.5 pt-1.5 border-t border-zinc-100 dark:border-zinc-800 flex gap-3">

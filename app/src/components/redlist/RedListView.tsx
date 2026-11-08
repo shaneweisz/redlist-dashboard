@@ -2606,15 +2606,29 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       assessmentCount: s.assessment_count,
       assessors: s.latest_assessors, reviewers: s.latest_reviewers, facilitators: s.latest_facilitators,
       contributors: s.latest_contributors, institutions: s.latest_institutions,
+      countries: s.countries.map((c) => ALPHA2_TO_NAME[c] || c).sort((a, b) => a.localeCompare(b)),
       redListUrl: s.sis_taxon_id && s.assessment_id ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}` : null,
       gbifUrl: s.gbif_species_key ? `https://www.gbif.org/species/${s.gbif_species_key}` : null,
     };
   }, [taxaFilteredSpecies]);
-  const priorityYLabel = useMemo(() => {
+  // The scatter's y axis title holds its controls: "[New ▾] GBIF records ([all ▾])".
+  const priorityYAxis = useMemo(() => {
     const { metric, mode } = gbifKeyParts(priorityKey);
-    const what = mode === "georeferenced" ? "georeferenced records" : "records";
-    return metric === "total" ? `GBIF ${what}` : metric === "new" ? `GBIF ${what} since` : `% of GBIF ${what} since`;
-  }, [priorityKey]);
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+        <select aria-label="Which GBIF metric the scatter's y axis shows" value={metric} className={CHART_SELECT_CLASS}
+          onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${mode}`)}>
+          {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+        </select>
+        GBIF records (
+        <select aria-label="Which GBIF records the scatter's y axis counts" value={mode} className={`${CHART_SELECT_CLASS} -mx-1`}
+          onChange={(e) => changePriorityKey(`${metric}.${e.target.value as GbifRecordMode}`)}>
+          {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+        </select>
+        )
+      </span>
+    );
+  }, [priorityKey, changePriorityKey]);
   const priorityInBox = useMemo(
     () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
@@ -5312,7 +5326,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <GbifChartControls value={priorityKey} onChange={changePriorityKey} showMetric what="the scatter's y axis" />
                   {priorityBox && (
                     <button type="button" onClick={() => setPriorityBox(null)}
                       className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
@@ -5322,14 +5335,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
               </div>
               {speciesLoading && assessedSpecies.length === 0 ? (
-                <div className="h-[292px] flex items-center justify-center"><Spinner /></div>
+                <div className="h-[316px] flex items-center justify-center"><Spinner /></div>
               ) : (
                 <PriorityScatter
                   points={priorityPoints}
                   colors={CATEGORY_COLORS}
                   categoryNames={CATEGORY_NAMES}
                   details={priorityDetails}
-                  yLabel={priorityYLabel}
+                  yAxis={priorityYAxis}
                   box={priorityBox}
                   onBoxChange={setPriorityBox}
                   onPointClick={openSpeciesFromScatter}
