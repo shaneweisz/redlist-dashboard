@@ -1172,9 +1172,15 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/01-link-flow.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/01-link-flow-v2.png)
 
 The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
+
+**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is the extended release (XR) GBIF's occurrence snapshot was keyed to, not CoL's newest: every occurrence carries that XR's ids, so linking to another release would link to ids the records don't use. GBIF re-indexes a few times a year, so the XR trails CoL's newest by up to a few months (here COL26.6 XR, 2026-06-19, while the curated COL26.10, 2026-10-14, is out), and the gap closes with the first snapshot keyed to the newer XR. What the gap means:
+
+- A name CoL added or changed since the XR isn't there to match: the species queues (*no species match*), or matches the older treatment.
+- The checks against CoL's curated release (demotions, the CoL-differences card's accepted names) use the newer curated release. So a difference there can be CoL itself changing between the two releases, not IUCN and CoL disagreeing.
+- "The Red List lags CoL" is measured against a CoL a few months old.
 
 Matching is two questions, answered separately so each can be explained on its own:
 

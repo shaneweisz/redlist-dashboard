@@ -76,6 +76,13 @@ for reason, example in QUEUE_REASONS:
     queue[reason] = (r["n"], example, r["a"], r["m"], r["ma"])
 [queued] = duck(f"SELECT count(*) AS n FROM {QUEUE}")
 
+# The versions matched: one Red List release against one CoL release, as this build's sync.json records them.
+manifest = json.load(open(os.path.join(BUILD, "data", "sync.json")))
+RL = manifest["redlist"]["database"].replace("redlist_", "Red List ").replace("_", "-")
+XR = manifest["col"]["xr"]
+CK = manifest["col"]["checklist"]
+SNAP = manifest["gbif"]["snapshot"]
+
 E = html.escape
 FILL = {"q": ("#eef2f6", "#5b6b7c"), "rule": ("#ffffff", "#5b6b7c"), "own": ("#e3f2e6", "#2c7a3f"),
         "part": ("#fff4dc", "#a26b00"), "none": ("#f6e3e3", "#9a3b3b"), "src": ("#f1f3f5", "#868e96")}
@@ -99,6 +106,8 @@ def eg(iucn, col):
 out = ['digraph link {',
        '  graph [rankdir=TB, nodesep=0.35, ranksep=0.45, pad=0.4, bgcolor="white", fontname="Helvetica", labelloc=t, labeljust=l,',
        '         label=<<FONT POINT-SIZE="26"><B>Which CoL species an assessed species is</B></FONT><BR ALIGN="LEFT"/>'
+       f'<FONT POINT-SIZE="16"><B>{E(RL)} × {E(XR["alias"])}</B></FONT><FONT POINT-SIZE="14" COLOR="#495057">   (CoL\'s extended release of {E(XR["issued"])}: the one GBIF\'s {E(SNAP)} occurrence snapshot is keyed to; '
+       f'demotions and accepted names from the curated {E(CK["alias"])}, {E(CK["issued"])})</FONT><BR ALIGN="LEFT"/>'
        '<FONT POINT-SIZE="14" COLOR="#495057">Two questions, answered separately. Counts: assessed species in this build; each example is a real species taking that branch.</FONT><BR ALIGN="LEFT"/>>];',
        '  node [shape=plaintext, fontname="Helvetica"]; edge [color="#868e96", fontname="Helvetica", fontsize=12, fontcolor="#495057", arrowsize=0.7];']
 
