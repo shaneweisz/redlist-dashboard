@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
-import { TAXON_GROUP_NAMES } from "@/config/taxonomy-tree";
+import { TAXON_GROUP_NAMES } from "@/config/taxonomy-groups";
 import { stripHtml } from "@/lib/html-text";
 import { CitationProse } from "@/components/redlist/CitationProse";
 import TaxaIcon from "@/components/TaxaIcon";

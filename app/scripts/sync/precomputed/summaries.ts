@@ -35,7 +35,7 @@
 import * as fs from "fs";
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { getTaxa } from "../../lib/taxa";
-import { NODE_INDEX, hasChildren } from "../../../src/lib/taxonomy-utils";
+import { NODE_INDEX, hasChildren, isSpecialistGroup } from "../../../src/lib/taxonomy-utils";
 import type { TaxonomyNode } from "../../../src/config/taxonomy-tree";
 import type { NodeSummary } from "../../../src/lib/data/species-store";
 import { COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
@@ -47,7 +47,6 @@ import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-reco
 import { lit, openDuckDB } from "../sql";
 import { output, parquet } from "../paths";
 import { loadColDifferences, type ColDifferenceFiles } from "./col-differences";
-import { isSpecialistGroup } from "../sources/specialist-groups";
 
 export interface TaxonSummaryRow {
   table1a_taxon_group: string;

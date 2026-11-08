@@ -1,8 +1,8 @@
 /**
  * specialist_group_remits, rank_aliases: the SSC Specialist Groups' remits, as
  * tables the SQL stages can read. The groups themselves stay in
- * src/config/taxonomy-tree.ts (the "By SSC Specialist Group" layout's sections
- * and their groups), where the app renders them.
+ * src/config/specialist-groups.ts (the "By SSC Specialist Group" layout's
+ * sections and their groups), where the app renders them.
  *
  * Only Specialist Groups have rules. Every other row of the app's tree is an
  * IUCN group, or a named list of them (Invertebrates, Plants, Fungi), and a
@@ -31,19 +31,13 @@
  *   rank                   'class' or 'order'
  *   name, alias            a remit naming `name` also holds species filed under `alias`
  */
-import { NODE_INDEX, PARENT_INDEX } from "../../../src/lib/taxonomy-utils";
+import { NODE_INDEX, PARENT_INDEX, SPECIALIST_GROUP_SECTIONS, isSpecialistGroup } from "../../../src/lib/taxonomy-utils";
 import { COL_CLASS_ALIASES, COL_ORDER_ALIASES } from "../../../src/lib/taxonomy-sql";
 import { COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { lit, openDuckDB } from "../sql";
 import { output } from "../paths";
 
 const list = (xs: string[] | undefined) => `[${(xs ?? []).map((x) => lit(x.toLowerCase())).join(", ")}]::VARCHAR[]`;
-
-/** The layout's sections: the "ssc-" nodes whose children are Specialist Groups. */
-export const SPECIALIST_GROUP_SECTIONS = [...NODE_INDEX.keys()].filter((id) => id.startsWith("ssc-") && NODE_INDEX.get(id)!.children?.length);
-
-/** Is this tree node a Specialist Group (a child of one of the sections)? */
-export const isSpecialistGroup = (id: string) => SPECIALIST_GROUP_SECTIONS.includes(PARENT_INDEX.get(id) ?? "");
 
 export async function buildSpecialistGroups(out: { remits: string; rankAliases: string }): Promise<void> {
   const conn = await openDuckDB();

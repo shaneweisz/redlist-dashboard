@@ -235,8 +235,8 @@ function ensureLengths(): Promise<number> {
  * dropped still has narratives worth finding, just without a common name.
  *
  * The lineage columns are what a taxonomic-group filter runs against (#565), and
- * they are named exactly as filterToSql expects them — this table IS the shape
- * that predicate is written for. Unlike the common name they are not a LEFT
+ * they are named exactly as filterToSql and staticNodeSql expect them — this table
+ * IS the shape those predicates are written for. Unlike the common name they are not a LEFT
  * join: an assessment the sync has no row for cannot be shown to be a mammal, so
  * a search narrowed to mammals leaves it out rather than guessing.
  */
@@ -248,7 +248,7 @@ function ensureSpeciesFacts(): Promise<void> {
       await conn.run(
         `CREATE TEMP TABLE IF NOT EXISTS narrative_species AS
          SELECT assessment_id, common_name, scientific_name,
-                taxon_group, class_name, order_name, family
+                taxon_group, class_name, order_name, family, specialist_group
          FROM read_parquet(${lit(parquetUri("assessed.parquet"))})
          WHERE assessment_id IS NOT NULL`
       );

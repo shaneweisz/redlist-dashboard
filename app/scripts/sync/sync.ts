@@ -157,9 +157,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   manifest.specialist_groups = { mismatches: groupMismatches };
   if (groupMismatches.length > 0) {
     writeManifest(T.syncJson, manifest);
-    throw new Error(`sync: specialist_group_species disagrees with the app's filter:\n  ${groupMismatches.join("\n  ")}`);
+    throw new Error(`sync: specialist_group_species disagrees with taxonomy-sql.ts's remits:\n  ${groupMismatches.join("\n  ")}`);
   }
-  console.log("   specialist_group_species agrees with the app's filter for every Specialist Group");
+  console.log("   specialist_group_species agrees with taxonomy-sql.ts's remits for every Specialist Group");
   // The tests that check a sync's output against the code (Table 1a totals, the
   // taxonomy tree's summaries, country names). CI has no data and skips them, so
   // this is where they run. The files they read are checked first: a missing one

@@ -9,6 +9,8 @@
  *   col_id, scientific_name, authorship, described_year,
  *   kingdom, phylum, class_name, order_name, family, genus, extinct, in_base,
  *   described      the dashboard's universe (below)
+ *   specialist_group  the SSC Specialist Group whose remit holds it, if any
+ *                  (specialist_group_species)
  *   taxon_group    the partition
  *
  * Decisions:
@@ -27,5 +29,8 @@ WITH ex_ew_linked AS (
 SELECT col_id, scientific_name, authorship, described_year, kingdom, phylum, class_name, order_name, family, genus,
        extinct, in_base,
        in_base AND (extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_linked)) AND ne_excluded IS NULL AS described,
+       g.group_id AS specialist_group,
        taxon_group
-FROM {{ source('core', 'taxa') }} WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
+FROM {{ source('core', 'taxa') }} t
+LEFT JOIN {{ ref('specialist_group_species') }} g USING (col_id)
+WHERE {{ col_species() }}

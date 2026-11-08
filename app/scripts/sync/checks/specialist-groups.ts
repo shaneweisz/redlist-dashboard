@@ -1,21 +1,20 @@
 /**
- * Does specialist_group_species agree with the app's live filter? The summaries
- * count a Specialist Group's species from specialist_group_species
- * (dbt/models/lists/specialist_group_species.sql); the app's live views (the
- * country-scoped summary, the group's species list) still filter with
- * taxonomy-sql.ts. Until they read the table too, the two must hold the same
- * species, group by group, or a summary and its live view disagree.
+ * Does specialist_group_species agree with the remits as taxonomy-sql.ts applies
+ * them? The app reads each species' group from the table (`specialist_group` on
+ * assessed and species/), but the CoL breakdown popovers (col-breakdown.ts) still
+ * apply a remit in SQL, narrowed to one family or order, so the two must hold the
+ * same species, group by group, or a breakdown wouldn't add up to its group. Goes
+ * when the breakdowns move into dbt with the precomputed stage.
  *
- * The app's filter for a group: its remit less what claiming groups in its
+ * taxonomy-sql.ts's filter for a group: its remit less what claiming groups in its
  * section hold (childFilterSql), or a CoL name its override holds (filterToSql
  * with the group's id).
  */
 import type { DuckDBConnection } from "@duckdb/node-api";
-import { NODE_INDEX, PARENT_INDEX } from "../../../src/lib/taxonomy-utils";
+import { NODE_INDEX, PARENT_INDEX, isSpecialistGroup } from "../../../src/lib/taxonomy-utils";
 import { filterToSql, childFilterSql } from "../../../src/lib/taxonomy-sql";
 import { COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { parquet, type Tables } from "../paths";
-import { isSpecialistGroup } from "../sources/specialist-groups";
 import { rows } from "../sql";
 
 /** One line per group and kind of species where the two disagree. */

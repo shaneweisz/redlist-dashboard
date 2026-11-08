@@ -11,7 +11,7 @@
  * would multiply scripts/sync/precomputed/summaries.ts's runtime ~200x, add a staleness
  * window, and can't compose with other simultaneous filters. Instead this queries the
  * same assessed.parquet species-duckdb.ts already serves /api/redlist/species from,
- * adding the scope predicate to filterToSql()'s taxonomy-node predicate — computed
+ * adding the scope predicate to the node's own (staticNodeSql) — computed
  * only for the specific scope + node actually requested, not the whole tree upfront.
  *
  * Deliberately omits GBIF (the gbif totals are zeroes) and
@@ -22,8 +22,7 @@
  */
 import { getConn, parquetUri } from "./species-duckdb";
 import { getTaxaSummary, type TaxaSummaryRow, type NodeSummary } from "./species-store";
-import { NODE_INDEX } from "@/lib/taxonomy-utils";
-import { childFilterSql } from "@/lib/taxonomy-sql";
+import { NODE_INDEX, staticNodeSql } from "@/lib/taxonomy-utils";
 import { outdatedCutoffDate } from "@/lib/outdated";
 import { getDataSyncDate } from "@/lib/data-sync-date";
 
@@ -116,8 +115,9 @@ export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRo
 
 /**
  * Scoped equivalent of getPrecomputedChildrenSummaries(parentNodeId) — one
- * NodeSummary per child of the given parent, with the same child filter the
- * precomputed summaries use (childFilterSql), computed on demand for just this one
+ * NodeSummary per child of the given parent, holding the same species the
+ * precomputed summaries count (a Specialist Group's from the sync, an IUCN
+ * group's by taxon_group: staticNodeSql), computed on demand for just this one
  * parent instead of the whole tree.
  *
  * `where` is a scope predicate — see getScopedTaxaSummary's doc comment.
@@ -131,9 +131,8 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
   const children = parent.children;
 
   const summaries: NodeSummary[] = [];
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i];
-    const childWhere = childFilterSql(children, i);
+  for (const child of children) {
+    const childWhere = staticNodeSql(child.id);
     const rows = (await conn.runAndReadAll(
       `SELECT iucn_category AS category, count(*) AS n,
               sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated

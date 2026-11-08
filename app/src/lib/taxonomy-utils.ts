@@ -6,10 +6,12 @@
  * and taxon-groups (getTaxonGroups).
  */
 
-import { TAXONOMY_TREE, GRA_NAME_EQUIVALENTS, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
+import { TAXONOMY_TREE, type TaxonomyNode, type SpeciesFilter } from "@/config/taxonomy-tree";
+import { GRA_NAME_EQUIVALENTS } from "@/config/specialist-groups";
 import { TAXONOMY_VIEWS } from "@/config/taxonomy-views";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
-import { NODE_DESCRIPTION_OVERRIDES, COL_NODE_TOOLTIP_NOTES, COL_EXCLUDE_ALL_NODES, COL_SPECIES_NAME_OVERRIDES } from "@/config/col-described-overrides";
+import { NODE_DESCRIPTION_OVERRIDES, COL_NODE_TOOLTIP_NOTES, COL_EXCLUDE_ALL_NODES } from "@/config/col-described-overrides";
+import { expandClasses, expandOrders, sqlStrList } from "@/lib/taxonomy-sql";
 import COL_TAXON_IDS from "@/config/col-taxon-ids.json";
 import COL_TAXON_ALIASES from "@/config/col-taxon-aliases.json";
 import COL_RELEASE from "@/config/col-release.json";
@@ -42,6 +44,37 @@ function indexTree(node: TaxonomyNode, parentId?: string) {
 }
 
 indexTree(TAXONOMY_TREE);
+
+/**
+ * The "By SSC Specialist Group" layout's sections (Mammal Specialist Groups, …):
+ * the "ssc-" nodes whose children are Specialist Groups.
+ */
+export const SPECIALIST_GROUP_SECTIONS: readonly string[] = [...NODE_INDEX.keys()]
+  .filter((id) => id.startsWith("ssc-") && Boolean(NODE_INDEX.get(id)!.children?.length));
+
+/**
+ * Is this node an SSC Specialist Group? Only Specialist Groups have remits (rules
+ * over class, order, family, genus or name); every other static node is an IUCN
+ * group, or a list of them, and holds the species of its taxon groups. Which group
+ * a species is in is decided once, by the sync (specialist_group_species), and
+ * carried on each species row as `specialist_group`.
+ */
+export function isSpecialistGroup(id: string): boolean {
+  return SPECIALIST_GROUP_SECTIONS.includes(PARENT_INDEX.get(id) ?? "");
+}
+
+/**
+ * The species a static node holds, as a predicate over a species table carrying
+ * taxon_group and specialist_group (assessed.parquet, species/): the server's
+ * twin of speciesMatchesNode for static nodes. Null for an id that isn't one.
+ */
+export function staticNodeSql(nodeId: string): string | null {
+  const node = NODE_INDEX.get(nodeId);
+  if (!node) return null;
+  return isSpecialistGroup(nodeId)
+    ? `specialist_group = '${nodeId.replace(/'/g, "''")}'`
+    : `taxon_group IN (${sqlStrList(node.filter.taxonGroups)})`;
+}
 
 // ─── Lookup helpers ──────────────────────────────────────────────────
 
@@ -385,13 +418,14 @@ export function getTaxonGroupsForNode(nodeId: string): string[] {
 // ─── Filter matching ─────────────────────────────────────────────────
 
 /**
- * Does a species row match a SpeciesFilter?
+ * Does a species row match a SpeciesFilter? The browser's twin of filterToSql
+ * (taxonomy-sql.ts), for the live drill-down's filters ("mammals~order:rodentia"):
+ * the same rules, the same class and order aliases (a filter naming
+ * Actinopterygii holds CoL's Teleostei too), and the same fallback to class_name
+ * where order_name is empty (a GBIF-taxonomy quirk). taxonomy-sql.test.ts checks
+ * the two agree.
  *
- * Works both server-side (with RedlistRow/GbifRow) and client-side
- * (with SpeciesRow). Caller must ensure the row comes from one of
- * the filter's taxonGroups.
- *
- * Falls back to class_name when order_name is empty (GBIF taxonomy quirk).
+ * Caller must ensure the row comes from one of the filter's taxonGroups.
  */
 export function matchesFilter(
   row: {
@@ -412,43 +446,22 @@ export function matchesFilter(
   // this filter — see the SpeciesFilter interface doc comment for why this exists.
   if (filter.extraSpeciesNames?.length && filter.extraSpeciesNames.includes(sciNameLower)) return true;
 
-  // Class include filter
-  if (filter.classNames && filter.classNames.length > 0) {
-    const cls = (row.class_name ?? "").toLowerCase();
-    if (!filter.classNames.includes(cls)) return false;
-  }
+  const cls = (row.class_name ?? "").toLowerCase();
+  const ord = (row.order_name ?? "").toLowerCase();
+  const inClasses = (names: string[]) => expandClasses(names).some((n) => n.toLowerCase() === cls);
+  // An order rule matches by class where the order is empty, with the names as given:
+  // an order alias is a CoL order label, never a class name.
+  const inOrders = (names: string[]) => expandOrders(names).some((n) => n.toLowerCase() === ord) || (ord === "" && names.includes(cls));
 
-  // Class exclude filter
-  if (filter.excludeClasses && filter.excludeClasses.length > 0) {
-    const cls = (row.class_name ?? "").toLowerCase();
-    if (cls && filter.excludeClasses.includes(cls)) return false;
-  }
+  if (filter.classNames?.length && !inClasses(filter.classNames)) return false;
+  if (filter.excludeClasses?.length && cls && inClasses(filter.excludeClasses)) return false;
+  if (filter.orderNames?.length && !inOrders(filter.orderNames)) return false;
+  if (filter.excludeOrders?.length && inOrders(filter.excludeOrders)) return false;
 
-  // Order include filter (with class_name fallback when order_name is empty)
-  if (filter.orderNames && filter.orderNames.length > 0) {
-    const ord = (row.order_name ?? "").toLowerCase();
-    const cls = (row.class_name ?? "").toLowerCase();
-    if (!filter.orderNames.includes(ord) && !(ord === "" && filter.orderNames.includes(cls))) return false;
-  }
-
-  // Order exclude filter (same class_name fallback)
-  if (filter.excludeOrders && filter.excludeOrders.length > 0) {
-    const ord = (row.order_name ?? "").toLowerCase();
-    const cls = (row.class_name ?? "").toLowerCase();
-    if (filter.excludeOrders.includes(ord) || (ord === "" && filter.excludeOrders.includes(cls))) return false;
-  }
-
-  // Family include filter
-  if (filter.families && filter.families.length > 0) {
-    const fam = (row.family ?? "").toLowerCase();
-    if (!filter.families.includes(fam)) return false;
-  }
-
-  // Family exclude filter
-  if (filter.excludeFamilies && filter.excludeFamilies.length > 0) {
-    const fam = (row.family ?? "").toLowerCase();
-    if (fam && filter.excludeFamilies.includes(fam)) return false;
-  }
+  // Family include/exclude filter
+  const fam = (row.family ?? "").toLowerCase();
+  if (filter.families?.length && !filter.families.includes(fam)) return false;
+  if (filter.excludeFamilies?.length && fam && filter.excludeFamilies.includes(fam)) return false;
 
   // Genus include/exclude filter (derived from the first token of scientific_name)
   if (filter.genera?.length || filter.excludeGenera?.length) {
@@ -458,35 +471,34 @@ export function matchesFilter(
   }
 
   // Full scientific name include/exclude filter (for species-level carve-outs)
-  if (filter.speciesNames?.length || filter.excludeSpeciesNames?.length) {
-    const name = (row.scientific_name ?? "").trim().toLowerCase();
-    if (filter.speciesNames && filter.speciesNames.length > 0 && !filter.speciesNames.includes(name)) return false;
-    if (filter.excludeSpeciesNames && filter.excludeSpeciesNames.length > 0 && name && filter.excludeSpeciesNames.includes(name)) return false;
-  }
-
-  // (Names reassigned to another node's species-name override, e.g. Bison, are
-  // checked at the top of this function, before the extraSpeciesNames bypass.)
+  if (filter.speciesNames?.length && !filter.speciesNames.includes(sciNameLower)) return false;
+  if (filter.excludeSpeciesNames?.length && sciNameLower && filter.excludeSpeciesNames.includes(sciNameLower)) return false;
 
   return true;
 }
 
 /**
- * Client-side filter: does a species row match a taxonomy node?
+ * Does a species row belong to a node? Runs in the browser, over the species list
+ * it has loaded.
  *
- * Replaces the old `speciesMatchesSubgroup`. Uses the same filter logic
- * but checks taxon group membership first.
+ * - A Specialist Group holds the species the sync put in it (`specialist_group`).
+ * - Any other static node (an IUCN group, Invertebrates, a layout section) holds
+ *   the species of its taxon groups.
+ * - A live drill-down node ("mammals~order:rodentia") holds what its filter matches.
  */
 export function speciesMatchesNode(
-  species: { taxon_group: string; class_name: string | null; order_name: string | null; family?: string | null; scientific_name?: string | null },
+  species: {
+    taxon_group: string; class_name: string | null; order_name: string | null; family?: string | null;
+    scientific_name?: string | null; specialist_group?: string | null;
+  },
   nodeId: string,
 ): boolean {
   const node = NODE_INDEX.get(nodeId);
   if (!node) {
-    // Dynamic (live taxonomic-drilldown) node — not a static tree entry, but a
-    // real, filterable rank chain (see dynamic-taxon.ts). Falling through to
-    // "don't filter" here would show every species in the taxonGroup regardless
-    // of the selected order/family/genus — a serious correctness bug, not a
-    // graceful degradation, so this is resolved explicitly rather than assumed.
+    // A live drill-down node: not a static tree entry, but a real, filterable rank
+    // chain (see dynamic-taxon.ts). Falling through to "don't filter" would show
+    // every species in the group regardless of the selected order/family/genus, so
+    // it is resolved explicitly.
     const dynFilter = dynamicNodeFilter(nodeId);
     if (dynFilter) {
       if (!dynFilter.taxonGroups.includes(species.taxon_group)) return false;
@@ -494,25 +506,8 @@ export function speciesMatchesNode(
     }
     return true; // Genuinely unknown, non-dynamic id → don't filter
   }
-
-  const f = node.filter;
-
-  // Must belong to one of the filter's taxon groups
-  if (!f.taxonGroups.includes(species.taxon_group)) return false;
-
-  // Mirrors filterToSql's COL_SPECIES_NAME_OVERRIDES branch (precomputed/summaries.ts):
-  // CoL lumps genus Bison into Bos, so a CoL-sourced row (NE species, named "Bos
-  // bison") never matches Bison SG's own filter (genera: ["bison"]) — but an
-  // IUCN-sourced row (assessed species, still named "Bison bison") DOES match the
-  // normal filter directly, since IUCN hasn't adopted CoL's lumping. Added as an
-  // extra match path, not a replacement, so both naming conventions work.
-  const override = COL_SPECIES_NAME_OVERRIDES[nodeId];
-  if (override) {
-    const name = (species.scientific_name ?? "").trim().toLowerCase();
-    if (override.includes(name)) return true;
-  }
-
-  return matchesFilter(species, f);
+  if (isSpecialistGroup(nodeId)) return species.specialist_group === nodeId;
+  return node.filter.taxonGroups.includes(species.taxon_group);
 }
 
 /**
@@ -695,8 +690,7 @@ export function breakdownHref(rank: FilterRank, name: string, liveColIds?: Recor
  * "order", name "rodentia"? Used to narrow a node's species list down to a single
  * breakdown row (RedListView's `bd=` URL param, set when a described-species popover
  * breakdown row is clicked — see TaxaSummary.tsx's BreakdownList). Mirrors the same
- * order/class_name fallback matchesFilter() uses for the GBIF-taxonomy quirk where
- * order_name is sometimes empty.
+ * order/class_name fallback and class/order aliases matchesFilter() uses.
  *
  * `nodeId` is optional but should be passed whenever the caller has it: a species
  * pulled into the node via extraSpeciesNames (e.g. Antelope SG's Pronghorn, not
@@ -718,12 +712,14 @@ export function matchesBreakdownName(
   }
   const n = name.toLowerCase();
   switch (rank) {
+    // Through the class and order aliases, as the counts the breakdown shows are
+    // (filterToSql): a Pinales row holds CoL's Cupressales species too.
     case "class":
-      return (row.class_name ?? "").toLowerCase() === n;
+      return expandClasses([n]).some((c) => c.toLowerCase() === (row.class_name ?? "").toLowerCase());
     case "order": {
       const ord = (row.order_name ?? "").toLowerCase();
       const cls = (row.class_name ?? "").toLowerCase();
-      return ord === n || (ord === "" && cls === n);
+      return expandOrders([n]).some((o) => o.toLowerCase() === ord) || (ord === "" && cls === n);
     }
     case "family":
       return (row.family ?? "").toLowerCase() === n;

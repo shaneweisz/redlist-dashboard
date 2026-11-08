@@ -69,7 +69,7 @@ uv run dbt build --profiles-dir . --select record_counts+    # a model and every
 uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
 ```
 
-The precomputed stage and the link are still TypeScript. Which Specialist Groups a species is in is a table now (`specialist_group_species`), which the summaries count from; next the app's live views read it too, after which the precomputed stage moves here.
+The precomputed stage and the link are still TypeScript. Which Specialist Group a species is in is decided once, by `specialist_group_species`, and carried on `assessed` and `species/` as `specialist_group`: the summaries count from it and the app filters on it. Only the CoL breakdown popovers still apply a remit themselves (`col-breakdown.ts` narrows one to a single family or order), and they move here with the precomputed stage.
 
 `publish.ts` uploads the result. Every builder opens DuckDB through `sql.ts`'s `openDuckDB` (spilling to `~/.cache/redlist-dashboard/duckdb-tmp/`) on its own connection, so no builder reads another's temporary tables. `paths.ts` names every file a sync builds.
 
@@ -286,8 +286,8 @@ Decisions:
 ```text
 specialist_group_remits, rank_aliases: the SSC Specialist Groups' remits, as
 tables the SQL stages can read. The groups themselves stay in
-src/config/taxonomy-tree.ts (the "By SSC Specialist Group" layout's sections
-and their groups), where the app renders them.
+src/config/specialist-groups.ts (the "By SSC Specialist Group" layout's
+sections and their groups), where the app renders them.
 
 Only Specialist Groups have rules. Every other row of the app's tree is an
 IUCN group, or a named list of them (Invertebrates, Plants, Fungi), and a
@@ -544,6 +544,7 @@ Decisions:
 | `latest_contributors` | text |  |
 | `latest_institutions` | text |  |
 | `assessment_count` | integer | years with a published assessment |
+| `specialist_group` | text | the SSC Specialist Group whose remit holds it, if any (specialist_group_species) |
 
 #### `dbt/models/lists/assessment_history.sql`
 
@@ -611,6 +612,7 @@ Decisions:
 | `extinct` | boolean |  |
 | `in_base` | boolean |  |
 | `described` | boolean | the dashboard's universe (below) |
+| `specialist_group` | text | the SSC Specialist Group whose remit holds it, if any (specialist_group_species) |
 | `taxon_group` | text | the partition |
 
 #### `dbt/models/lists/ne.sql`
@@ -718,7 +720,8 @@ remit holds it, assessed (IUCN's names) or not (CoL's). Every count the "By
 SSC Specialist Group" layout shows is a count of a group's rows here.
 
 Built from: specialist_group_remits and rank_aliases (sources/specialist-groups.ts),
-assessed, species/.
+assessments (the latest), taxa (species/'s rows). lists/assessed and species/
+carry each species' group as specialist_group.
 
 Decisions:
   - A species is in a group when it is in one of the group's IUCN groups and
@@ -731,6 +734,8 @@ Decisions:
     taxonomy files a few so).
   - extra_names are held whatever the rules say. override_names (CoL's names
     for the bison) are held by their group only, and left out of every other.
+  - A species is in at most one group (the tests check it), so the lists
+    carry it as one column.
   - A section's catch-all ("Other Mammals") holds what its remit matches less
     what a sibling naming classes or orders holds, so groups never share a
     species. The same for assessed and CoL species, and the same override for
@@ -1175,7 +1180,8 @@ Four layers, from strict to advisory.
 - every domesticated-species name is an accepted CoL species
 - each assessed species has one current taxon record
 - **each GBIF usage counts towards at most one species, once** (the `unique` test on `usage_owner.usage_key`; dbt builds nothing downstream if it fails). A violation means some number is inflated.
-- **specialist_group_species agrees with the app's live filter** (`checks/specialist-groups.ts`): the same species in every Specialist Group, assessed and CoL. The summaries count from the table, the live views (the country-scoped summary, a group's species list) still from `taxonomy-sql.ts`, so a disagreement would show one number in the summary and another once scoped. The check goes once the app reads the table too.
+- **specialist_group_species agrees with the remits as `taxonomy-sql.ts` applies them** (`checks/specialist-groups.ts`): the same species in every Specialist Group, assessed and CoL. Everything else reads the table (`specialist_group`), but the CoL breakdown popovers still apply a remit narrowed to one family or order in SQL, so a disagreement would show a breakdown that doesn't add up to its group. The check goes when the breakdowns move into dbt.
+- **every species in an IUCN group the Specialist Groups cover is in one of them** (`dbt/tests/specialist_groups_cover_their_sections.sql`; assessed species, and the described CoL species): each section ends with a catch-all, so a species no remit holds means a remit went wrong.
 - the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
 
 **2. Matching fixtures, which stop the build.** `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `link/assessment-link.ts` is the quickest way to see what each matching rule is for.

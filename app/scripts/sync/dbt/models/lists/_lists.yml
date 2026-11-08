@@ -1,3 +1,14 @@
+models:
+  - name: specialist_group_species
+    description: Which SSC Specialist Group each species is in (see the header in specialist_group_species.sql).
+    columns:
+      - name: sis_taxon_id
+        description: An assessed species is in at most one group, so the lists can carry it as one column.
+        data_tests: [unique]
+      - name: col_id
+        description: A CoL species is in at most one group, likewise.
+        data_tests: [unique]
+
 unit_tests:
   - name: specialist_group_rules
     description: >
@@ -23,19 +34,19 @@ unit_tests:
         format: sql
         rows: |
           SELECT * FROM (VALUES ('order', 'pinales', 'cupressales')) t(rank, name, alias)
-      - input: ref('assessed')
+      - input: source('core', 'assessments')
         format: sql
         rows: |
-          SELECT * FROM (VALUES
+          SELECT *, true AS is_latest FROM (VALUES
             (1::BIGINT, 'plants', 'PINOPSIDA', 'PINALES', 'PINACEAE', 'Pinus nigra'),
             (2, 'mammals', 'MAMMALIA', 'CARNIVORA', 'FELIDAE', 'Panthera leo'),
             (3, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'AILURIDAE', 'Ailurus fulgens'),
             (4, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'BOVIDAE', 'Bison bison')
-          ) t(id, taxon_group, class_name, order_name, family, scientific_name)
-      - input: ref('species')
+          ) t(sis_taxon_id, taxon_group, class_name, order_name, family, scientific_name)
+      - input: source('core', 'taxa')
         format: sql
         rows: |
-          SELECT * FROM (VALUES
+          SELECT *, 'species' AS rank, 'accepted' AS status, false AS demoted FROM (VALUES
             ('C1', 'plants', 'Pinopsida', 'Cupressales', 'Cupressaceae', 'Juniperus communis'),
             ('C2', 'plants', 'Pinales', NULL, NULL, 'Pinus orphana'),
             ('C3', 'plants', 'Magnoliopsida', 'Rosales', 'Rosaceae', 'Rosa canina'),
