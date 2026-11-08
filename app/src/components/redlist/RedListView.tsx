@@ -23,11 +23,12 @@ import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRi
 import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
-import { CATEGORY_COLORS, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
+import { CATEGORY_COLORS, TAXA, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
 import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
+import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -40,7 +41,7 @@ import { HABITAT_CATEGORIES } from "@/lib/habitat-classification";
 import { parseHabitatEntries, matchesHabitatFilter as matchesHabitatCriteria, coarseKnownCategories, isRestrictiveSelection, ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } from "@/lib/habitat-filter";
 import { type RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
 import { useSpeciesCache } from "@/contexts/SpeciesCacheContext";
-import { isOutdated, outdatedCutoffDate } from "@/lib/outdated";
+import { isOutdated, outdatedCutoffDate, yearsSince } from "@/lib/outdated";
 
 import CandidatesTable from "../CandidatesTable";
 import type { CreditRole } from "@/lib/credit-candidates";
@@ -530,7 +531,7 @@ type FilterAxis =
   | "search" | "categories" | "countries" | "years" | "assessmentYears" | "obs"
   | "assessmentCounts" | "systems" | "trends" | "movement" | "threats" | "criteria"
   | "habitat" | "endemics" | "growthForms" | "assessors" | "reviewers" | "facilitators"
-  | "contributors" | "institutions" | "revision";
+  | "contributors" | "institutions" | "revision" | "priority";
 
 // Species-table column classes. Deliberately the same treatment as the taxa summary
 // table above it (TaxaSummary's numericThClasses and friends): sentence-case bold
@@ -575,6 +576,7 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 // A chart's own axis, so its bars keep showing what clicking them would select.
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
+const SKIP_PRIORITY = skipSet("priority");
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -595,6 +597,29 @@ const SKIP_CREDITS = skipSet("assessors", "reviewers", "facilitators", "contribu
 // been written from the Criteria chart's clause list.
 const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
+
+/** A select only as wide as its chosen option (CSS field-sizing; not yet in every browser's types). */
+const FIT_CONTENT = { fieldSizing: "content" } as React.CSSProperties;
+
+// yearsSince per assessment date, for today: ~175k species share a few thousand
+// dates, and the triage scatter asks for every one on each metric switch.
+let yearsCacheDay = -1;
+const yearsCache = new Map<string, number>();
+function cachedYearsSince(date: string): number {
+  const today = Math.floor(Date.now() / 86_400_000); // the UTC day, cheaply
+  if (today !== yearsCacheDay) { yearsCache.clear(); yearsCacheDay = today; }
+  let y = yearsCache.get(date);
+  if (y === undefined) { y = yearsSince(date); yearsCache.set(date, y); }
+  return y;
+}
+
+/** Where a species sits on the triage scatter for a y-axis key; null when it has no date or no value. */
+function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
+  if (s.category === "NE" || !s.assessment_date) return null;
+  const years = cachedYearsSince(s.assessment_date);
+  const value = gbifMetricValue(s, key);
+  return isNaN(years) || value == null ? null : { years, value };
+}
 
 // Explain IUCN Red List criteria codes
 // See: https://www.iucnredlist.org/resources/categories-and-criteria
@@ -1078,8 +1103,8 @@ function formatSingleGbif(value: number | null, metric: GbifMetric): string {
   return metric === "pctNew" ? `${Math.round(value)}%` : compactNumber.format(value);
 }
 /** Time since a single species' assessment, exactly: "1.5 years", or months under a year. */
-function formatTimeSince(date: string, now = Date.now()): string {
-  const years = (now - new Date(date).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+function formatTimeSince(date: string, now = new Date()): string {
+  const years = yearsSince(date, now);
   if (years < 1) {
     const months = Math.max(0, Math.floor(years * 12));
     return months === 0 ? "<1 month" : `${months} month${months === 1 ? "" : "s"}`;
@@ -1117,19 +1142,21 @@ function chipSelection<T>(prev: Set<T>, value: T, e: React.MouseEvent): Set<T> {
 }
 
 const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
-function GbifChartControls({ value, onChange, showMetric }: {
+function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
+  /** Names the control's subject in its aria-labels, where a page has two sets ("the scatter's y axis"). */
+  what?: string;
 }) {
   const { metric, mode } = gbifKeyParts(value);
   return (
     <div className="flex items-center gap-1">
       {showMetric && (
-        <select aria-label="Which GBIF metric the chart shows" value={metric} className={CHART_SELECT_CLASS}
+        <select aria-label={`Which GBIF metric ${what} shows`} value={metric} className={CHART_SELECT_CLASS}
           onChange={(e) => onChange(`${e.target.value as GbifMetric}.${mode}`)}>
           {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
         </select>
       )}
-      <select aria-label="Which GBIF records the chart counts" value={mode} className={CHART_SELECT_CLASS}
+      <select aria-label={`Which GBIF records ${what} counts`} value={mode} className={CHART_SELECT_CLASS}
         onChange={(e) => onChange(`${metric}.${e.target.value as GbifRecordMode}`)}>
         {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{GBIF_RECORD_MODE_LABEL[m]}</option>)}
       </select>
@@ -1377,10 +1404,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     setSelectedInstitutions(new Set());
     setSort(null, "desc");
     setShowOnlyStarred(false);
-    // Clear "all" taxa selection when switching to new-assessments (NE dataset too large for "all")
-    if (viewMode === "new-assessments") {
-      setSelectedTaxa(prev => prev.has("all") ? new Set<string>() : prev);
-    }
   }, [viewMode, setSelectedTaxa, setSelectedCategories, setSelectedYearRanges, setSelectedAssessmentYears, setSelectedDescribedYears, setSelectedCountries, setGbifRanges, setSelectedAssessmentCounts, setSelectedSystems, setSelectedPopulationTrends, setSelectedMovementPatterns, setSelectedThreats, setSelectedCriteria, setSelectedHabitat, setHabitatBreadth, setSelectedHabitatImportance, setSelectedHabitatSeasons, setSelectedHabitatSuitability, setEndemicsOnly, setSelectedGrowthForms, setSelectedAssessors, setSelectedReviewers, setSelectedFacilitators, setSelectedContributors, setSelectedInstitutions, setSort]);
 
   // Set by the navigations that already produce a complete, fully-specified
@@ -1413,7 +1436,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // "all" row behavior:
     // - If anything is selected (nested view), return to landing page
     // - Only select "all" when clicking from the landing page itself (nothing selected)
-    // Disabled in new-assessments mode (NE dataset too large for "all")
     if (taxonId === "all") {
       if (selectedTaxa.size > 0 || selectedSubgroups.size > 0) {
         if (isScopeLayout(originLayout)) {
@@ -1444,8 +1466,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         setShowOnlyStarred(false);
         return;
       }
-      // On landing page: toggle "all" on/off (disabled in new-assessments — NE dataset too large)
-      if (isNewAssessments) return;
+      // On landing page: toggle "all" on/off. In new-assessments the API answers "all"
+      // with tooLarge (no rows), so it shows the drill-down prompt rather than ~2M rows.
       setSelectedTaxa(prev => {
         if (prev.has("all")) return new Set<string>();
         return new Set(["all"]);
@@ -1674,7 +1696,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
     for (const t of fetchSet) {
-      if (isNewAssessments && t === "all") continue;
       const err = cache.errors[speciesApiUrl(t, categoryParam)];
       if (err) return err;
     }
@@ -1694,10 +1715,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const categoryParam = isNewAssessments ? "&category=NE" : "";
 
     // If "all" is already cached, no individual fetches needed — "all" data covers everything.
-    if (cache.entries[speciesApiUrl("all", categoryParam)] && !selectedTaxa.has("all")) return;
+    // Not a tooLarge "all" (new-assessments): that has no rows, so each taxon is still fetched.
+    const allCached = cache.entries[speciesApiUrl("all", categoryParam)];
+    if (allCached && !allCached.tooLarge && !selectedTaxa.has("all")) return;
 
     for (const taxonId of fetchSet) {
-      if (isNewAssessments && taxonId === "all") continue; // NE dataset too large for "all"
       cache.request(speciesApiUrl(taxonId, categoryParam));
     }
   // cache.entries (for the "all" fast-path check above) + cache.request
@@ -1715,16 +1737,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (selectedTaxa.size === 0) return false;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    return fetchSet.some(t => !(isNewAssessments && t === "all") && cache.loadingUrls.has(speciesApiUrl(t, categoryParam)));
+    return fetchSet.some(t => cache.loadingUrls.has(speciesApiUrl(t, categoryParam)));
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.loadingUrls, speciesApiUrl]);
 
   // Merge species from all fetched taxa relevant to current selection
   const assessedSpecies = useMemo(() => {
     if (selectedTaxa.size === 0) return [];
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    // If "all" is cached for this mode, use it directly
+    // If "all" is cached for this mode, use it directly (unless it's a tooLarge "all",
+    // which has no rows and so covers nothing).
     const allEntry = cache.entries[speciesApiUrl("all", categoryParam)];
-    if (allEntry) return allEntry.species;
+    if (allEntry && !allEntry.tooLarge) return allEntry.species;
     // In new-assessments mode a drill-down is fetched per sub-group, so merge those caches
     // when sub-groups are selected; otherwise merge the per-taxon caches.
     const sourceIds = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -1828,7 +1851,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const speciesListFetched = useMemo(() => {
     if (selectedTaxa.size === 0) return false;
     const categoryParam = isNewAssessments ? "&category=NE" : "";
-    if (cache.entries[speciesApiUrl("all", categoryParam)]) return true;
+    const allEntry = cache.entries[speciesApiUrl("all", categoryParam)];
+    if (allEntry && !allEntry.tooLarge) return true;
     const ids = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
     return ids.every((t) => cache.entries[speciesApiUrl(t, categoryParam)]);
   }, [selectedTaxa, selectedSubgroups, isNewAssessments, cache.entries, speciesApiUrl]);
@@ -1885,15 +1909,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const matchesYearRangeFilter = useCallback((assessmentDate: string | null, yearRanges: Set<string> = selectedYearRanges): boolean => {
     if (yearRanges.size === 0) return true;
     if (!assessmentDate) return false;
-    const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
-    const yearsSince = (Date.now() - new Date(assessmentDate).getTime()) / msPerYear;
+    const years = yearsSince(assessmentDate);
     for (const range of yearRanges) {
       switch (range) {
-        case "<1 year": if (yearsSince < 1) return true; break;
-        case "1-5 years": if (yearsSince >= 1 && yearsSince < 5) return true; break;
-        case "5-10 years": if (yearsSince >= 5 && yearsSince < 10) return true; break;
-        case "10-20 years": if (yearsSince >= 10 && yearsSince < 20) return true; break;
-        case "20+ years": if (yearsSince >= 20) return true; break;
+        case "<1 year": if (years < 1) return true; break;
+        case "1-5 years": if (years >= 1 && years < 5) return true; break;
+        case "5-10 years": if (years >= 5 && years < 10) return true; break;
+        case "10-20 years": if (years >= 10 && years < 20) return true; break;
+        case "20+ years": if (years >= 20) return true; break;
       }
     }
     return false;
@@ -2233,6 +2256,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // because a row from the NE list was keyed on its CoL id while the same species from
   // search was keyed on its GBIF one — two different keys for one species. Both sides
   // resolve through assessment_link to the same `col-…` key now, so the keys match.
+  // Reassessment triage scatter: the box dragged on it filters
+  // the page like any chart. Local state for now, not in the URL.
+  const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
+  // The scatter's y axis (Total / New / % New, all records / georeferenced),
+  // its own choice rather than the GBIF Records chart's. Starts on New in the
+  // page's record mode.
+  const [priorityKey, setPriorityKey] = useState<GbifRangeKey>(() => `new.${gbifRecordMode}`);
+  const changePriorityKey = useCallback((k: GbifRangeKey) => {
+    setPriorityKey(k);
+    setPriorityBox(null); // the box is in the old metric's units
+  }, []);
+  const matchesPriorityBox = useCallback(
+    (s: Species): boolean => !priorityBox || priorityBox.keys.has(s.species_key),
+    [priorityBox],
+  );
+
   const taxaFilteredSpecies = useMemo(() => {
     if (!singleSpeciesPreview) return taxaFilteredSpeciesNoPreview;
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
@@ -2371,6 +2410,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesContributorsFilter(s)) return;
       if (!matchesInstitutionsFilter(s)) return;
       if (!matchesColFilter(s)) return;
+      if (!matchesPriorityBox(s)) return;
       counts[s.category] = (counts[s.category] || 0) + 1;
     });
     const DISPLAY_ORDER = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"];
@@ -2383,7 +2423,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       percent: total > 0 ? Math.round(((counts[code] || 0) / total) * 100) : 0,
       label: `${(counts[code] || 0).toLocaleString()} (${total > 0 ? Math.round(((counts[code] || 0) / total) * 100) : 0}%)`,
     }));
-  }, [taxaFilteredSpecies, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedAssessmentYears, matchesAssessmentYearFilter]);
+  }, [taxaFilteredSpecies, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Year chart: apply all filters EXCEPT year range AND outdated (see
   // taxaFilteredSpeciesBase above) — buckets align exactly with the
@@ -2425,19 +2465,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (!skip.has("contributors") && !matchesContributorsFilter(s)) return false;
     if (!skip.has("institutions") && !matchesInstitutionsFilter(s)) return false;
     if (!skip.has("revision") && !matchesColFilter(s)) return false;
+    if (!skip.has("priority") && !matchesPriorityBox(s)) return false;
     return true;
   }, [matchesSearch, selectedCategories, selectedCountries, selectedYearRanges, matchesYearRangeFilter,
       selectedAssessmentYears, matchesAssessmentYearFilter, gbifChartKey, matchesGbifFilters,
       selectedAssessmentCounts, matchesAssessmentCountFilter, selectedSystems, selectedPopulationTrends,
       selectedMovementPatterns, matchesThreatFilter, selectedCriteria, endemicsOnly, selectedGrowthForms,
       matchesAssessorsFilter, matchesHabitatFilter, matchesReviewersFilter, matchesFacilitatorsFilter,
-      matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter]);
+      matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox]);
 
   // isOutdated() threshold (>10 years) so the Outdated toggle mutes rather than
   // zeroes out the buckets that don't match.
   const assessmentYearData = useMemo(() => {
-    const now = Date.now();
-    const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
+    const now = new Date();
     const ranges = [
       { range: "<1 year", shortRange: "<1y", count: 0, minYear: 0 },
       { range: "1-5 years", shortRange: "1-5y", count: 0, minYear: 1 },
@@ -2448,11 +2488,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     taxaFilteredSpeciesBase.forEach(s => {
       if (!matchesFilters(s, SKIP_YEARS)) return;
       if (!s.assessment_date || s.category === "NE") return;
-      const yearsSince = (now - new Date(s.assessment_date).getTime()) / msPerYear;
-      if (yearsSince < 1) ranges[0].count++;
-      else if (yearsSince < 5) ranges[1].count++;
-      else if (yearsSince < 10) ranges[2].count++;
-      else if (yearsSince < 20) ranges[3].count++;
+      const years = yearsSince(s.assessment_date, now);
+      if (years < 1) ranges[0].count++;
+      else if (years < 5) ranges[1].count++;
+      else if (years < 10) ranges[2].count++;
+      else if (years < 20) ranges[3].count++;
       else ranges[4].count++;
     });
     const total = ranges.reduce((sum, r) => sum + r.count, 0);
@@ -2540,6 +2580,39 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       label: `${r.count.toLocaleString()} (${total > 0 ? Math.round((r.count / total) * 100) : 0}%)`,
     }));
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
+
+  // Triage scatter: every assessed species passing every filter but its own box.
+  const priorityPoints = useMemo((): PriorityPoint[] => {
+    if (isNewAssessments) return [];
+    const out: PriorityPoint[] = [];
+    const { mode } = gbifKeyParts(priorityKey);
+    for (const s of taxaFilteredSpecies) {
+      const p = priorityOf(s, priorityKey);
+      if (!p || !matchesFilters(s, SKIP_PRIORITY)) continue;
+      out.push({
+        key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
+        total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
+        assessmentDate: s.assessment_date!, ...p,
+      });
+    }
+    return out;
+  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey]);
+  // The axes' extents from the whole taxon, filters ignored, so applying or
+  // changing a filter never rescales the chart and selections stay comparable.
+  const priorityExtent = useMemo(() => {
+    let maxYears = 0, maxValue = 0;
+    for (const s of taxaFilteredSpeciesBase) {
+      const p = priorityOf(s, priorityKey);
+      if (!p) continue;
+      if (p.years > maxYears) maxYears = p.years;
+      if (p.value > maxValue) maxValue = p.value;
+    }
+    return { maxYears, maxValue };
+  }, [taxaFilteredSpeciesBase, priorityKey]);
+  const priorityInBox = useMemo(
+    () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
+    [priorityPoints, priorityBox],
+  );
 
   // Number of Assessments chart (#423 item 1): apply all filters EXCEPT the
   // assessment-count selection itself. NE species have no assessment history
@@ -2666,12 +2739,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesContributorsFilter(s)) return;
       if (!matchesInstitutionsFilter(s)) return;
       if (!matchesColFilter(s)) return;
+      if (!matchesPriorityBox(s)) return;
       for (const sys of s.systems ?? []) {
         if (sys in counts) counts[sys]++;
       }
     });
     return counts;
-  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
+  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Population trend counts: apply all filters EXCEPT population trend
   const populationTrendCounts = useMemo(() => {
@@ -2698,10 +2772,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesContributorsFilter(s)) return;
       if (!matchesInstitutionsFilter(s)) return;
       if (!matchesColFilter(s)) return;
+      if (!matchesPriorityBox(s)) return;
       counts[s.population_trend] = (counts[s.population_trend] || 0) + 1;
     });
     return counts;
-  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedSystems, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
+  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedSystems, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Movement pattern counts: apply all filters EXCEPT movement pattern
   const movementPatternCounts = useMemo(() => {
@@ -2728,10 +2803,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesContributorsFilter(s)) return;
       if (!matchesInstitutionsFilter(s)) return;
       if (!matchesColFilter(s)) return;
+      if (!matchesPriorityBox(s)) return;
       counts[s.movement_pattern] = (counts[s.movement_pattern] || 0) + 1;
     });
     return counts;
-  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
+  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedYearRanges, selectedSystems, selectedPopulationTrends, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, matchesSearch, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox, endemicsOnly, matchesGbifFilters, selectedAssessmentCounts, matchesAssessmentCountFilter, matchesYearRangeFilter, selectedGrowthForms, selectedAssessmentYears, matchesAssessmentYearFilter]);
 
   // Threat counts: apply all filters EXCEPT threats (count species per prefix, deduplicated)
   // Threat counts per code, plus the denominator (`threatTotal`) for percentages:
@@ -2970,7 +3046,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       const matchesFacilitator = matchesFacilitatorsFilter(s);
       const matchesContributor = matchesContributorsFilter(s);
       const matchesInstitution = matchesInstitutionsFilter(s);
-      const matchesCol = matchesColFilter(s);
+      const matchesCol = matchesColFilter(s) && matchesPriorityBox(s);
       const matchesStarred = !showOnlyStarred || pinnedSet.has(s.species_key);
       return matchesCategory && matchesYear && matchesDescribed && matchesObs && matchesAssessmentCount && matchesCountry && matchesSystem && matchesTrend && matchesMovement && matchesThreat && matchesCriteria && matchesHabitat && matchesEndemic && matchesGrowth && matchesSearch && matchesAssessor && matchesReviewer && matchesFacilitator && matchesContributor && matchesInstitution && matchesCol && matchesStarred;
     });
@@ -3008,7 +3084,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     });
 
     return { filteredSpecies: filtered, sortedSpecies: sorted };
-  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, searchFilter, showOnlyStarred, pinnedSet, pinnedSpecies, sortField, sortDirection, sortField2, sortDirection2, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, isNewAssessments, matchesGbifFilters, matchesAssessmentCountFilter, matchesYearRangeFilter, matchesAssessmentYearFilter, matchesDescribedYearFilter]);
+  }, [taxaFilteredSpecies, selectedCategories, selectedCountries, selectedSystems, selectedPopulationTrends, selectedMovementPatterns, matchesThreatFilter, selectedCriteria, matchesHabitatFilter, endemicsOnly, selectedGrowthForms, searchFilter, showOnlyStarred, pinnedSet, pinnedSpecies, sortField, sortDirection, sortField2, sortDirection2, matchesAssessorsFilter, matchesReviewersFilter, matchesFacilitatorsFilter, matchesContributorsFilter, matchesInstitutionsFilter, matchesColFilter, matchesPriorityBox, isNewAssessments, matchesGbifFilters, matchesAssessmentCountFilter, matchesYearRangeFilter, matchesAssessmentYearFilter, matchesDescribedYearFilter]);
 
   // Giant aggregates (insects, invertebrates…) are capped at 400k server-side; surface
   // a banner so the list reads as "showing N of M — drill into a sub-group for the rest".
@@ -3077,6 +3153,29 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // species should keep showing the regular charts view.
   const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
+  const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
+
+  // Clicking a dot on the triage scatter opens that species in the table and
+  // scrolls to it: turn to the page it is on, then scroll once the row renders.
+  // A dot outside the scatter's own box is faded but still clickable; its
+  // species isn't in the table, so the box is cleared first.
+  const [scrollToSpecies, setScrollToSpecies] = useState<string | null>(null);
+  const openSpeciesFromScatter = useCallback((key: string) => {
+    if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
+    setSelectedSpeciesKey(key);
+    setScrollToSpecies(key);
+  }, [priorityBox, setSelectedSpeciesKey]);
+  useEffect(() => {
+    if (!scrollToSpecies) return;
+    const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
+    if (index < 0) return; // not in the table (yet): wait for the next render
+    const page = Math.floor(index / pageSize) + 1;
+    if (page !== currentPage) { setCurrentPage(page); return; }
+    const row = document.querySelector(`[data-species-row="${CSS.escape(scrollToSpecies)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "start" });
+    setScrollToSpecies(null);
+  }, [scrollToSpecies, sortedSpecies, pageSize, currentPage]);
   const singleSpeciesAssessors = useMemo(() => singleSpecies ? getSpeciesAssessors(singleSpecies) : [], [singleSpecies, getSpeciesAssessors]);
   const singleSpeciesReviewers = useMemo(() => singleSpecies ? getSpeciesReviewers(singleSpecies) : [], [singleSpecies, getSpeciesReviewers]);
   const singleSpeciesFacilitators = useMemo(() => singleSpecies ? getSpeciesFacilitators(singleSpecies) : [], [singleSpecies, getSpeciesFacilitators]);
@@ -4934,9 +5033,24 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <p className="text-base font-medium text-zinc-700 dark:text-zinc-200">
             {neTooLarge.names.join(" & ")} has {neTooLarge.neTotal.toLocaleString()} not-evaluated species — too many to load at once.
           </p>
-          <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-            Open a sub-group (a class or order — e.g. Beetles, Crustaceans) above to view its charts and species list.
-          </p>
+          {selectedTaxa.has("all") ? (
+            // All Species: the table above is just its own row, so offer the landing table's groups here.
+            <>
+              <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Pick a group to view its charts and species list.</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {TAXA.filter((g) => g.id !== "all").map((g) => (
+                  <button key={g.id} type="button" onClick={(e) => handleToggleTaxon(g.id, e)}
+                    className="px-3 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              Open a sub-group (a class or order — e.g. Beetles, Crustaceans) above to view its charts and species list.
+            </p>
+          )}
         </div>
       ) : (
       <div className="space-y-3">
@@ -5394,6 +5508,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     if (!matchesContributorsFilter(s)) return;
                     if (!matchesInstitutionsFilter(s)) return;
       if (!matchesColFilter(s)) return;
+      if (!matchesPriorityBox(s)) return;
                     for (const gf of s.growth_forms) {
                       gfCounts[gf] = (gfCounts[gf] || 0) + 1;
                     }
@@ -5580,9 +5695,61 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     property of an IUCN assessment's name, so it has no meaning
                     in the Not Evaluated (new-assessments) view, whose rows are
                     CoL species with no assessment to disagree with. */}
+                {/* ...with the Reassessment Triage scatter beside it: years since
+                    assessment against GBIF records (not for a single species). */}
                 {!isNewAssessments && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {taxonomicRevisionCard}
+                    {showPriority && (
+                      <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+                          <div className="min-w-0">
+                            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                            <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {priorityBox && (
+                              <button type="button" onClick={() => setPriorityBox(null)}
+                                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {speciesLoading && assessedSpecies.length === 0 ? (
+                          <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
+                        ) : (
+                          <PriorityScatter
+                            points={priorityPoints}
+                            colors={CATEGORY_COLORS}
+                            yAxis={
+                              // The y axis title is its controls, read as a phrase:
+                              // "[New ▾] GBIF records ([all ▾])", each select sized to
+                              // its chosen option where the browser supports it.
+                              <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                                <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                  onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                  {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                                </select>
+                                GBIF records (
+                                <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                  onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                  {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                                </select>
+                                )
+                              </span>
+                            }
+                            box={priorityBox}
+                            onBoxChange={setPriorityBox}
+                            onPointClick={openSpeciesFromScatter}
+                            selectedKey={selectedSpeciesKey}
+                            yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                            maxYears={priorityExtent.maxYears}
+                            maxValue={priorityExtent.maxValue}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
             </>
@@ -5630,6 +5797,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   // the taxa will change, since that's the only time it's read.
                   if (selectedTaxa.size > 0) skipClearOnTaxaChangeRef.current = true;
                   clearAllFiltersAndTaxa({ replace: switchView });
+                  setPriorityBox(null);
                   setShowOnlyStarred(false);
                   setExpandedThreat(new Set());
                   setExpandedCriteria(new Set());
@@ -6211,7 +6379,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 const assessmentDateObj = s.assessment_date ? new Date(s.assessment_date) : null;
                 const assessmentYear = assessmentDateObj ? assessmentDateObj.getFullYear() : null;
                 const yearsSinceAssessment = assessmentDateObj
-                  ? Math.floor((Date.now() - assessmentDateObj.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+                  ? Math.floor(yearsSince(assessmentDateObj))
                   : null;
                 const details = speciesDetails[s.species_key];
                 const gbifSpeciesKey = s.gbif_species_key || details?.gbifUrl?.split('/').pop() || null;
@@ -6234,6 +6402,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <React.Fragment key={speciesKey}>
                   <tr
                     className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer ${selectedSpeciesKey === speciesKey ? "bg-zinc-100 dark:bg-zinc-800" : ""} ${isDragging ? "opacity-50" : ""} ${isDragOver ? "border-t-2 border-amber-500" : ""}`}
+                    data-species-row={speciesKey}
                     onClick={() => { setSelectedSpeciesKey(selectedSpeciesKey === speciesKey ? null : speciesKey); }}
                     draggable={isPinned && showOnlyStarred}
                     onDragStart={(e) => handleDragStart(e, speciesKey)}
