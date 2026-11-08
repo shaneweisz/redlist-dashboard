@@ -122,6 +122,9 @@ describe("compare over a sync", () => {
     await writeSync(path.join(tmp, "moved"), { count: 130, neName: "Panthera onka", snapshot: "2026-11-01" });
     await writeSync(path.join(tmp, "grew"), { count: 130, neName: "Panthera onca", snapshot: "2026-12-01" });
     await writeSync(path.join(tmp, "shrank"), { count: 80, neName: "Panthera onca", snapshot: "2026-12-01" });
+    // A sync compares before it writes its sync.json.
+    await writeSync(path.join(tmp, "unwritten"), { count: 130, neName: "Panthera onca", snapshot: "2026-11-01" });
+    fs.rmSync(path.join(tmp, "unwritten", syncPath("sync.json")));
   });
   afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -150,5 +153,16 @@ describe("compare over a sync", () => {
     expect(grew).toMatchObject({ total: 1, unexplained: 0 });
     const shrank = await compare({ baseline: path.join(tmp, "base"), candidate: path.join(tmp, "shrank"), out: path.join(tmp, "o4") });
     expect(shrank).toMatchObject({ total: 1, unexplained: 1 });
+  });
+
+  it("explains nothing by snapshot when the candidate's snapshot is unknown or the same", async () => {
+    const base = path.join(tmp, "base"), unwritten = path.join(tmp, "unwritten");
+    // No sync.json and nothing passed: unknown is not "a different snapshot".
+    expect(await compare({ baseline: base, candidate: unwritten, out: path.join(tmp, "o5") })).toMatchObject({ total: 1, unexplained: 1 });
+    // The sync passes the snapshot it counted: the same one explains nothing, a newer one the growth.
+    expect(await compare({ baseline: base, candidate: unwritten, out: path.join(tmp, "o6"), candidateSnapshot: "2026-11-01" }))
+      .toMatchObject({ total: 1, unexplained: 1 });
+    expect(await compare({ baseline: base, candidate: unwritten, out: path.join(tmp, "o7"), candidateSnapshot: "2026-12-01" }))
+      .toMatchObject({ total: 1, unexplained: 0 });
   });
 });

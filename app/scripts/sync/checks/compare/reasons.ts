@@ -38,7 +38,8 @@ export const REASONS: ReasonRule[] = [
       "gbif_all_records_since_assessment", "gbif_georeferenced_species_count", "gbif_georeferenced_ne_species_count",
       "gbif_georeferenced_records", "gbif_georeferenced_median", "gbif_all_species_count", "gbif_all_ne_species_count",
       "gbif_all_records", "gbif_all_median", "gbif_ne_species_georeferenced", "gbif_ne_species_all"],
-    where: `(SELECT b IS DISTINCT FROM a FROM snapshots) AND d.delta IS NOT NULL
+    // Both snapshots known and different: an unknown one explains nothing.
+    where: `(SELECT b IS NOT NULL AND a IS NOT NULL AND b <> a FROM snapshots) AND d.delta IS NOT NULL
             AND (d.delta >= 0 OR -d.delta <= 0.05 * d.before::DOUBLE)`,
   },
   {
