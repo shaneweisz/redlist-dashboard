@@ -598,6 +598,9 @@ const SKIP_CREDITS = skipSet("assessors", "reviewers", "facilitators", "contribu
 const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
+/** A select only as wide as its chosen option (CSS field-sizing; not yet in every browser's types). */
+const FIT_CONTENT = { fieldSizing: "content" } as React.CSSProperties;
+
 // yearsSince per assessment date, for today: ~175k species share a few thousand
 // dates, and the triage scatter asks for every one on each metric switch.
 let yearsCacheDay = -1;
@@ -5309,49 +5312,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           </div>
           )}
 
-          {/* Reassessment triage: years since assessment against GBIF records,
-              half and half with the Country map. */}
-          {showPriority && (
-            <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* countryMapCard is wrapped in a plain div; making that a flex column
-                lets the card inside fill the row's height beside the scatter. */}
-            <div className="min-w-0 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col">{countryMapCard}</div>
-            <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <div className="min-w-0">
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                  <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <GbifChartControls value={priorityKey} onChange={changePriorityKey} showMetric what="the scatter's y axis" />
-                  {priorityBox && (
-                    <button type="button" onClick={() => setPriorityBox(null)}
-                      className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                      {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-              {speciesLoading && assessedSpecies.length === 0 ? (
-                <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-              ) : (
-                <PriorityScatter
-                  points={priorityPoints}
-                  colors={CATEGORY_COLORS}
-                  yLabel={priorityYLabel}
-                  box={priorityBox}
-                  onBoxChange={setPriorityBox}
-                  onPointClick={openSpeciesFromScatter}
-                  selectedKey={selectedSpeciesKey}
-                  yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                  maxYears={priorityExtent.maxYears}
-                  maxValue={priorityExtent.maxValue}
-                />
-              )}
-            </div>
-            </div>
-          )}
-
           {/* Charts row 2 (new-assessments mode only): Country map + Year
               Described + GBIF Records, 3-col, 1/3 each. For
               reassessments, everything past Charts row 1 (Country, Threats,
@@ -5460,10 +5420,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           {!isNewAssessments && moreFiltersOpen && (
             <>
                 {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
-                {/* With the triage scatter showing, Country sits beside it above,
-                    so the CoL differences card takes its place here, left of the credits. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {showPriority ? taxonomicRevisionCard : countryMapCard}
+                  {countryMapCard}
                   {isSingleSpecies && singleSpecies ? (() => {
                     // Facilitators are absent on ~62% of latest assessments, and
                     // contributors (~67%) and institutions (~81%) more often still —
@@ -5742,9 +5700,60 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     property of an IUCN assessment's name, so it has no meaning
                     in the Not Evaluated (new-assessments) view, whose rows are
                     CoL species with no assessment to disagree with. */}
-                {!isNewAssessments && !showPriority && (
+                {/* ...with the Reassessment Triage scatter beside it: years since
+                    assessment against GBIF records (not for a single species). */}
+                {!isNewAssessments && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {taxonomicRevisionCard}
+                    {showPriority && (
+                      <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+                          <div className="min-w-0">
+                            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                            <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {/* The y axis, read as a phrase: "[New ▾] GBIF records ([all ▾])". Each
+                                select is as wide as its chosen option (field-sizing; where a
+                                browser lacks it, as wide as its longest). */}
+                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                              </select>
+                              GBIF records (
+                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                              </select>
+                              )
+                            </span>
+                            {priorityBox && (
+                              <button type="button" onClick={() => setPriorityBox(null)}
+                                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {speciesLoading && assessedSpecies.length === 0 ? (
+                          <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
+                        ) : (
+                          <PriorityScatter
+                            points={priorityPoints}
+                            colors={CATEGORY_COLORS}
+                            yLabel={priorityYLabel}
+                            box={priorityBox}
+                            onBoxChange={setPriorityBox}
+                            onPointClick={openSpeciesFromScatter}
+                            selectedKey={selectedSpeciesKey}
+                            yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                            maxYears={priorityExtent.maxYears}
+                            maxValue={priorityExtent.maxValue}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
             </>
