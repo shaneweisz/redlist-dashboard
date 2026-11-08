@@ -321,19 +321,44 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   const dragStart = useRef<{ x0: number; y0: number } | null>(null);
   const inPlot = (x: number, y: number) =>
     x >= M.left - 4 && x <= M.left + scales.plotW + 4 && y >= M.top - 4 && y <= M.top + scales.plotH + 4;
+  // The drag is followed on the window, in the capture phase: the 0-record dots
+  // sit on the x axis, so taking them in means releasing below the plot, over
+  // the bars or off the chart, where the chart's own handlers never saw the
+  // mouseup (a bar swallowed it, or leaving the chart cancelled the drag).
   const onMouseDown = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
     if (!inPlot(x, y)) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const at = (ev: MouseEvent) => ({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
     dragStart.current = { x0: x, y0: y };
     setDrag({ x0: x, y0: y, x1: x, y1: y });
+    const move = (ev: MouseEvent) => {
+      const start = dragStart.current;
+      if (!start) return;
+      const p = at(ev);
+      setDrag({ ...start, x1: p.x, y1: p.y });
+      setHover(null);
+    };
+    const up = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", move, true);
+      window.removeEventListener("mouseup", up, true);
+      const p = at(ev);
+      if (finishDrag(p.x, p.y)) {
+        // A drag that ends over a bar must not also click it.
+        const swallow = (c: MouseEvent) => { c.stopPropagation(); c.preventDefault(); };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+      }
+    };
+    window.addEventListener("mousemove", move, true);
+    window.addEventListener("mouseup", up, true);
   };
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelLeave = () => { if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; } };
   useEffect(() => cancelLeave, []);
   const onMouseMove = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
-    const start = dragStart.current;
-    if (start) { setDrag({ ...start, x1: x, y1: y }); setHover(null); return; }
+    if (dragStart.current) return; // followed on the window (onMouseDown)
     const i = inPlot(x, y) ? hitTest(x, y) : null;
     if (i != null) {
       cancelLeave();
@@ -344,10 +369,10 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       leaveTimer.current = setTimeout(() => { leaveTimer.current = null; setHover(null); setExpanded(false); }, 300);
     }
   };
-  const onMouseUp = (e: React.MouseEvent) => {
+  /** Ends a drag at (x, y): a box if it moved, else a click. Returns whether it moved. */
+  const finishDrag = (x: number, y: number): boolean => {
     const drag = dragStart.current;
-    if (!drag) return;
-    const { x, y } = localXY(e);
+    if (!drag) return false;
     dragStart.current = null;
     setDrag(null);
     const moved = Math.abs(x - drag.x0) > 4 || Math.abs(y - drag.y0) > 4;
@@ -362,28 +387,27 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
         if (!ordered[i].dim && px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
       }
       onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
-      return;
+      return true;
     }
-    const i = hitTest(x, y);
+    const i = inPlot(x, y) ? hitTest(x, y) : null;
     if (i != null) onPointClick(layout.ordered[i].key);
     else if (box) onBoxChange(null);
+    return false;
   };
 
-  // Clamped to the plot, so a box dragged past an axis stays inside the chart
-  const boxPx = box && width > 0 ? (() => {
-    const cx = (v: number) => Math.min(Math.max(v, 0), scales.xMax);
-    const cy = (v: number) => Math.min(Math.max(v, 0), scales.yMax);
-    const left = scales.sx(cx(box.x0)), right = scales.sx(cx(box.x1));
-    const top = scales.sy(cy(box.y1)), bottom = scales.sy(cy(box.y0));
-    return { left, top, width: right - left, height: bottom - top };
-  })() : null;
-  const dragPx = drag ? (() => {
+  // Boxes are clamped to the plot plus EDGE px: dots on an axis (the 0-record
+  // row, jittered a few px either side of it) are inside a box dragged past it.
+  const EDGE = 5;
+  const toRect = (l: number, t: number, r: number, b: number) => {
     const { plotW, plotH } = scales;
-    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-    const x0 = clamp(Math.min(drag.x0, drag.x1), M.left, M.left + plotW), x1 = clamp(Math.max(drag.x0, drag.x1), M.left, M.left + plotW);
-    const y0 = clamp(Math.min(drag.y0, drag.y1), M.top, M.top + plotH), y1 = clamp(Math.max(drag.y0, drag.y1), M.top, M.top + plotH);
-    return { left: x0, top: y0, width: x1 - x0, height: y1 - y0 };
-  })() : null;
+    const cx = (v: number) => Math.min(Math.max(v, M.left - EDGE), M.left + plotW + EDGE);
+    const cy = (v: number) => Math.min(Math.max(v, M.top - EDGE), M.top + plotH + EDGE);
+    return { left: cx(l), top: cy(t), width: cx(r) - cx(l), height: cy(b) - cy(t) };
+  };
+  const boxPx = box && width > 0
+    ? toRect(scales.sx(box.x0), scales.sy(box.y1), scales.sx(box.x1), scales.sy(box.y0)) : null;
+  const dragPx = drag
+    ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;
 
   // Edge bars on the scatter's own axes: the bottom band's bars span their
   // years, the left band's their GBIF values (through the same y transform as the dots).
@@ -429,8 +453,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       style={{ height: HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); setDrag(null); dragStart.current = null; }}
+      onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
       {/* The edge bars: the Years Since Assessed and GBIF Records charts, on this chart's axes. */}
