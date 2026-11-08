@@ -444,10 +444,8 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
     // without this. Both are inert unless the actual parent matches their layout
     // mode, so having both covers each caller without affecting the other.
     <div className="relative bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-zinc-200 dark:border-zinc-800 p-3 h-full flex-1 min-h-0 flex flex-col">
-      {/* Header with controls. In a narrow card (the left third beside the triage
-          scatter) the controls wrap below the title as a block, rather than in a
-          ragged column beside it. */}
-      <div className="flex flex-wrap items-center justify-between mb-1 gap-x-2 gap-y-1">
+      {/* Header with controls */}
+      <div className="flex items-center justify-between mb-1 gap-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 flex items-center gap-1">
           Country
           {titleInfo}

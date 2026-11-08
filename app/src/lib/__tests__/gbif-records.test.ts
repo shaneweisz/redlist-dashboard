@@ -44,7 +44,7 @@ describe("gbif record modes", () => {
   });
 });
 
-import { emptyGbifRanges, gbifBucket, gbifMetricValue, gbifRangeMatches, matchesGbifRanges, parseGbifChartKey } from "../gbif-records";
+import { emptyGbifRanges, gbifBucket, gbifMetricValue, matchesGbifRanges, parseGbifChartKey } from "../gbif-records";
 
 describe("GBIF Records chart filters", () => {
   // 20,000 records in all, 5,000 georeferenced; 500 and 50 of them new.
@@ -59,30 +59,6 @@ describe("GBIF Records chart filters", () => {
     expect(gbifMetricValue(sp, "pctNew.all")).toBe(2.5);
     expect(gbifMetricValue({ gbif_all_records_count: 0, gbif_all_records_since_assessment: 0 }, "pctNew.all")).toBeNull();
     expect(gbifMetricValue({ gbif_all_records_count: 3 }, "new.all")).toBeNull(); // no window
-  });
-
-  it("matches the triage scatter's even bins as well as the chart's buckets", () => {
-    // Powers of ten, inclusive.
-    expect(gbifRangeMatches("10-99", 10, "total")).toBe(true);
-    expect(gbifRangeMatches("10-99", 99, "total")).toBe(true);
-    expect(gbifRangeMatches("10-99", 100, "total")).toBe(false);
-    expect(gbifRangeMatches("1000-9999", 5000, "new")).toBe(true);
-    // 10% bins: the lower bound in, the upper out, except 100%.
-    expect(gbifRangeMatches("20-30%", 20, "pctNew")).toBe(true);
-    expect(gbifRangeMatches("20-30%", 30, "pctNew")).toBe(false);
-    expect(gbifRangeMatches("90-100%", 100, "pctNew")).toBe(true);
-    // A count range never matches a percentage, nor the other way round.
-    expect(gbifRangeMatches("20-30", 25, "pctNew")).toBe(false);
-    expect(gbifRangeMatches("20-30%", 25, "total")).toBe(false);
-    // The chart's own buckets, as before (old links).
-    expect(gbifRangeMatches("101-1K", 1000, "total")).toBe(true);
-    expect(gbifRangeMatches("1K-10K", 1000, "total")).toBe(false);
-    expect(gbifRangeMatches("0%", 0, "pctNew")).toBe(true);
-    const r = emptyGbifRanges();
-    r["new.all"] = new Set(["100-999"]);
-    expect(matchesGbifRanges(sp, r)).toBe(true); // 500 new
-    r["new.all"] = new Set(["1000-9999", "11-100"]);
-    expect(matchesGbifRanges(sp, r)).toBe(false);
   });
 
   it("buckets counts and percentages", () => {
