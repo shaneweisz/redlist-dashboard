@@ -30,6 +30,27 @@ jobs:
       - name: Install uv
         run: pipx install uv==0.11.27
 
+      # dbt-oss installs by downloading its binary from GitHub release assets, the
+      # same host, so uv's cache (which keeps the built package) is kept between runs,
+      # keyed on the lockfile: a new download only when the dbt version changes. Saved
+      # right after the install, so a later failing test can't keep it from being saved.
+      - name: Restore uv's cache
+        id: uv-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('app/scripts/sync/dbt/uv.lock') }}
+
+      - name: Install the sync's dbt
+        run: uv sync --project app/scripts/sync/dbt
+
+      - name: Save uv's cache
+        if: steps.uv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('app/scripts/sync/dbt/uv.lock') }}
+
       - name: Run tests with coverage
         run: npm run test:coverage
         working-directory: app
