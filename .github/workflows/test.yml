@@ -24,7 +24,11 @@ jobs:
         working-directory: app
 
       # The sync's count and lists tests run its dbt models (app/scripts/sync/dbt), through uv.
-      - uses: astral-sh/setup-uv@v6
+      # From PyPI rather than astral-sh/setup-uv, which downloads any uv newer than its
+      # bundled list (0.8.x) from GitHub release assets, a download that has been
+      # returning 504s. Pinned, so CI runs the uv the lockfile was made with.
+      - name: Install uv
+        run: pipx install uv==0.11.27
 
       - name: Run tests with coverage
         run: npm run test:coverage
