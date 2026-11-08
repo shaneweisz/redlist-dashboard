@@ -23,49 +23,58 @@ STAGES = [
     ("checks", "6  checks", "stop, or explain"),
 ]
 # Each lane's heading sits over the middle of its tables.
-LANES = [("Catalogue of Life", 0.2), ("Red List", 1.65), ("GBIF", 2.6)]
+LANES = [("Catalogue of Life", 0.2), ("Red List", 1.65), ("GBIF", 2.6), ("Specialist Groups", 3.55)]
 
-# (id, stage, lane position 0..2 (fractions allowed), kind, title, subtitle)
+# (id, stage, lane position (fractions allowed), kind, title, subtitle). A subtitle
+# starting "dbt · " is a dbt model (app/scripts/sync/dbt/); the rest is TypeScript.
 NODES = [
     ("in_col", "inputs", 0.0, "input", "CoL XR + curated checklist", "the release GBIF indexes"),
     ("in_inat", "inputs", 0.75, "input", "iNaturalist names", "monthly"),
     ("in_rl", "inputs", 1.25, "input", "Red List database", "read-only"),
     ("in_seeds", "inputs", 1.75, "seed", "seeds/", "people's decisions, each with why"),
     ("in_gbif", "inputs", 2.5, "input", "GBIF snapshot", "monthly, ~255 GiB, reduced once"),
+    ("in_sg", "inputs", 3.55, "else", "src/config/specialist-groups.ts", "the remits, as the app shows them"),
     ("taxa", "sources", 0.0, "core", "taxa", "one row per CoL usage"),
     ("names", "sources", 0.75, "core", "common_names", "one row per name a source gives"),
     ("assessments", "sources", 1.5, "core", "assessments", "one row per global assessment"),
     ("occ", "sources", 2.25, "core", "occurrences", "usage × georef × date"),
     ("occc", "sources", 2.9, "core", "occurrence_countries", "usage × country × georef"),
-    ("matches", "link", 1.5, "core", "matches", "GBIF's matcher's answer per species"),
+    ("remits", "sources", 3.55, "core", "specialist_group_remits", "+ rank_aliases; written every run"),
+    ("matches", "link", 1.5, "core", "matches", "matching-ws's answer per species"),
     ("link", "link", 0.75, "core", "assessment_link", "assessed species → CoL species it is"),
     ("queue", "link", 2.25, "else", "match-queue.tsv", "species waiting for a person"),
-    ("owner", "count", 1.0, "core", "usage_owner", "one row per usage: whose records"),
-    ("counts", "count", 2.0, "core", "record_counts", "one row per species with records"),
-    ("species", "lists", 0.0, "data", "species/", "the universe: described"),
-    ("appt", "lists", 0.75, "data", "taxa + assessment_link", "as the app reads them"),
-    ("assessed", "lists", 1.5, "data", "assessed", "one row per assessed species"),
-    ("history", "lists", 2.15, "data", "assessments", "history, one per year"),
-    ("ne", "lists", 2.8, "data", "ne", "Not Evaluated with records"),
-    ("vern", "lists", -0.6, "data", "vernacular-names.json", "the tree's labels"),
-    ("coldiff", "precomputed", 0.25, "data", "CoL differences", "3 tables + col-revisions.json"),
-    ("summaries", "precomputed", 1.25, "data", "summaries", "4 JSON files"),
-    ("search", "precomputed", 2.25, "data", "search", "name, rank and synonym indexes"),
-    ("checks", "checks", 1.25, "else", "fixtures · data tests · comparison", "sync.json, sync.log, compare/"),
+    ("owner", "count", 1.0, "core", "usage_owner", "dbt · one row per usage: whose records"),
+    ("counts", "count", 2.0, "core", "record_counts", "dbt · one row per species with records"),
+    ("species", "lists", 0.0, "data", "species/", "dbt · the universe: described"),
+    ("appt", "lists", 0.75, "data", "taxa + assessment_link", "dbt · as the app reads them"),
+    ("assessed", "lists", 1.5, "data", "assessed", "dbt · one row per assessed species"),
+    ("history", "lists", 2.15, "data", "assessments", "dbt · history, one per year"),
+    ("ne", "lists", 2.8, "data", "ne", "dbt · Not Evaluated with records"),
+    ("vern", "lists", -0.6, "data", "vernacular-names.json", "dbt · the tree's labels"),
+    ("sgspecies", "lists", 3.55, "core", "specialist_group_species", "dbt · each species' group, at most one"),
+    ("coldiff", "precomputed", 0.0, "data", "CoL differences", "dbt · 3 tables"),
+    ("colrev", "precomputed", 0.75, "data", "col-revisions.json", "app code: the revision flags"),
+    ("summaries", "precomputed", 1.6, "data", "summaries", "app code: 4 JSON files"),
+    ("search", "precomputed", 2.5, "data", "search", "dbt · name, rank and synonym indexes"),
+    ("checks", "checks", 1.25, "else", "dbt tests · fixtures · data tests · comparison", "sync.json, sync.log, compare/"),
 ]
 EDGES = [
     ("in_col", "taxa"), ("in_seeds", "taxa"), ("in_col", "names"), ("in_inat", "names"), ("taxa", "names"),
     ("in_rl", "assessments"), ("in_seeds", "assessments"), ("in_gbif", "occ"), ("in_gbif", "occc"), ("taxa", "occ"),
+    ("in_sg", "remits"),
     ("assessments", "matches"), ("in_col", "matches"),
     ("taxa", "link"), ("assessments", "link"), ("matches", "link"), ("in_seeds", "link"), ("link", "queue"),
     ("taxa", "owner"), ("link", "owner"), ("owner", "counts"), ("occ", "counts"), ("assessments", "counts"),
-    ("taxa", "species"), ("link", "species"), ("taxa", "appt"), ("link", "appt"),
+    ("remits", "sgspecies"), ("taxa", "sgspecies"), ("assessments", "sgspecies"),
+    ("taxa", "species"), ("link", "species"), ("sgspecies", "species"), ("taxa", "appt"), ("link", "appt"),
     ("assessments", "assessed"), ("counts", "assessed"), ("names", "assessed"), ("assessments", "history"), ("history", "assessed"),
+    ("sgspecies", "assessed"),
     ("species", "ne"), ("counts", "ne"), ("occc", "ne"), ("names", "ne"), ("names", "vern"),
-    ("appt", "coldiff"), ("assessed", "coldiff"), ("species", "coldiff"),
-    ("assessed", "summaries"), ("ne", "summaries"), ("species", "summaries"), ("coldiff", "summaries"),
-    ("assessed", "search"), ("ne", "search"), ("names", "search"), ("vern", "search"), ("appt", "search"),
-    ("coldiff", "checks"), ("summaries", "checks"), ("search", "checks"),
+    ("appt", "coldiff"), ("assessed", "coldiff"),
+    ("coldiff", "colrev"), ("species", "colrev"), ("assessed", "colrev"),
+    ("assessed", "summaries"), ("ne", "summaries"), ("species", "summaries"), ("coldiff", "summaries"), ("sgspecies", "summaries"),
+    ("assessed", "search"), ("ne", "search"), ("names", "search"), ("vern", "search"), ("appt", "search"), ("species", "search"),
+    ("coldiff", "checks"), ("colrev", "checks"), ("summaries", "checks"), ("search", "checks"), ("sgspecies", "checks"),
 ]
 
 LANE_W, ROW_H, X0 = 420, 175, 330
@@ -73,9 +82,14 @@ LANE_W, ROW_H, X0 = 420, 175, 330
 
 def label(kind, title, sub):
     fill, border = FILL[kind]
+    tag = ""
+    if sub.startswith("dbt · "):
+        sub = sub[len("dbt · "):]
+        tag = '<FONT POINT-SIZE="12" COLOR="#ffffff"><B> dbt </B></FONT>'
     return (f'<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6" BGCOLOR="{fill}" COLOR="{border}">'
-            f'<TR><TD><FONT POINT-SIZE="17"><B>{html.escape(title)}</B></FONT></TD></TR>'
-            f'<TR><TD><FONT POINT-SIZE="12" COLOR="#495057">{html.escape(sub)}</FONT></TD></TR></TABLE>>')
+            f'<TR><TD><FONT POINT-SIZE="17"><B>{html.escape(title)}</B></FONT></TD>'
+            + (f'<TD BGCOLOR="#5f3dc4">{tag}</TD>' if tag else '') + '</TR>'
+            f'<TR><TD{" COLSPAN=\"2\"" if tag else ""}><FONT POINT-SIZE="12" COLOR="#495057">{html.escape(sub)}</FONT></TD></TR></TABLE>>')
 
 
 out = ['digraph overview {',
@@ -83,6 +97,7 @@ out = ['digraph overview {',
        '         label=<<FONT POINT-SIZE="30"><B>The sync</B></FONT><BR ALIGN="LEFT"/><FONT POINT-SIZE="15" COLOR="#495057">'
        'Every table it builds, by stage and by source, and what each is built from. Only link and count make judgements.<BR ALIGN="LEFT"/>'
        'Grey: input. Yellow: decisions people made. Green: working table (build/core/). Orange: published (build/data/). White: elsewhere.<BR ALIGN="LEFT"/>'
+       'Purple tag: a dbt model (app/scripts/sync/dbt/; npm run sync:lineage draws its graph). Everything else is TypeScript.<BR ALIGN="LEFT"/>'
        'Each table\'s columns are in the table reference below.<BR ALIGN="LEFT"/></FONT>>, labelloc=t, labeljust=l];',
        '  node [shape=plaintext, fontname="Helvetica", fontcolor="#1e1e1e"];',
        '  edge [color="#868e96", arrowsize=0.7, penwidth=1.1];']

@@ -4,7 +4,7 @@ How the dashboard's data is built, why it works the way it does, and how to run 
 
 ![The sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-612-sync-stages/01-sync-overview.png)
 
-The diagram is generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng`. [The tables](#the-tables) below it give every table's columns.
+The diagram is generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`. [The tables](#the-tables) below it give every table's columns. For the stages dbt runs (count, lists, the precomputed SQL tables), `npm run sync:lineage` serves dbt's own docs from the code and the build: each model's SQL, columns, tests and lineage graph, always current.
 
 ## Contents
 
@@ -61,7 +61,7 @@ The SQL stages run as a [dbt](https://docs.getdbt.com/) project in `dbt/`: `dbt-
 - dbt reads the tables the sources and link stages wrote as **sources** (`dbt/models/sources.yml`), and builds each model as a table in one DuckDB file, `core/sync.duckdb`.
 - **`exportDbtTables`** then writes the files everything after it reads, from those tables: the app's lists and search indexes, the CoL-differences tables, and the count tables for the precomputed stage's TypeScript. How a file is sorted or partitioned is decided there, not in the models, so a model says only what its rows are.
 
-Shared SQL lives in `dbt/macros/`. A data test is a line in a model's `.yml` (`unique`, `not_null`) and checks the build's own rows. A unit test (`unit_tests:` in a `.yml`) gives a model a few input rows and the rows it must return, one per rule, so a rule is pinned down without real data: `specialist_group_rules` is the example. `runDbt` runs the unit tests after the models, since dbt reads their column types from the tables upstream; the count/lists vitest suites run them in CI. Run dbt by hand from `app/scripts/sync/dbt`, against a build:
+Shared SQL lives in `dbt/macros/`. A data test is a line in a model's `.yml` (`unique`, `not_null`) and checks the build's own rows. A unit test (`unit_tests:` in a `.yml`) gives a model a few input rows and the rows it must return, one per rule, so a rule is pinned down without real data: `specialist_group_rules` is the example. `runDbt` runs the unit tests after the models, since dbt reads their column types from the tables upstream; the count/lists vitest suites run them in CI. `npm run sync:lineage` serves dbt's docs for the build (models, columns, tests, lineage graph). Run dbt by hand from `app/scripts/sync/dbt`, against a build:
 
 ```bash
 export SYNC_BUILD_DIR=~/.cache/redlist-dashboard/build SYNC_DATE=$(date +%F) SYNC_DUCKDB_TMP=~/.cache/redlist-dashboard/duckdb-tmp
