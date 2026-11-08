@@ -2,7 +2,7 @@
 
 How the dashboard's data is built, why it works the way it does, and how to run it. The code is the reference for the details; this explains the design and points to it. What happens after a sync, on every deploy, is in [build.md](build.md).
 
-![The sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-612-sync-stages/01-sync-overview.png)
+![The sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-622-system-diagrams/01-sync-overview.png)
 
 The diagram is generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`. [The tables](#the-tables) below it give every table's columns. For the stages dbt runs (count, lists, the precomputed SQL tables), `npm run sync:lineage` serves dbt's own docs from the code and the build: each model's SQL, columns, tests and lineage graph, always current.
 

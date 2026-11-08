@@ -2,7 +2,7 @@
 
 How the running dashboard reads its data: the API routes, what each reads, and what calls it. The sync that produces the data is [sync.md](sync.md); the deploy build that packages it is [build.md](build.md). This is a map of what is there and why, kept alongside the simplifications it points to.
 
-![The API routes](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-604-system-docs/03-api-routes.png)
+![The API routes](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-622-system-diagrams/02-api-routes.png)
 
 The diagram's source is [`diagrams/api-routes.excalidraw`](diagrams/api-routes.excalidraw) (open it at excalidraw.com; `python3 -I diagrams/gen.py routes <out>` regenerates it).
 
