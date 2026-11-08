@@ -1,0 +1,68 @@
+unit_tests:
+  - name: split_candidates_follow_promoted_subspecies
+    description: >
+      A Not Evaluated species whose CoL synonyms include an assessed species'
+      old subspecies is likely split from it (Gazella acaciae from Gazella
+      gazella), also when CoL points the old name at the new species' nominate
+      subspecies (the Giraffa tippelskirchi autonym hop). A name that resolves
+      back to an assessed species explains no gap and is left out.
+    model: col_split_candidates
+    given:
+      - input: ref('app_taxa')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('NEG', NULL, 'accepted', 'species', 'Gazella acaciae'),
+            ('SYNG', 'NEG', 'synonym', 'subspecies', 'Gazella gazella acaciae'),
+            ('GT', NULL, 'accepted', 'species', 'Giraffa tippelskirchi'),
+            ('GTT', 'GT', 'accepted', 'subspecies', 'Giraffa tippelskirchi tippelskirchi'),
+            ('GCT', 'GTT', 'synonym', 'subspecies', 'Giraffa camelopardalis tippelskirchi'),
+            ('VC', NULL, 'accepted', 'species', 'Vallonia costata'),
+            ('VCH', 'VC', 'synonym', 'variety', 'Vallonia costata var. helvetica')
+          ) t(col_id, parent_id, status, rank, scientific_name)
+      - input: ref('assessed')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES (10::BIGINT, 'Gazella gazella', 'VU'), (11, 'Giraffa camelopardalis', 'VU'), (12, 'Vallonia costata', 'LC'))
+            t(id, scientific_name, iucn_category)
+      - input: source('core', 'assessment_link')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES (12::BIGINT, 'VC')) t(sis_taxon_id, col_id)
+    expect:
+      rows:
+        - {ne_col_id: NEG, parent_id: 10, parent_name: Gazella gazella, parent_category: VU, rn: 1}
+        - {ne_col_id: GT, parent_id: 11, parent_name: Giraffa camelopardalis, parent_category: VU, rn: 1}
+
+  - name: synonym_assessed_names_one_species_or_none
+    description: >
+      CoL files the assessed 'Clean species' as a synonym of the unassessed 'Ne
+      accepta', so IUCN has assessed that taxon under a name CoL doesn't accept.
+      Two separately assessed names under one species make no claim, and a
+      synonym under an assessed species explains no gap.
+    model: col_synonym_assessed
+    given:
+      - input: ref('app_taxa')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('IN1', NULL, 'accepted', 'species', 'Clean species'),
+            ('SYN1', 'IN1', 'synonym', 'species', 'Renamed away'),
+            ('NEACC', NULL, 'accepted', 'species', 'Ne accepta'),
+            ('NESYN', 'NEACC', 'synonym', 'species', 'Clean species'),
+            ('NEAMB', NULL, 'accepted', 'species', 'Ne ambigua'),
+            ('NEAMB1', 'NEAMB', 'synonym', 'species', 'Lump winner'),
+            ('NEAMB2', 'NEAMB', 'synonym', 'species', 'Demoted one')
+          ) t(col_id, parent_id, status, rank, scientific_name)
+      - input: ref('assessed')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES (1::BIGINT, 'Clean species', 'LC'), (3, 'Renamed away', 'LC'), (4, 'Demoted one', 'LC'), (5, 'Lump winner', 'LC'))
+            t(id, scientific_name, iucn_category)
+      - input: source('core', 'assessment_link')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES (1::BIGINT, 'IN1')) t(sis_taxon_id, col_id)
+    expect:
+      rows:
+        - {ne_col_id: NEACC, assessed_id: 1, assessed_name: Clean species, assessed_category: LC}

@@ -568,7 +568,7 @@ export interface SplitEntry {
  * CoL record — both the species and the old name behind it. Showing the old name
  * is what makes the inference checkable: CoL's site has no view of "names that
  * used to sit under this species and now resolve elsewhere", so without it a
- * reader has to reconstruct the derivation (see SPLIT_CANDIDATES_SQL's worked
+ * reader has to reconstruct the derivation (see col_split_candidates.sql's worked
  * example).
  */
 export interface SplitSummary {
@@ -733,7 +733,7 @@ export function noMatchSentence(flag: ColRevision, subject: string | null): NoMa
  *
  * Deliberately hedged ("likely"): the underlying signal is a name-pattern
  * heuristic — CoL keeps the old subspecies name as a synonym when a subspecies
- * is promoted — not a confirmed taxonomic changelog. See SPLIT_CANDIDATES_SQL
+ * is promoted — not a confirmed taxonomic changelog. See the sync's col_split_candidates.sql
  * in col-breakdown.ts.
  */
 export function splitSummary(flag: ColRevision, subject: string): SplitSummary | null {
@@ -880,9 +880,9 @@ export function acceptedNameSentence(
  * Two shapes, both derived from CoL's own synonymy (col-breakdown.ts):
  *
  *  - `neSynonym` — CoL files an IUCN-ASSESSED name among this species' synonyms
- *    (SYNONYM_ASSESSED_SQL). Checkable on the species' CoL page, under Synonyms.
+ *    (the sync's col_synonym_assessed.sql). Checkable on the species' CoL page, under Synonyms.
  *  - `split` — CoL keeps an old infraspecific name under an assessed species
- *    that now resolves here (SPLIT_CANDIDATES_SQL). A heuristic, so it stays
+ *    that now resolves here (the sync's col_split_candidates.sql). A heuristic, so it stays
  *    hedged, and the evidence is only visible from THIS species' CoL page —
  *    hence a tooltip alongside saying what to look for.
  *

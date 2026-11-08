@@ -21,7 +21,9 @@
  *   2 link       which CoL species each assessed species is (link/)
  *   3 count      whose records each GBIF usage's are (dbt/models/count/)
  *   4 lists      what the app reads, joins only (dbt/models/lists/)
- *   5 precomputed  the app's own queries, run ahead of time (precomputed/)
+ *   5 precomputed  the app's own queries, run ahead of time: the CoL-differences
+ *                tables and search indexes in SQL (dbt/models/precomputed/), the
+ *                summaries and revisions with the app's code (precomputed/)
  *   6 checks     fixtures and data tests (either stops the sync), then the
  *                comparison with production's sync (checks/)
  *
@@ -48,11 +50,8 @@ import { buildSpecialistGroups } from "./sources/specialist-groups";
 import { askMatcher } from "./link/matches";
 import { buildLink, summariseQueue } from "./link/assessment-link";
 import { runDbt, exportDbtTables } from "./dbt";
-import { buildColDifferences } from "./precomputed/col-differences";
 import { buildColRevisions } from "./precomputed/col-revisions";
 import { buildSummaries } from "./precomputed/summaries";
-import { buildSearchIndex } from "./precomputed/search-index";
-import { buildSynonymIndex } from "./precomputed/synonym-index";
 import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
 import { observe, mismatches } from "./checks/check-fixtures";
 import { specialistGroupMismatches } from "./checks/specialist-groups";
@@ -116,27 +115,26 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done();
   }
 
-  if (runs("lists")) {
-    // Count and lists are dbt models: `dbt build` runs them in dependency order
-    // and tests them, then their tables are written out as files. Both run even
-    // --from lists: count takes seconds, and the lists read its tables.
-    done = step("3 count, 4 lists (dbt)");
+  if (runs("precomputed")) {
+    // Count, lists and the precomputed stage's SQL tables are dbt models: `dbt
+    // build` runs them in dependency order and tests them, then their tables are
+    // written out as files. All of it runs from any of those stages: it takes
+    // seconds, and each model reads the ones before it.
+    done = step("3 count, 4 lists, 5 precomputed SQL (dbt)");
     runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
     await exportDbtTables(T, BUILD_DIR);
     done();
   }
 
   if (runs("precomputed")) {
-    done = step("5 precomputed");
+    // What dbt can't do: the app's own breakdown and revision logic, run ahead of
+    // time with the app's code so a precomputed number matches its live one.
+    done = step("5 precomputed (app code)");
     const colDifferences = { splitCandidates: T.splitCandidates, synonymAssessed: T.synonymAssessed, colToAssessed: T.colToAssessed };
-    await buildColDifferences({ appTaxa: T.appTaxa, assessed: T.assessed, link: T.appLink }, colDifferences);
     await buildColRevisions({ ...colDifferences, species: T.species, link: T.appLink, assessed: T.assessed, appTaxa: T.appTaxa }, T.colRevisions);
     await buildSummaries({ ...colDifferences, assessed: T.assessed, ne: T.ne, species: T.species, link: T.appLink, appTaxa: T.appTaxa,
       specialistGroupSpecies: T.specialistGroupSpecies },
       { taxaSummary: T.taxaSummary, countryStats: T.countryStats, table1aChildren: T.table1aChildren, sscChildren: T.sscChildren });
-    await buildSearchIndex({ assessed: T.assessed, ne: T.ne, link: T.appLink, commonNames: T.commonNames, treeNames: T.treeNames },
-      { nameIndex: T.nameIndex, rankIndex: T.rankIndex });
-    await buildSynonymIndex({ appTaxa: T.appTaxa, species: T.species, link: T.appLink, assessed: T.assessed }, T.synonymIndex);
     // Into the repo, not the sync: the app's client code imports these at build time.
     await buildColTaxonIds({ appTaxa: T.appTaxa });
     writeColReleasePin(col.xr, col.checklist);

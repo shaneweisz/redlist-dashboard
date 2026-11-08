@@ -124,7 +124,7 @@ export async function buildColRevisions(
   // The evidence behind every split: CoL keeps the old infraspecific name as a
   // synonym when one is promoted, so "which accepted species does the name
   // 'Vallonia costata var. montana' resolve to today" IS the signal. Same
-  // resolution (including the autonym hop) as SPLIT_CANDIDATES_SQL, kept here
+  // resolution (including the autonym hop) as dbt/models/precomputed/col_split_candidates.sql, kept here
   // rather than added to that shared table so the committed
   // col-split-candidates.parquet keeps its current shape.
   await conn.run(`
