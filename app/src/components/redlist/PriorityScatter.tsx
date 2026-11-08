@@ -11,10 +11,11 @@
  *
  * Quiet grey bars along the bottom and left edges are the dots' distribution
  * along each axis, in even bins lined up with the ticks: 5 years across, one
- * power of ten (or 10%) up. With a box drawn, each bar's share inside it is
- * shaded darker. Clicking a bar selects that band, the same box filter as a
- * drag, so there is one way to select here. A dot outside another filter that
- * this chart ignores (an age or GBIF range, 10+ yrs old) is faded, not dropped.
+ * power of ten (or 10%) up. Clicking a bar is a real page filter (years=, or
+ * the y metric's gbif…= in the URL; ⌘/Ctrl-click adds one), and the dots
+ * outside the chosen bars, or 10+ yrs old, are removed. Each edge's bars count
+ * the dots inside the other edge's filter only, so the unchosen bars stay
+ * visible to click.
  *
  * The axes' extents come from the caller (the whole taxon, not the filtered
  * points), so applying a filter never rescales the chart.
@@ -38,12 +39,17 @@ export interface PriorityPoint {
   total: number | null;
   newRecords: number | null;
   assessmentDate: string;
-  /** Outside an edge-bar selection: drawn faded, not selectable by a box. */
-  dim?: boolean;
+  /** Outside the years filter (an age range, 10+ yrs old) / the y metric's GBIF ranges: not drawn. */
+  outX: boolean;
+  outY: boolean;
 }
 
-/** One edge bar: a band of its axis, [lo, hi) in data units (years, or the raw GBIF value). */
-interface Bin { key: string; lo: number; hi: number; label: string; count: number; inBox: number }
+/**
+ * One edge bar: a band of its axis, [lo, hi) in data units (years, or the raw
+ * GBIF value). Its key is the range as the URL filter spells it ("10-15 years",
+ * "100-999", "20-30%"); mid is a value inside it, to ask whether it is selected.
+ */
+interface Bin { key: string; lo: number; hi: number; mid: number; label: string; count: number }
 
 /**
  * A selection: the box in plot units (years; log10(value + 1), or %), for
@@ -69,11 +75,7 @@ export interface PriorityDetails {
   gbifUrl: string | null;
 }
 
-export interface PriorityBox {
-  x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string>;
-  /** Set when the box is an edge bar's band (clicking that bar again clears it). */
-  band?: string;
-}
+export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
@@ -157,8 +159,14 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yLabel, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, categoryNames, box, onBoxChange, onPointClick, details, selectedKey, yScale, yLabel, maxYears, maxValue, xSelected, ySelected, onXBin, onYBin }: {
   points: PriorityPoint[];
+  /** Whether a point on each axis is inside its filter; null when nothing is chosen on it. */
+  xSelected: ((years: number) => boolean) | null;
+  ySelected: ((value: number) => boolean) | null;
+  /** An edge bar's click, with its range key (the event carries ⌘/Ctrl for multi-select). */
+  onXBin: (range: string, e: React.MouseEvent) => void;
+  onYBin: (range: string, e: React.MouseEvent) => void;
   yScale: YScale;
   /** The y axis title, e.g. "New GBIF records". */
   yLabel: string;
@@ -216,9 +224,9 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
   // species on the same count, above all 0, show as a band rather than a line),
   // plus a coarse grid for hover hit-testing.
   const layout = useMemo(() => {
-    // Faded dots first, then least concerning, so selected and threatened dots sit on top.
-    const ordered = [...points].sort((a, b) =>
-      (a.dim === b.dim ? 0 : a.dim ? -1 : 1) || (DRAW_RANK[a.category] ?? 0) - (DRAW_RANK[b.category] ?? 0));
+    // Only the dots inside both axes' filters, least concerning first so threatened dots sit on top.
+    const ordered = points.filter((p) => !p.outX && !p.outY)
+      .sort((a, b) => (DRAW_RANK[a.category] ?? 0) - (DRAW_RANK[b.category] ?? 0));
     const xy = new Float32Array(ordered.length * 2);
     const grid = new Map<number, number[]>();
     const cell = 12;
@@ -283,7 +291,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     const r = big ? 1.2 : 2.4;
     for (let i = 0; i < ordered.length; i++) {
       const p = ordered[i];
-      const dim = p.dim || (box ? !box.keys.has(p.key) : false);
+      const dim = box ? !box.keys.has(p.key) : false;
       ctx.globalAlpha = dim ? 0.1 : big ? 0.5 : 0.75;
       ctx.fillStyle = colors[p.category] || "#a1a1aa";
       const x = xy[i * 2], y = xy[i * 2 + 1];
@@ -381,7 +389,7 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       const { ordered, xy } = layout;
       for (let i = 0; i < ordered.length; i++) {
         const px = xy[i * 2], py = xy[i * 2 + 1];
-        if (!ordered[i].dim && px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
+        if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
       }
       onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
       return true;
@@ -407,63 +415,43 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
     ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;
 
   // The edge bars: even bins lined up with the ticks (5 years; a power of ten,
-  // or 10%), counting the dots in view and, with a box drawn, those inside it.
+  // or 10%). Each edge counts the dots inside the other edge's filter, ignoring
+  // its own, so its unchosen bars stay visible to click.
   const bins = useMemo(() => {
     const x: Bin[] = [];
-    for (let lo = 0; lo < scales.xMax; lo += 5) x.push({ key: `x${lo}`, lo, hi: lo + 5, label: `${lo}–${lo + 5} years since assessed`, count: 0, inBox: 0 });
+    for (let lo = 0; lo < scales.xMax; lo += 5) x.push({ key: `${lo}-${lo + 5} years`, lo, hi: lo + 5, mid: lo + 2.5, label: `${lo}–${lo + 5} years since assessed`, count: 0 });
     const y: Bin[] = yScale === "pct"
-      ? Array.from({ length: 10 }, (_, i) => ({ key: `y${i}`, lo: i * 10, hi: (i + 1) * 10, label: `${i * 10}–${(i + 1) * 10}% new records`, count: 0, inBox: 0 }))
-      : [{ key: "y0", lo: 0, hi: 1, label: "No records", count: 0, inBox: 0 },
+      ? Array.from({ length: 10 }, (_, i) => ({ key: `${i * 10}-${(i + 1) * 10}%`, lo: i * 10, hi: (i + 1) * 10, mid: i * 10 + 5, label: `${i * 10}–${(i + 1) * 10}% new records`, count: 0 }))
+      : [{ key: "0", lo: 0, hi: 1, mid: 0, label: "No records", count: 0 },
         ...Array.from({ length: scales.yMax }, (_, k) => ({
-          key: `y${k + 1}`, lo: 10 ** k, hi: 10 ** (k + 1),
-          label: `${(10 ** k).toLocaleString()}–${(10 ** (k + 1) - 1).toLocaleString()} records`, count: 0, inBox: 0,
+          key: `${10 ** k}-${10 ** (k + 1) - 1}`, lo: 10 ** k, hi: 10 ** (k + 1), mid: 5 * 10 ** k,
+          label: `${(10 ** k).toLocaleString()}–${(10 ** (k + 1) - 1).toLocaleString()} records`, count: 0,
         }))];
-    const xIndex = (p: PriorityPoint) => Math.min(Math.floor(p.years / 5), x.length - 1);
-    const yIndex = (p: PriorityPoint) => Math.min(y.length - 1, yScale === "pct"
-      ? Math.floor(p.value / 10)
-      : p.value < 1 ? 0 : Math.floor(Math.log10(p.value) + 1e-9) + 1);
     for (const p of points) {
-      if (p.dim) continue;
-      const inBox = box?.keys.has(p.key) ? 1 : 0;
-      const bx = x[xIndex(p)], by = y[yIndex(p)];
-      bx.count++; by.count++; bx.inBox += inBox; by.inBox += inBox;
+      if (!p.outY) x[Math.min(Math.floor(p.years / 5), x.length - 1)].count++;
+      if (!p.outX) y[Math.min(y.length - 1, yScale === "pct"
+        ? Math.floor(p.value / 10)
+        : p.value < 1 ? 0 : Math.floor(Math.log10(p.value) + 1e-9) + 1)].count++;
     }
-    return { x, y, xIndex, yIndex };
-  }, [points, box, scales.xMax, scales.yMax, yScale]);
+    return { x, y };
+  }, [points, scales.xMax, scales.yMax, yScale]);
 
-  /** An edge bar's click: select its band (the same box filter as a drag), or clear it if it is the box. */
-  const selectBand = (axis: "x" | "y", bin: Bin) => {
-    if (box?.band === bin.key) { onBoxChange(null); return; }
-    const index = axis === "x" ? bins.xIndex : bins.yIndex;
-    const list = axis === "x" ? bins.x : bins.y;
-    const keys = new Set<string>();
-    for (const p of points) if (!p.dim && list[index(p)] === bin) keys.add(p.key);
-    const { xMax, yMax } = scales;
-    onBoxChange(axis === "x"
-      ? { x0: bin.lo, x1: bin.hi, y0: -1, y1: yMax + 1, keys, band: bin.key }
-      : { x0: -1, x1: xMax + 1, y0: bin.lo === 0 ? -1 : toPlotY(bin.lo, yScale), y1: toPlotY(bin.hi, yScale), keys, band: bin.key });
-  };
-
-  const share = (bin: Bin, length: number) => (bin.inBox ? Math.max(2, (bin.inBox / Math.max(1, bin.count)) * length) : 0);
   const xMaxCount = Math.max(1, ...bins.x.map((b) => b.count));
   const yMaxCount = Math.max(1, ...bins.y.map((b) => b.count));
   const bars = width > 0 ? [
     ...bins.x.map((bin) => {
       const left = scales.sx(bin.lo), right = scales.sx(Math.min(bin.hi, scales.xMax));
       const h = bin.count ? Math.max(1, (bin.count / xMaxCount) * BOTTOM_HIST) : 0;
-      return { bin, axis: "x" as const, rect: { left: left + 1, width: right - left - 2, top: M.top + scales.plotH + X_TICKS + 4, height: h },
-        // The in-box share, from the bar's base (its top edge, the axis side);
-        // at least 2px, so a small selection still shows where it falls.
-        inner: { left: 0, top: 0, width: "100%", height: share(bin, h) } };
+      return { bin, axis: "x" as const, selected: xSelected?.(bin.mid) ?? null, rect: { left: left + 1, width: right - left - 2, top: M.top + scales.plotH + X_TICKS + 4, height: h } };
     }),
     ...bins.y.map((bin) => {
       const top = scales.sy(Math.min(toPlotY(bin.hi, yScale), scales.yMax)), bottom = scales.sy(toPlotY(bin.lo, yScale));
       const w = bin.count ? Math.max(1, (bin.count / yMaxCount) * LEFT_HIST) : 0;
-      return { bin, axis: "y" as const, rect: { top: top + 1, height: bottom - top - 2, left: M.left - Y_TICKS - 4 - w, width: w },
-        inner: { right: 0, top: 0, height: "100%", width: share(bin, w) } };
+      return { bin, axis: "y" as const, selected: ySelected?.(bin.mid) ?? null, rect: { top: top + 1, height: bottom - top - 2, left: M.left - Y_TICKS - 4 - w, width: w } };
     }),
   ].filter((b) => b.rect.width > 0 && b.rect.height > 0) : [];
-  const hoverBinLive = hoverBin ? [...bins.x, ...bins.y].find((b) => b.key === hoverBin.key) ?? null : null;
+  const hoverBar = hoverBin ? bars.find((b) => `${b.axis}-${b.bin.key}` === hoverBin.key) ?? null : null;
+  const hoverBinLive = hoverBar?.bin ?? null;
   const binTipRef = useRef<HTMLDivElement>(null);
   const binTipPos = usePlacement(binTipRef, hoverBinLive ? hoverBin : null, width, height, 8, false);
 
@@ -486,38 +474,32 @@ export default function PriorityScatter({ points, colors, categoryNames, box, on
       onMouseLeave={() => { cancelLeave(); setHover(null); setExpanded(false); }}
     >
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height, display: "block" }} />
-      {/* The edge bars: grey, with the in-box share darker; a click selects the band. */}
-      {bars.map(({ bin, axis, rect, inner }) => {
-        const isBand = box?.band === bin.key;
-        return (
-          <button
-            key={bin.key}
-            type="button"
-            aria-pressed={isBand}
-            aria-label={`${bin.label}: ${bin.count.toLocaleString()} species. Select this band`}
-            className="group absolute z-10 cursor-pointer overflow-hidden rounded-[2px] bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600"
-            style={rect}
-            onMouseDown={stop}
-            onMouseUp={stop}
-            onMouseMove={(e) => { stop(e); setHover(null); setHoverBin({ key: bin.key, px: rect.left + rect.width / 2, py: rect.top + rect.height / 2 }); }}
-            onMouseLeave={() => setHoverBin(null)}
-            onClick={() => selectBand(axis, bin)}
-          >
-            {box && bin.inBox > 0 && (
-              <span className="absolute bg-zinc-500 dark:bg-zinc-400" style={isBand ? { inset: 0 } : inner} />
-            )}
-          </button>
-        );
-      })}
+      {/* The edge bars: grey; with a filter on an axis, its chosen bars darker and the rest lighter. */}
+      {bars.map(({ bin, axis, rect, selected: on }) => (
+        <button
+          key={`${axis}-${bin.key}`}
+          type="button"
+          aria-pressed={on === true}
+          aria-label={`${bin.label}: ${bin.count.toLocaleString()} species. Filter to this range`}
+          className={`absolute z-10 cursor-pointer rounded-[2px] ${on == null
+            ? "bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-600 dark:hover:bg-zinc-500"
+            : on ? "bg-zinc-600 hover:bg-zinc-700 dark:bg-zinc-300 dark:hover:bg-zinc-200"
+              : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"}`}
+          style={rect}
+          onMouseDown={stop}
+          onMouseUp={stop}
+          onMouseMove={(e) => { stop(e); setHover(null); setHoverBin({ key: `${axis}-${bin.key}`, px: rect.left + rect.width / 2, py: rect.top + rect.height / 2 }); }}
+          onMouseLeave={() => setHoverBin(null)}
+          onClick={(e) => (axis === "x" ? onXBin : onYBin)(bin.key, e)}
+        />
+      ))}
       {hoverBinLive && (
         <div ref={binTipRef} role="tooltip"
           className="pointer-events-none absolute z-30 whitespace-nowrap rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-md px-2 py-1 text-[11px] leading-[14px]"
           style={placedStyle(binTipPos)}>
           <div className="text-zinc-900 dark:text-zinc-100 font-medium">{hoverBinLive.label}</div>
-          <div className="tabular-nums text-zinc-600 dark:text-zinc-400">
-            {hoverBinLive.count.toLocaleString()} species{box && box.band !== hoverBinLive.key ? ` · ${hoverBinLive.inBox.toLocaleString()} selected` : ""}
-          </div>
-          <div className="text-zinc-400">{box?.band === hoverBinLive.key ? "Click to clear" : "Click to select this band"}</div>
+          <div className="tabular-nums text-zinc-600 dark:text-zinc-400">{hoverBinLive.count.toLocaleString()} species</div>
+          <div className="text-zinc-400">{hoverBar?.selected ? "Click to clear · ⌘-click to remove" : "Click to filter · ⌘-click to add"}</div>
         </div>
       )}
       {(dragPx ?? boxPx) && (

@@ -11,7 +11,7 @@ import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
-  GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
+  GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, gbifRangeMatches, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
@@ -576,7 +576,6 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 // A chart's own axis, so its bars keep showing what clicking them would select.
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
-const SKIP_PRIORITY = skipSet("priority");
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -598,16 +597,41 @@ const SKIP_CREDITS = skipSet("assessors", "reviewers", "facilitators", "contribu
 const SKIP_REVISION = skipSet("revision", "endemics", "growthForms");
 
 
+// yearsSince per assessment date, for today: ~175k species share a few thousand
+// dates, and the triage scatter asks for every one on each metric switch.
+let yearsCacheDay = -1;
+const yearsCache = new Map<string, number>();
+function cachedYearsSince(date: string): number {
+  const today = Math.floor(Date.now() / 86_400_000); // the UTC day, cheaply
+  if (today !== yearsCacheDay) { yearsCache.clear(); yearsCacheDay = today; }
+  let y = yearsCache.get(date);
+  if (y === undefined) { y = yearsSince(date); yearsCache.set(date, y); }
+  return y;
+}
+
 /** Where a species sits on the triage scatter for a y-axis key; null when it has no date or no value. */
 function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
   if (s.category === "NE" || !s.assessment_date) return null;
-  const years = yearsSince(s.assessment_date);
+  const years = cachedYearsSince(s.assessment_date);
   const value = gbifMetricValue(s, key);
   return isNaN(years) || value == null ? null : { years, value };
 }
 
 // The scatter shows every species its box, an age range (or 10+ yrs old) or a
 // GBIF range would hide too, faded: those are all filters on its own axes.
+
+/**
+ * A Years Since Assessed range as [from, to) years: the old chart's buckets
+ * ("<1 year", "10-20 years", "20+ years") or the triage scatter's even 5-year
+ * bins ("10-15 years"). Both live in the URL's years=, so old links still work.
+ */
+function yearRangeSpan(range: string): [number, number] | null {
+  if (range === "<1 year") return [0, 1];
+  let m = /^(\d+)-(\d+) years$/.exec(range);
+  if (m) return [+m[1], +m[2]];
+  m = /^(\d+)\+ years$/.exec(range);
+  return m ? [+m[1], Infinity] : null;
+}
 const SKIP_PRIORITY_AXES = skipSet("priority", "years", "assessmentYears", "obs");
 
 // Explain IUCN Red List criteria codes
@@ -1900,13 +1924,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (!assessmentDate) return false;
     const years = yearsSince(assessmentDate);
     for (const range of yearRanges) {
-      switch (range) {
-        case "<1 year": if (years < 1) return true; break;
-        case "1-5 years": if (years >= 1 && years < 5) return true; break;
-        case "5-10 years": if (years >= 5 && years < 10) return true; break;
-        case "10-20 years": if (years >= 10 && years < 20) return true; break;
-        case "20+ years": if (years >= 20) return true; break;
-      }
+      const span = yearRangeSpan(range);
+      if (span && years >= span[0] && years < span[1]) return true;
     }
     return false;
   }, [selectedYearRanges]);
@@ -2429,7 +2448,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // "what does this chart deliberately ignore?" is a visible argument rather
   // than an absence you have to notice. The skip sets below are exactly what the
   // old inline chains did, quirks included — see SKIP_THREATS et al.
-  const matchesFilters = useCallback((s: Species, skip: ReadonlySet<FilterAxis>): boolean => {
+  const matchesFilters = useCallback((s: Species, skip: ReadonlySet<FilterAxis>, obsKey?: GbifRangeKey): boolean => {
     if (!skip.has("search") && !matchesSearch(s)) return false;
     if (!skip.has("categories") && selectedCategories.size > 0 && !selectedCategories.has(s.category)) return false;
     if (!skip.has("countries") && selectedCountries.size > 0 && !s.countries.some(c => selectedCountries.has(c))) return false;
@@ -2437,7 +2456,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // assessment date to compare against.
     if (!skip.has("years") && s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return false;
     if (!skip.has("assessmentYears") && s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return false;
-    if (!matchesGbifFilters(s, skip.has("obs") ? gbifChartKey : undefined)) return false;
+    // The "obs" axis is the chart showing GBIF ranges: the GBIF Records chart's
+    // key by default, or the one a caller names (the triage scatter's y axis).
+    // An argument rather than a dependency, so switching the scatter's metric
+    // doesn't make every other chart re-filter 175k species.
+    if (!matchesGbifFilters(s, skip.has("obs") ? (obsKey ?? gbifChartKey) : undefined)) return false;
     if (!skip.has("assessmentCounts") && selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return false;
     if (!skip.has("systems") && selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return false;
     if (!skip.has("trends") && selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return false;
@@ -2574,34 +2597,65 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
     const { mode } = gbifKeyParts(priorityKey);
-    for (const s of taxaFilteredSpecies) {
+    const outdated = exactFilters.outdated;
+    // One full filter pass per species (everything but the scatter's own axes),
+    // then the two axes' own filters, cheaply: a dot outside them is faded, and
+    // each edge's bars count the dots inside the other axis's filter.
+    for (const s of taxaFilteredSpeciesBase) {
       const p = priorityOf(s, priorityKey);
-      if (!p || !matchesFilters(s, SKIP_PRIORITY_AXES)) continue;
+      if (!p || !matchesFilters(s, SKIP_PRIORITY_AXES, priorityKey)) continue;
+      const outX = !matchesYearRangeFilter(s.assessment_date) || !matchesAssessmentYearFilter(s.assessment_date)
+        || (outdated != null && isOutdated(s.assessment_date, dataAsOf) !== (outdated === "yes"));
+      const outY = !matchesGbifFilters(s);
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
         total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
-        assessmentDate: s.assessment_date!, ...p,
-        // Outside an edge-bar selection (Years Since Assessed / GBIF Records): faded.
-        dim: !matchesFilters(s, SKIP_PRIORITY),
+        assessmentDate: s.assessment_date!, ...p, outX, outY,
       });
     }
     return out;
-  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey]);
+  }, [taxaFilteredSpeciesBase, matchesFilters, matchesYearRangeFilter, matchesAssessmentYearFilter, matchesGbifFilters, exactFilters.outdated, dataAsOf, isNewAssessments, priorityKey]);
   // The axes' extents from the whole taxon, filters ignored, so applying or
   // changing a filter never rescales the chart and selections stay comparable.
   const priorityExtent = useMemo(() => {
     let maxYears = 0, maxValue = 0;
-    for (const s of taxaFilteredSpecies) {
+    for (const s of taxaFilteredSpeciesBase) {
       const p = priorityOf(s, priorityKey);
       if (!p) continue;
       if (p.years > maxYears) maxYears = p.years;
       if (p.value > maxValue) maxValue = p.value;
     }
     return { maxYears, maxValue };
-  }, [taxaFilteredSpecies, priorityKey]);
+  }, [taxaFilteredSpeciesBase, priorityKey]);
+  // Which of the scatter's edge bars are selected, by a point on its axis (a
+  // bar's middle): from the years= ranges and 10+ yrs old across, and the y
+  // metric's own GBIF ranges up. Null when nothing is selected on that axis.
+  const priorityXSelected = useMemo(() => {
+    const spans = [...selectedYearRanges].map(yearRangeSpan).filter((x): x is [number, number] => x != null);
+    const outdated = exactFilters.outdated;
+    if (spans.length === 0 && !outdated) return null;
+    return (years: number) => (spans.length === 0 || spans.some(([lo, hi]) => years >= lo && years < hi))
+      && (!outdated || (years >= 10) === (outdated === "yes"));
+  }, [selectedYearRanges, exactFilters.outdated]);
+  const priorityYSelected = useMemo(() => {
+    const sel = gbifRanges[priorityKey];
+    if (sel.size === 0) return null;
+    const { metric } = gbifKeyParts(priorityKey);
+    return (value: number) => [...sel].some((r) => gbifRangeMatches(r, value, metric));
+  }, [gbifRanges, priorityKey]);
+  // An edge bar's click: select its range (⌘/Ctrl-click to add or remove one),
+  // or clear it when it is the only one selected. Real URL filters, like the
+  // bar charts they replace.
+  const togglePriorityRange = useCallback((update: (u: (prev: Set<string>) => Set<string>) => void, range: string, e: React.MouseEvent) => {
+    const multi = e.metaKey || e.ctrlKey;
+    update((prev) => {
+      if (multi) { const next = new Set(prev); if (next.has(range)) next.delete(range); else next.add(range); return next; }
+      return prev.size === 1 && prev.has(range) ? new Set() : new Set([range]);
+    });
+  }, []);
   // The scatter tooltip's expanded details: looked up for the one species only.
   const priorityDetails = useCallback((key: string): PriorityDetails | null => {
-    const s = taxaFilteredSpecies.find((x) => x.species_key === key);
+    const s = taxaFilteredSpeciesBase.find((x) => x.species_key === key);
     if (!s) return null;
     return {
       criteria: s.criteria, populationTrend: s.population_trend, possiblyExtinct: s.possibly_extinct,
@@ -2612,14 +2666,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       redListUrl: s.sis_taxon_id && s.assessment_id ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}` : null,
       gbifUrl: s.gbif_species_key ? `https://www.gbif.org/species/${s.gbif_species_key}` : null,
     };
-  }, [taxaFilteredSpecies]);
+  }, [taxaFilteredSpeciesBase]);
   const priorityYLabel = useMemo(() => {
     const { metric, mode } = gbifKeyParts(priorityKey);
     const what = mode === "georeferenced" ? "georeferenced GBIF records" : "GBIF records";
     return metric === "total" ? `Total ${what}` : metric === "new" ? `New ${what}` : `% new ${what}`;
   }, [priorityKey]);
   const priorityInBox = useMemo(
-    () => priorityBox ? priorityPoints.filter((p) => !p.dim && priorityBox.keys.has(p.key)).length : 0,
+    () => priorityBox ? priorityPoints.filter((p) => !p.outX && !p.outY && priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
   );
 
@@ -5193,7 +5247,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                   <div className="min-w-0">
                     <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                    <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag or click a bar to select · click a dot to show it in the table</span>
+                    <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Click a bar to filter · drag to select · click a dot to show it in the table</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <button
@@ -5223,6 +5277,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     categoryNames={CATEGORY_NAMES}
                     details={priorityDetails}
                     yLabel={priorityYLabel}
+                    xSelected={priorityXSelected}
+                    ySelected={priorityYSelected}
+                    onXBin={(range, e) => togglePriorityRange(setSelectedYearRanges, range, e)}
+                    onYBin={(range, e) => togglePriorityRange((u) => setGbifRanges(priorityKey, u), range, e)}
                     box={priorityBox}
                     onBoxChange={setPriorityBox}
                     onPointClick={openSpeciesFromScatter}

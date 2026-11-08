@@ -161,13 +161,35 @@ export function gbifBucket(value: number | null, metric: GbifMetric): string | n
   return "10K+";
 }
 
+const EVEN_RANGE_RE = /^(\d+)-(\d+)(%?)$/;
+
+/**
+ * Whether a value falls in a selected range. A range is either one of the GBIF
+ * Records chart's buckets ("1-10", "10K+", "<10%"), or one of the triage
+ * scatter's even bins: a power of ten for counts ("10-99", "1000-9999",
+ * inclusive) or 10% for % New ("20-30%", the top one taking 100%). Both kinds
+ * live in the same URL parameter, so a link made with either keeps working.
+ */
+export function gbifRangeMatches(range: string, value: number, metric: GbifMetric): boolean {
+  if (gbifBucket(value, metric) === range) return true;
+  const m = EVEN_RANGE_RE.exec(range);
+  if (!m) return false;
+  const lo = +m[1], hi = +m[2];
+  if (metric === "pctNew") return m[3] === "%" && value >= lo && (value < hi || (hi === 100 && value <= 100));
+  return m[3] === "" && value >= lo && value <= hi;
+}
+
 /** Does a species pass every GBIF range selection (except `skip`, the chart's own)? */
 export function matchesGbifRanges(s: GbifRecordCounts, ranges: GbifRanges, skip?: GbifRangeKey): boolean {
   for (const key of GBIF_RANGE_KEYS) {
     const sel = ranges[key];
     if (key === skip || sel.size === 0) continue;
-    const b = gbifBucket(gbifMetricValue(s, key), gbifKeyParts(key).metric);
-    if (b == null || !sel.has(b)) return false;
+    const value = gbifMetricValue(s, key);
+    if (value == null) return false;
+    const { metric } = gbifKeyParts(key);
+    let ok = false;
+    for (const range of sel) if (gbifRangeMatches(range, value, metric)) { ok = true; break; }
+    if (!ok) return false;
   }
   return true;
 }
