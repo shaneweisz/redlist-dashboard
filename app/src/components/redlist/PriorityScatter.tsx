@@ -53,11 +53,11 @@ const M = { left: Y_TITLE + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + X_TIT
 const HEIGHT = 300;
 const HIT_RADIUS = 6;
 
-/** "10 years, 3 months ago", "4 months ago", "this month". */
+/** "10y 3m ago", "4m ago", "this month": short, so the tooltip stays narrow (the table says "10y ago"). */
 function ageText(date: string): string {
   const { years, months } = yearsMonthsSince(date);
-  const parts = [years ? `${years} year${years === 1 ? "" : "s"}` : "", months ? `${months} month${months === 1 ? "" : "s"}` : ""].filter(Boolean);
-  return parts.length ? `${parts.join(", ")} ago` : "this month";
+  const parts = [years ? `${years}y` : "", months ? `${months}m` : ""].filter(Boolean);
+  return parts.length ? `${parts.join(" ")} ago` : "this month";
 }
 
 /** % New as the species table shows it: "<1%" for a sliver, "—" with no records or no window. */
