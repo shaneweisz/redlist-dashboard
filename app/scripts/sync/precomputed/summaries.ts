@@ -13,14 +13,17 @@
  * Every other level of the tree is answered live (live-taxa-children.ts).
  *
  * Built from: lists/assessed, lists/ne, lists/species, assessment_link,
- * taxonomy/taxa and the CoL-differences tables; the taxonomy tree
- * (src/config/taxonomy-tree.ts).
+ * taxonomy/taxa, specialist_group_species and the CoL-differences tables; the
+ * taxonomy tree (src/config/taxonomy-tree.ts).
  *
  * Decisions:
  *   - Assessed species count in IUCN's group, so Table 1a stays exact; Not
  *     Evaluated species in their CoL group.
- *   - A node's species are the app's own SQL filter for it (childFilterSql in
- *     taxonomy-sql.ts), so these numbers are the ones the live views compute.
+ *   - A child's species: an IUCN group's are those of its taxon_group; a
+ *     Specialist Group's are its rows in specialist_group_species
+ *     (dbt/models/lists/), which the sync's checks confirm agree with the app's
+ *     live filter (childFilterSql in taxonomy-sql.ts), so these numbers are the
+ *     ones the live views compute.
  *   - Outdated: assessed more than ten years before the sync, or undated.
  *   - "all" isn't summarised: its children mix the top-level taxa with the SSC
  *     wrappers, and nothing reads them as one list.
@@ -37,13 +40,14 @@ import type { TaxonomyNode } from "../../../src/config/taxonomy-tree";
 import type { NodeSummary } from "../../../src/lib/data/species-store";
 import { COL_SPECIES_NAME_OVERRIDES } from "../../../src/config/col-described-overrides";
 import { outdatedCutoffDate } from "../../../src/lib/outdated";
-import { filterToSql, childFilterSql, canonicalClassColumnSql, canonicalOrderColumnSql, type NodeFilter } from "../../../src/lib/taxonomy-sql";
+import { canonicalClassColumnSql, canonicalOrderColumnSql, type NodeFilter } from "../../../src/lib/taxonomy-sql";
 import { DYNAMIC_DRILLDOWN_ROOTS, nextDynamicRank } from "../../../src/lib/dynamic-taxon";
 import { computeBreakdownEntry, type BreakdownQueryContext } from "../../../src/lib/data/col-breakdown";
 import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-records";
 import { lit, openDuckDB } from "../sql";
 import { output, parquet } from "../paths";
 import { loadColDifferences, type ColDifferenceFiles } from "./col-differences";
+import { isSpecialistGroup } from "../sources/specialist-groups";
 
 export interface TaxonSummaryRow {
   table1a_taxon_group: string;
@@ -66,7 +70,7 @@ type Rows = Record<string, unknown>[];
 const all = async (conn: DuckDBConnection, sql: string): Promise<Rows> => (await conn.runAndReadAll(sql)).getRowObjects();
 
 export async function buildSummaries(
-  inputs: ColDifferenceFiles & { assessed: string; ne: string; species: string; link: string; appTaxa: string },
+  inputs: ColDifferenceFiles & { assessed: string; ne: string; species: string; link: string; appTaxa: string; specialistGroupSpecies: string },
   out: { taxaSummary: string; countryStats: string; table1aChildren: string; sscChildren: string },
 ): Promise<void> {
   const conn = await openDuckDB();
@@ -74,6 +78,7 @@ export async function buildSummaries(
   const outdated = `(assessment_date IS NULL OR CAST(assessment_date AS DATE) <= ${lit(cutoff)}::DATE)`;
   await conn.run(`CREATE TEMP TABLE assessed AS SELECT * FROM ${parquet(inputs.assessed)}`);
   await conn.run(`CREATE TEMP TABLE ne AS SELECT * FROM ${parquet(inputs.ne)}`);
+  await conn.run(`CREATE TEMP TABLE membership AS ${membershipSql(inputs)}`);
   // Species GBIF has records for, per group and key: assessed ones in their IUCN
   // group, Not Evaluated ones in their CoL group.
   await conn.run(`CREATE TEMP TABLE gbif_species AS
@@ -97,10 +102,10 @@ export async function buildSummaries(
   console.log(`   ${Object.keys(countries).length} countries → ${out.countryStats}`);
 
   const children: Record<string, NodeSummary[]> = {};
+  const counts = await nodeCounts(conn, outdated);
   for (const [nodeId, node] of NODE_INDEX) {
     if (!hasChildren(nodeId) || nodeId === "all") continue;
-    children[nodeId] = [];
-    for (let i = 0; i < node.children!.length; i++) children[nodeId].push(await childSummary(conn, node.children!, i, outdated));
+    children[nodeId] = node.children!.map((child) => childSummary(child, counts));
   }
   await attachColCounts(conn, children, inputs);
 
@@ -155,26 +160,65 @@ async function groupSummaries(conn: DuckDBConnection, inputs: { species: string;
   return rows;
 }
 
-/** One child's summary among its siblings. */
-async function childSummary(conn: DuckDBConnection, siblings: TaxonomyNode[], i: number, outdated: string): Promise<NodeSummary> {
-  const node = siblings[i];
-  const where = childFilterSql(siblings, i);
+/**
+ * Which species each summarised child holds, as (sis_taxon_id, col_id, node_id):
+ * a Specialist Group's from specialist_group_species, an IUCN group's (the
+ * children of Invertebrates, Plants and Fungi) by taxon_group.
+ */
+function membershipSql(inputs: { assessed: string; species: string; specialistGroupSpecies: string }): string {
+  const groups: string[] = [];
+  for (const [id, node] of NODE_INDEX) {
+    if (id === "all" || !hasChildren(id)) continue;
+    for (const child of node.children!) {
+      if (isSpecialistGroup(child.id)) continue;
+      for (const g of child.filter.taxonGroups) groups.push(`(${lit(child.id)}, ${lit(g)})`);
+    }
+  }
+  const byGroup = groups.length === 0 ? "" : `
+    UNION ALL SELECT a.id, NULL, g.node_id FROM ${parquet(inputs.assessed)} a JOIN (VALUES ${groups.join(", ")}) g(node_id, taxon_group) USING (taxon_group)
+    UNION ALL SELECT NULL, s.col_id, g.node_id FROM ${parquet(inputs.species)} s JOIN (VALUES ${groups.join(", ")}) g(node_id, taxon_group) USING (taxon_group)`;
+  return `SELECT sis_taxon_id, col_id, group_id AS node_id FROM ${parquet(inputs.specialistGroupSpecies)}${byGroup}`;
+}
+
+interface NodeCounts {
+  byCategory: Map<string, { category: string | null; n: number; outdated: number }[]>;
+  neWithRecords: Map<string, { georeferenced: number; all: number }>;
+}
+
+/** Every node's assessed species by category, and its Not Evaluated species with records (membershipSql). */
+async function nodeCounts(conn: DuckDBConnection, outdated: string): Promise<NodeCounts> {
+  const byCategory: NodeCounts["byCategory"] = new Map();
+  for (const r of await all(conn, `
+    SELECT m.node_id, a.iucn_category AS category, count(*) AS n, count(*) FILTER (${outdated}) AS outdated
+    FROM assessed a JOIN membership m ON m.sis_taxon_id = a.id GROUP BY ALL ORDER BY m.node_id, n DESC, category`)) {
+    const id = String(r.node_id);
+    if (!byCategory.has(id)) byCategory.set(id, []);
+    byCategory.get(id)!.push({ category: r.category == null ? null : String(r.category), n: Number(r.n), outdated: Number(r.outdated) });
+  }
+  const neWithRecords: NodeCounts["neWithRecords"] = new Map();
+  for (const r of await all(conn, `
+    SELECT m.node_id, count(*) FILTER (ne.gbif_georeferenced_records_count > 0) AS georeferenced,
+           count(*) FILTER (ne.gbif_all_records_count > 0) AS "all"
+    FROM ne JOIN membership m ON m.col_id = ne.col_id GROUP BY m.node_id`)) {
+    neWithRecords.set(String(r.node_id), { georeferenced: Number(r.georeferenced), all: Number(r.all) });
+  }
+  return { byCategory, neWithRecords };
+}
+
+/** One child's summary. */
+function childSummary(node: TaxonomyNode, counts: NodeCounts): NodeSummary {
   const byCategory: Record<string, number> = {};
   let totalAssessed = 0, outdatedCount = 0;
-  for (const r of await all(conn, `
-    SELECT iucn_category AS category, count(*) AS n, count(*) FILTER (${outdated}) AS outdated
-    FROM assessed WHERE ${where} GROUP BY ALL ORDER BY n DESC, category`)) {
-    totalAssessed += Number(r.n);
-    outdatedCount += Number(r.outdated);
-    if (r.category) byCategory[String(r.category)] = Number(r.n);
+  for (const r of counts.byCategory.get(node.id) ?? []) {
+    totalAssessed += r.n;
+    outdatedCount += r.outdated;
+    if (r.category) byCategory[r.category] = r.n;
   }
-  const [ne] = await all(conn, `
-    SELECT count(*) FILTER (gbif_georeferenced_records_count > 0) AS georeferenced, count(*) FILTER (gbif_all_records_count > 0) AS "all"
-    FROM ne WHERE ${where}`);
+  const ne = counts.neWithRecords.get(node.id) ?? { georeferenced: 0, all: 0 };
   return {
     id: node.id, name: node.name, estimatedDescribed: node.estimatedDescribed ?? 0,
     totalAssessed, outdated: outdatedCount,
-    gbifNeSpecies: { georeferenced: Number(ne.georeferenced), all: Number(ne.all) },
+    gbifNeSpecies: { georeferenced: ne.georeferenced, all: ne.all },
     byCategory,
   };
 }
@@ -207,16 +251,17 @@ async function attachColCounts(
     conn, speciesGlob, assessedPath: inputs.assessed, linkPath: inputs.link,
     assessedCidsTable: "assessed_cids", hasTaxa: true, taxaPath: inputs.appTaxa,
   };
+  const colCounts = new Map((await all(conn, `
+    SELECT m.node_id, count(*) FILTER (s.described) AS col_described,
+           count(*) FILTER (s.described AND s.col_id NOT IN (SELECT col_id FROM assessed_cids)) AS col_ne
+    FROM ${parquet(inputs.species)} s JOIN membership m ON m.col_id = s.col_id GROUP BY m.node_id`)).map((r) => [String(r.node_id), r]));
   for (const children of Object.values(summaries)) {
     for (const child of children) {
       const node = NODE_INDEX.get(child.id);
       if (!node) continue;
-      const [r] = await all(conn, `
-        SELECT count(*) FILTER (described) AS col_described,
-               count(*) FILTER (described AND col_id NOT IN (SELECT col_id FROM assessed_cids)) AS col_ne
-        FROM ${parquet(inputs.species)} WHERE ${filterToSql(node.filter, node.id)}`);
-      child.colDescribed = Number(r.col_described);
-      child.colNe = Number(r.col_ne);
+      const r = colCounts.get(child.id);
+      child.colDescribed = Number(r?.col_described ?? 0);
+      child.colNe = Number(r?.col_ne ?? 0);
 
       const dim = COL_SPECIES_NAME_OVERRIDES[node.id] ? null : primaryDimension(node.filter);
       const f = node.filter;

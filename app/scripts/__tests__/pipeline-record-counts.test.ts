@@ -10,6 +10,7 @@ import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { tables } from "../sync/paths";
 import { runDbt, exportDbtTables } from "../sync/dbt";
+import { buildSpecialistGroups } from "../sync/sources/specialist-groups";
 
 let tmp: string;
 let conn: DuckDBConnection;
@@ -71,6 +72,9 @@ beforeAll(async () => {
 
   const T = tables(tmp);
   const today = "2026-11-06";
+  // The real Specialist Groups' remits; dbt's unit test (dbt/models/lists/_lists.yml)
+  // checks specialist_group_species's rules on its own rows once the models are built.
+  await buildSpecialistGroups({ remits: T.specialistGroupRemits, rankAliases: T.rankAliases });
   runDbt({ buildDir: tmp, today, quiet: true });
   await exportDbtTables(T, tmp);
   for (const r of (await conn.runAndReadAll(`SELECT * FROM read_parquet('${tables(tmp).assessed}')`)).getRowObjects()) {
@@ -100,6 +104,12 @@ describe("GBIF counts in the lists", () => {
   it("has no window for an assessment dated after today", () => {
     expect(rows["2"].gbif_georeferenced_records_since_assessment).toBeNull();
     expect(rows["2"].gbif_all_records_since_assessment).toBeNull();
+  });
+
+  it("puts a species in no Specialist Group when none covers its IUCN group", async () => {
+    // These are birds, and no Specialist Group's remit covers birds.
+    const [r] = (await conn.runAndReadAll(`SELECT count(*) AS n FROM read_parquet('${tables(tmp).specialistGroupSpecies}')`)).getRowObjects();
+    expect(Number(r.n)).toBe(0);
   });
 
   it("writes 0, not NULL, for a Not Evaluated species with no georeferenced records", () => {

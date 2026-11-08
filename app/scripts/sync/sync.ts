@@ -15,7 +15,8 @@
  * writes one table, documented at the top of its file. Count and lists are SQL
  * models run by dbt (dbt.ts): there, each model's ref()s are what it reads.
  *
- *   inputs       fetch and cache each input (inputs/)
+ *   inputs       fetch and cache each input (inputs/), and write the Specialist
+ *                Groups' remits from the app's config (sources/specialist-groups.ts)
  *   1 sources    each input as one clean table (sources/)
  *   2 link       which CoL species each assessed species is (link/)
  *   3 count      whose records each GBIF usage's are (dbt/models/count/)
@@ -43,6 +44,7 @@ import { buildTaxa } from "./sources/taxa";
 import { buildAssessments, REDLIST_DB } from "./sources/assessments";
 import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
+import { buildSpecialistGroups } from "./sources/specialist-groups";
 import { askMatcher } from "./link/matches";
 import { buildLink, summariseQueue } from "./link/assessment-link";
 import { runDbt, exportDbtTables } from "./dbt";
@@ -53,6 +55,7 @@ import { buildSearchIndex } from "./precomputed/search-index";
 import { buildSynonymIndex } from "./precomputed/synonym-index";
 import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
 import { observe, mismatches } from "./checks/check-fixtures";
+import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
@@ -90,6 +93,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
   manifest.inat = path.basename(path.dirname(inat));
+  // The Specialist Groups' remits come from the app's config, not the data, so
+  // they are written every run: an edited remit takes effect whatever --from says.
+  await buildSpecialistGroups({ remits: T.specialistGroupRemits, rankAliases: T.rankAliases });
   done();
 
   if (runs("sources")) {
@@ -112,9 +118,10 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
 
   if (runs("lists")) {
     // Count and lists are dbt models: `dbt build` runs them in dependency order
-    // and tests them, then their tables are written out as files.
-    done = step(runs("count") ? "3 count, 4 lists (dbt)" : "4 lists (dbt)");
-    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10), select: runs("count") ? undefined : "path:models/lists" });
+    // and tests them, then their tables are written out as files. Both run even
+    // --from lists: count takes seconds, and the lists read its tables.
+    done = step("3 count, 4 lists (dbt)");
+    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
     await exportDbtTables(T, BUILD_DIR);
     done();
   }
@@ -124,7 +131,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     const colDifferences = { splitCandidates: T.splitCandidates, synonymAssessed: T.synonymAssessed, colToAssessed: T.colToAssessed };
     await buildColDifferences({ appTaxa: T.appTaxa, assessed: T.assessed, link: T.appLink }, colDifferences);
     await buildColRevisions({ ...colDifferences, species: T.species, link: T.appLink, assessed: T.assessed, appTaxa: T.appTaxa }, T.colRevisions);
-    await buildSummaries({ ...colDifferences, assessed: T.assessed, ne: T.ne, species: T.species, link: T.appLink, appTaxa: T.appTaxa },
+    await buildSummaries({ ...colDifferences, assessed: T.assessed, ne: T.ne, species: T.species, link: T.appLink, appTaxa: T.appTaxa,
+      specialistGroupSpecies: T.specialistGroupSpecies },
       { taxaSummary: T.taxaSummary, countryStats: T.countryStats, table1aChildren: T.table1aChildren, sscChildren: T.sscChildren });
     await buildSearchIndex({ assessed: T.assessed, ne: T.ne, link: T.appLink, commonNames: T.commonNames, treeNames: T.treeNames },
       { nameIndex: T.nameIndex, rankIndex: T.rankIndex });
@@ -145,6 +153,13 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     writeManifest(T.syncJson, manifest);
     throw new Error(`sync: ${failed.length} matching fixtures fail: ${failed.map((c) => `${c.name} (${mismatches(c, obs.get(c.name)!).join("; ")})`).join(", ")}`);
   }
+  const groupMismatches = await specialistGroupMismatches(conn, T);
+  manifest.specialist_groups = { mismatches: groupMismatches };
+  if (groupMismatches.length > 0) {
+    writeManifest(T.syncJson, manifest);
+    throw new Error(`sync: specialist_group_species disagrees with the app's filter:\n  ${groupMismatches.join("\n  ")}`);
+  }
+  console.log("   specialist_group_species agrees with the app's filter for every Specialist Group");
   // The tests that check a sync's output against the code (Table 1a totals, the
   // taxonomy tree's summaries, country names). CI has no data and skips them, so
   // this is where they run. The files they read are checked first: a missing one
