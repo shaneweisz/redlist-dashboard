@@ -64,7 +64,7 @@ export interface PreviousAssessment {
    *
    * Optional because it is optional in the FILES, not just the type: history
    * JSON written before sources/assessments.ts started emitting the field has no
-   * such key (same story as `criteria` — see scripts/sync/lists/assessed.ts, which writes these
+   * such key (same story as `criteria` — see scripts/sync/dbt/models/lists/assessed.sql, which writes these
    * same files and coalesces both).
    */
   facilitators?: string | null;

@@ -1,0 +1,11 @@
+models:
+  - name: usage_owner
+    description: The counting rule (see the header in usage_owner.sql).
+    columns:
+      - name: usage_key
+        description: Each usage counts for at most one species; a second owner would inflate a number somewhere.
+        data_tests:
+          - not_null
+          - unique
+  - name: record_counts
+    description: GBIF record counts per species (see the header in record_counts.sql).

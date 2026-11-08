@@ -1,0 +1,16 @@
+# The sync's SQL transforms: count and lists so far (docs/sync.md). sync.ts
+# runs `dbt build` between the TypeScript stages, against the tables the
+# stages before it wrote, and exports what the app reads afterwards.
+name: redlist_sync
+version: "1.0.0"
+profile: redlist_sync
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+vars:
+  # The day the sync counts "since the assessment" up to (sync.ts passes it).
+  sync_date: "{{ env_var('SYNC_DATE') }}"
+
+models:
+  redlist_sync:
+    +materialized: table

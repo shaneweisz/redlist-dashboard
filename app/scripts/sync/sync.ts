@@ -12,13 +12,14 @@
  * is (link), and how many GBIF records each species has (count). Only link and
  * count make judgements; every other stage reshapes data. Read top to bottom,
  * this file is the whole sync: each builder is given the tables it reads, and
- * writes one table, documented at the top of its file.
+ * writes one table, documented at the top of its file. Count and lists are SQL
+ * models run by dbt (dbt.ts): there, each model's ref()s are what it reads.
  *
  *   inputs       fetch and cache each input (inputs/)
  *   1 sources    each input as one clean table (sources/)
  *   2 link       which CoL species each assessed species is (link/)
- *   3 count      whose records each GBIF usage's are (count/)
- *   4 lists      what the app reads, joins only (lists/)
+ *   3 count      whose records each GBIF usage's are (dbt/models/count/)
+ *   4 lists      what the app reads, joins only (dbt/models/lists/)
  *   5 precomputed  the app's own queries, run ahead of time (precomputed/)
  *   6 checks     fixtures and data tests (either stops the sync), then the
  *                comparison with production's sync (checks/)
@@ -44,14 +45,7 @@ import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
 import { askMatcher } from "./link/matches";
 import { buildLink, summariseQueue } from "./link/assessment-link";
-import { buildUsageOwners } from "./count/usage-owners";
-import { buildRecordCounts } from "./count/record-counts";
-import { buildAssessmentHistory } from "./lists/assessment-history";
-import { buildAssessed } from "./lists/assessed";
-import { buildSpecies } from "./lists/species";
-import { buildNotEvaluated } from "./lists/ne";
-import { buildAppTaxonomy } from "./lists/app-taxonomy";
-import { buildVernacularNames } from "./lists/vernacular-names";
+import { runDbt, exportDbtTables } from "./dbt";
 import { buildColDifferences } from "./precomputed/col-differences";
 import { buildColRevisions } from "./precomputed/col-revisions";
 import { buildSummaries } from "./precomputed/summaries";
@@ -116,22 +110,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done();
   }
 
-  if (runs("count")) {
-    done = step("3 count");
-    await buildUsageOwners({ taxa: T.taxa, link: T.link }, T.usageOwner);
-    await buildRecordCounts({ usageOwner: T.usageOwner, occurrences: T.occurrences, link: T.link, assessments: T.assessments }, T.recordCounts);
-    done();
-  }
-
   if (runs("lists")) {
-    done = step("4 lists");
-    await buildAssessmentHistory({ assessments: T.assessments }, T.assessmentHistory);
-    await buildAssessed({ assessments: T.assessments, recordCounts: T.recordCounts, assessmentHistory: T.assessmentHistory, commonNames: T.commonNames }, T.assessed);
-    await buildSpecies({ taxa: T.taxa, link: T.link, assessments: T.assessments }, T.species);
-    await buildNotEvaluated({ species: T.species, link: T.link, recordCounts: T.recordCounts, occurrenceCountries: T.occurrenceCountries,
-      usageOwner: T.usageOwner, commonNames: T.commonNames }, T.ne);
-    await buildAppTaxonomy({ taxa: T.taxa, link: T.link }, { appTaxa: T.appTaxa, appLink: T.appLink });
-    await buildVernacularNames({ commonNames: T.commonNames }, T.treeNames);
+    // Count and lists are dbt models: `dbt build` runs them in dependency order
+    // and tests them, then their tables are written out as files.
+    done = step(runs("count") ? "3 count, 4 lists (dbt)" : "4 lists (dbt)");
+    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10), select: runs("count") ? undefined : "path:models/lists" });
+    await exportDbtTables(T, BUILD_DIR);
     done();
   }
 
