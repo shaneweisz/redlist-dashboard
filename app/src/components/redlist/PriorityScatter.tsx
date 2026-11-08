@@ -46,8 +46,9 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// Left: the y title, then the tick labels. Below: the tick labels, then the x title.
-const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 16, X_TITLE = 18;
+// Left: the y title (room for its 20px-tall selects, rotated), then the tick
+// labels. Below: the tick labels, then the x title.
+const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 26, X_TITLE = 18;
 const M = { left: Y_TITLE + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + X_TITLE };
 const HEIGHT = 300;
 const HIT_RADIUS = 6;
@@ -72,11 +73,11 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yLabel, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue }: {
   points: PriorityPoint[];
   yScale: YScale;
-  /** The y axis title, e.g. "New GBIF records". */
-  yLabel: string;
+  /** The y axis title, rotated beside the axis; it holds the y metric's controls. */
+  yAxis: React.ReactNode;
   /** The axes' extents: the oldest assessment and largest value in the whole taxon. */
   maxYears: number;
   maxValue: number;
@@ -167,17 +168,11 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ctx.fillText(`${yr}`, Math.round(sx(yr)) + 0.5, M.top + plotH + 5);
     }
 
-    // Axis titles.
+    // The x axis title (the y one is an HTML overlay: it holds the y metric's selects).
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#71717a";
     ctx.textBaseline = "bottom";
     ctx.fillText("Years since latest assessment", M.left + plotW / 2, HEIGHT - 2);
-    ctx.save();
-    ctx.translate(Y_TITLE / 2 + 1, M.top + plotH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textBaseline = "middle";
-    ctx.fillText(yLabel, 0, 0);
-    ctx.restore();
 
     // Dots.
     const { ordered, xy } = layout;
@@ -193,7 +188,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors, yScale, yLabel]);
+  }, [layout, scales, width, box, colors, yScale]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -323,6 +318,14 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       onMouseLeave={() => setHover(null)}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
+      {/* The y axis title, rotated and centred on the plot's height. Its own
+          events: picking an option must not start a drag or hover a dot. */}
+      <div className="absolute z-20 whitespace-nowrap cursor-default"
+        style={{ left: Y_TITLE / 2, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}>
+        {yAxis}
+      </div>
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />

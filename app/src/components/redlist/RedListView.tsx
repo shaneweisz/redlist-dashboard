@@ -2609,11 +2609,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return { maxYears, maxValue };
   }, [taxaFilteredSpeciesBase, priorityKey]);
-  const priorityYLabel = useMemo(() => {
-    const { metric, mode } = gbifKeyParts(priorityKey);
-    const what = mode === "georeferenced" ? "georeferenced GBIF records" : "GBIF records";
-    return metric === "total" ? `Total ${what}` : metric === "new" ? `New ${what}` : `% new ${what}`;
-  }, [priorityKey]);
   const priorityInBox = useMemo(
     () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
@@ -5713,21 +5708,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
-                            {/* The y axis, read as a phrase: "[New ▾] GBIF records ([all ▾])". Each
-                                select is as wide as its chosen option (field-sizing; where a
-                                browser lacks it, as wide as its longest). */}
-                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                              </select>
-                              GBIF records (
-                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                              </select>
-                              )
-                            </span>
                             {priorityBox && (
                               <button type="button" onClick={() => setPriorityBox(null)}
                                 className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
@@ -5742,7 +5722,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           <PriorityScatter
                             points={priorityPoints}
                             colors={CATEGORY_COLORS}
-                            yLabel={priorityYLabel}
+                            yAxis={
+                              // The y axis title is its controls, read as a phrase:
+                              // "[New ▾] GBIF records ([all ▾])", each select sized to
+                              // its chosen option where the browser supports it.
+                              <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                                <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                  onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                  {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                                </select>
+                                GBIF records (
+                                <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                  onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                  {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                                </select>
+                                )
+                              </span>
+                            }
                             box={priorityBox}
                             onBoxChange={setPriorityBox}
                             onPointClick={openSpeciesFromScatter}
