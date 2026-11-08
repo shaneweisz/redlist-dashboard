@@ -1053,6 +1053,57 @@ Decisions:
     or seeds/tree-col-equivalents.tsv where they can't, each with its reason.
 ```
 
+### Checks
+
+#### `dbt/models/audit/link_audit.sql`
+
+```text
+link_audit: one row per assessed species, with how its CoL link was made and
+the evidence for checking it: where IUCN and CoL agree, where they differ, and
+whether a difference looks like our link going wrong or a real taxonomic one
+(a lag, or a disagreement between authorities). It decides nothing; it is what
+a reviewer, a person or an agent, works from.
+
+Built from: assessments (the latest, with IUCN's authority and synonyms),
+assessment_link (the primary row), taxa, rank_aliases.
+
+Decisions:
+  - Evidence, not verdicts: a difference is a reason to look, and the same
+    columns serve the review queue and, later, the CoL-differences card.
+  - Raw comparisons, deliberately looser than the card's (which folds
+    orthographic variants): for finding links to check, a false alarm costs a
+    look, a missed one costs a wrong link.
+```
+
+`core/link_audit.parquet` · 175,909 rows · 8 MB
+
+| column | type | |
+|---|---|---|
+| `sis_taxon_id` | integer |  |
+| `iucn_name` | text |  |
+| `iucn_authority` | text |  |
+| `taxon_group` | text |  |
+| `assessment_date` | date |  |
+| `stratum` | text | how the link was made, the unit the accuracy is measured per: 'exact' (the Red List name is an accepted CoL species), 'synonym' (a CoL synonym, linked to the species it points to), 'checklist_synonym', 'decision' (decisions.tsv), or 'unmatched' |
+| `decided_by` | text | who decided it, for a decision ('heuristic' when carried over from the old name-matching passes, unreviewed) |
+| `col_id` | text | the CoL species it is linked to |
+| `col_name` | text | that species, as CoL accepts it |
+| `col_authorship` | text | that species, as CoL accepts it |
+| `matched_name` | text | the CoL record the Red List name matched, when that is a synonym of col_name |
+| `matched_authorship` | text | the CoL record the Red List name matched, when that is a synonym of col_name |
+| `col_described_year` | integer | the year CoL gives for the species' description |
+| `lumped_with` | integer | how many other assessed species share the CoL species |
+| `genus_differs` | boolean | between the Red List name and col_name (as written, lowercased: spelling variants count too) |
+| `epithet_differs` | boolean | between the Red List name and col_name (as written, lowercased: spelling variants count too) |
+| `class_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `order_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `family_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `author_year_differs` | boolean | both authorities give a year, and the years differ |
+| `iucn_lists_col_name` | boolean | IUCN's own synonym list for the species includes the name CoL accepts: IUCN knows CoL's name and treats it as the same species, which backs the link and points to a choice of authority rather than an error |
+| `described_after_assessment` | boolean | CoL's species was described after the assessment: the taxonomy moved on since (a likely lag) |
+| `signals` | integer | how many of the differences above hold |
+| `sample_rank` | integer | the species' place in a fixed random order within its stratum: reviewing ranks 1..n is a random sample of n, the same every sync, so an error rate can be measured per stratum |
+
 <!-- tables:end -->
 
 ## Inputs
@@ -1225,6 +1276,8 @@ Four layers, from strict to advisory.
 - **specialist_group_species agrees with the remits as `taxonomy-sql.ts` applies them** (`checks/specialist-groups.ts`): the same species in every Specialist Group, assessed and CoL. Everything else reads the table (`specialist_group`), but the CoL breakdown popovers still apply a remit narrowed to one family or order in SQL, so a disagreement would show a breakdown that doesn't add up to its group. The check goes when the breakdowns move into dbt.
 - **every species in an IUCN group the Specialist Groups cover is in one of them** (`dbt/tests/specialist_groups_cover_their_sections.sql`; assessed species, and the described CoL species): each section ends with a catch-all, so a species no remit holds means a remit went wrong.
 - the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
+
+**Link audit, which stops nothing.** `link_audit` (`dbt/models/audit/`) gives every assessed species' link with the evidence for checking it: how it was made (its stratum: exact name, CoL synonym, decision), and where IUCN and CoL differ (genus, epithet, family, order, author year, a shared CoL species), or agree (IUCN listing CoL's name among its synonyms). A difference is a reason to look, not a verdict: it may be our link going wrong, or a real taxonomic one, a lag or a disagreement between authorities. `sample_rank` orders each stratum in a fixed random order, so reviewing its first n links measures that stratum's error rate. `sync.json` records each stratum's links and signals.
 
 **2. Matching fixtures, which stop the build.** `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `link/assessment-link.ts` is the quickest way to see what each matching rule is for.
 

@@ -41,6 +41,7 @@ export function tables(buildDir = BUILD_DIR) {
     usageOwner: core("usage_owner.parquet"),
     recordCounts: core("record_counts.parquet"),
     specialistGroupSpecies: core("specialist_group_species.parquet"),
+    linkAudit: core("link_audit.parquet"),
     // 4. Lists
     assessed: data("assessed.parquet"),
     assessmentHistory: data("assessments.parquet"),

@@ -93,6 +93,8 @@ function exports(T: Tables) {
     // By col_id, so a lookup by id skips row groups.
     { model: "app_taxa", file: T.appTaxa, orderBy: "col_id" },
     { model: "specialist_group_species", file: T.specialistGroupSpecies, orderBy: "group_id, sis_taxon_id, col_id" },
+    // Not published: what the link's review works from.
+    { model: "link_audit", file: T.linkAudit, orderBy: "stratum, sample_rank" },
     { model: "col_split_candidates", file: T.splitCandidates, orderBy: "ne_col_id, rn" },
     { model: "col_synonym_assessed", file: T.synonymAssessed, orderBy: "ne_col_id" },
     { model: "col_to_assessed", file: T.colToAssessed, orderBy: "col_id" },

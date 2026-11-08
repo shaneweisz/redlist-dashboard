@@ -44,6 +44,7 @@ CARDS = [
     ("Precomputed", "precomputed/summaries.ts", ["data/summaries/taxa-summary.json", "data/summaries/country-stats.json",
         "data/summaries/table1a-children-summaries.json", "data/summaries/ssc-group-children-summaries.json"]),
     ("Precomputed", "precomputed/col-taxon-ids.ts", []),
+    ("Checks", "dbt/models/audit/link_audit.sql", ["core/link_audit.parquet"]),
 ]
 
 
