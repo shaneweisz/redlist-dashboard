@@ -15,7 +15,8 @@
  * writes one table, documented at the top of its file. Count and lists are SQL
  * models run by dbt (dbt.ts): there, each model's ref()s are what it reads.
  *
- *   inputs       fetch and cache each input (inputs/)
+ *   inputs       fetch and cache each input (inputs/), and write the Specialist
+ *                Groups' remits from the app's config (sources/specialist-groups.ts)
  *   1 sources    each input as one clean table (sources/)
  *   2 link       which CoL species each assessed species is (link/)
  *   3 count      whose records each GBIF usage's are (dbt/models/count/)
@@ -92,6 +93,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
   manifest.inat = path.basename(path.dirname(inat));
+  // The Specialist Groups' remits come from the app's config, not the data, so
+  // they are written every run: an edited remit takes effect whatever --from says.
+  await buildSpecialistGroups({ remits: T.specialistGroupRemits, rankAliases: T.rankAliases });
   done();
 
   if (runs("sources")) {
@@ -101,7 +105,6 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     await buildOccurrences({ snapshotCounts: snapshot.dir, sourceRows: snapshot.sourceRows, taxa: T.taxa },
       { occurrences: T.occurrences, occurrenceCountries: T.occurrenceCountries });
     await buildCommonNames({ colVernacularNames: col.vernacularNames, taxa: T.taxa, inatNames: inat }, T.commonNames);
-    await buildSpecialistGroups({ remits: T.specialistGroupRemits, rankAliases: T.rankAliases });
     done();
   }
 
@@ -115,9 +118,10 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
 
   if (runs("lists")) {
     // Count and lists are dbt models: `dbt build` runs them in dependency order
-    // and tests them, then their tables are written out as files.
-    done = step(runs("count") ? "3 count, 4 lists (dbt)" : "4 lists (dbt)");
-    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10), select: runs("count") ? undefined : "path:models/lists" });
+    // and tests them, then their tables are written out as files. Both run even
+    // --from lists: count takes seconds, and the lists read its tables.
+    done = step("3 count, 4 lists (dbt)");
+    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
     await exportDbtTables(T, BUILD_DIR);
     done();
   }

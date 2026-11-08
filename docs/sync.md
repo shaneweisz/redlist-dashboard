@@ -39,7 +39,7 @@ Count and lists are SQL models run by [dbt](#dbt), one `.sql` file per table und
 | Stage | Folder | What it does |
 |---|---|---|
 | inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher |
-| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, and the SSC Specialist Groups' remits (`specialist_group_remits`, `rank_aliases`) |
+| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, and the SSC Specialist Groups' remits (`specialist_group_remits`, `rank_aliases`, written every run, since they come from the app's config) |
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
 | 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
 | 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, `assessments` history, `species/`, `ne`, the app's `taxa` and `assessment_link`, the tree's labels, and `specialist_group_species`: which Specialist Groups each species is in |
@@ -1236,7 +1236,7 @@ Each comparison then explains one source's changes. Publish the second (or both,
 
 ### Running parts
 
-`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count` and `lists` are one dbt run, so either reruns both), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 
