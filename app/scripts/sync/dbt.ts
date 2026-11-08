@@ -67,7 +67,7 @@ function exports(T: Tables) {
     { model: "ne", file: T.ne, orderBy: "taxon_group, class_name, order_name, family, scientific_name" },
     // By col_id, so a lookup by id skips row groups.
     { model: "app_taxa", file: T.appTaxa, orderBy: "col_id" },
-    { model: "tree_membership", file: T.treeMembership, orderBy: "node_id, sis_taxon_id, col_id" },
+    { model: "specialist_group_species", file: T.specialistGroupSpecies, orderBy: "group_id, sis_taxon_id, col_id" },
   ];
 }
 

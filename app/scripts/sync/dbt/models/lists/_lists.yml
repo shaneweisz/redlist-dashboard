@@ -1,28 +1,28 @@
 unit_tests:
-  - name: tree_membership_rules
+  - name: specialist_group_rules
     description: >
-      One species per rule tree_membership applies: an alias (CoL's Cupressales
-      under a node naming Pinales), the class standing in for a missing order, a
-      catch-all leaving out what a claiming sibling holds, extra names, and the
-      bison override held by its own node and left out of every other.
-    model: tree_membership
+      One species per rule specialist_group_species applies: an alias (CoL's
+      Cupressales in a remit naming Pinales), the class standing in for a missing
+      order, a section's catch-all leaving out what a claiming group holds, extra
+      names, and the bison override, held by its own group and left out of every
+      other.
+    model: specialist_group_species
     given:
-      - input: source('core', 'tree_nodes')
+      - input: source('core', 'specialist_group_remits')
         format: sql
         rows: |
           SELECT * FROM (VALUES
-            ('all', NULL, ['plants', 'mammals'], [], [], [], [], [], [], [], [], [], [], [], [], false, false),
-            ('conifers', 'all', ['plants'], [], [], ['pinales'], [], [], [], [], [], [], [], [], [], false, true),
-            ('other-plants', 'all', ['plants'], [], ['mammalia'], [], [], [], [], [], [], [], [], [], [], true, false),
-            ('carnivores', 'all', ['mammals'], [], [], ['carnivora'], [], [], [], [], [], [], [], ['ailurus fulgens'], [], false, true),
-            ('bison', 'all', ['mammals'], [], [], [], [], [], [], ['bison'], [], [], [], [], ['bos bison'], false, false),
-            ('bovids', 'all', ['mammals'], [], [], [], [], ['bovidae'], [], [], [], [], [], [], [], false, false)
-          ) t(node_id, parent_id, taxon_groups, class_in, class_out, order_in, order_out, family_in, family_out,
+            ('conifers', 'plant-groups', ['plants'], [], [], ['pinales'], [], [], [], [], [], [], [], [], [], false, true),
+            ('other-plants', 'plant-groups', ['plants'], [], ['mammalia'], [], [], [], [], [], [], [], [], [], [], true, false),
+            ('carnivores', 'mammal-groups', ['mammals'], [], [], ['carnivora'], [], [], [], [], [], [], [], ['ailurus fulgens'], [], false, true),
+            ('bison', 'mammal-groups', ['mammals'], [], [], [], [], [], [], ['bison'], [], [], [], [], ['bos bison'], false, false),
+            ('bovids', 'mammal-groups', ['mammals'], [], [], [], [], ['bovidae'], [], [], [], [], [], [], [], false, false)
+          ) t(group_id, section_id, taxon_groups, class_in, class_out, order_in, order_out, family_in, family_out,
               genus_in, genus_out, name_in, name_out, extra_names, override_names, catch_all, claims)
-      - input: source('core', 'tree_aliases')
+      - input: source('core', 'rank_aliases')
         format: sql
         rows: |
-          SELECT * FROM (VALUES ('order', 'pinales', 'cupressales'), ('excluded', 'bos bison', 'bos bison')) t(rank, name, alias)
+          SELECT * FROM (VALUES ('order', 'pinales', 'cupressales')) t(rank, name, alias)
       - input: ref('assessed')
         format: sql
         rows: |
@@ -43,12 +43,12 @@ unit_tests:
           ) t(col_id, taxon_group, class_name, order_name, family, scientific_name)
     expect:
       rows:
-        - {sis_taxon_id: 1, col_id: null, node_id: conifers}
-        - {sis_taxon_id: 2, col_id: null, node_id: carnivores}
-        - {sis_taxon_id: 3, col_id: null, node_id: carnivores}
-        - {sis_taxon_id: 4, col_id: null, node_id: bison}
-        - {sis_taxon_id: 4, col_id: null, node_id: bovids}
-        - {sis_taxon_id: null, col_id: C1, node_id: conifers}
-        - {sis_taxon_id: null, col_id: C2, node_id: conifers}
-        - {sis_taxon_id: null, col_id: C3, node_id: other-plants}
-        - {sis_taxon_id: null, col_id: C4, node_id: bison}
+        - {sis_taxon_id: 1, col_id: null, group_id: conifers}
+        - {sis_taxon_id: 2, col_id: null, group_id: carnivores}
+        - {sis_taxon_id: 3, col_id: null, group_id: carnivores}
+        - {sis_taxon_id: 4, col_id: null, group_id: bison}
+        - {sis_taxon_id: 4, col_id: null, group_id: bovids}
+        - {sis_taxon_id: null, col_id: C1, group_id: conifers}
+        - {sis_taxon_id: null, col_id: C2, group_id: conifers}
+        - {sis_taxon_id: null, col_id: C3, group_id: other-plants}
+        - {sis_taxon_id: null, col_id: C4, group_id: bison}

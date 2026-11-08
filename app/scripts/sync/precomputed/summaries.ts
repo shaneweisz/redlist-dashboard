@@ -13,16 +13,17 @@
  * Every other level of the tree is answered live (live-taxa-children.ts).
  *
  * Built from: lists/assessed, lists/ne, lists/species, assessment_link,
- * taxonomy/taxa, tree_membership and the CoL-differences tables; the taxonomy
- * tree (src/config/taxonomy-tree.ts).
+ * taxonomy/taxa, specialist_group_species and the CoL-differences tables; the
+ * taxonomy tree (src/config/taxonomy-tree.ts).
  *
  * Decisions:
  *   - Assessed species count in IUCN's group, so Table 1a stays exact; Not
  *     Evaluated species in their CoL group.
- *   - A node's species are its rows in tree_membership (dbt/models/lists/), the
- *     one definition of which species a tree node holds. The sync's checks
- *     confirm it agrees with the app's live filter (childFilterSql in
- *     taxonomy-sql.ts), so these numbers are the ones the live views compute.
+ *   - A child's species: an IUCN group's are those of its taxon_group; a
+ *     Specialist Group's are its rows in specialist_group_species
+ *     (dbt/models/lists/), which the sync's checks confirm agree with the app's
+ *     live filter (childFilterSql in taxonomy-sql.ts), so these numbers are the
+ *     ones the live views compute.
  *   - Outdated: assessed more than ten years before the sync, or undated.
  *   - "all" isn't summarised: its children mix the top-level taxa with the SSC
  *     wrappers, and nothing reads them as one list.
@@ -46,6 +47,7 @@ import type { GbifGroupTotals, GbifRecordMode } from "../../../src/lib/gbif-reco
 import { lit, openDuckDB } from "../sql";
 import { output, parquet } from "../paths";
 import { loadColDifferences, type ColDifferenceFiles } from "./col-differences";
+import { isSpecialistGroup } from "../sources/specialist-groups";
 
 export interface TaxonSummaryRow {
   table1a_taxon_group: string;
@@ -68,7 +70,7 @@ type Rows = Record<string, unknown>[];
 const all = async (conn: DuckDBConnection, sql: string): Promise<Rows> => (await conn.runAndReadAll(sql)).getRowObjects();
 
 export async function buildSummaries(
-  inputs: ColDifferenceFiles & { assessed: string; ne: string; species: string; link: string; appTaxa: string; treeMembership: string },
+  inputs: ColDifferenceFiles & { assessed: string; ne: string; species: string; link: string; appTaxa: string; specialistGroupSpecies: string },
   out: { taxaSummary: string; countryStats: string; table1aChildren: string; sscChildren: string },
 ): Promise<void> {
   const conn = await openDuckDB();
@@ -76,7 +78,7 @@ export async function buildSummaries(
   const outdated = `(assessment_date IS NULL OR CAST(assessment_date AS DATE) <= ${lit(cutoff)}::DATE)`;
   await conn.run(`CREATE TEMP TABLE assessed AS SELECT * FROM ${parquet(inputs.assessed)}`);
   await conn.run(`CREATE TEMP TABLE ne AS SELECT * FROM ${parquet(inputs.ne)}`);
-  await conn.run(`CREATE TEMP TABLE membership AS SELECT * FROM ${parquet(inputs.treeMembership)}`);
+  await conn.run(`CREATE TEMP TABLE membership AS ${membershipSql(inputs)}`);
   // Species GBIF has records for, per group and key: assessed ones in their IUCN
   // group, Not Evaluated ones in their CoL group.
   await conn.run(`CREATE TEMP TABLE gbif_species AS
@@ -158,12 +160,32 @@ async function groupSummaries(conn: DuckDBConnection, inputs: { species: string;
   return rows;
 }
 
+/**
+ * Which species each summarised child holds, as (sis_taxon_id, col_id, node_id):
+ * a Specialist Group's from specialist_group_species, an IUCN group's (the
+ * children of Invertebrates, Plants and Fungi) by taxon_group.
+ */
+function membershipSql(inputs: { assessed: string; species: string; specialistGroupSpecies: string }): string {
+  const groups: string[] = [];
+  for (const [id, node] of NODE_INDEX) {
+    if (id === "all" || !hasChildren(id)) continue;
+    for (const child of node.children!) {
+      if (isSpecialistGroup(child.id)) continue;
+      for (const g of child.filter.taxonGroups) groups.push(`(${lit(child.id)}, ${lit(g)})`);
+    }
+  }
+  const byGroup = groups.length === 0 ? "" : `
+    UNION ALL SELECT a.id, NULL, g.node_id FROM ${parquet(inputs.assessed)} a JOIN (VALUES ${groups.join(", ")}) g(node_id, taxon_group) USING (taxon_group)
+    UNION ALL SELECT NULL, s.col_id, g.node_id FROM ${parquet(inputs.species)} s JOIN (VALUES ${groups.join(", ")}) g(node_id, taxon_group) USING (taxon_group)`;
+  return `SELECT sis_taxon_id, col_id, group_id AS node_id FROM ${parquet(inputs.specialistGroupSpecies)}${byGroup}`;
+}
+
 interface NodeCounts {
   byCategory: Map<string, { category: string | null; n: number; outdated: number }[]>;
   neWithRecords: Map<string, { georeferenced: number; all: number }>;
 }
 
-/** Every node's assessed species by category, and its Not Evaluated species with records, from tree_membership. */
+/** Every node's assessed species by category, and its Not Evaluated species with records (membershipSql). */
 async function nodeCounts(conn: DuckDBConnection, outdated: string): Promise<NodeCounts> {
   const byCategory: NodeCounts["byCategory"] = new Map();
   for (const r of await all(conn, `
