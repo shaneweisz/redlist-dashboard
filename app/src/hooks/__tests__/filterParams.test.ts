@@ -303,6 +303,20 @@ describe("buildQs", () => {
   // Only the opt-out is written: "threatened" is the default, so writing it would
   // put a param in every URL that says nothing, and (worse) a shared link would
   // pin the scope it happened to have rather than following the default.
+  it("round-trips the triage scatter's box and y metric", () => {
+    const qs = buildQs({ ...emptyState, triageBox: [10, 15.5, 2.25, 4], triageY: "pctNew.georeferenced" as const });
+    expect(qs).toContain("triage=10,15.5,2.25,4");
+    expect(qs).toContain("triageY=pctNew.georeferenced");
+    const back = parseParams(qs);
+    expect(back.triageBox).toEqual([10, 15.5, 2.25, 4]);
+    expect(back.triageY).toBe("pctNew.georeferenced");
+    // Malformed or empty boxes, and unknown metrics, are dropped.
+    expect(parseParams("?triage=1,2,3").triageBox).toBeNull();
+    expect(parseParams("?triage=5,1,0,1").triageBox).toBeNull();
+    expect(parseParams("?triage=a,b,c,d").triageBox).toBeNull();
+    expect(parseParams("?triageY=bogus").triageY).toBeNull();
+  });
+
   it("omits threatsScope for the default (threatened) scope, writes it for all", () => {
     expect(buildQs({ ...emptyState, threats: new Set(["11"]), threatsScope: "threatened" as const }))
       .not.toContain("threatsScope");

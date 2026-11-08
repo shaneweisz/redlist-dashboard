@@ -7,8 +7,11 @@
  * top right is outdated with plenty of data since. Drag a box to filter the
  * page to the species inside it; click a dot to show that species in the table.
  *
- * The axes' extents come from the caller (the whole taxon, not the filtered
- * points), so applying a filter never rescales the chart.
+ * The axes come from the caller (triageAxes, over the whole taxon, not the
+ * filtered points), so applying a filter never rescales the chart. The x axis
+ * runs to the taxon's 99th-percentile age; older assessments sit in a narrow
+ * "+" band at its right edge, in order, rather than stretching the axis for a
+ * handful of dots.
  *
  * Canvas rather than SVG: "All species" is ~175k dots. Hover and the drag box
  * are DOM overlays, so the canvas only redraws when the data or box changes.
@@ -31,18 +34,56 @@ export interface PriorityPoint {
   assessmentDate: string;
 }
 
-/**
- * A selection: the box in plot units (years; log10(value + 1), or %), for
- * drawing, and the species whose dots were inside it as drawn. Filtering by
- * the keys rather than re-testing the box keeps it exactly what you see: dots
- * are jittered a few pixels, so a tight box around one dot could miss its
- * unjittered position and select nothing.
- */
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
+/** A box selection in plot units (triagePlotX across, triagePlotY up). */
+export type TriageBoxUnits = { x0: number; x1: number; y0: number; y1: number };
+/** The box, and the species it holds (the caller derives them, so a URL box selects the same dots). */
+export interface PriorityBox extends TriageBoxUnits { keys: ReadonlySet<string> }
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
 export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? value : Math.log10(value + 1));
+
+/**
+ * The scatter's axes, from the whole taxon. X runs to `xCap`, the taxon's
+ * 99th-percentile age rounded up to 5 years; when older assessments exist they
+ * take a narrow band past it, up to `xMax`. Y runs to the largest count's
+ * power of ten, or 100%.
+ */
+export interface TriageAxes { xCap: number; xMax: number; maxYears: number; yMax: number; yScale: YScale }
+const BAND_SHARE = 0.12; // the "+" band's width, as a share of the capped axis
+export function triageAxes(maxYears: number, capYears: number, maxValue: number, yScale: YScale): TriageAxes {
+  const xCap = Math.max(10, Math.ceil(capYears / 5) * 5);
+  const band = maxYears > xCap;
+  return {
+    xCap, maxYears, yScale,
+    xMax: band ? xCap + xCap * BAND_SHARE : xCap,
+    yMax: yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log"))),
+  };
+}
+/** Plot units across: the age itself up to the cap; past it, a place in the band, in order of age. */
+export function triagePlotX(years: number, a: TriageAxes): number {
+  if (years <= a.xCap) return years;
+  const into = Math.min(1, (years - a.xCap) / Math.max(1e-9, a.maxYears - a.xCap));
+  return a.xCap + (a.xMax - a.xCap) * (0.2 + 0.8 * into);
+}
+/**
+ * Plot units up, with the dot's deterministic jitter (±3px, so the many
+ * species on one count, above all 0, show as a band rather than a line)
+ * folded in. The plot's height is fixed, so pixels and plot units convert the
+ * same at any width: a box stored in plot units selects the dots it covers as
+ * drawn, on any screen.
+ */
+export function triagePlotY(value: number, key: string, a: TriageAxes): number {
+  let h = 0;
+  for (let c = 0; c < key.length; c++) h = (h * 31 + key.charCodeAt(c)) | 0;
+  const jitterPx = ((h & 1023) / 1023 - 0.5) * 6;
+  return Math.min(toPlotY(value, a.yScale), a.yMax) - (jitterPx * a.yMax) / PLOT_H;
+}
+/** Whether a dot (by its data) is inside a box in plot units. */
+export const inTriageBox = (b: TriageBoxUnits, years: number, value: number, key: string, a: TriageAxes): boolean => {
+  const x = triagePlotX(years, a), y = triagePlotY(value, key, a);
+  return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+};
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
@@ -51,6 +92,7 @@ const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, C
 const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 26, X_TITLE = 18;
 const M = { left: Y_TITLE + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + X_TITLE };
 const HEIGHT = 300;
+const PLOT_H = HEIGHT - M.top - M.bottom;
 const HIT_RADIUS = 6;
 
 /** "10y 3m ago", "4m ago", "this month": short, so the tooltip stays narrow (the table says "10y ago"). */
@@ -73,17 +115,16 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, axes, yAxis }: {
   points: PriorityPoint[];
-  yScale: YScale;
+  /** The axes, from the whole taxon (triageAxes). */
+  axes: TriageAxes;
   /** The y axis title, rotated beside the axis; it holds the y metric's controls. */
   yAxis: React.ReactNode;
-  /** The axes' extents: the oldest assessment and largest value in the whole taxon. */
-  maxYears: number;
-  maxValue: number;
   colors: Record<string, string>;
   box: PriorityBox | null;
-  onBoxChange: (box: PriorityBox | null) => void;
+  /** A drawn box, in plot units (the caller works out which species it holds), or null to clear. */
+  onBoxChange: (box: TriageBoxUnits | null) => void;
   /** Clicking a dot: page and scroll the species table to this species. */
   onPointClick: (key: string) => void;
   selectedKey?: string | null;
@@ -102,13 +143,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     return () => ro.disconnect();
   }, []);
 
-  // Scales. X runs to the taxon's oldest assessment (rounded up to 5 years); Y
-  // to its largest count's power of ten, or 100%.
+  const { yScale } = axes;
+  // Plot units to pixels and back.
   const scales = useMemo(() => {
-    const xMax = Math.max(10, Math.ceil(maxYears / 5) * 5);
-    const yMax = yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log")));
+    const { xMax, yMax } = axes;
     const plotW = Math.max(0, width - M.left - M.right);
-    const plotH = HEIGHT - M.top - M.bottom;
+    const plotH = PLOT_H;
     return {
       xMax, yMax, plotW, plotH,
       sx: (years: number) => M.left + (years / xMax) * plotW,
@@ -116,28 +156,24 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ix: (px: number) => ((px - M.left) / plotW) * xMax,
       iy: (py: number) => ((M.top + plotH - py) / plotH) * yMax,
     };
-  }, [width, maxYears, maxValue, yScale]);
+  }, [width, axes]);
 
-  // Screen positions (with a little deterministic vertical jitter, so the many
-  // species on the same count, above all 0, show as a band rather than a line),
-  // plus a coarse grid for hover hit-testing.
+  // Screen positions (triagePlotX / triagePlotY, jitter included), plus a
+  // coarse grid for hover hit-testing.
   const layout = useMemo(() => {
     const ordered = [...points].sort((a, b) => (DRAW_RANK[a.category] ?? 0) - (DRAW_RANK[b.category] ?? 0));
     const xy = new Float32Array(ordered.length * 2);
     const grid = new Map<number, number[]>();
     const cell = 12;
     ordered.forEach((p, i) => {
-      let h = 0;
-      for (let c = 0; c < p.key.length; c++) h = (h * 31 + p.key.charCodeAt(c)) | 0;
-      const jitter = ((h & 1023) / 1023 - 0.5) * 6;
-      const x = scales.sx(Math.min(p.years, scales.xMax)), y = scales.sy(Math.min(toPlotY(p.value, yScale), scales.yMax)) + jitter;
+      const x = scales.sx(triagePlotX(p.years, axes)), y = scales.sy(triagePlotY(p.value, p.key, axes));
       xy[i * 2] = x; xy[i * 2 + 1] = y;
       const k = Math.floor(x / cell) * 10007 + Math.floor(y / cell);
       const bucket = grid.get(k);
       if (bucket) bucket.push(i); else grid.set(k, [i]);
     });
     return { ordered, xy, grid, cell };
-  }, [points, scales, yScale]);
+  }, [points, scales, axes]);
 
   // Draw.
   useEffect(() => {
@@ -164,8 +200,26 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ctx.fillText(yScale === "pct" ? `${t}%` : t === 0 ? "0" : formatCount(10 ** t), M.left - 6, y);
     }
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    for (let yr = 0; yr <= xMax; yr += 5) {
+    const band = xMax > axes.xCap;
+    const bandLabel = `>${axes.xCap}`;
+    // On a narrow chart the band is too thin for both the cap's tick and the
+    // band's label side by side: then the label alone, the dashed rule marking the cap.
+    const capTickFits = !band || sx((axes.xCap + xMax) / 2) - sx(axes.xCap)
+      >= (ctx.measureText(`${axes.xCap}`).width + ctx.measureText(bandLabel).width) / 2 + 4;
+    for (let yr = 0; yr <= axes.xCap; yr += 5) {
+      if (yr === axes.xCap && !capTickFits) continue;
       ctx.fillText(`${yr}`, Math.round(sx(yr)) + 0.5, M.top + plotH + 5);
+    }
+    // The "+" band for the assessments older than the cap: a dashed rule at
+    // the cap, and ">20" under the band.
+    if (band) {
+      const x = Math.round(sx(axes.xCap)) + 0.5;
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = "rgba(161, 161, 170, 0.6)";
+      ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, M.top + plotH); ctx.stroke();
+      ctx.restore();
+      ctx.fillText(bandLabel, sx((axes.xCap + xMax) / 2), M.top + plotH + 5);
     }
 
     // The x axis title (the y one is an HTML overlay: it holds the y metric's selects).
@@ -188,7 +242,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors, yScale]);
+  }, [layout, scales, width, box, colors, yScale, axes.xCap]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -257,13 +311,9 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       const { ix, iy } = scales;
       const left = Math.min(drag.x0, x), right = Math.max(drag.x0, x);
       const top = Math.min(drag.y0, y), bottom = Math.max(drag.y0, y);
-      const keys = new Set<string>();
-      const { ordered, xy } = layout;
-      for (let i = 0; i < ordered.length; i++) {
-        const px = xy[i * 2], py = xy[i * 2 + 1];
-        if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
-      }
-      onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
+      // In plot units; the caller works out the species inside from the data
+      // (inTriageBox), with the same positions the dots are drawn at.
+      onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top) });
       return;
     }
     const i = inPlot(x, y) ? hitTest(x, y) : null;

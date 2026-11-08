@@ -93,7 +93,21 @@ export const OWN_PARAM_NAMES = [
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
   GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
   ...Object.values(GBIF_RANGE_PARAM),
+  "triage", "triageY",
 ];
+
+/**
+ * The Reassessment Triage scatter's box selection, in its plot units:
+ * [x0, x1] along its x axis, [y0, y1] up its y (log10(count + 1), or %), for
+ * the y metric in `triageY`. A filter like any other (`triage=`); the species
+ * it holds are re-derived from the data, so a link selects the same dots.
+ */
+export type TriageBox = [x0: number, x1: number, y0: number, y1: number];
+
+function parseTriageBox(v: string | null): TriageBox | null {
+  const n = v?.split(",").map(Number);
+  return n && n.length === 4 && n.every(Number.isFinite) && n[0] < n[1] && n[2] < n[3] ? (n as TriageBox) : null;
+}
 
 /**
  * Which species the Threats chart (and a threat selection made from it) covers.
@@ -350,6 +364,9 @@ export function parseParams(search: string) {
     gbifRecordMode: parseGbifRecordMode(p.get(GBIF_RECORDS_PARAM)),
     // Which of the six the GBIF Records chart shows (a display choice, like mapview).
     gbifChartKey: parseGbifChartKey(p.get(GBIF_CHART_PARAM)),
+    triageBox: parseTriageBox(p.get("triage")),
+    // The triage scatter's y metric (a display choice, like gbifChart); null = its default, New.
+    triageY: (GBIF_RANGE_KEYS as readonly string[]).includes(p.get("triageY") ?? "") ? (p.get("triageY") as GbifRangeKey) : null,
     mapSortKey: (
       p.get("mapsort") === "name" ? "name" :
       p.get("mapsort") === "outdated" ? "outdated" :
@@ -436,6 +453,8 @@ export function buildQs(state: {
   mapViewMode?: MapViewMode;
   gbifRecordMode?: GbifRecordMode;
   gbifChartKey?: GbifRangeKey;
+  triageBox?: TriageBox | null;
+  triageY?: GbifRangeKey | null;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
   species: string | null;
@@ -505,6 +524,8 @@ export function buildQs(state: {
   if (state.mapViewMode === "list") p.set("mapview", "list");
   if (state.gbifRecordMode && state.gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE) p.set(GBIF_RECORDS_PARAM, state.gbifRecordMode);
   if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(GBIF_CHART_PARAM, state.gbifChartKey);
+  if (state.triageBox) p.set("triage", state.triageBox.join(","));
+  if (state.triageY) p.set("triageY", state.triageY);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set("mapsort", state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set("mapdir", "asc");
   const qs = prettifyQs(p.toString());
@@ -1140,6 +1161,28 @@ export function useFilterParams() {
     [syncUrl]
   );
 
+  // The triage box is a filter; its y metric a display choice. Changing the metric clears the box, drawn in the old units.
+  const setTriageBox = useCallback(
+    (box: TriageBox | null) => {
+      setState(prev => {
+        const next = { ...prev, triageBox: box };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+  const setTriageY = useCallback(
+    (key: GbifRangeKey | null) => {
+      setState(prev => {
+        const next = { ...prev, triageY: key, triageBox: null };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setGbifChartKey = useCallback(
     (key: GbifRangeKey) => {
       setState(prev => {
@@ -1230,6 +1273,7 @@ export function useFilterParams() {
         contributors: new Set<string>(),
         institutions: new Set<string>(),
         search: "",
+        triageBox: null,
         ...EMPTY_EXACT_FILTERS,
         sortField: null,
         sortDirection: "desc" as const,
@@ -1281,6 +1325,7 @@ export function useFilterParams() {
         contributors: new Set<string>(),
         institutions: new Set<string>(),
         search: "",
+        triageBox: null,
         ...EMPTY_EXACT_FILTERS,
         sortField: null,
         sortDirection: "desc" as const,
@@ -1307,6 +1352,8 @@ export function useFilterParams() {
     selectedCountries: state.countries,
     gbifRanges: state.gbifRanges,
     gbifChartKey: state.gbifChartKey ?? DEFAULT_GBIF_CHART_KEY,
+    triageBox: state.triageBox ?? null,
+    triageY: state.triageY ?? null,
     selectedAssessmentCounts: state.assessmentCounts,
     selectedSystems: state.systems,
     selectedPopulationTrends: state.populationTrends,
@@ -1358,6 +1405,8 @@ export function useFilterParams() {
     setSelectedCountries,
     setGbifRanges,
     setGbifChartKey,
+    setTriageBox,
+    setTriageY,
     setSelectedAssessmentCounts,
     setSelectedSystems,
     setSelectedPopulationTrends,

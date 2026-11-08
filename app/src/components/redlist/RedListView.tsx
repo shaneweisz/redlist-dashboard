@@ -28,7 +28,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { inTriageBox, triageAxes, type PriorityBox, type PriorityPoint, type TriageBoxUnits } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -1267,6 +1267,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedDescribedYears, setSelectedDescribedYears,
     selectedCountries, setSelectedCountries,
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
+    triageBox, setTriageBox, triageY, setTriageY,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
@@ -1381,6 +1382,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     setSelectedDescribedYears(new Set());
     setSelectedCountries(new Set());
     for (const key of GBIF_RANGE_KEYS) setGbifRanges(key, new Set());
+    setTriageBox(null);
     setSelectedAssessmentCounts(new Set());
     setSelectedSystems(new Set());
     setSelectedPopulationTrends(new Set());
@@ -1404,7 +1406,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     setSelectedInstitutions(new Set());
     setSort(null, "desc");
     setShowOnlyStarred(false);
-  }, [viewMode, setSelectedTaxa, setSelectedCategories, setSelectedYearRanges, setSelectedAssessmentYears, setSelectedDescribedYears, setSelectedCountries, setGbifRanges, setSelectedAssessmentCounts, setSelectedSystems, setSelectedPopulationTrends, setSelectedMovementPatterns, setSelectedThreats, setSelectedCriteria, setSelectedHabitat, setHabitatBreadth, setSelectedHabitatImportance, setSelectedHabitatSeasons, setSelectedHabitatSuitability, setEndemicsOnly, setSelectedGrowthForms, setSelectedAssessors, setSelectedReviewers, setSelectedFacilitators, setSelectedContributors, setSelectedInstitutions, setSort]);
+  }, [viewMode, setSelectedTaxa, setSelectedCategories, setSelectedYearRanges, setSelectedAssessmentYears, setSelectedDescribedYears, setSelectedCountries, setGbifRanges, setSelectedAssessmentCounts, setSelectedSystems, setSelectedPopulationTrends, setSelectedMovementPatterns, setSelectedThreats, setSelectedCriteria, setSelectedHabitat, setHabitatBreadth, setSelectedHabitatImportance, setSelectedHabitatSeasons, setSelectedHabitatSuitability, setEndemicsOnly, setSelectedGrowthForms, setSelectedAssessors, setSelectedReviewers, setSelectedFacilitators, setSelectedContributors, setSelectedInstitutions, setSort, setTriageBox]);
 
   // Set by the navigations that already produce a complete, fully-specified
   // state in one atomic update (a sub-group selection that also moves the view
@@ -2256,17 +2258,48 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // because a row from the NE list was keyed on its CoL id while the same species from
   // search was keyed on its GBIF one — two different keys for one species. Both sides
   // resolve through assessment_link to the same `col-…` key now, so the keys match.
-  // Reassessment triage scatter: the box dragged on it filters
-  // the page like any chart. Local state for now, not in the URL.
-  const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
-  // The scatter's y axis (Total / New / % New, all records / georeferenced),
-  // its own choice rather than the GBIF Records chart's. Starts on New in the
-  // page's record mode.
-  const [priorityKey, setPriorityKey] = useState<GbifRangeKey>(() => `new.${gbifRecordMode}`);
-  const changePriorityKey = useCallback((k: GbifRangeKey) => {
-    setPriorityKey(k);
-    setPriorityBox(null); // the box is in the old metric's units
-  }, []);
+  // Reassessment triage scatter. Its y axis (Total / New / % New, all records /
+  // georeferenced) is its own choice, in the URL as triageY (default: New in the
+  // page's record mode); changing it clears the box, drawn in the old units.
+  const priorityKey: GbifRangeKey = triageY ?? `new.${gbifRecordMode}`;
+  const changePriorityKey = setTriageY;
+  // The axes, from the whole taxon with filters ignored, so a filter never
+  // rescales the chart and selections stay comparable. X is capped at the 99th
+  // percentile of age (older assessments go in the scatter's "+" band).
+  const priorityAxes = useMemo(() => {
+    let maxValue = 0;
+    const ages: number[] = [];
+    for (const s of taxaFilteredSpeciesBase) {
+      const p = priorityOf(s, priorityKey);
+      if (!p) continue;
+      ages.push(p.years);
+      if (p.value > maxValue) maxValue = p.value;
+    }
+    ages.sort((a, b) => a - b);
+    const maxYears = ages.length ? ages[ages.length - 1] : 0;
+    const p99 = ages.length ? ages[Math.min(ages.length - 1, Math.floor(ages.length * 0.99))] : 0;
+    return triageAxes(maxYears, p99, maxValue, gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log");
+  }, [taxaFilteredSpeciesBase, priorityKey]);
+  // The box dragged on it filters the page like any chart, from the URL
+  // (triage=, in plot units). Its species come from the data, placed exactly
+  // as the scatter draws them, so a shared link selects the same dots. Ignored
+  // in the Awaiting view, which has no scatter.
+  const priorityBox = useMemo((): PriorityBox | null => {
+    if (!triageBox || isNewAssessments) return null;
+    const [x0, x1, y0, y1] = triageBox;
+    const b = { x0, x1, y0, y1 };
+    const keys = new Set<string>();
+    for (const s of taxaFilteredSpeciesBase) {
+      const p = priorityOf(s, priorityKey);
+      if (p && inTriageBox(b, p.years, p.value, s.species_key, priorityAxes)) keys.add(s.species_key);
+    }
+    return { ...b, keys };
+  }, [triageBox, isNewAssessments, taxaFilteredSpeciesBase, priorityKey, priorityAxes]);
+  const setPriorityBox = useCallback((b: TriageBoxUnits | null) => {
+    // Rounded for the URL; the species are re-derived from the rounded box.
+    const r = (v: number) => Math.round(v * 1000) / 1000;
+    setTriageBox(b ? [r(b.x0), r(b.x1), r(b.y0), r(b.y1)] : null);
+  }, [setTriageBox]);
   const matchesPriorityBox = useCallback(
     (s: Species): boolean => !priorityBox || priorityBox.keys.has(s.species_key),
     [priorityBox],
@@ -2597,18 +2630,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return out;
   }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey]);
-  // The axes' extents from the whole taxon, filters ignored, so applying or
-  // changing a filter never rescales the chart and selections stay comparable.
-  const priorityExtent = useMemo(() => {
-    let maxYears = 0, maxValue = 0;
-    for (const s of taxaFilteredSpeciesBase) {
-      const p = priorityOf(s, priorityKey);
-      if (!p) continue;
-      if (p.years > maxYears) maxYears = p.years;
-      if (p.value > maxValue) maxValue = p.value;
-    }
-    return { maxYears, maxValue };
-  }, [taxaFilteredSpeciesBase, priorityKey]);
   const priorityInBox = useMemo(
     () => priorityBox ? priorityPoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
     [priorityPoints, priorityBox],
@@ -3164,7 +3185,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
     setSelectedSpeciesKey(key);
     setScrollToSpecies(key);
-  }, [priorityBox, setSelectedSpeciesKey]);
+  }, [priorityBox, setPriorityBox, setSelectedSpeciesKey]);
   useEffect(() => {
     if (!scrollToSpecies) return;
     const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
@@ -5743,9 +5764,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             onBoxChange={setPriorityBox}
                             onPointClick={openSpeciesFromScatter}
                             selectedKey={selectedSpeciesKey}
-                            yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                            maxYears={priorityExtent.maxYears}
-                            maxValue={priorityExtent.maxValue}
+                            axes={priorityAxes}
                           />
                         )}
                       </div>
@@ -5797,7 +5816,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   // the taxa will change, since that's the only time it's read.
                   if (selectedTaxa.size > 0) skipClearOnTaxaChangeRef.current = true;
                   clearAllFiltersAndTaxa({ replace: switchView });
-                  setPriorityBox(null);
                   setShowOnlyStarred(false);
                   setExpandedThreat(new Set());
                   setExpandedCriteria(new Set());
