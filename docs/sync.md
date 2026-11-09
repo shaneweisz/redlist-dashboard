@@ -1311,6 +1311,14 @@ What the gap between the snapshot's XR and the newest costs, measured on the 202
 - Lumps, renames and splits follow on their own: each record sits on the usage its own name matched, and that usage follows its name into the newer release, which is how GBIF's re-index will file it (COL26.10 raises *Corvus corone cornix* to *C. cornix*; the 1.38M records filed under the subspecies go to *C. cornix*, those filed as *C. corone* stay). A species new since the snapshot's XR can't: records carrying its name were matched to something else (*Agrotis sabine*'s to *A. sabura*) and move only when GBIF re-indexes. Its count carries a note in the app (`count_note = 'new'`: 40 assessed species in this pair).
 - Counts stop matching gbif.org's for the same snapshot until GBIF re-indexes; they match how GBIF will file the records once it has.
 
+**Where names meet ids.** Three steps turn names into CoL ids, and only the first is a judgement:
+
+1. **The link** (`link/`): which CoL name a Red List name is, by the matcher on the taxonomy's XR, or a person's decision. Everything under *Matching* below.
+2. **The release map** (`sources/release-map.ts`): which usage in one CoL release is a usage in another, for the snapshot's records and GBIF's live ids. Not a judgement about species: CoL keeps the id where it can, and otherwise the map follows the name and author the record was filed under, so a record lands where GBIF's re-index will put it.
+3. **Re-applying decisions** (`link/decisions.ts`): each decision is kept as names and re-found by name each sync; one that no longer resolves goes back to the queue as *stale*.
+
+The first two could disagree: the matcher could link a species to one usage while the records filed under its name are mapped onto another. Measured on this pair, they don't: for 175,324 of the 175,356 linked species whose CoL name the snapshot's XR also holds, that name's usage maps onto exactly the usage the link chose; 29 more land on another usage of the same species, and 3 on another species, all names CoL holds twice.
+
 Measured once against the decision this replaced (the snapshot's XR for everything): about 1,450 assessed species (0.8%) land on a different CoL species in COL26.10 XR than in COL26.6 XR, 993 of them CoL moving away from IUCN's name and 215 moving to it.
 
 Matching is two questions, answered separately so each can be explained on its own:
@@ -1320,7 +1328,7 @@ Matching is two questions, answered separately so each can be explained on its o
 
 ### 1. The name
 
-Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/matching-ws)**, the service GBIF interprets occurrence records with, with IUCN's kingdom, phylum, class, order and family as hints. It runs locally in Docker (`inputs/matcher.ts`), pinned to the matching-ws release GBIF's hosted service reports (v1.0.12) and built from the exact XR the sync uses, so a name matched here lands where GBIF filed that name's records. The index takes about 15 minutes to build, once per XR; all 175,909 names take about a minute, and answers are cached by query, release and matcher version, so an unchanged month asks nothing.
+Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/matching-ws)**, the service GBIF interprets occurrence records with, with IUCN's kingdom, phylum, class, order and family as hints. It runs locally in Docker (`inputs/matcher.ts`), pinned to the matching-ws release GBIF's hosted service reports (v1.0.12) and built from the taxonomy's XR, so a name matched here lands where GBIF files that name's records when it indexes against that XR. The snapshot's records were filed by the same matcher against the snapshot's XR; *Versions* above says how they reach the taxonomy's ids, and how often the two agree. The index takes about 15 minutes to build, once per XR; all 175,909 names take about a minute, and answers are cached by query, release and matcher version, so an unchanged month asks nothing.
 
 The authority is deliberately not sent. Most records carry none, so GBIF files them on CoL's accepted record; asked with it, the matcher prefers whichever CoL record has the identical author string, often a provisional duplicate the records aren't on (*Melospiza melodia* (Wilson, 1810) went to that copy, not the accepted "(A. Wilson, 1810)"). Sending it, measured on COL26.6 XR, cost 301 species 42.6M records, 282 of them all their records, and gained 9 species 404. The authority does its work after the match: the acceptance rule below compares it against the matcher's alternatives, which is how same-spelled names by different authors are told apart.
 
@@ -1338,15 +1346,16 @@ Everything else is a case for **`decisions.tsv`**: one row per species, naming t
 
 The queue of species waiting for a person is written each sync to `build/match-queue.tsv`, with the reason and the matcher's suggestion. Statuses: *undecided* (counts nothing yet), *proposed* (a decision applies, but no person has checked it), *stale* (a decision no longer resolves).
 
-| COL26.6 XR, Red List 2026-1 | Species |
+| COL26.10 XR, Red List 2026-1 | Species |
 |---|---:|
-| taken from the matcher | 173,627 |
-| from `decisions.tsv` (2,016 rows, none reviewed yet) | 2,016 |
-| undecided, so unlinked | 266 |
+| taken from the matcher | 173,561 |
+| from `decisions.tsv` (2,017 rows, none reviewed yet) | 1,977 |
+| a decision that no longer resolves (*stale*), so the matcher's answer | 36 |
+| undecided or stale, so unlinked | 335 |
 
 The first `decisions.tsv` carries the answers of the hand-written matching passes it replaced (`by = heuristic`, `reviewed = no`), for the species the matcher's answer doesn't settle: spelling variants (*Ochotona pallasii* / *pallasi*), homonyms, provisional names, matches through IUCN's synonyms. So it moved almost nothing on the day it landed (against the old passes: 28 species that had no records now count the usage GBIF files their name under, *Piptadenia flava* 0 → 1,117; 54 refused links dropped, which counted nothing; no species lost records). Each row is a review item, and a reviewed row replaces it.
 
-The 266 undecided are mostly names the Red List marks as unsettled (145) and names CoL doesn't hold below genus (71); the old passes left them unmatched too.
+The 331 undecided are mostly names the Red List marks as unsettled (145) and spelling variants (108). Against the last sync on COL26.6 XR (266 undecided), the move to COL26.10 XR unlinked 137 species and settled others: mostly names the matcher now finds only as a spelling variant (67), a provisional name (29) or not as a species (27), and 11 homonyms (*Juncus filiformis*, 207k records). It also left 40 decisions stale, 36 of which fall back to the matcher's answer (*Accipiter cirrocephalus*, now a synonym of *Tachyspiza cirrocephala*). Every CoL move does this, so each needs a pass over the queue.
 
 ### 2. The concept
 
@@ -1466,7 +1475,7 @@ Needs: Docker (for the matcher), uv (`brew install uv`, for dbt), the Red List P
 - link changes (`link_col_id`), since each one moves a species' records
 - species leaving or joining the NE list in bulk
 
-**When CoL moves.** A new XR (CoL releases monthly) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes it on its own, a few days after release once its archive is built, and maps the snapshot's keys onto it; the log names the three XRs and how many usages, splits and new species the mapping found. The curated release follows the XR on its own. When GBIF re-indexes, the next snapshot's XR moves and the mapping shrinks; when GBIF runs the newest XR, the maps, notes and live keys are all empty.
+**When CoL moves.** A new XR (CoL releases monthly) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes it on its own, a few days after release once its archive is built, and maps the snapshot's keys onto it; the log names the three XRs, how many usages change id, and how many species the snapshot's XR has no name for. The curated release follows the XR on its own. When GBIF re-indexes, the next snapshot's XR moves and the mapping shrinks; when GBIF runs the newest XR, the maps, notes and live keys are all empty.
 
 **When IUCN publishes.** Point `DB_NAME` at the new database, and update `validate-table1a.test.ts` to the new Table 1a. Expect new species, new categories and count changes from moved assessment years, and a longer matching queue: new species go through the matcher, and a renamed species' decision is asked again.
 
@@ -1531,14 +1540,14 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 
 Known limits:
 
-- 266 assessed species link to no CoL name yet (`method = 'unmatched'` in `assessment_link`, listed in `build/match-queue.tsv`), so they have no GBIF counts.
-- 2,016 decisions are the old passes' answers, unreviewed. The queue says why each needed a person (709 spelling variants, 635 homonyms, 251 with no species match, 218 provisional names, 149 lower confidence, ...).
+- 335 assessed species link to no CoL name yet (`method = 'unmatched'` in `assessment_link`, listed in `build/match-queue.tsv`), so they have no GBIF counts.
+- 2,017 decisions are unreviewed: the old passes' answers and two drafted by an agent. The queue says why each needed a person (789 spelling variants, 445 homonyms, 223 with no species match, 160 provisional names, 151 lower confidence, ...).
 - Ownership walks three levels below a lumped species' root. The deepest case in the current release is three; a deeper one would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so they differ a little from gbif.org's live counts.
 - `decideKey`'s genus-transfer rule accepts a shared epithet under another genus without comparing authors; the covered rows do. Whether it should too is open.
 - The acceptance rule, the decisions file and the counting rule have unit tests on small synthetic tables (`pipeline-accept-match.test.ts`, `pipeline-decisions.test.ts`, `pipeline-usage-owners.test.ts`, `pipeline-record-counts.test.ts`); the link's concept rules are checked against real data only (the fixtures above, on every run).
-- Between GBIF re-indexes, counts follow a mapping of the snapshot's ids, not GBIF's own filing: 0.08% of records have no counterpart (COL26.6 XR onto COL26.10 XR), and split and new species' counts carry a note.
+- Between GBIF re-indexes, counts follow a mapping of the snapshot's ids, not GBIF's own filing: 0.08% of records have no counterpart (COL26.6 XR onto COL26.10 XR), and new species' counts carry a note.
 
 Follow-ups:
 
