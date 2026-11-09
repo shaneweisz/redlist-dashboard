@@ -4,7 +4,9 @@
  *
  * GBIF's live index runs the XR it last re-indexed against, a few times a
  * year, so between re-indexes some of the app's keys are ids it doesn't have,
- * or has as something else. The sync writes those keys' live ids to
+ * or has as something else; and while GBIF re-indexes (about five days), its
+ * records sit partly under the old ids. The sync writes, for each key that
+ * differs, the ids to try in order (the live XR's, then the snapshot's) to
  * taxonomy/gbif-live-keys.json (scripts/sync/link/live-keys.ts); this reads it
  * once per server process. The app's key stays a species' identity (URLs,
  * saved edits); only requests to GBIF change.
@@ -23,9 +25,9 @@ const FILE = syncPath("gbif-live-keys.json");
 const LOCAL = path.join(process.cwd(), "data", "sync", FILE);
 
 export interface LiveKeys {
-  /** app key → live key */
-  live: Map<string, string>;
-  /** live key → app key */
+  /** app key → the ids to ask GBIF with, in order */
+  live: Map<string, string[]>;
+  /** any of those ids → app key */
   app: Map<string, string>;
 }
 
@@ -39,9 +41,14 @@ async function readFromR2(): Promise<string> {
   return (await object.Body?.transformToString()) ?? "{}";
 }
 
+/** The file's { key: ids to try }; a sync from before the list wrote { key: live id }, meaning [live id, key]. */
 export function parseLiveKeys(json: string): LiveKeys {
-  const pairs = Object.entries(JSON.parse(json) as Record<string, string>);
-  return { live: new Map(pairs), app: new Map(pairs.map(([k, v]) => [v, k])) };
+  const pairs = Object.entries(JSON.parse(json) as Record<string, string | string[]>)
+    .map(([k, v]): [string, string[]] => [k, Array.isArray(v) ? v : [v, k]]);
+  return {
+    live: new Map(pairs),
+    app: new Map(pairs.flatMap(([k, tries]) => tries.filter((t) => t !== k).map((t): [string, string] => [t, k]))),
+  };
 }
 
 let loading: Promise<LiveKeys> | null = null;
@@ -63,10 +70,9 @@ export function liveKeys(): Promise<LiveKeys> {
   return loading;
 }
 
-/** The keys to ask GBIF's live API with, in order: the live key where it differs, then the app's. */
+/** The keys to ask GBIF's live API with, in order: the live XR's id, then the snapshot's, where they differ. */
 export function queryKeys(keys: LiveKeys, key: string): string[] {
-  const live = keys.live.get(key);
-  return live ? [live, key] : [key];
+  return keys.live.get(key) ?? [key];
 }
 
 const HOUR = 60 * 60 * 1000;
@@ -74,23 +80,25 @@ const chosen = new Map<string, { key: string; at: number }>();
 
 /**
  * The key to ask GBIF's live API with for this species. Most months it is the
- * key itself, with no request made. Where a live key exists, it is used if GBIF
- * has records under it, else the app's key: while GBIF re-indexes, records
- * move between the two. Remembered for an hour, so a species page's several
+ * key itself, with no request made. Otherwise the first id to try that GBIF
+ * has records under, else the first: while GBIF re-indexes, records move from
+ * the old ids to the new. Remembered for an hour, so a species page's several
  * panels ask once.
  */
 export async function liveGbifKey(key: string): Promise<string> {
   const tries = queryKeys(await liveKeys(), key);
-  if (tries.length === 1) return key;
+  if (tries.length === 1) return tries[0];
   const hit = chosen.get(key);
   if (hit && Date.now() - hit.at < HOUR) return hit.key;
-  let pick = key;
+  let pick = tries[0];
   try {
-    const live = (await gbifJson(`https://api.gbif.org/v1/occurrence/search?${new URLSearchParams({
-      taxonKey: tries[0], checklistKey: GBIF_CHECKLIST_KEY, limit: "0" })}`)) as { count?: number };
-    if ((live.count ?? 0) > 0) pick = tries[0];
+    for (const t of tries) {
+      const live = (await gbifJson(`https://api.gbif.org/v1/occurrence/search?${new URLSearchParams({
+        taxonKey: t, checklistKey: GBIF_CHECKLIST_KEY, limit: "0" })}`)) as { count?: number };
+      if ((live.count ?? 0) > 0) { pick = t; break; }
+    }
   } catch {
-    // GBIF unreachable: the caller's own request will say so; ask with the app's key.
+    // GBIF unreachable: the caller's own request will say so.
   }
   chosen.set(key, { key: pick, at: Date.now() });
   return pick;

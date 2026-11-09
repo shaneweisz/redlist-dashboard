@@ -185,7 +185,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     writeColReleasePin(col.xr, col.checklist, snapshotXr);
     const liveKeyed = await writeGbifLiveKeys({ assessed: T.assessed, ne: T.ne, liveUsages: T.liveUsages,
       snapshotUsages: T.snapshotUsages, taxa: T.taxa }, T.gbifLiveKeys);
-    console.log(`   ${liveKeyed.toLocaleString()} species with a different key in GBIF's live index`);
+    console.log(`   ${liveKeyed.toLocaleString()} keys GBIF's live index may hold under another id (gbif-live-keys.json)`);
     done();
   }
 

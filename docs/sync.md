@@ -499,19 +499,23 @@ Decisions, in two steps kept apart so each can be explained on its own:
 #### `link/live-keys.ts`
 
 ```text
-taxonomy/gbif-live-keys.json: { taxonomy's GBIF key: live index's GBIF key },
-for every key the app asks GBIF's live API with whose id differs there.
+taxonomy/gbif-live-keys.json: { taxonomy's GBIF key: [ids to ask GBIF's live
+API with, in order] }, for every key the app asks with whose id differs in
+the live XR or the snapshot's.
 
 The app's keys are ids of the taxonomy's XR, CoL's newest. GBIF's live index
 (maps, record breakdowns, photos, nearby species, gbif.org links) runs the
 XR GBIF last re-indexed against, which is often older: GBIF re-indexes a few
-times a year, CoL releases monthly. The app's server reads this file to ask
-GBIF with the ids its index uses (src/lib/gbif-live-keys.ts). It is empty
-whenever GBIF runs CoL's newest XR.
+times a year, CoL releases monthly. And while GBIF re-indexes (about five
+days, announced on status.gbif.org), its records sit partly under the
+previous XR's ids, the snapshot's. The app's server reads this file and
+asks with the first id GBIF has records under (src/lib/gbif-live-keys.ts).
+It is empty whenever the snapshot, GBIF and the taxonomy share one XR.
 
-Built from: live_usages (sources/release-map.ts: the taxonomy's usages onto
-the live XR's), snapshot_usages (for the groups, below), assessed and ne (the
-keys the app uses), src/config/gbif-taxon-keys.json (the groups).
+Built from: live_usages and snapshot_usages (sources/release-map.ts: the
+taxonomy's usages onto the live XR's, the snapshot's onto the taxonomy's),
+assessed and ne (the keys the app uses), src/config/gbif-taxon-keys.json
+(the groups).
 
 Decisions:
   - Only the keys the app asks with: assessed and Not Evaluated species', and
@@ -521,11 +525,12 @@ Decisions:
     GBIF ran then. It is read as the taxonomy's id, else as the snapshot's
     (mapped onto the taxonomy's), and then mapped onto the live XR's
     (Ostracoda, B8TXJ in COL26.6 XR, is another id in COL26.10 XR).
-  - A key the live XR has no counterpart for is left out: the app then asks
-    with the taxonomy's id, and GBIF answers for what it has.
+  - The ids to try: the live XR's, then the snapshot's (the usage that maps
+    onto it by name, when one does). A key the live XR has no counterpart
+    for tries the taxonomy's own id first.
 ```
 
-`taxonomy/gbif-live-keys.json` · 0 kB
+`taxonomy/gbif-live-keys.json` · 1 MB
 
 ### Count
 
@@ -1296,7 +1301,7 @@ The diagram is generated from a build, with a real species on every branch: `pyt
 **Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is CoL's newest extended release (XR) with an archive to download, with the curated release it was built from (`inputs/col-xr.ts`, `inputs/col-checklist.ts`); taxa, the link, the lists and the CoL-differences card all follow it, so the taxonomy is as current as CoL. Two other XRs can be in play, and most months all three are one:
 
 - **The snapshot's.** A GBIF snapshot is keyed by the XR GBIF indexed when it was made. GBIF re-indexes a few times a year (July and November 2026, skipping three CoL releases between; monthly is its stated aim, gbif/pipelines#1259, not yet its practice), so the snapshot's XR can trail CoL's newest by months. Snapshots don't say which XR they use (gbif/occurrence#559), so the sync finds it by testing: the XR that holds all but 0.1% of the snapshot's keys (`inputs/snapshot-xr.ts`; the wrong one leaves out about 2%). Its usages are then mapped onto the newest release's (`sources/release-map.ts`): the same id with the same name and rank, else the usage with the same name, rank and authorship, else the usages with the same name and rank if they all lead to one species, else the usage's species. That is how GBIF's own re-index treats records, by the name they carry. Every record is then counted where the newest release puts its name: lumps add up, renames follow.
-- **GBIF's live index's.** The app's live panels (map, record breakdown, photos, nearby species, country map, gbif.org links) ask GBIF's API by id, and it runs the XR GBIF last re-indexed against. Where that isn't the newest, the newest release's usages are mapped onto it the same way, and the app asks with the live id (`link/live-keys.ts`, `src/lib/gbif-live-keys.ts`).
+- **GBIF's live index's.** The app's live panels (map, record breakdown, photos, nearby species, country map, gbif.org links) ask GBIF's API by id, and it runs the XR GBIF last re-indexed against. Where that isn't the newest, the newest release's usages are mapped onto it the same way. And while GBIF re-indexes (about five days), its records sit partly under the previous XR's ids. So each key that differs gets the ids to try in order, the live XR's then the snapshot's, and the app asks with the first GBIF has records under (`link/live-keys.ts`, `src/lib/gbif-live-keys.ts`).
 
 What the gap between the snapshot's XR and the newest costs, measured on the 2026-11-01 snapshot (COL26.6 XR) mapped onto COL26.10 XR:
 

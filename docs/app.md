@@ -49,7 +49,7 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 
 ### Live data in the detail panel and maps
 
-These routes ask GBIF's live API, which runs the CoL release GBIF last re-indexed against, while the lists are keyed by CoL's newest. Each sends `liveGbifKey(key)` (`src/lib/gbif-live-keys.ts`): the species' id in the live index where it differs, read from the sync's `taxonomy/gbif-live-keys.json`, falling back to the lists' id while GBIF is mid-reprocess. Links to gbif.org go through `/api/gbif-link` for the same reason. The lists' id stays the app's identity for a species (URLs, saved edits). When GBIF runs CoL's newest release, the file is empty.
+These routes ask GBIF's live API, which runs the CoL release GBIF last re-indexed against, while the lists are keyed by CoL's newest. Each sends `liveGbifKey(key)` (`src/lib/gbif-live-keys.ts`): the first id GBIF has records under, from the ids to try that the sync writes to `taxonomy/gbif-live-keys.json` (the live index's, then the snapshot's, for the days GBIF is re-filing). Links to gbif.org go through `/api/gbif-link` for the same reason. The lists' id stays the app's identity for a species (URLs, saved edits). When GBIF runs CoL's newest release, the file is empty.
 
 A count the snapshot can't give in full carries `count_note` (`split` or `new`, from the sync's `snapshot_notes`), shown as an asterisk beside the Total GBIF count with its reason on hover (`src/lib/count-note.ts`).
 

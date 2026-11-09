@@ -136,15 +136,16 @@ describe("gbif-live-keys.json", () => {
     const out = f("gbif-live-keys.json");
     await writeGbifLiveKeys({ assessed: f("assessed.parquet"), ne: f("ne.parquet"), liveUsages: f("live_usages.parquet"),
       snapshotUsages: f("snapshot_usages.parquet"), taxa: f("taxa.parquet") }, out);
-    // S1 is the same id live; N8 has no live counterpart, so the app asks with its own key.
-    expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual({ N2: "L2" });
+    // N2: the live XR's id, then the snapshot's (S2, mapped onto N2 by name).
+    // S1 is the same id everywhere; N8 has no live counterpart and no snapshot id.
+    expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual({ N2: ["L2", "S2"] });
   });
 
-  it("is empty when GBIF runs the taxonomy's XR", async () => {
+  it("tries the snapshot's id while GBIF re-indexes onto the taxonomy's XR", async () => {
     await buildReleaseMap(null, f("live_none.parquet"));
     const out = f("gbif-live-keys-none.json");
     await writeGbifLiveKeys({ assessed: f("assessed.parquet"), ne: f("ne.parquet"), liveUsages: f("live_none.parquet"),
       snapshotUsages: f("snapshot_usages.parquet"), taxa: f("taxa.parquet") }, out);
-    expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual({});
+    expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual({ N2: ["N2", "S2"] });
   });
 });
