@@ -13,6 +13,12 @@
  *     is a species and that it is another one (Sipyloidea brevicerci)
  *   - a misapplied name: CoL saying that name was used wrongly, not that it
  *     is another species
+ *
+ * And a synonym match whose authors share no year or author word with the Red
+ * List's waits too: when CoL drops a species, the only name left spelled like
+ * it can be another author's, for another organism. COL26.10 dropped Tritoma bipustulata Fabricius, 1775;
+ * the one left, Schilsky, 1888, is a synonym of Mycetophagus quadripustulatus,
+ * and the beetle IUCN assessed would have shown that one's records.
  */
 
 export interface MatchAnswer {
@@ -37,7 +43,8 @@ export type QueueReason =
   | "lower confidence"
   | "synonym of no species"
   | "homonym the authors don't decide"
-  | "accepted and a synonym in CoL";
+  | "accepted and a synonym in CoL"
+  | "synonym by other authors";
 
 export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice" }
@@ -54,15 +61,41 @@ const DISOWNED_AUTHORITY = /\b(ined|auct)\b\.?|\bnon\b|\bsensu\b/i;
  * folded (one may abbreviate the other, "Pit." / "Pitard"), and the same year
  * where both give one.
  */
+const authorWords = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  .split(/[^a-z]+/).filter((w) => w.length >= 2 && !["ex", "in", "et", "de", "van", "von", "fil", "f"].includes(w));
+const authorYear = (s: string) => s.match(/\b(1[7-9]\d\d|20\d\d)\b/)?.[1];
+const shareAuthorWord = (a: string, b: string, minPrefix = 3) => {
+  const wb = authorWords(b);
+  return authorWords(a).some((x) => wb.some((y) => x === y || (x.length >= minPrefix && y.startsWith(x)) || (y.length >= minPrefix && x.startsWith(y))));
+};
+
 export function sameAuthors(a: string | null | undefined, b: string | null | undefined): boolean {
-  const words = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-    .split(/[^a-z]+/).filter((w) => w.length >= 2 && !["ex", "in", "et", "de", "van", "von", "fil", "f"].includes(w));
-  const year = (s: string) => s.match(/\b(1[7-9]\d\d|20\d\d)\b/)?.[1];
   if (!a || !b) return false;
-  const ya = year(a), yb = year(b);
+  const ya = authorYear(a), yb = authorYear(b);
   if (ya && yb && ya !== yb) return false;
-  const wb = words(b);
-  return words(a).some((x) => wb.some((y) => x === y || (x.length >= 3 && y.startsWith(x)) || (y.length >= 3 && x.startsWith(y))));
+  return shareAuthorWord(a, b);
+}
+
+/**
+ * Could two author citations not be the same author at all? Only when they
+ * share neither a year nor an author word: looser than sameAuthors, since a
+ * citation's year is often a year out ("Forster, 1781" / "1780") and its
+ * names misspelled ("Milen-Edwards"). The same test as the release map's
+ * homonym block (sources/release-map.ts).
+ */
+export function otherAuthors(a: string, b: string): boolean {
+  const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (norm(a) === norm(b)) return false;
+  // "L." or "Bl.": nothing to compare beyond an initial, so no evidence they differ.
+  if (authorWords(a).length === 0 || authorWords(b).length === 0) return false;
+  // The same basionym author in brackets: one organism, moved by different authors ("(L.) Roth" / "(L.) Hoffm.").
+  const basionym = (s: string) => s.match(/\(([^)]*)\)/)?.[1];
+  const ba = basionym(a), bb = basionym(b);
+  if (ba && bb && (norm(ba) === norm(bb) || authorWords(ba).length === 0 || authorWords(bb).length === 0 || shareAuthorWord(ba, bb))) return false;
+  const ya = authorYear(a);
+  // German transliteration aside ("Düben" / "Dueben"), and abbreviations as short as "Bl." for Blume.
+  const translit = (s: string) => s.replace(/([aou])e/gi, "$1");
+  return !(ya && ya === authorYear(b)) && !shareAuthorWord(translit(a), translit(b), 2);
 }
 
 const binomial = (n: string | null) => (n ?? "").replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
@@ -86,6 +119,8 @@ export function acceptMatch(
   if ((m.confidence ?? 0) < 99) return no("lower confidence");
   const mine = speciesOf(m.usage_id);
   if (!mine) return no("synonym of no species");
+  if (m.usage_status === "SYNONYM" && species.authority && m.usage_authorship
+    && otherAuthors(species.authority, m.usage_authorship)) return no("synonym by other authors");
 
   const rivals = m.alternatives.filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === binomial(m.usage_name)
     && speciesOf(a.usage_id) !== mine);

@@ -492,7 +492,7 @@ Decisions, in two steps kept apart so each can be explained on its own:
      - Every usage counts for one assessed species at most.
 ```
 
-`core/assessment_link.parquet` · 182,738 rows · 3 MB
+`core/assessment_link.parquet` · 182,837 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -572,7 +572,7 @@ Checks: each usage has at most one owner. A violation means a number
 somewhere is inflated, so the sync stops.
 ```
 
-`core/usage_owner.parquet` · 6,240,441 rows · 33 MB
+`core/usage_owner.parquet` · 6,240,491 rows · 33 MB
 
 | column | type | |
 |---|---|---|
@@ -606,7 +606,7 @@ Decisions:
     date: nothing can postdate it yet.
 ```
 
-`core/record_counts.parquet` · 1,727,606 rows · 9 MB
+`core/record_counts.parquet` · 1,727,533 rows · 9 MB
 
 | column | type | |
 |---|---|---|
@@ -652,7 +652,7 @@ Decisions:
 | `year_published` | text |  |
 | `countries` | text | lists, ';'-joined (the app's filter SQL reads them so) |
 | `gbif_species_key` | text | see record_counts |
-| `count_note` | text | 'new' when the snapshot's XR has no name for its species, so its records were filed elsewhere until GBIF re-indexes (snapshot_notes); NULL most months |
+| `count_note` | text | 'unlinked' when it is linked to no CoL species (waiting in the match queue), so no records are counted; 'new' when the snapshot's XR has no name for its species, so its records were filed elsewhere until GBIF re-indexes (snapshot_notes); else NULL |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
 | `gbif_georeferenced_records_since_assessment` | integer |  |
@@ -759,7 +759,7 @@ Decisions:
   - Common name: iNaturalist's, else CoL's.
 ```
 
-`lists/ne.parquet` · 1,330,120 rows · 36 MB
+`lists/ne.parquet` · 1,330,122 rows · 36 MB
 
 | column | type | |
 |---|---|---|
@@ -810,7 +810,7 @@ taxonomy/assessment_link: assessment_link as built (see link/assessment-link.ts)
 | `checklist_parent_id` | text |  |
 | `checklist_name` | text |  |
 
-`taxonomy/assessment_link.parquet` · 182,738 rows · 3 MB
+`taxonomy/assessment_link.parquet` · 182,837 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -910,7 +910,7 @@ CoL shows the evidence only from the new species' page: V. gracilicosta lists
 "Vallonia costata var. montana Sterki, 1893" among its synonyms.
 ```
 
-`taxonomy/col-split-candidates.parquet` · 5,841 rows · 80 kB
+`taxonomy/col-split-candidates.parquet` · 5,842 rows · 80 kB
 
 | column | type | |
 |---|---|---|
@@ -964,7 +964,7 @@ Decisions: primary links only; where two share a col_id, an accepted-name
 match before others, then the lowest SIS id.
 ```
 
-`taxonomy/col-to-assessed.parquet` · 172,464 rows · 2 MB
+`taxonomy/col-to-assessed.parquet` · 172,397 rows · 2 MB
 
 | column | type | |
 |---|---|---|
@@ -995,7 +995,7 @@ Decisions:
     so a prefix query reads about a megabyte, fast even on a cold container.
 ```
 
-`search/name-index.parquet` · 3,823,868 rows · 169 MB
+`search/name-index.parquet` · 3,823,671 rows · 170 MB
 
 | column | type | |
 |---|---|---|
@@ -1305,7 +1305,7 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v4.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v5.png)
 
 The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
 
@@ -1365,20 +1365,22 @@ The answer is taken without review (`accept-match.ts`) when:
 
 A same-spelled name with the match's own author citation isn't a rival: that is CoL holding the name twice, and the twin rule below counts both. Except when the match is a synonym and its twin an accepted species: CoL is then saying both that the name is a species and that it is another one (*Sipyloidea brevicerci*), so a person decides. Names the Red List itself marks as unsettled (aff., cf., sp., `[...]` in the name; ined., auct., non, sensu in the authority) always go to a person: the matcher read *Heliotropium* aff. *wagneri* "[non Vierh.]" as *H. wagneri* Vierh.
 
-Everything else is a case for **`decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart) the Red List name is, who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases: each sync re-applies a decision while its names still resolve, and asks again when they don't (or when the Red List renames the species). A decision always beats the matcher. Undecided species link to nothing and count no records until someone decides.
+A synonym match whose authors plainly aren't the Red List's goes to a person too (*synonym by other authors*): when CoL drops a species, the only name left spelled like it can be another author's, for another organism. COL26.10 lost *Tritoma bipustulata* Fabricius, 1775 (an erotylid beetle, still accepted in Dyntaxa, the source it came from); the *T. bipustulata* left is Schilsky, 1888, a synonym of *Mycetophagus quadripustulatus*, so the matcher's answer would have shown that beetle's records. "Plainly" means no year and no author word in common, the bracketed basionym author aside: a citation's year is often a year out (*Drepanis coccinea* "(Forster, 1781)" / "1780"), its names misspelled ("Milen-Edwards") or transliterated ("Düben" / "Dueben"), and a different combination author is the same organism moved ("(L.) Roth" / "(L.) Hoffm."). 107 species wait for this reason on COL26.10 XR.
+
+Everything else is a case for **`decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart) the Red List name is, who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases: each sync re-applies a decision while its names still resolve, and asks again when they don't (or when the Red List renames the species). A decision always beats the matcher. Undecided species link to nothing and count no records until someone decides; the lists mark them `count_note = 'unlinked'`, and the app shows a dash, not 0.
 
 The queue of species waiting for a person is written each sync to `build/match-queue.tsv`, with the reason and the matcher's suggestion. Statuses: *undecided* (counts nothing yet), *proposed* (a decision applies, but no person has checked it), *stale* (a decision no longer resolves).
 
 | COL26.10 XR, Red List 2026-1 | Species |
 |---|---:|
-| taken from the matcher | 173,561 |
+| taken from the matcher | 173,455 |
 | from `decisions.tsv` (2,017 rows, none reviewed yet) | 1,977 |
 | a decision that no longer resolves (*stale*), so the matcher's answer | 36 |
-| undecided or stale, so unlinked | 335 |
+| undecided or stale, so unlinked | 441 |
 
 The first `decisions.tsv` carries the answers of the hand-written matching passes it replaced (`by = heuristic`, `reviewed = no`), for the species the matcher's answer doesn't settle: spelling variants (*Ochotona pallasii* / *pallasi*), homonyms, provisional names, matches through IUCN's synonyms. So it moved almost nothing on the day it landed (against the old passes: 28 species that had no records now count the usage GBIF files their name under, *Piptadenia flava* 0 → 1,117; 54 refused links dropped, which counted nothing; no species lost records). Each row is a review item, and a reviewed row replaces it.
 
-The 331 undecided are mostly names the Red List marks as unsettled (145) and spelling variants (108). Against the last sync on COL26.6 XR (266 undecided), the move to COL26.10 XR unlinked 137 species and settled others: mostly names the matcher now finds only as a spelling variant (67), a provisional name (29) or not as a species (27), and 11 homonyms (*Juncus filiformis*, 207k records). It also left 40 decisions stale, 36 of which fall back to the matcher's answer (*Accipiter cirrocephalus*, now a synonym of *Tachyspiza cirrocephala*). Every CoL move does this, so each needs a pass over the queue.
+The 437 undecided are mostly names the Red List marks as unsettled (145), spelling variants (108) and synonyms by other authors (107). Against the last sync on COL26.6 XR (266 undecided), the move to COL26.10 XR unlinked 137 species and settled others: mostly names the matcher now finds only as a spelling variant (67), a provisional name (29) or not as a species (27), and 11 homonyms (*Juncus filiformis*, 207k records). It also left 40 decisions stale, 36 of which fall back to the matcher's answer (*Accipiter cirrocephalus*, now a synonym of *Tachyspiza cirrocephala*). Every CoL move does this, so each needs a pass over the queue.
 
 ### 2. The concept
 
@@ -1563,8 +1565,8 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 
 Known limits:
 
-- 335 assessed species link to no CoL name yet (`method = 'unmatched'` in `assessment_link`, listed in `build/match-queue.tsv`), so they have no GBIF counts.
-- 2,017 decisions are unreviewed: the old passes' answers and two drafted by an agent. The queue says why each needed a person (789 spelling variants, 445 homonyms, 223 with no species match, 160 provisional names, 151 lower confidence, ...).
+- 441 assessed species link to no CoL name yet (`method = 'unmatched'` in `assessment_link`, listed in `build/match-queue.tsv`), so they have no GBIF counts.
+- 2,017 decisions are unreviewed: the old passes' answers and two drafted by an agent. The queue says why each needed a person (789 spelling variants, 431 homonyms, 223 with no species match, 160 provisional names, 151 lower confidence, 107 synonyms by other authors, ...).
 - Ownership walks three levels below a lumped species' root. The deepest case in the current release is three; a deeper one would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so they differ a little from gbif.org's live counts.

@@ -13,9 +13,12 @@
  *   countries, systems, growth_forms, threat_codes, habitat_codes
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
- *   count_note               'new' when the snapshot's XR has no name for its
- *                            species, so its records were filed elsewhere until
- *                            GBIF re-indexes (snapshot_notes); NULL most months
+ *   count_note               'unlinked' when it is linked to no CoL species
+ *                            (waiting in the match queue), so no records are
+ *                            counted; 'new' when the snapshot's XR has no name
+ *                            for its species, so its records were filed
+ *                            elsewhere until GBIF re-indexes (snapshot_notes);
+ *                            else NULL
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,
@@ -40,7 +43,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CAST(latest.assessment_date AS VARCHAR) AS assessment_date, latest.year_published,
        {{ semicolon_list("latest.countries") }} AS countries,
        gbif.gbif_species_key,
-       note.note AS count_note,
+       CASE WHEN link.col_id IS NULL THEN 'unlinked' ELSE note.note END AS count_note,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,
        CASE WHEN gbif.sis_taxon_id IS NOT NULL THEN gbif.georef_since

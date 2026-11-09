@@ -12,8 +12,13 @@ describe("countNoteText", () => {
     expect(countNoteText("new", {})).toMatch(/under an earlier Catalogue of Life release, which/);
   });
 
+  it("says an unlinked species counts nothing, naming the release", () => {
+    expect(countNoteText("unlinked", versions)).toMatch(/^Not yet linked to a species in COL26.10 XR, so none of its GBIF records are counted/);
+  });
+
   it("knows its notes", () => {
     expect(isCountNote("new")).toBe(true);
+    expect(isCountNote("unlinked")).toBe(true);
     expect(isCountNote("split")).toBe(false);
     expect(isCountNote(null)).toBe(false);
     expect(isCountNote("lumped")).toBe(false);

@@ -6595,7 +6595,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     )}
                     {/* Total GBIF */}
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {s.gbif_records != null && s.gbif_species_key ? (
+                      {s.count_note === 'unlinked' ? (
+                        <HoverTooltip text={countNoteText(s.count_note, DATA_VERSIONS)}>
+                          <span className="text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                        </HoverTooltip>
+                      ) : s.gbif_records != null && s.gbif_species_key ? (
                         <a
                           href={`/api/gbif-link?key=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
@@ -6616,7 +6620,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           <span className="text-zinc-400 cursor-help">?</span>
                         </HoverTooltip>
                       ) : "—"}
-                      {s.count_note && (
+                      {s.count_note === 'new' && (
                         <HoverTooltip text={countNoteText(s.count_note, DATA_VERSIONS)}>
                           <span className="ml-0.5 text-zinc-400 cursor-help" aria-label="About this count">*</span>
                         </HoverTooltip>
@@ -6629,7 +6633,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         <span className="text-zinc-400">N/A</span>
                       ) : (() => {
                         const newObs = s.gbif_records_since_assessment;
-                        if (newObs == null) return "—";
+                        // Not linked to a CoL species: nothing was counted, so no number (Total GBIF says why).
+                        if (newObs == null || s.count_note === 'unlinked') return "—";
                         const key = s.gbif_species_key ?? details?.gbifUrl?.split('/').pop();
                         // The count starts the day after the assessment date, and
                         // so does the search it links to. A null count already

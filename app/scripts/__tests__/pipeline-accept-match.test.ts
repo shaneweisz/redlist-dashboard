@@ -35,6 +35,21 @@ describe("acceptMatch", () => {
     expect(acceptMatch(puma, answer(over), speciesOf({}))).toEqual({ accepted: false, reason });
   });
 
+  it("queues a synonym by other authors: the species CoL dropped (Tritoma bipustulata)", () => {
+    const m = answer({ usage_status: "SYNONYM", usage_name: "Tritoma bipustulata", usage_authorship: "Schilsky, 1888" });
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: "Fabricius, 1775" }, m, speciesOf({ U1: "Mycetophagus" })))
+      .toEqual({ accepted: false, reason: "synonym by other authors" });
+    // The same authors written differently, or an authority missing on either side, still count as a rename.
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: "(Fabr., 1775)" }, answer({ usage_status: "SYNONYM",
+      usage_authorship: "Fabricius, 1775" }), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: null }, m, speciesOf({ U1: "S1" })).accepted).toBe(true);
+    // A year out, a misspelling, or a bare "L.": not evidence of another author.
+    const syn = (au: string) => answer({ usage_status: "SYNONYM", usage_authorship: au });
+    expect(acceptMatch({ name: "Drepanis coccinea", authority: "(Forster, 1781)" }, syn("(Forster, 1780)"), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Meandrina danae", authority: "Milen-Edwards & Haime, 1948" }, syn("(Milne Edwards & Haime, 1848)"), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Epilobium angustifolium", authority: "L." }, syn("L."), speciesOf({ U1: "S1" })).accepted).toBe(true);
+  });
+
   it("queues a synonym that leads nowhere (Vestia roschitzi)", () => {
     expect(acceptMatch(puma, answer({ usage_status: "SYNONYM" }), speciesOf({ U1: null })))
       .toEqual({ accepted: false, reason: "synonym of no species" });

@@ -33,8 +33,9 @@ beforeAll(async () => {
       true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
     FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, "taxa.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
-      usage_id AS col_id, 'exact' AS method, 'matcher' AS basis, NULL::VARCHAR AS decided_by
-    FROM (VALUES (1, 'A1'), (2, 'A2')) t(sis, usage_id)`, "assessment_link.parquet");
+      usage_id AS col_id, CASE WHEN usage_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
+      'matcher' AS basis, NULL::VARCHAR AS decided_by
+    FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, usage_id)`, "assessment_link.parquet");
   // The snapshot's older XR has no name for A2 or N1 (sources/release-map.ts).
   await copy(`SELECT * FROM (VALUES ('A2', 'new'), ('N1', 'new')) t(col_id, note)`, "snapshot_notes.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
@@ -46,7 +47,8 @@ beforeAll(async () => {
       NULL::VARCHAR AS common_name, 'ANIMALIA' AS kingdom_name, 'CHORDATA' AS phylum_name, 'AVES' AS class_name,
       'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'birds' AS taxon_group,
       []::STRUCT(name VARCHAR, status VARCHAR)[] AS synonyms
-    FROM (VALUES (1, '2025-04-15', 'Accipiter one'), (2, '2026-12-02', 'Accipiter two')) t(sis, d, name)`, "assessments.parquet");
+    FROM (VALUES (1, '2025-04-15', 'Accipiter one'), (2, '2026-12-02', 'Accipiter two'), (3, '2025-01-01', 'Accipiter four'))
+      t(sis, d, name)`, "assessments.parquet");
 
   // A1, assessed 15 April 2025:
   //   2024: 50 georeferenced                          → before
@@ -106,6 +108,9 @@ describe("GBIF counts in the lists", () => {
   it("notes a count the snapshot can't give in full, by the species it links to", () => {
     expect(rows["2"].count_note).toBe("new");
     expect(rows["1"].count_note).toBeNull();
+    // Linked to no CoL species (the match queue): counted as nothing, and says so.
+    expect(rows["3"].count_note).toBe("unlinked");
+    expect(Number(rows["3"].gbif_all_records_count)).toBe(0);
     expect(ne.N1.count_note).toBe("new");
   });
 
