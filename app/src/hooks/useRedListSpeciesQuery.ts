@@ -43,7 +43,7 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
-  /** Why the snapshot can't count it in full (src/lib/count-note.ts); null most months. */
+  /** Why the snapshot can't count it yet (src/lib/count-note.ts); null most months. */
   count_note?: CountNote | null;
   /**
    * The counts the view shows, for the record mode it is in. Set by RedListView

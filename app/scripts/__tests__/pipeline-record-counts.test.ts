@@ -35,9 +35,8 @@ beforeAll(async () => {
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
       usage_id AS col_id, 'exact' AS method, 'matcher' AS basis, NULL::VARCHAR AS decided_by
     FROM (VALUES (1, 'A1'), (2, 'A2')) t(sis, usage_id)`, "assessment_link.parquet");
-  // The snapshot's older XR holds A2 together with another species the taxonomy
-  // separates, and N1 not at all (sources/release-map.ts).
-  await copy(`SELECT * FROM (VALUES ('A2', 'split', 'Accipiter duo'), ('N1', 'new', NULL)) t(col_id, note, snapshot_name)`, "snapshot_notes.parquet");
+  // The snapshot's older XR has no name for A2 or N1 (sources/release-map.ts).
+  await copy(`SELECT * FROM (VALUES ('A2', 'new'), ('N1', 'new')) t(col_id, note)`, "snapshot_notes.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
       false AS possibly_extinct_in_the_wild, NULL::VARCHAR AS population_trend, ['CU']::VARCHAR[] AS countries,
@@ -105,7 +104,7 @@ describe("GBIF counts in the lists", () => {
   });
 
   it("notes a count the snapshot can't give in full, by the species it links to", () => {
-    expect(rows["2"].count_note).toBe("split");
+    expect(rows["2"].count_note).toBe("new");
     expect(rows["1"].count_note).toBeNull();
     expect(ne.N1.count_note).toBe("new");
   });

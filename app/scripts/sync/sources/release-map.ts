@@ -6,8 +6,8 @@
  * read through it, so every count follows the newest taxonomy.
  * live_usages: the taxonomy's usages onto the XR GBIF's live index runs, for the
  * app's live GBIF queries (link/live-keys.ts).
- * snapshot_notes: the taxonomy's species whose snapshot counts can't follow the
- * newer taxonomy.
+ * snapshot_notes: the taxonomy's species the snapshot's XR has no name for, so
+ * GBIF filed their records elsewhere until it re-indexes.
  *
  * All three are empty when the two XRs are the same, as they are whenever GBIF
  * has re-indexed against CoL's newest release.
@@ -23,11 +23,8 @@
  *
  * Columns (snapshot_notes):
  *   col_id     a species in the taxonomy
- *   note       'split': CoL now divides a species the snapshot holds as one,
- *              and records GBIF filed under the shared name count for the one
- *              keeping it; 'new': the snapshot's XR has no usage of it, so GBIF
- *              has filed no records under it yet
- *   snapshot_name  the snapshot's species, for a split
+ *   note       'new': no usage in the snapshot's XR maps onto any of its names,
+ *              so records carrying them were matched to something else
  *
  * Decisions:
  *   - A usage keeps its id when the newer XR has that id with the same name and
@@ -39,11 +36,14 @@
  *   - Failing those, its species' usage ('species'), so a renamed
  *     infraspecific's records stay with their species. Else nothing: 0.08% of
  *     records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
- *   - A lump needs no note: the snapshot's species' records all map onto the
- *     one the newer release keeps, as GBIF's own re-index will file them. A
- *     split does, since the records filed under the old combined name can't be
- *     divided (586 assessed species, COL26.6 XR onto COL26.10 XR); and so does a
- *     species new to the newer XR (250).
+ *   - Lumps, renames and splits need no note. Each record sits on the usage
+ *     its own name matched, and that usage follows its name into the newer
+ *     release, as GBIF's re-index will file it: when COL26.10 raises Corvus
+ *     corone cornix to Corvus cornix, the 1.38M records filed under the
+ *     subspecies go to C. cornix, and those filed as Corvus corone stay.
+ *   - A species new since the snapshot's XR does: records carrying its name
+ *     were matched to something else (Agrotis sabine's to A. sabura) and move
+ *     only when GBIF re-indexes. 40 assessed species, COL26.6 XR onto COL26.10 XR.
  */
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { lit, openDuckDB } from "../sql";
@@ -75,7 +75,7 @@ async function mapUsages(conn: DuckDBConnection, from: string, to: string): Prom
 }
 
 const EMPTY_MAP = `SELECT NULL::VARCHAR AS from_key, NULL::VARCHAR AS to_key, NULL::VARCHAR AS how WHERE false`;
-const EMPTY_NOTES = `SELECT NULL::VARCHAR AS col_id, NULL::VARCHAR AS note, NULL::VARCHAR AS snapshot_name WHERE false`;
+const EMPTY_NOTES = `SELECT NULL::VARCHAR AS col_id, NULL::VARCHAR AS note WHERE false`;
 
 async function writeMap(conn: DuckDBConnection, mapped: boolean, out: string): Promise<number> {
   const sql = mapped ? `SELECT from_key, to_key, how FROM mapped WHERE how IS DISTINCT FROM 'id'` : EMPTY_MAP;
@@ -93,44 +93,24 @@ export async function buildReleaseMap(inputs: { from: string; to: string } | nul
 
 /**
  * snapshot_usages and snapshot_notes: the snapshot's XR onto the taxonomy's,
- * and the species whose counts can't follow. Null (the same XR) writes both empty.
+ * and the species it has no name for. Null (the same XR) writes both empty.
  */
 export async function buildSnapshotMap(
   inputs: { snapshotTaxa: string; taxa: string } | null,
   out: { usages: string; notes: string },
-): Promise<{ changed: number; unmapped: number; split: number; new: number }> {
+): Promise<{ changed: number; unmapped: number; new: number }> {
   const conn = await openDuckDB();
   if (inputs) await mapUsages(conn, inputs.snapshotTaxa, inputs.taxa);
   const changed = await writeMap(conn, Boolean(inputs), out.usages);
-  // Each species in the taxonomy, with the snapshot species it comes from: the
-  // one its own name sat under in the snapshot (a synonym or subspecies raised
-  // to a species), and, for each snapshot species, the taxonomy's species its
-  // own name now leads to. A snapshot species reaching two is divided.
+  // A species of the taxonomy's that no snapshot usage maps onto, by any route.
   const sql = !inputs ? EMPTY_NOTES : `
-    WITH species AS (
-      SELECT col_id FROM ${parquet(inputs.taxa)}
-      WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND species_id = col_id),
-    own_name AS (
-      SELECT m.to_key AS col_id, f.species_id AS snapshot_species
-      FROM mapped m JOIN f ON f.col_id = m.from_key
-      WHERE m.how IN ('id', 'name', 'name only') AND f.species_id IS NOT NULL),
-    led_to AS (
-      SELECT t.species_id AS col_id, f.col_id AS snapshot_species
-      FROM f JOIN mapped m ON m.from_key = f.col_id JOIN t ON t.col_id = m.to_key
-      WHERE f.col_id = f.species_id AND t.species_id IS NOT NULL),
-    origin AS (SELECT * FROM own_name UNION SELECT * FROM led_to),
-    divided AS (
-      SELECT o.snapshot_species FROM origin o SEMI JOIN species s USING (col_id)
-      GROUP BY 1 HAVING count(DISTINCT o.col_id) > 1)
-    SELECT o.col_id, 'split' AS note, min(sn.scientific_name) AS snapshot_name
-    FROM origin o SEMI JOIN species s USING (col_id) JOIN divided d USING (snapshot_species)
-    JOIN ${parquet(inputs.snapshotTaxa)} sn ON sn.col_id = o.snapshot_species
-    GROUP BY 1
-    UNION ALL
-    SELECT s.col_id, 'new', NULL FROM species s ANTI JOIN origin o USING (col_id)`;
+    WITH reached AS (
+      SELECT DISTINCT t.species_id AS col_id FROM mapped m JOIN t ON t.col_id = m.to_key WHERE t.species_id IS NOT NULL)
+    SELECT col_id, 'new' AS note FROM ${parquet(inputs.taxa)}
+    WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND species_id = col_id
+      AND col_id NOT IN (SELECT col_id FROM reached)`;
   await conn.run(`COPY (${sql} ORDER BY col_id) TO ${lit(output(out.notes))} (FORMAT parquet, COMPRESSION zstd)`);
-  const [r] = (await conn.runAndReadAll(`SELECT count(*) FILTER (note = 'split')::INTEGER AS split, count(*) FILTER (note = 'new')::INTEGER AS new
-    FROM ${parquet(out.notes)}`)).getRowObjects();
+  const [r] = (await conn.runAndReadAll(`SELECT count(*)::INTEGER AS new FROM ${parquet(out.notes)}`)).getRowObjects();
   const [u] = (await conn.runAndReadAll(`SELECT count(*) FILTER (to_key IS NULL)::INTEGER AS n FROM ${parquet(out.usages)}`)).getRowObjects();
-  return { changed, unmapped: Number(u.n), split: Number(r.split), new: Number(r.new) };
+  return { changed, unmapped: Number(u.n), new: Number(r.new) };
 }

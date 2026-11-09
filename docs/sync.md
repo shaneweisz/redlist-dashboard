@@ -210,8 +210,8 @@ indexed when it was made) onto the taxonomy's, CoL's newest. Occurrences are
 read through it, so every count follows the newest taxonomy.
 live_usages: the taxonomy's usages onto the XR GBIF's live index runs, for the
 app's live GBIF queries (link/live-keys.ts).
-snapshot_notes: the taxonomy's species whose snapshot counts can't follow the
-newer taxonomy.
+snapshot_notes: the taxonomy's species the snapshot's XR has no name for, so
+GBIF filed their records elsewhere until it re-indexes.
 
 All three are empty when the two XRs are the same, as they are whenever GBIF
 has re-indexed against CoL's newest release.
@@ -228,11 +228,14 @@ Decisions:
   - Failing those, its species' usage ('species'), so a renamed
     infraspecific's records stay with their species. Else nothing: 0.08% of
     records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
-  - A lump needs no note: the snapshot's species' records all map onto the
-    one the newer release keeps, as GBIF's own re-index will file them. A
-    split does, since the records filed under the old combined name can't be
-    divided (586 assessed species, COL26.6 XR onto COL26.10 XR); and so does a
-    species new to the newer XR (250).
+  - Lumps, renames and splits need no note. Each record sits on the usage
+    its own name matched, and that usage follows its name into the newer
+    release, as GBIF's re-index will file it: when COL26.10 raises Corvus
+    corone cornix to Corvus cornix, the 1.38M records filed under the
+    subspecies go to C. cornix, and those filed as Corvus corone stay.
+  - A species new since the snapshot's XR does: records carrying its name
+    were matched to something else (Agrotis sabine's to A. sabura) and move
+    only when GBIF re-indexes. 40 assessed species, COL26.6 XR onto COL26.10 XR.
 ```
 
 `core/snapshot_usages.parquet` · 380,861 rows · 2 MB
@@ -243,13 +246,12 @@ Decisions:
 | `to_key` | text | the usage in the XR mapped onto; NULL when it has none (a snapshot record on it counts for nothing) |
 | `how` | text | 'name' \| 'name only' \| 'species' (below) |
 
-`core/snapshot_notes.parquet` · 44,332 rows · 171 kB
+`core/snapshot_notes.parquet` · 33,722 rows · 71 kB
 
 | column | type | |
 |---|---|---|
 | `col_id` | text | a species in the taxonomy |
-| `note` | text | 'split': CoL now divides a species the snapshot holds as one, and records GBIF filed under the shared name count for the one keeping it; 'new': the snapshot's XR has no usage of it, so GBIF has filed no records under it yet |
-| `snapshot_name` | text | the snapshot's species, for a split |
+| `note` | text | 'new': no usage in the snapshot's XR maps onto any of its names, so records carrying them were matched to something else |
 
 `core/live_usages.parquet` · 0 rows · 0 kB
 
@@ -641,7 +643,7 @@ Decisions:
 | `year_published` | text |  |
 | `countries` | text | lists, ';'-joined (the app's filter SQL reads them so) |
 | `gbif_species_key` | text | see record_counts |
-| `count_note` | text | 'split' \| 'new' when the snapshot's XR can't count its species as the taxonomy's release has it (snapshot_notes); NULL most months |
+| `count_note` | text | 'new' when the snapshot's XR has no name for its species, so its records were filed elsewhere until GBIF re-indexes (snapshot_notes); NULL most months |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
 | `gbif_georeferenced_records_since_assessment` | integer |  |
@@ -766,7 +768,7 @@ Decisions:
 | `gbif_species_key` | text | the CoL id, three times: the app reads each name in a different place |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
-| `count_note` | text | 'split' \| 'new' (snapshot_notes, see lists/assessed); NULL most months |
+| `count_note` | text | 'new' (snapshot_notes, see lists/assessed); NULL most months |
 
 #### `dbt/models/lists/app_taxa.sql`
 
@@ -1306,7 +1308,7 @@ The diagram is generated from a build, with a real species on every branch: `pyt
 What the gap between the snapshot's XR and the newest costs, measured on the 2026-11-01 snapshot (COL26.6 XR) mapped onto COL26.10 XR:
 
 - 98.6% of records keep their usage's id, 1.3% follow a name or a species, and 0.08% have no counterpart and count for nothing (mostly genera and bacteria, but also CoL's own new errors: COL26.10 truncates *Artamus leucorynchus* to *A. leucoryn*). The sync stops if more than 0.5% would be dropped.
-- A count can't follow a split, since records filed under the old combined name can't be divided, and a species new since the snapshot's XR has had no records filed under it. Those counts carry a note in the app (`count_note`: 586 assessed species split, 250 new, in this pair; *Cathormion umbellatum*, which COL26.10 folds into *Albizia umbellata* while raising its subspecies *moniliforme* to a species, is one).
+- Lumps, renames and splits follow on their own: each record sits on the usage its own name matched, and that usage follows its name into the newer release, which is how GBIF's re-index will file it (COL26.10 raises *Corvus corone cornix* to *C. cornix*; the 1.38M records filed under the subspecies go to *C. cornix*, those filed as *C. corone* stay). A species new since the snapshot's XR can't: records carrying its name were matched to something else (*Agrotis sabine*'s to *A. sabura*) and move only when GBIF re-indexes. Its count carries a note in the app (`count_note = 'new'`: 40 assessed species in this pair).
 - Counts stop matching gbif.org's for the same snapshot until GBIF re-indexes; they match how GBIF will file the records once it has.
 
 Measured once against the decision this replaced (the snapshot's XR for everything): about 1,450 assessed species (0.8%) land on a different CoL species in COL26.10 XR than in COL26.6 XR, 993 of them CoL moving away from IUCN's name and 215 moving to it.
@@ -1524,7 +1526,7 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 - **Every record type counts, for every kingdom.** Museum specimens, fossils and literature records are in both the all-records and georeferenced totals, as on gbif.org; the occurrence map applies its own filters.
 - **Outdated is as of the sync date.**
 - **The XR, not the curated release, decides `species_id`**, because that is what GBIF indexes.
-- **CoL's newest release for every CoL question**, and the snapshot read through it rather than in its own release's ids, so a page shows one taxonomy, the newest; the footer names it. Where the snapshot can't count a species as the newest release has it (a split, a new species), the count says so.
+- **CoL's newest release for every CoL question**, and the snapshot read through it rather than in its own release's ids, so a page shows one taxonomy, the newest; the footer names it. Where the snapshot's release has no name for a species yet, its count says so.
 - **Every decision a person made is a seed**, a row in a file under `seeds/` with its reason, not a constant in code, so the list of human judgements the sync applies can be read in one place.
 
 Known limits:

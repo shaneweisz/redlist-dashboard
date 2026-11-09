@@ -20,7 +20,7 @@ sources:
       - name: assessment_link
         description: link/assessment-link.ts
       - name: snapshot_notes
-        description: sources/release-map.ts (species a split or a new name leaves the snapshot unable to count in full)
+        description: sources/release-map.ts (species the snapshot's XR has no name for)
       - name: specialist_group_remits
         description: sources/specialist-groups.ts (each SSC Specialist Group's remit)
       - name: rank_aliases

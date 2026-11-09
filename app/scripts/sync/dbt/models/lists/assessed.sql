@@ -13,9 +13,9 @@
  *   countries, systems, growth_forms, threat_codes, habitat_codes
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
- *   count_note               'split' | 'new' when the snapshot's XR can't count
- *                            its species as the taxonomy's release has it
- *                            (snapshot_notes); NULL most months
+ *   count_note               'new' when the snapshot's XR has no name for its
+ *                            species, so its records were filed elsewhere until
+ *                            GBIF re-indexes (snapshot_notes); NULL most months
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,

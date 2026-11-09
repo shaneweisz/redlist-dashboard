@@ -203,7 +203,7 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Cathormion umbellatum",
-    why: "COL26.10 folds it into Albizia umbellata and raises its subspecies moniliforme to Albizia moniliforme. Its records follow (395 under its own name, into Albizia umbellata; 215 georeferenced in all); the 809 under subsp. moniliforme go to that species, so the count carries a split note.",
+    why: "COL26.10 folds it into Albizia umbellata and raises its subspecies moniliforme to Albizia moniliforme. Its records follow (395 under its own name, into Albizia umbellata; 215 georeferenced in all); the 809 under subsp. moniliforme go to that species, as GBIF's re-index will file them.",
     source: "sources/release-map.ts (snapshot_notes)",
     expect: { linkedTo: "Albizia umbellata", minRecords: 150, maxRecords: 1_000 },
   },

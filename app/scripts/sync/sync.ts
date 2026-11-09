@@ -136,7 +136,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
       { usages: T.snapshotUsages, notes: T.snapshotNotes });
     if (!sameSnapshot) {
       console.log(`   snapshot ${snapshotXr.alias} onto ${col.xr.alias}: ${mapped.changed.toLocaleString()} usages change id ` +
-        `(${mapped.unmapped.toLocaleString()} have none); ${mapped.split.toLocaleString()} species split, ${mapped.new.toLocaleString()} new`);
+        `(${mapped.unmapped.toLocaleString()} have none); ${mapped.new.toLocaleString()} species it has no name for`);
     }
     const sameLive = !liveXr || liveXr.key === col.xr.key;
     const liveTaxa = sameLive ? null : liveXr!.key === snapshotXr.key ? T.snapshotTaxa : T.liveTaxa;

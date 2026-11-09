@@ -20,7 +20,7 @@ const CSV_COLUMNS: { header: string; getValue: (s: RedListSpecies) => string }[]
   { header: "GBIF Georeferenced Records Since Assessment", getValue: (s) => s.gbif_georeferenced_records_since_assessment?.toString() ?? "" },
   { header: "GBIF All Records", getValue: (s) => s.gbif_all_records_count?.toString() ?? "" },
   { header: "GBIF All Records Since Assessment", getValue: (s) => s.gbif_all_records_since_assessment?.toString() ?? "" },
-  // Why the snapshot can't count it in full (src/lib/count-note.ts): split or new in CoL since the snapshot's release.
+  // Why the snapshot can't count it yet (src/lib/count-note.ts): new in CoL since the snapshot's release.
   { header: "GBIF Count Note", getValue: (s) => (s.count_note ? countNoteText(s.count_note, DATA_VERSIONS) : "") },
   { header: "SIS Taxon ID", getValue: (s) => s.sis_taxon_id?.toString() ?? "" },
   { header: "Assessment ID", getValue: (s) => s.assessment_id?.toString() ?? "" },

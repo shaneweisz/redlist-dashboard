@@ -139,7 +139,7 @@ The key innovation — linking assessment data to real-world observations:
 CoL supplies the described-species universe behind the new-assessments view — the species CoL knows about that haven't been assessed for the Red List yet — plus the synonym index that makes searching an outdated name work.
 
 ### Versions
-Every sync uses one release of each source, recorded in its `sync.json` and named in the app's footer: a Red List version, a GBIF occurrence snapshot, and CoL's newest release (with the curated release that XR was built from), which counts, the Not Evaluated list and the CoL-differences card all follow. GBIF re-indexes against a newer CoL only a few times a year, so the snapshot's records are often filed under an older CoL release; the sync maps them onto the newest by name before counting, and a count it can't map in full (a species CoL has since split, or one new since) carries a note. See "Versions" in [docs/sync.md](docs/sync.md#matching-which-col-species-an-assessed-species-is).
+Every sync uses one release of each source, recorded in its `sync.json` and named in the app's footer: a Red List version, a GBIF occurrence snapshot, and CoL's newest release (with the curated release that XR was built from), which counts, the Not Evaluated list and the CoL-differences card all follow. GBIF re-indexes against a newer CoL only a few times a year, so the snapshot's records are often filed under an older CoL release; the sync maps them onto the newest by name before counting, and the count of a species new since that release carries a note. See "Versions" in [docs/sync.md](docs/sync.md#matching-which-col-species-an-assessed-species-is).
 
 ## How data reaches the dashboard
 

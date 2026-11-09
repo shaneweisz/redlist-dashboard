@@ -14,7 +14,7 @@
  *   countries                      GBIF countries of its georeferenced records
  *   gbif_all_records_countries     … of all its records
  *   gbif_georeferenced_records_count, gbif_all_records_count
- *   count_note                     'split' | 'new' (snapshot_notes, see
+ *   count_note                     'new' (snapshot_notes, see
  *                                  lists/assessed); NULL most months
  *
  * Decisions:

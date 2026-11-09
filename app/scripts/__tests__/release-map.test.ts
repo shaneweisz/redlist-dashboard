@@ -21,7 +21,7 @@ const taxa = (rows: string) => `SELECT col_id, scientific_name, rank, status, nu
   FROM (VALUES ${rows}) t(col_id, scientific_name, rank, status, authorship, species_id)`;
 
 let usages: Record<string, { to_key: string | null; how: string }>;
-let notes: Record<string, { note: string; snapshot_name: string | null }>;
+let notes: Record<string, { note: string }>;
 
 beforeAll(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "release-map-"));
@@ -55,7 +55,7 @@ beforeAll(async () => {
     ('S14', 'Hus minor', 'species', 'accepted', 'L.', 'S14')`), "taxa.parquet");
   const mapped = await buildSnapshotMap({ snapshotTaxa: f("snapshot_taxa.parquet"), taxa: f("taxa.parquet") },
     { usages: f("snapshot_usages.parquet"), notes: f("snapshot_notes.parquet") });
-  expect(mapped).toMatchObject({ unmapped: 1, split: 4, new: 1 });
+  expect(mapped).toMatchObject({ unmapped: 1, new: 1 });
   usages = Object.fromEntries((await read("snapshot_usages.parquet")).map((r) => [r.from_key, r])) as typeof usages;
   notes = Object.fromEntries((await read("snapshot_notes.parquet")).map((r) => [r.col_id, r])) as typeof notes;
 });
@@ -86,24 +86,14 @@ describe("the snapshot's usages, as the taxonomy's", () => {
 });
 
 describe("snapshot_notes", () => {
-  it("notes both halves of a split, naming the snapshot's species", () => {
-    expect(notes.S6).toMatchObject({ note: "split", snapshot_name: "Cus eus" });
-    expect(notes.S7).toMatchObject({ note: "split", snapshot_name: "Cus eus" });
-  });
-
-  // Cathormion umbellatum: COL26.10 makes it a synonym of Albizia umbellata and
-  // raises its subspecies moniliforme to Albizia moniliforme.
-  it("notes a split where the old species became a synonym of another", () => {
-    expect(notes.S12).toMatchObject({ note: "split", snapshot_name: "Gus a" });
-    expect(notes.S14).toMatchObject({ note: "split", snapshot_name: "Gus a" });
-  });
-
-  it("notes a species the snapshot's XR doesn't have", () => {
+  it("notes a species the snapshot's XR has no name for", () => {
     expect(notes.N8).toMatchObject({ note: "new" });
   });
 
-  it("leaves renames, duplicates and lumps alone", () => {
-    expect(Object.keys(notes).sort()).toEqual(["N8", "S12", "S14", "S6", "S7"]);
+  // Each record follows the usage its own name matched, as GBIF's re-index will
+  // file it, so a split needs no note: Cus fus's records were on its own usage.
+  it("leaves renames, duplicates, lumps and splits alone", () => {
+    expect(Object.keys(notes)).toEqual(["N8"]);
   });
 });
 
