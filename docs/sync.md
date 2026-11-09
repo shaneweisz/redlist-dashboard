@@ -30,7 +30,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 ## The stages
 
-The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
+The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Each is answered for one set of releases, which `sync.json` records and the app's footer names: a Red List version, a GBIF occurrence snapshot, and the CoL release GBIF filed that snapshot's records under, used for every CoL question, never a newer one (see *Versions*, under Matching). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
 
 `app/scripts/sync/sync.ts` is the whole sync, read top to bottom: one section per stage, and in each a call per table, given the tables it reads. Each builder writes one table (or a few files of one kind), and the top of its file says what a row is, what it is built from, what each column means, and the decisions it makes. [The tables](#the-tables) collects those headers.
 
@@ -88,14 +88,17 @@ In the order `sync.ts` builds them. `core/` is `~/.cache/redlist-dashboard/build
 taxa: one row per Catalogue of Life XR usage (accepted names, synonyms,
 infraspecifics, BOLD BINs). Every list of species is a filter over it.
 
-Built from: the CoL XR (NameUsage.tsv, Reference.tsv), the curated
-checklist's NameUsage.tsv, the curated Base source ids, seeds/ne-excluded.tsv.
+Built from: the CoL XR (NameUsage.tsv, Reference.tsv), the NameUsage.tsv and
+Base source ids of the curated release that XR was built from,
+seeds/ne-excluded.tsv.
 
 Decisions:
   - species_id follows the XR, which is what GBIF indexes, so totals match
-    gbif.org. The checklist only demotes: curated silence never removes a
-    species (macroalgae, whose source isn't in the curated release), only
-    curated contradiction does.
+    gbif.org. The curated release only demotes: curated silence never removes
+    a species (macroalgae, whose source isn't in the curated release), only
+    curated contradiction does. Read against the release its XR was built
+    from, it demotes nothing (COL26.6 XR); a newer one demoted 8,738 species,
+    which was CoL's later taxonomy, not an XR error.
   - A misapplied name is someone else's concept and counts towards nothing.
   - A usage takes its species' group, so a synonym can't land in another group
     than the species it counts towards.
@@ -128,7 +131,7 @@ absorb its records).
 | `checklist_status` | text | the usage as the curated release (catalogueoflife.org) has it |
 | `checklist_parent_id` | text | the usage as the curated release (catalogueoflife.org) has it |
 | `checklist_name` | text | the usage as the curated release (catalogueoflife.org) has it |
-| `demoted` | boolean | an XR accepted species the curated release treats as a synonym or infraspecific (Pycnonotus tricolor) |
+| `demoted` | boolean | an XR accepted species the curated release treats as a synonym or infraspecific (none, against the XR's own release) |
 | `species_id` | text | the accepted species this usage's GBIF records count towards: itself, a synonym's accepted species, or an infraspecific's or BIN's species. NULL above species rank and for misapplied names. |
 | `taxon_group` | text | the Table 1a group, from CoL's lineage (taxon-groups.ts) |
 | `ne_excluded` | text | why the species is never Not Evaluated (domesticated, human), else NULL |
@@ -389,7 +392,7 @@ Decisions, in two steps kept apart so each can be explained on its own:
 
 2. Concept: what that usage makes the species.
      - An accepted CoL species is the species (own). One the curated
-       checklist demotes is followed to the checklist's species.
+       release demotes would be followed to its species (none do).
      - A synonym of a species the Red List treats the same way is the
        species too, renamed (own); one CoL folds into another species
        keeps only the records filed under its own name (lumped), or
@@ -581,7 +584,7 @@ Decisions:
 #### `dbt/models/lists/species.sql`
 
 ```text
-lists/species/: one row per accepted CoL species the curated checklist keeps,
+lists/species/: one row per accepted CoL species the curated release keeps,
 with its lineage, partitioned by taxon_group. The universe every "described"
 and Not Evaluated count, list and search tier is drawn from.
 
@@ -592,7 +595,7 @@ Decisions:
     or EW, which IUCN agrees with), and not excluded (seeds/ne-excluded.tsv).
     This is the one definition: every reader filters on it, so no two counts
     can disagree about which species exist.
-  - Accepted in the XR and not demoted by the checklist.
+  - Accepted in the XR and not demoted by the curated release.
 ```
 
 `lists/species` · 2,345,724 rows · 38 MB
@@ -1113,7 +1116,7 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 | Input | What it gives | Version | Code |
 |---|---|---|---|
 | **Catalogue of Life XR** | every name usage: accepted species, synonyms, infraspecifics, BOLD BINs, with lineage | the release GBIF *indexes* (asked of GBIF), not the newest, so every GBIF key resolves | `inputs/col-xr.ts` |
-| **CoL curated checklist** | what catalogueoflife.org shows; used to *demote* XR species the curators treat as synonyms | newest release whose export ChecklistBank has built (up to three back) | `inputs/col-checklist.ts` |
+| **CoL curated release** | which species are curated (Base sources) and which usages the curated release holds | the one the XR was built from (COL26.6 XR → COL26.6), never a newer one | `inputs/col-checklist.ts` |
 | **IUCN Red List Postgres** | every global assessment, taxonomy, synonyms, credits | the database named by `DB_NAME` | `sources/assessments.ts` |
 | **GBIF monthly snapshot** | every occurrence record, as parquet, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `inputs/gbif-snapshot.ts` |
 | iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat-names.ts` |
@@ -1172,14 +1175,14 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/01-link-flow-v2.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v3.png)
 
 The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
 
-**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is the extended release (XR) GBIF's occurrence snapshot was keyed to, not CoL's newest: every occurrence carries that XR's ids, so linking to another release would link to ids the records don't use. GBIF re-indexes a few times a year, so the XR trails CoL's newest by up to a few months (here COL26.6 XR, 2026-06-19, while the curated COL26.10, 2026-10-14, is out), and the gap closes with the first snapshot keyed to the newer XR. What the gap means:
+**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is the extended release (XR) GBIF's occurrence snapshot was keyed to, not CoL's newest: every occurrence carries that XR's ids, so linking to another release would link to ids the records don't use. GBIF re-indexes a few times a year, so the XR trails CoL's newest by up to a few months (here COL26.6 XR, 2026-06-19, while COL26.10 is out), and the gap closes with the first snapshot keyed to the newer XR. GBIF has re-indexed in July and November 2026, skipping three CoL releases between; monthly re-indexing is its stated aim (gbif/pipelines#1259), not yet its practice. Everything else CoL-related uses the same release, including the curated release (the one the XR was built from) and so the CoL-differences card, so every count, list and difference on a page describes one taxonomy. What the gap means:
 
 - A name CoL added or changed since the XR isn't there to match: the species queues (*no species match*), or matches the older treatment.
-- The checks against CoL's curated release (demotions, the CoL-differences card's accepted names) use the newer curated release. So a difference there can be CoL itself changing between the two releases, not IUCN and CoL disagreeing.
+- The CoL-differences card describes CoL as of that release. A difference CoL has since resolved stays on the card until GBIF re-indexes; one CoL has since introduced appears then. Measured once (Red List 2026-1 against COL26.6 XR and COL26.10 XR, matcher answers compared by accepted name): about 1,450 assessed species (0.8%) land on a different CoL species in the newer release, 993 of them CoL moving away from IUCN's name and 215 moving to it.
 - "The Red List lags CoL" is measured against a CoL a few months old.
 
 How big the gap is, measured once (the 2026-11-01 snapshot on COL26.6 XR, against COL26.10 XR): 96.7% of the snapshot's records sit on CoL records the newer release leaves unchanged, and about 0.5% would count for a different species, gain one or lose one if refiled against it (*Corvus corone* → *C. cornix*, 1.4M records; but also CoL's own new errors, a truncated *Artamus leucoryn*). Refiling the mirror ourselves by each record's written name would take minutes, and was decided against: the dashboard's counts would stop matching GBIF's for the same snapshot, and CoL's newest errors would arrive here before anywhere else. The gap closes when GBIF re-indexes.
@@ -1223,7 +1226,7 @@ The 266 undecided are mostly names the Red List marks as unsettled (145) and nam
 
 What the chosen CoL usage makes the species. `assessment_link.method` says what kind of usage it is (`accepted`, `synonym`, `checklist_synonym`, `provisional`, `ambiguous_synonym`) and `basis` how it was chosen (`matcher`, `decision`).
 
-- **An accepted species is the species.** One the curated checklist demotes (an XR over-split) is followed to the checklist's accepted species.
+- **An accepted species is the species.** One the curated release demotes would be followed to its accepted species; against the XR's own curated release, none are.
 - **A synonym is the species renamed, or a lump.** Each gets a verdict from `decideKey` in `app/scripts/sync/link/species-key.ts`:
   - **own**: the target is this species, under this name or a rename. It counts the target's records (minus anything others own). That includes a CoL synonym CoL itself marks as a respelling of its accepted name, with the same author citation (*Meandrina danae* / *danai*).
   - **lumped**: CoL folds it into another species, so its own usage (and anything under it) is its records. Where CoL files the synonym under an infraspecific (*Fringilla polatzeki* → *F. teydea polatzeki*), its records start at that infraspecific. Never at a nominate one (*Rosa villosa* subsp. *villosa*): that is the accepted species' core.
@@ -1237,7 +1240,7 @@ What the chosen CoL usage makes the species. `assessment_link.method` says what 
 - The identical name (a hybrid sign aside) held twice in one class or under one author citation (*Andoa berthelotiana*, *Utricularia* × *ochroleuca*): `same_name_twin`.
 - The same epithet stem and the same dated author citation in one family under another genus (*Charadrius nivosus* / *Anarhynchus nivosus*, both Cassin, 1858): `duplicate_concept`.
 - For a lumped species, every synonym usage carrying its exact name (*Rubus fruticosus*): `same_name_synonym`.
-- For a checklist demotion, the demoted XR species itself, since that is where GBIF files the records (*Cathormion umbellatum* → *Albizia umbellata*): `checklist_demoted`.
+- For a curated-release demotion, the demoted XR species itself, since that is where GBIF files the records: `checklist_demoted` (none, against the XR's own release).
 
 **One owner per usage.** If two assessed species claim the same usage, it goes to one, by: primary row before covered, *own* before *lumped*, the matcher before a decision, the more direct kind of name, then lower SIS id. The loser's primary row becomes `duplicate` and counts nothing.
 
@@ -1247,7 +1250,7 @@ What the chosen CoL usage makes the species. `assessment_link.method` says what 
 
 `lists/ne.parquet`, built by `dbt/models/lists/ne.sql`. A CoL species is on it when all of these hold:
 
-- it is *described* (`species/`'s `described`, the one definition every count and list uses): accepted in the XR and not demoted by the checklist, in a curated Base source (not the XR's tail of single fossil papers), not extinct, and not domesticated or human (`seeds/ne-excluded.tsv`: 17 names; the build fails if CoL ever stops accepting one of them, since its wild sibling would then absorb its records)
+- it is *described* (`species/`'s `described`, the one definition every count and list uses): accepted in the XR and not demoted by the curated release, in a curated Base source (not the XR's tail of single fossil papers), not extinct, and not domesticated or human (`seeds/ne-excluded.tsv`: 17 names; the build fails if CoL ever stops accepting one of them, since its wild sibling would then absorb its records)
 - **no assessed species links to it**, by any row: primary, covered, even refused
 - GBIF has records for it under the counting rule (usages an assessed species owns don't count)
 
@@ -1338,7 +1341,7 @@ Needs: Docker (for the matcher), uv (`brew install uv`, for dbt), the Red List P
 - link changes (`link_col_id`), since each one moves a species' records
 - species leaving or joining the NE list in bulk
 
-**When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes the XR GBIF indexes *now*, but a snapshot is keyed by the XR GBIF indexed when it was *made*: between GBIF moving and the next snapshot (COL26.10 XR went live just after the 1 November 2026 snapshot) the two disagree, and the occurrences builder stops if more than 0.1% of the snapshot's records have keys the taxonomy doesn't hold. Wait for the next snapshot, or set `COL_XR_DATASET` to the snapshot's XR.
+**When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes the XR GBIF indexes *now*, but a snapshot is keyed by the XR GBIF indexed when it was *made*: between GBIF moving and the next snapshot (COL26.10 XR went live just after the 1 November 2026 snapshot) the two disagree, and the occurrences builder stops if more than 0.1% of the snapshot's records have keys the taxonomy doesn't hold. Wait for the next snapshot, or set `COL_XR_DATASET` to the snapshot's XR. The curated release follows the XR on its own.
 
 **When IUCN publishes.** Point `DB_NAME` at the new database, and update `validate-table1a.test.ts` to the new Table 1a. Expect new species, new categories and count changes from moved assessment years, and a longer matching queue: new species go through the matcher, and a renamed species' decision is asked again.
 
@@ -1355,7 +1358,7 @@ Each comparison then explains one source's changes. Publish the second (or both,
 
 ### Running parts
 
-`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count`, `lists` and the precomputed stage's SQL tables are one dbt run, so any of them reruns it all), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count`, `lists` and the precomputed stage's SQL tables are one dbt run, so any of them reruns it all), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The sources stage records the releases its tables came from (`core/sources-releases.json`), and a later stage refuses to run when the releases it resolves differ: a `--from link` run without `COL_XR_DATASET` once matched against a newer XR than the build's taxa. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
 
 ### Tracing a species
 
@@ -1397,7 +1400,8 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 - **IUCN's synonyms keep CoL species off the NE list.** If IUCN lists a name as a synonym of an assessed species and CoL accepts it, it isn't Not Evaluated as far as the Red List is concerned, even when the records aren't counted (5,674 refused covered rows; *Rubus plicatus* and *R. vestitus* sit under the *R. fruticosus* aggregate).
 - **Every record type counts, for every kingdom.** Museum specimens, fossils and literature records are in both the all-records and georeferenced totals, as on gbif.org; the occurrence map applies its own filters.
 - **Outdated is as of the sync date.**
-- **The XR, not the curated checklist, decides `species_id`**, because that is what GBIF indexes. The checklist only demotes.
+- **The XR, not the curated release, decides `species_id`**, because that is what GBIF indexes.
+- **One CoL release for everything**: the XR GBIF filed the snapshot under, and the curated release it was built from. CoL's newer releases are never mixed in, so a page never shows two taxonomies at once; the footer names the release.
 - **Every decision a person made is a seed**, a row in a file under `seeds/` with its reason, not a constant in code, so the list of human judgements the sync applies can be read in one place.
 
 Known limits:
@@ -1409,7 +1413,7 @@ Known limits:
 - NE country lists come from the snapshot, so they differ a little from gbif.org's live counts.
 - `decideKey`'s genus-transfer rule accepts a shared epithet under another genus without comparing authors; the covered rows do. Whether it should too is open.
 - The acceptance rule, the decisions file and the counting rule have unit tests on small synthetic tables (`pipeline-accept-match.test.ts`, `pipeline-decisions.test.ts`, `pipeline-usage-owners.test.ts`, `pipeline-record-counts.test.ts`); the link's concept rules are checked against real data only (the fixtures above, on every run).
-- The XR lags the curated checklist (COL26.6 XR against COL26.10 in November 2026): GBIF re-indexes a few times a year, and the sync follows GBIF.
+- The CoL release lags CoL's newest (COL26.6 XR against COL26.10 in November 2026): GBIF re-indexes a few times a year, and the sync follows GBIF.
 
 Follow-ups:
 

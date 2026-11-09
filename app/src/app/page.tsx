@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import { FaGlobeAmericas } from "react-icons/fa";
 import { SpeciesSearchBar } from "../components/SpeciesSearchBar";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -219,7 +220,7 @@ export default function RedListPage() {
           >
             IUCN Red List
           </a>
-          {" "}(version 2026-1),{" "}
+          {DATA_VERSIONS.redlist ? ` (version ${DATA_VERSIONS.redlist}),` : ","}{" "}
           <a
             href="https://www.gbif.org"
             target="_blank"
@@ -228,7 +229,7 @@ export default function RedListPage() {
           >
             GBIF
           </a>
-          ,{" "}
+          {DATA_VERSIONS.gbifSnapshot ? ` (snapshot of ${DATA_VERSIONS.gbifSnapshot}),` : ","}{" "}
           <a
             href="https://www.inaturalist.org"
             target="_blank"
@@ -273,7 +274,7 @@ export default function RedListPage() {
           >
             Catalogue of Life
           </a>
-          {" "}data. This is a free, non-commercial research tool; commercial users should obtain IUCN Red List data via{" "}
+          {DATA_VERSIONS.col ? ` (${DATA_VERSIONS.col})` : ""}{" "}data. This is a free, non-commercial research tool; commercial users should obtain IUCN Red List data via{" "}
           <a
             href="https://www.ibat-alliance.org/"
             target="_blank"

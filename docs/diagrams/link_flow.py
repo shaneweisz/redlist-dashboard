@@ -40,7 +40,6 @@ NAME_BRANCHES = {
 }
 CONCEPT_BRANCHES = {
     "accepted": ("verdict = 'own' AND method = 'accepted'", "Panthera leo"),
-    "demoted": ("verdict = 'own' AND method = 'checklist_synonym'", "Fordia stipularis"),
     "renamed": ("verdict = 'own' AND method IN ('synonym', 'provisional')", "Glossopsitta porphyrocephala"),
     "lumped": ("verdict = 'lumped' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
     "refused": ("verdict = 'refused'", "Turcichondrostoma fahirae"),
@@ -107,7 +106,7 @@ out = ['digraph link {',
        '  graph [rankdir=TB, nodesep=0.35, ranksep=0.45, pad=0.4, bgcolor="white", fontname="Helvetica", labelloc=t, labeljust=l,',
        '         label=<<FONT POINT-SIZE="26"><B>Which CoL species an assessed species is</B></FONT><BR ALIGN="LEFT"/>'
        f'<FONT POINT-SIZE="16"><B>{E(RL)} × {E(XR["alias"])}</B></FONT><FONT POINT-SIZE="14" COLOR="#495057">   (CoL\'s extended release of {E(XR["issued"])}: the one GBIF\'s {E(SNAP)} occurrence snapshot is keyed to; '
-       f'demotions and accepted names from the curated {E(CK["alias"])}, {E(CK["issued"])})</FONT><BR ALIGN="LEFT"/>'
+       f'curated release {E(CK["alias"])}, the one it was built from)</FONT><BR ALIGN="LEFT"/>'
        '<FONT POINT-SIZE="14" COLOR="#495057">Two questions, answered separately. Counts: assessed species in this build; each example is a real species taking that branch.</FONT><BR ALIGN="LEFT"/>>];',
        '  node [shape=plaintext, fontname="Helvetica"]; edge [color="#868e96", fontname="Helvetica", fontsize=12, fontcolor="#495057", arrowsize=0.7];']
 
@@ -129,7 +128,6 @@ out.append(f'  dec [label={box("own", "Decided: a row in decisions.tsv", ["all c
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
 out.append(f'  acc [label={box("own", "An accepted species: the species itself", [eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
-out.append(f'  dem [label={box("own", "Demoted by CoL\'s curated release: its species", [eg("Fordia stipularis", concept["demoted"][1])], concept["demoted"][0])}];')
 out.append(f'  ren [label={box("own", "A synonym: the species, renamed", [eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
 out.append(f'  lum [label={box("part", "A synonym CoL folds into another species: lumped", ["counts only the records filed under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
 out.append(f'  amb [label={box("part", "An ambiguous synonym: its own name\'s records only", [eg("Astragalus albanicus", concept["ambiguous"][1])], concept["ambiguous"][0])}];')
@@ -140,8 +138,8 @@ out += ['  start -> q1; q1 -> mat [label="  certain"]; q1 -> queue [label="  not
         '  queue -> dec; queue -> und;',
         '  { rank=same; mat; queue }',
         '  mat -> q2; dec -> q2;',
-        '  q2 -> acc; q2 -> dem; q2 -> ren; q2 -> lum; q2 -> amb;',
-        '  { rank=same; acc; dem; ren; lum; amb }',
+        '  q2 -> acc; q2 -> ren; q2 -> lum; q2 -> amb;',
+        '  { rank=same; acc; ren; lum; amb }',
         '  lum -> ref [label="  if IUCN assesses that species"];',
         '  ren -> dup [label="  if another assessment\\n  already has that name", style=dotted];',
         '}']

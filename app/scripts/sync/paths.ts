@@ -26,6 +26,7 @@ export function tables(buildDir = BUILD_DIR) {
   const data = (f: string) => path.join(buildDir, "data", syncPath(f));
   return {
     // 1. Sources
+    sourcesReleases: core("sources-releases.json"),
     taxa: core("taxa.parquet"),
     assessments: core("assessments.parquet"),
     occurrences: core("occurrences.parquet"),

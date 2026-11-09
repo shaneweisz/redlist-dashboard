@@ -138,6 +138,9 @@ The key innovation — linking assessment data to real-world observations:
 ### Catalogue of Life
 CoL supplies the described-species universe behind the new-assessments view — the species CoL knows about that haven't been assessed for the Red List yet — plus the synonym index that makes searching an outdated name work.
 
+### Versions
+Every sync uses one release of each source, recorded in its `sync.json` and named in the app's footer: a Red List version, a GBIF occurrence snapshot, and the CoL release GBIF filed that snapshot's records under (with the curated release that XR was built from). CoL's newer releases aren't mixed in, so counts, the Not Evaluated list and the CoL-differences card always describe one taxonomy; GBIF re-indexes against a newer CoL a few times a year, and the next sync follows. See "Versions" in [docs/sync.md](docs/sync.md#matching-which-col-species-an-assessed-species-is).
+
 ## How data reaches the dashboard
 
 Four ways, and each has its own folder in [`app/scripts/`](app/scripts/README.md):
