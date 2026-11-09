@@ -1053,6 +1053,57 @@ Decisions:
     or seeds/tree-col-equivalents.tsv where they can't, each with its reason.
 ```
 
+### Checks
+
+#### `dbt/models/audit/link_audit.sql`
+
+```text
+link_audit: one row per assessed species, with how its CoL link was made and
+the evidence for checking it: where IUCN and CoL agree, where they differ, and
+whether a difference looks like our link going wrong or a real taxonomic one
+(a lag, or a disagreement between authorities). It decides nothing; it is what
+a reviewer, a person or an agent, works from.
+
+Built from: assessments (the latest, with IUCN's authority and synonyms),
+assessment_link (the primary row), taxa, rank_aliases.
+
+Decisions:
+  - Evidence, not verdicts: a difference is a reason to look, and the same
+    columns serve the review queue and, later, the CoL-differences card.
+  - Raw comparisons, deliberately looser than the card's (which folds
+    orthographic variants): for finding links to check, a false alarm costs a
+    look, a missed one costs a wrong link.
+```
+
+`core/link_audit.parquet` · 175,909 rows · 8 MB
+
+| column | type | |
+|---|---|---|
+| `sis_taxon_id` | integer |  |
+| `iucn_name` | text |  |
+| `iucn_authority` | text |  |
+| `taxon_group` | text |  |
+| `assessment_date` | date |  |
+| `stratum` | text | how the link was made, the unit the accuracy is measured per: 'exact' (the Red List name is an accepted CoL species), 'synonym' (a CoL synonym, linked to the species it points to), 'checklist_synonym', 'decision' (decisions.tsv), or 'unmatched' |
+| `decided_by` | text | who decided it, for a decision ('heuristic' when carried over from the old name-matching passes, unreviewed) |
+| `col_id` | text | the CoL species it is linked to |
+| `col_name` | text | that species, as CoL accepts it |
+| `col_authorship` | text | that species, as CoL accepts it |
+| `matched_name` | text | the CoL record the Red List name matched, when that is a synonym of col_name |
+| `matched_authorship` | text | the CoL record the Red List name matched, when that is a synonym of col_name |
+| `col_described_year` | integer | the year CoL gives for the species' description |
+| `lumped_with` | integer | how many other assessed species share the CoL species |
+| `genus_differs` | boolean | between the Red List name and col_name (as written, lowercased: spelling variants count too) |
+| `epithet_differs` | boolean | between the Red List name and col_name (as written, lowercased: spelling variants count too) |
+| `class_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `order_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `family_differs` | boolean | between IUCN's and CoL's placement, order and class through rank_aliases (a known renaming is not a difference) |
+| `author_year_differs` | boolean | both authorities give a year, and the years differ |
+| `iucn_lists_col_name` | boolean | IUCN's own synonym list for the species includes the name CoL accepts: IUCN knows CoL's name and treats it as the same species, which backs the link and points to a choice of authority rather than an error |
+| `described_after_assessment` | boolean | CoL's species was described after the assessment: the taxonomy moved on since (a likely lag) |
+| `signals` | integer | how many of the differences above hold |
+| `sample_rank` | integer | the species' place in a fixed random order within its stratum: reviewing ranks 1..n is a random sample of n, the same every sync, so an error rate can be measured per stratum |
+
 <!-- tables:end -->
 
 ## Inputs
@@ -1121,6 +1172,18 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/01-link-flow-v2.png)
+
+The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
+
+**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is the extended release (XR) GBIF's occurrence snapshot was keyed to, not CoL's newest: every occurrence carries that XR's ids, so linking to another release would link to ids the records don't use. GBIF re-indexes a few times a year, so the XR trails CoL's newest by up to a few months (here COL26.6 XR, 2026-06-19, while the curated COL26.10, 2026-10-14, is out), and the gap closes with the first snapshot keyed to the newer XR. What the gap means:
+
+- A name CoL added or changed since the XR isn't there to match: the species queues (*no species match*), or matches the older treatment.
+- The checks against CoL's curated release (demotions, the CoL-differences card's accepted names) use the newer curated release. So a difference there can be CoL itself changing between the two releases, not IUCN and CoL disagreeing.
+- "The Red List lags CoL" is measured against a CoL a few months old.
+
+How big the gap is, measured once (the 2026-11-01 snapshot on COL26.6 XR, against COL26.10 XR): 96.7% of the snapshot's records sit on CoL records the newer release leaves unchanged, and about 0.5% would count for a different species, gain one or lose one if refiled against it (*Corvus corone* → *C. cornix*, 1.4M records; but also CoL's own new errors, a truncated *Artamus leucoryn*). Refiling the mirror ourselves by each record's written name would take minutes, and was decided against: the dashboard's counts would stop matching GBIF's for the same snapshot, and CoL's newest errors would arrive here before anywhere else. The gap closes when GBIF re-indexes.
+
 Matching is two questions, answered separately so each can be explained on its own:
 
 1. **Name: which CoL name is the Red List name?** Answered by GBIF's own matcher, and by people where the matcher's answer isn't certain.
@@ -1131,6 +1194,10 @@ Matching is two questions, answered separately so each can be explained on its o
 Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/matching-ws)**, the service GBIF interprets occurrence records with, with IUCN's kingdom, phylum, class, order and family as hints. It runs locally in Docker (`inputs/matcher.ts`), pinned to the matching-ws release GBIF's hosted service reports (v1.0.12) and built from the exact XR the sync uses, so a name matched here lands where GBIF filed that name's records. The index takes about 15 minutes to build, once per XR; all 175,909 names take about a minute, and answers are cached by query, release and matcher version, so an unchanged month asks nothing.
 
 The authority is deliberately not sent. Most records carry none, so GBIF files them on CoL's accepted record; asked with it, the matcher prefers whichever CoL record has the identical author string, often a provisional duplicate the records aren't on (*Melospiza melodia* (Wilson, 1810) went to that copy, not the accepted "(A. Wilson, 1810)"). Sending it, measured on COL26.6 XR, cost 301 species 42.6M records, 282 of them all their records, and gained 9 species 404. The authority does its work after the match: the acceptance rule below compares it against the matcher's alternatives, which is how same-spelled names by different authors are told apart.
+
+![How matching-ws picks a CoL name](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/02-matcher-flow-v2.png)
+
+What the matcher does with a query, step by step from its source (`MatchingService` at the pinned release): it finds up to 50 CoL usages spelled the same or nearly so, scores each on the name, the authority, the hints, the rank and the usage's status, takes the best, and goes up a rank when nothing at the name's own rank is good enough. The examples are live answers with the scores the matcher itself reports (`verbose=true`): `python3 -I docs/diagrams/matcher_flow.py <matcher url> <build dir> <out.dot>`, with the sync's matcher serving. Like the matching diagram, it stops if an example no longer answers the way its box says.
 
 The answer is taken without review (`accept-match.ts`) when:
 
@@ -1227,6 +1294,8 @@ Four layers, from strict to advisory.
 - **specialist_group_species agrees with the remits as `taxonomy-sql.ts` applies them** (`checks/specialist-groups.ts`): the same species in every Specialist Group, assessed and CoL. Everything else reads the table (`specialist_group`), but the CoL breakdown popovers still apply a remit narrowed to one family or order in SQL, so a disagreement would show a breakdown that doesn't add up to its group. The check goes when the breakdowns move into dbt.
 - **every species in an IUCN group the Specialist Groups cover is in one of them** (`dbt/tests/specialist_groups_cover_their_sections.sql`; assessed species, and the described CoL species): each section ends with a catch-all, so a species no remit holds means a remit went wrong.
 - the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
+
+**Link audit, which stops nothing.** `link_audit` (`dbt/models/audit/`) gives every assessed species' link with the evidence for checking it: how it was made (its stratum: exact name, CoL synonym, decision), and where IUCN and CoL differ (genus, epithet, family, order, author year, a shared CoL species), or agree (IUCN listing CoL's name among its synonyms). A difference is a reason to look, not a verdict: it may be our link going wrong, or a real taxonomic one, a lag or a disagreement between authorities. `sample_rank` orders each stratum in a fixed random order, so reviewing its first n links measures that stratum's error rate. `sync.json` records each stratum's links and signals.
 
 **2. Matching fixtures, which stop the build.** `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number or a rule written because of one, with what should be true of it: which CoL species it links to, which name its GBIF key has, a floor or ceiling on its records, whether given species are on the NE list. `check-fixtures.ts` checks them against the built files. Expectations are by name, not CoL id, because CoL renumbers about 2% of ids each release. Reading this file next to `link/assessment-link.ts` is the quickest way to see what each matching rule is for.
 

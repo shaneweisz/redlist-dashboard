@@ -121,7 +121,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     // written out as files. All of it runs from any of those stages: it takes
     // seconds, and each model reads the ones before it.
     done = step("3 count, 4 lists, 5 precomputed SQL (dbt)");
-    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
+    runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10),
+      versions: { redlist: REDLIST_DB, colXr: col.xr.alias, colChecklist: col.checklist.alias } });
     await exportDbtTables(T, BUILD_DIR);
     done();
   }
@@ -200,8 +201,15 @@ async function describeBuild(T: ReturnType<typeof tables>, matcher: { version: s
     const [, , , status, reason] = line.split("\t");
     return { status, reason } as { status: "undecided"; reason: string };
   });
+  // How each link was made, and how many carry a difference worth checking
+  // (dbt/models/audit/link_audit.sql).
+  const audit = await rows<{ stratum: string; links: number; with_signal: number; with_two: number; iucn_lists_col_name: number }>(conn, `
+    SELECT stratum, count(*)::INT AS links, count(*) FILTER (signals > 0)::INT AS with_signal,
+           count(*) FILTER (signals > 1)::INT AS with_two, count(*) FILTER (iucn_lists_col_name)::INT AS iucn_lists_col_name
+    FROM ${parquet(T.linkAudit)} GROUP BY stratum ORDER BY links DESC`);
   return {
     redlist: { database: REDLIST_DB, assessed_species: rl.species, newest_published: rl.newest },
+    link_audit: Object.fromEntries(audit.map(({ stratum, ...r }) => [stratum, r])),
     matching: { matcher: matcher.version, xr: matcher.datasetKey, by_matcher: link.matcher, by_decision: link.decision,
       unlinked: link.unlinked, queue: summariseQueue(queue as Parameters<typeof summariseQueue>[0]) },
   };
