@@ -12,6 +12,8 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
+import { countNoteText } from "@/lib/count-note";
+import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
@@ -6604,7 +6606,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         >
                           {s.gbif_records.toLocaleString()}
                         </a>
-                      ) : details?.gbifMatchStatus?.matchType === 'HIGHERRANK' || details?.gbifMatchStatus?.matchType === 'NONE' ? (
+                      ) : s.count_note ? (s.gbif_records ?? 0).toLocaleString()
+                      : details?.gbifMatchStatus?.matchType === 'HIGHERRANK' || details?.gbifMatchStatus?.matchType === 'NONE' ? (
                         <HoverTooltip
                           text={details.gbifMatchStatus.matchType === 'HIGHERRANK'
                             ? `Name not found in GBIF (matched to ${details.gbifMatchStatus.matchedRank?.toLowerCase() || 'higher rank'} instead). May be due to a taxonomic split, synonym, or naming difference.`
@@ -6613,6 +6616,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           <span className="text-zinc-400 cursor-help">?</span>
                         </HoverTooltip>
                       ) : "—"}
+                      {s.count_note && (
+                        <HoverTooltip text={countNoteText(s.count_note, DATA_VERSIONS)}>
+                          <span className="ml-0.5 text-zinc-400 cursor-help" aria-label="About this count">*</span>
+                        </HoverTooltip>
+                      )}
                     </td>
                     {/* New GBIF */}
                     {!isNewAssessments && (

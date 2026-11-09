@@ -49,7 +49,7 @@ CONCEPT_BRANCHES = {
 QUEUE_REASONS = [  # reason, example: the commonest reasons the matcher's answer waits for a person
     ("spelling variant", "Pseudechis pailsi"),
     ("homonym the authors don't decide", "Boscia senegalensis"),
-    ("no species match", "Breviceps batrachophiliorum"),
+    ("no species match", "Sudanonautes orthostylis"),
     ("informal or qualified name", "Diospyros sp. nov. 'malcomberi'"),
 ]
 
@@ -105,8 +105,8 @@ def eg(iucn, col):
 out = ['digraph link {',
        '  graph [rankdir=TB, nodesep=0.35, ranksep=0.45, pad=0.4, bgcolor="white", fontname="Helvetica", labelloc=t, labeljust=l,',
        '         label=<<FONT POINT-SIZE="26"><B>Which CoL species an assessed species is</B></FONT><BR ALIGN="LEFT"/>'
-       f'<FONT POINT-SIZE="16"><B>{E(RL)} × {E(XR["alias"])}</B></FONT><FONT POINT-SIZE="14" COLOR="#495057">   (CoL\'s extended release of {E(XR["issued"])}: the one GBIF\'s {E(SNAP)} occurrence snapshot is keyed to; '
-       f'curated release {E(CK["alias"])}, the one it was built from)</FONT><BR ALIGN="LEFT"/>'
+       f'<FONT POINT-SIZE="16"><B>{E(RL)} × {E(XR["alias"])}</B></FONT><FONT POINT-SIZE="14" COLOR="#495057">   (CoL\'s newest extended release, of {E(XR["issued"])}, and curated release {E(CK["alias"])}, the one it was built from; '
+       f'GBIF\'s {E(SNAP)} snapshot mapped onto it)</FONT><BR ALIGN="LEFT"/>'
        '<FONT POINT-SIZE="14" COLOR="#495057">Two questions, answered separately. Counts: assessed species in this build; each example is a real species taking that branch.</FONT><BR ALIGN="LEFT"/>>];',
        '  node [shape=plaintext, fontname="Helvetica"]; edge [color="#868e96", fontname="Helvetica", fontsize=12, fontcolor="#495057", arrowsize=0.7];']
 
@@ -124,7 +124,7 @@ out.append(f'  start [label={box("src", "A Red List species: its name and author
 out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
 out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly, as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide)", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
 out.append(f'  queue [label={box("q", "Otherwise a person decides: the match queue", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
-out.append(f'  dec [label={box("own", "Decided: a row in decisions.tsv", ["all carried over from the old matching passes so far, none reviewed", eg("Acer divergens", name["decision"][1])], name["decision"][0])}];')
+out.append(f'  dec [label={box("own", "Decided: a row in decisions.tsv", ["carried over from the old matching passes, or drafted by an agent; none reviewed yet", eg("Acer divergens", name["decision"][1])], name["decision"][0])}];')
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
 out.append(f'  acc [label={box("own", "An accepted species: the species itself", [eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')

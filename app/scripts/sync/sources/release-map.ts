@@ -1,0 +1,136 @@
+/**
+ * Mapping one CoL XR's usage ids onto another's.
+ *
+ * snapshot_usages: the snapshot's usages (its keys are ids of the XR GBIF
+ * indexed when it was made) onto the taxonomy's, CoL's newest. Occurrences are
+ * read through it, so every count follows the newest taxonomy.
+ * live_usages: the taxonomy's usages onto the XR GBIF's live index runs, for the
+ * app's live GBIF queries (link/live-keys.ts).
+ * snapshot_notes: the taxonomy's species whose snapshot counts can't follow the
+ * newer taxonomy.
+ *
+ * All three are empty when the two XRs are the same, as they are whenever GBIF
+ * has re-indexed against CoL's newest release.
+ *
+ * Built from: two taxa tables (sources/taxa.ts), one per XR.
+ *
+ * Columns (snapshot_usages, live_usages): only usages whose id changes
+ *   from_key   the usage in the XR mapped from (the snapshot's; the taxonomy's
+ *              for live_usages)
+ *   to_key     the usage in the XR mapped onto; NULL when it has none (a
+ *              snapshot record on it counts for nothing)
+ *   how        'name' | 'name only' | 'species' (below)
+ *
+ * Columns (snapshot_notes):
+ *   col_id     a species in the taxonomy
+ *   note       'split': CoL now divides a species the snapshot holds as one,
+ *              and records GBIF filed under the shared name count for the one
+ *              keeping it; 'new': the snapshot's XR has no usage of it, so GBIF
+ *              has filed no records under it yet
+ *   snapshot_name  the snapshot's species, for a split
+ *
+ * Decisions:
+ *   - A usage keeps its id when the newer XR has that id with the same name and
+ *     rank; else it is the usage with the same name, rank and authorship; else
+ *     the usages with the same name and rank, if all lead to one species
+ *     ('name only': a duplicate an XR source added and the next release
+ *     dropped, Anas americana "Gmelin, 1789" beside "J. F. Gmelin, 1789"). That
+ *     is how GBIF's re-index treats the records: by the name they carry.
+ *   - Failing those, its species' usage ('species'), so a renamed
+ *     infraspecific's records stay with their species. Else nothing: 0.08% of
+ *     records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
+ *   - A lump needs no note: the snapshot's species' records all map onto the
+ *     one the newer release keeps, as GBIF's own re-index will file them. A
+ *     split does, since the records filed under the old combined name can't be
+ *     divided (586 assessed species, COL26.6 XR onto COL26.10 XR); and so does a
+ *     species new to the newer XR (250).
+ */
+import { type DuckDBConnection } from "@duckdb/node-api";
+import { lit, openDuckDB } from "../sql";
+import { output, parquet } from "../paths";
+
+/** A taxa table, keyed for matching across releases. Authorship is '' rather than NULL so it joins by hash. */
+const usages = (file: string) =>
+  `SELECT col_id, scientific_name AS nm, rank, coalesce(authorship, '') AS au, species_id FROM ${parquet(file)}`;
+
+async function mapUsages(conn: DuckDBConnection, from: string, to: string): Promise<void> {
+  await conn.run(`CREATE OR REPLACE TEMP TABLE f AS ${usages(from)}`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE t AS ${usages(to)}`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE direct AS
+    WITH same AS (SELECT f.col_id, f.col_id AS to_key, 'id' AS how FROM f JOIN t USING (col_id) WHERE f.nm = t.nm AND f.rank = t.rank),
+    by_name AS (
+      SELECT f.col_id, any_value(t.col_id) AS to_key, 'name' AS how
+      FROM (SELECT * FROM f ANTI JOIN same USING (col_id)) f JOIN t ON t.nm = f.nm AND t.rank = f.rank AND t.au = f.au
+      GROUP BY 1 HAVING count(*) = 1),
+    by_name_only AS (
+      SELECT f.col_id, min(t.col_id) AS to_key, 'name only' AS how
+      FROM (SELECT * FROM f ANTI JOIN same USING (col_id) ANTI JOIN by_name USING (col_id)) f
+      JOIN t ON t.nm = f.nm AND t.rank = f.rank
+      GROUP BY 1 HAVING count(DISTINCT coalesce(t.species_id, t.col_id)) = 1)
+    SELECT * FROM same UNION ALL SELECT * FROM by_name UNION ALL SELECT * FROM by_name_only`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE mapped AS
+    SELECT f.col_id AS from_key, coalesce(d.to_key, s.to_key) AS to_key,
+           CASE WHEN d.how IS NOT NULL THEN d.how WHEN s.to_key IS NOT NULL THEN 'species' END AS how
+    FROM f LEFT JOIN direct d ON d.col_id = f.col_id LEFT JOIN direct s ON s.col_id = f.species_id`);
+}
+
+const EMPTY_MAP = `SELECT NULL::VARCHAR AS from_key, NULL::VARCHAR AS to_key, NULL::VARCHAR AS how WHERE false`;
+const EMPTY_NOTES = `SELECT NULL::VARCHAR AS col_id, NULL::VARCHAR AS note, NULL::VARCHAR AS snapshot_name WHERE false`;
+
+async function writeMap(conn: DuckDBConnection, mapped: boolean, out: string): Promise<number> {
+  const sql = mapped ? `SELECT from_key, to_key, how FROM mapped WHERE how IS DISTINCT FROM 'id'` : EMPTY_MAP;
+  await conn.run(`COPY (${sql} ORDER BY from_key) TO ${lit(output(out))} (FORMAT parquet, COMPRESSION zstd)`);
+  const [r] = (await conn.runAndReadAll(`SELECT count(*)::INTEGER AS n FROM ${parquet(out)}`)).getRowObjects();
+  return Number(r.n);
+}
+
+/** Map `from`'s usages onto `to`'s (live_usages). Null (the same XR) writes an empty map. */
+export async function buildReleaseMap(inputs: { from: string; to: string } | null, out: string): Promise<number> {
+  const conn = await openDuckDB();
+  if (inputs) await mapUsages(conn, inputs.from, inputs.to);
+  return writeMap(conn, Boolean(inputs), out);
+}
+
+/**
+ * snapshot_usages and snapshot_notes: the snapshot's XR onto the taxonomy's,
+ * and the species whose counts can't follow. Null (the same XR) writes both empty.
+ */
+export async function buildSnapshotMap(
+  inputs: { snapshotTaxa: string; taxa: string } | null,
+  out: { usages: string; notes: string },
+): Promise<{ changed: number; unmapped: number; split: number; new: number }> {
+  const conn = await openDuckDB();
+  if (inputs) await mapUsages(conn, inputs.snapshotTaxa, inputs.taxa);
+  const changed = await writeMap(conn, Boolean(inputs), out.usages);
+  // Each species in the taxonomy, with the snapshot species it comes from: the
+  // one its own name sat under in the snapshot (a synonym or subspecies raised
+  // to a species), and, for each snapshot species, the taxonomy's species its
+  // own name now leads to. A snapshot species reaching two is divided.
+  const sql = !inputs ? EMPTY_NOTES : `
+    WITH species AS (
+      SELECT col_id FROM ${parquet(inputs.taxa)}
+      WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND species_id = col_id),
+    own_name AS (
+      SELECT m.to_key AS col_id, f.species_id AS snapshot_species
+      FROM mapped m JOIN f ON f.col_id = m.from_key
+      WHERE m.how IN ('id', 'name', 'name only') AND f.species_id IS NOT NULL),
+    led_to AS (
+      SELECT t.species_id AS col_id, f.col_id AS snapshot_species
+      FROM f JOIN mapped m ON m.from_key = f.col_id JOIN t ON t.col_id = m.to_key
+      WHERE f.col_id = f.species_id AND t.species_id IS NOT NULL),
+    origin AS (SELECT * FROM own_name UNION SELECT * FROM led_to),
+    divided AS (
+      SELECT o.snapshot_species FROM origin o SEMI JOIN species s USING (col_id)
+      GROUP BY 1 HAVING count(DISTINCT o.col_id) > 1)
+    SELECT o.col_id, 'split' AS note, min(sn.scientific_name) AS snapshot_name
+    FROM origin o SEMI JOIN species s USING (col_id) JOIN divided d USING (snapshot_species)
+    JOIN ${parquet(inputs.snapshotTaxa)} sn ON sn.col_id = o.snapshot_species
+    GROUP BY 1
+    UNION ALL
+    SELECT s.col_id, 'new', NULL FROM species s ANTI JOIN origin o USING (col_id)`;
+  await conn.run(`COPY (${sql} ORDER BY col_id) TO ${lit(output(out.notes))} (FORMAT parquet, COMPRESSION zstd)`);
+  const [r] = (await conn.runAndReadAll(`SELECT count(*) FILTER (note = 'split')::INTEGER AS split, count(*) FILTER (note = 'new')::INTEGER AS new
+    FROM ${parquet(out.notes)}`)).getRowObjects();
+  const [u] = (await conn.runAndReadAll(`SELECT count(*) FILTER (to_key IS NULL)::INTEGER AS n FROM ${parquet(out.usages)}`)).getRowObjects();
+  return { changed, unmapped: Number(u.n), split: Number(r.split), new: Number(r.new) };
+}

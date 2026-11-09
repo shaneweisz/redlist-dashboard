@@ -30,7 +30,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 ## The stages
 
-The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Each is answered for one set of releases, which `sync.json` records and the app's footer names: a Red List version, a GBIF occurrence snapshot, and the CoL release GBIF filed that snapshot's records under, used for every CoL question, never a newer one (see *Versions*, under Matching). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
+The sync answers four questions: what species exist (the Catalogue of Life), what IUCN has assessed (the Red List), which CoL species each assessed species is (**link**), and how many GBIF records each species has (**count**). Each is answered for one set of releases, which `sync.json` records and the app's footer names: a Red List version, a GBIF occurrence snapshot, and CoL's newest release, used for every CoL question. The snapshot's records are filed under an older CoL release whenever GBIF hasn't re-indexed since, and are mapped onto the newest before they are counted (see *Versions*, under Matching). Only link and count make judgements. Every other stage reshapes data, so if a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
 
 `app/scripts/sync/sync.ts` is the whole sync, read top to bottom: one section per stage, and in each a call per table, given the tables it reads. Each builder writes one table (or a few files of one kind), and the top of its file says what a row is, what it is built from, what each column means, and the decisions it makes. [The tables](#the-tables) collects those headers.
 
@@ -93,12 +93,15 @@ Base source ids of the curated release that XR was built from,
 seeds/ne-excluded.tsv.
 
 Decisions:
-  - species_id follows the XR, which is what GBIF indexes, so totals match
-    gbif.org. The curated release only demotes: curated silence never removes
-    a species (macroalgae, whose source isn't in the curated release), only
-    curated contradiction does. Read against the release its XR was built
-    from, it demotes nothing (COL26.6 XR); a newer one demoted 8,738 species,
-    which was CoL's later taxonomy, not an XR error.
+  - species_id follows the XR, which is what GBIF indexes. The curated
+    release only demotes: curated silence never removes a species
+    (macroalgae, whose source isn't in the curated release), only curated
+    contradiction does. Read against the release its XR was built from, it
+    demotes nothing (COL26.6, COL26.10), and the sync stops if it ever does;
+    read against an older XR it demoted 8,738 species.
+  - The same builder makes the snapshot's and GBIF's live XRs' taxa, from
+    their NameUsage alone, for sources/release-map.ts: only ids, names,
+    ranks and species_id are read from those.
   - A misapplied name is someone else's concept and counts towards nothing.
   - A usage takes its species' group, so a synonym can't land in another group
     than the species it counts towards.
@@ -108,7 +111,7 @@ CoL lumped a domestic form into its wild sibling, the wild species would
 absorb its records).
 ```
 
-`core/taxa.parquet` · 7,991,756 rows · 159 MB
+`core/taxa.parquet` · 8,504,545 rows · 163 MB
 
 | column | type | |
 |---|---|---|
@@ -197,6 +200,65 @@ species has one current taxon record; each falls in exactly one Table 1a group.
 | `taxon_group` | text | the Table 1a group, from IUCN's lineage |
 | `synonyms` | list of {name, status} | IUCN's synonyms: [{name, status}] |
 
+#### `sources/release-map.ts`
+
+```text
+Mapping one CoL XR's usage ids onto another's.
+
+snapshot_usages: the snapshot's usages (its keys are ids of the XR GBIF
+indexed when it was made) onto the taxonomy's, CoL's newest. Occurrences are
+read through it, so every count follows the newest taxonomy.
+live_usages: the taxonomy's usages onto the XR GBIF's live index runs, for the
+app's live GBIF queries (link/live-keys.ts).
+snapshot_notes: the taxonomy's species whose snapshot counts can't follow the
+newer taxonomy.
+
+All three are empty when the two XRs are the same, as they are whenever GBIF
+has re-indexed against CoL's newest release.
+
+Built from: two taxa tables (sources/taxa.ts), one per XR.
+
+Decisions:
+  - A usage keeps its id when the newer XR has that id with the same name and
+    rank; else it is the usage with the same name, rank and authorship; else
+    the usages with the same name and rank, if all lead to one species
+    ('name only': a duplicate an XR source added and the next release
+    dropped, Anas americana "Gmelin, 1789" beside "J. F. Gmelin, 1789"). That
+    is how GBIF's re-index treats the records: by the name they carry.
+  - Failing those, its species' usage ('species'), so a renamed
+    infraspecific's records stay with their species. Else nothing: 0.08% of
+    records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
+  - A lump needs no note: the snapshot's species' records all map onto the
+    one the newer release keeps, as GBIF's own re-index will file them. A
+    split does, since the records filed under the old combined name can't be
+    divided (586 assessed species, COL26.6 XR onto COL26.10 XR); and so does a
+    species new to the newer XR (250).
+```
+
+`core/snapshot_usages.parquet` · 380,861 rows · 2 MB
+
+| column | type | |
+|---|---|---|
+| `from_key` | text | the usage in the XR mapped from (the snapshot's; the taxonomy's for live_usages) |
+| `to_key` | text | the usage in the XR mapped onto; NULL when it has none (a snapshot record on it counts for nothing) |
+| `how` | text | 'name' \| 'name only' \| 'species' (below) |
+
+`core/snapshot_notes.parquet` · 44,332 rows · 171 kB
+
+| column | type | |
+|---|---|---|
+| `col_id` | text | a species in the taxonomy |
+| `note` | text | 'split': CoL now divides a species the snapshot holds as one, and records GBIF filed under the shared name count for the one keeping it; 'new': the snapshot's XR has no usage of it, so GBIF has filed no records under it yet |
+| `snapshot_name` | text | the snapshot's species, for a split |
+
+`core/live_usages.parquet` · 0 rows · 0 kB
+
+| column | type | |
+|---|---|---|
+| `from_key` | text | the usage in the XR mapped from (the snapshot's; the taxonomy's for live_usages) |
+| `to_key` | text | the usage in the XR mapped onto; NULL when it has none (a snapshot record on it counts for nothing) |
+| `how` | text | 'name' \| 'name only' \| 'species' (below) |
+
 #### `sources/occurrences.ts`
 
 ```text
@@ -205,7 +267,8 @@ the records are dated to, with how many GBIF records there are.
 occurrence_countries: one row per usage × country × georeferenced.
 
 Built from: the GBIF snapshot, reduced once per snapshot
-(inputs/gbif-snapshot.ts); taxa, to check the keys.
+(inputs/gbif-snapshot.ts); snapshot_usages, to read its keys as the
+taxonomy's ids (sources/release-map.ts); taxa, to check them.
 
 country is its countrycode, which GBIF fills from the coordinates or from
 what the publisher wrote.
@@ -217,26 +280,33 @@ Decisions:
     and a dated one: every count is a sum over it, and a since-assessment
     count can start the day after the assessment.
 
-Checks: no more records than the snapshot holds; at most 0.1% of records
-have keys taxa doesn't hold (a snapshot keyed by another XR than taxa).
+  - The snapshot's keys are ids of the XR GBIF indexed when it was made,
+    often older than the taxonomy's. Read through snapshot_usages, a record
+    counts where the newer release puts its name; one whose usage has no
+    counterpart counts for nothing (0.08% of records, COL26.6 XR onto
+    COL26.10 XR).
+
+Checks: every snapshot record is in the table or dropped by the map; at most
+0.5% are dropped; at most 0.1% of the rest have keys taxa doesn't hold (a map
+built from the wrong XR).
 ```
 
-`core/occurrences.parquet` · 329,547,176 rows · 927 MB
+`core/occurrences.parquet` · 327,758,025 rows · 921 MB
 
 | column | type | |
 |---|---|---|
-| `usage_key` | text | the record's taxonkey: the CoL usage its name matched (a species, a synonym, a subspecies, a BIN); a taxa.col_id |
+| `usage_key` | text | the record's taxonkey, the CoL usage its name matched (a species, a synonym, a subspecies, a BIN), as a taxa.col_id |
 | `year` | integer | NULL for an undated record |
 | `month` | integer | NULL for a record dated only to the year (or undated) |
 | `event_date` | date | NULL for a record dated only to the month (or coarser) |
 | `georef` | boolean | has coordinates and none of GBIF's geospatial issues (the API's hasCoordinate=true&hasGeospatialIssue=false) |
 | `n` | integer | records |
 
-`core/occurrence_countries.parquet` · 15,477,898 rows · 41 MB
+`core/occurrence_countries.parquet` · 15,296,086 rows · 41 MB
 
 | column | type | |
 |---|---|---|
-| `usage_key` | text | the record's taxonkey: the CoL usage its name matched (a species, a synonym, a subspecies, a BIN); a taxa.col_id |
+| `usage_key` | text | the record's taxonkey, the CoL usage its name matched (a species, a synonym, a subspecies, a BIN), as a taxa.col_id |
 | `countrycode` | text |  |
 | `georef` | boolean | has coordinates and none of GBIF's geospatial issues (the API's hasCoordinate=true&hasGeospatialIssue=false) |
 | `n` | integer | records |
@@ -272,7 +342,7 @@ Decisions:
     iNaturalist repeats within a kingdom is ambiguous and gets no names.
 ```
 
-`core/common_names.parquet` · 932,473 rows · 14 MB
+`core/common_names.parquet` · 938,075 rows · 14 MB
 
 | column | type | |
 |---|---|---|
@@ -411,7 +481,7 @@ Decisions, in two steps kept apart so each can be explained on its own:
      - Every usage counts for one assessed species at most.
 ```
 
-`core/assessment_link.parquet` · 187,355 rows · 3 MB
+`core/assessment_link.parquet` · 182,738 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -429,44 +499,33 @@ Decisions, in two steps kept apart so each can be explained on its own:
 #### `link/live-keys.ts`
 
 ```text
-live_keys: the id GBIF's *live* occurrence index files a species' records
-under, where that differs from the snapshot's. The app's live GBIF queries
-(maps, record breakdowns, photos, nearby species) go to that index, not the
-snapshot, so they need its ids.
+taxonomy/gbif-live-keys.json: { taxonomy's GBIF key: live index's GBIF key },
+for every key the app asks GBIF's live API with whose id differs there.
 
-The two differ for the weeks between GBIF re-indexing against a newer XR and
-the first snapshot keyed to it (COL26.6 XR → COL26.10 XR in November 2026:
-1,130 assessed species' ids gone, 4,494 turned synonyms). Every other month
-the releases are the same and this table is empty.
+The app's keys are ids of the taxonomy's XR, CoL's newest. GBIF's live index
+(maps, record breakdowns, photos, nearby species, gbif.org links) runs the
+XR GBIF last re-indexed against, which is often older: GBIF re-indexes a few
+times a year, CoL releases monthly. The app's server reads this file to ask
+GBIF with the ids its index uses (src/lib/gbif-live-keys.ts). It is empty
+whenever GBIF runs CoL's newest XR.
 
-Built from: the snapshot's taxa, and the same link stage run on GBIF's live
-XR (its taxa, matcher answers and link), see sync.ts.
+Built from: live_usages (sources/release-map.ts: the taxonomy's usages onto
+the live XR's), snapshot_usages (for the groups, below), assessed and ne (the
+keys the app uses), src/config/gbif-taxon-keys.json (the groups).
 
 Decisions:
-  - An assessed species takes its live link's usage_id: where its records
-    start, by the same rules as the snapshot's link (a rename follows to the
-    new accepted species, a lump keeps to its own name's usage). Refused,
-    duplicate and unlinked species get no row.
-  - Any other CoL species follows its name: the live usage with its id and
-    name, else the one usage with its name and authorship, and then that
-    usage's species (taxa.species_id, the species GBIF counts its records
-    towards).
-  - A group follows its name and rank to the live release's accepted taxon
+  - Only the keys the app asks with: assessed and Not Evaluated species', and
+    the higher taxa of the country map's groups.
+  - A group's key comes from GBIF's own matcher when the config was derived
+    (scripts/config/derive-gbif-taxon-keys.ts), so it is an id of whatever XR
+    GBIF ran then. It is read as the taxonomy's id, else as the snapshot's
+    (mapped onto the taxonomy's), and then mapped onto the live XR's
     (Ostracoda, B8TXJ in COL26.6 XR, is another id in COL26.10 XR).
-  - Only differences are kept for CoL species (a few percent of 2.3M); every
-    assessed species gets a row, and the lists keep it only where it differs.
-  - Never used for counts or taxonomy: those come from the snapshot's release.
+  - A key the live XR has no counterpart for is left out: the app then asks
+    with the taxonomy's id, and GBIF answers for what it has.
 ```
 
-`core/live_keys.parquet` · 222,692 rows · 2 MB
-
-| column | type | |
-|---|---|---|
-| `kind` | text | 'assessed' (id is a SIS taxon id) \| 'species' \| 'group' (id is a CoL id; a group is a higher taxon the app asks GBIF about, src/config/gbif-taxon-keys.json) |
-| `id` | text | the species, as the snapshot names it |
-| `live_key` | text | the live index's id for it |
-
-`taxonomy/gbif-live-keys.json` · 354 kB
+`taxonomy/gbif-live-keys.json` · 0 kB
 
 ### Count
 
@@ -497,7 +556,7 @@ Checks: each usage has at most one owner. A violation means a number
 somewhere is inflated, so the sync stops.
 ```
 
-`core/usage_owner.parquet` · 6,209,472 rows · 33 MB
+`core/usage_owner.parquet` · 6,240,441 rows · 33 MB
 
 | column | type | |
 |---|---|---|
@@ -531,7 +590,7 @@ Decisions:
     date: nothing can postdate it yet.
 ```
 
-`core/record_counts.parquet` · 1,741,666 rows · 9 MB
+`core/record_counts.parquet` · 1,727,596 rows · 9 MB
 
 | column | type | |
 |---|---|---|
@@ -552,7 +611,7 @@ lists/assessed: one row per assessed species: its latest assessment, its GBIF
 key and counts, its latest credits.
 
 Built from: assessments (latest), record_counts, lists/assessments (how many
-years it was assessed in), common_names.
+years it was assessed in), common_names, assessment_link and snapshot_notes.
 
 Decisions:
   - Common name: IUCN's, else iNaturalist's.
@@ -577,7 +636,7 @@ Decisions:
 | `year_published` | text |  |
 | `countries` | text | lists, ';'-joined (the app's filter SQL reads them so) |
 | `gbif_species_key` | text | see record_counts |
-| `gbif_live_key` | text | the id GBIF's live index uses for it, where that differs (live_keys); the app's live GBIF queries ask it first. NULL most months |
+| `count_note` | text | 'split' \| 'new' when the snapshot's XR can't count its species as the taxonomy's release has it (snapshot_notes); NULL most months |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
 | `gbif_georeferenced_records_since_assessment` | integer |  |
@@ -648,7 +707,7 @@ Decisions:
   - Accepted in the XR and not demoted by the curated release (none are, against the XR's own release).
 ```
 
-`lists/species` · 2,354,462 rows · 39 MB
+`lists/species` · 2,359,753 rows · 39 MB
 
 | column | type | |
 |---|---|---|
@@ -676,7 +735,7 @@ col_id, which is also its GBIF key. Looked up by that key (the map's
 tooltips, nearby species, search), which species/'s partitions can't prune.
 
 Built from: species/, assessment_link, record_counts, occurrence_countries
-with usage_owner, common_names.
+with usage_owner, common_names, snapshot_notes.
 
 Decisions:
   - Not Evaluated: described (species/), linked by no assessment_link row of
@@ -684,7 +743,7 @@ Decisions:
   - Common name: iNaturalist's, else CoL's.
 ```
 
-`lists/ne.parquet` · 1,327,388 rows · 36 MB
+`lists/ne.parquet` · 1,330,108 rows · 36 MB
 
 | column | type | |
 |---|---|---|
@@ -702,7 +761,7 @@ Decisions:
 | `gbif_species_key` | text | the CoL id, three times: the app reads each name in a different place |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
-| `gbif_live_key` | text | the id GBIF's live index uses for it, where that differs (live_keys). NULL most months |
+| `count_note` | text | 'split' \| 'new' (snapshot_notes, see lists/assessed); NULL most months |
 
 #### `dbt/models/lists/app_taxa.sql`
 
@@ -721,7 +780,7 @@ the universe flags and groups are on species/.
 taxonomy/assessment_link: assessment_link as built (see link/assessment-link.ts).
 ```
 
-`taxonomy/taxa.parquet` · 7,991,756 rows · 127 MB
+`taxonomy/taxa.parquet` · 8,504,545 rows · 128 MB
 
 | column | type | |
 |---|---|---|
@@ -735,7 +794,7 @@ taxonomy/assessment_link: assessment_link as built (see link/assessment-link.ts)
 | `checklist_parent_id` | text |  |
 | `checklist_name` | text |  |
 
-`taxonomy/assessment_link.parquet` · 187,355 rows · 3 MB
+`taxonomy/assessment_link.parquet` · 182,738 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -764,7 +823,7 @@ One name per scientific name, chosen in sources/common-names.ts. dbt keeps
 the pairs as a table; the export step writes them as one JSON object.
 ```
 
-`taxonomy/vernacular-names.json` · 482 kB
+`taxonomy/vernacular-names.json` · 502 kB
 
 #### `dbt/models/lists/specialist_group_species.sql`
 
@@ -797,7 +856,7 @@ Decisions:
     the second.
 ```
 
-`core/specialist_group_species.parquet` · 2,369,424 rows · 6 MB
+`core/specialist_group_species.parquet` · 2,374,633 rows · 6 MB
 
 | column | type | |
 |---|---|---|
@@ -835,7 +894,7 @@ CoL shows the evidence only from the new species' page: V. gracilicosta lists
 "Vallonia costata var. montana Sterki, 1893" among its synonyms.
 ```
 
-`taxonomy/col-split-candidates.parquet` · 5,662 rows · 78 kB
+`taxonomy/col-split-candidates.parquet` · 5,841 rows · 80 kB
 
 | column | type | |
 |---|---|---|
@@ -866,7 +925,7 @@ Decisions:
     present a coin toss as a finding.
 ```
 
-`taxonomy/col-synonym-assessed.parquet` · 1,212 rows · 22 kB
+`taxonomy/col-synonym-assessed.parquet` · 1,275 rows · 23 kB
 
 | column | type | |
 |---|---|---|
@@ -889,7 +948,7 @@ Decisions: primary links only; where two share a col_id, an accepted-name
 match before others, then the lowest SIS id.
 ```
 
-`taxonomy/col-to-assessed.parquet` · 172,718 rows · 2 MB
+`taxonomy/col-to-assessed.parquet` · 172,464 rows · 2 MB
 
 | column | type | |
 |---|---|---|
@@ -920,7 +979,7 @@ Decisions:
     so a prefix query reads about a megabyte, fast even on a cold container.
 ```
 
-`search/name-index.parquet` · 3,822,428 rows · 169 MB
+`search/name-index.parquet` · 3,823,846 rows · 169 MB
 
 | column | type | |
 |---|---|---|
@@ -963,7 +1022,7 @@ Decisions:
     scientific row wins); one shared by several ranks follows the same rule.
 ```
 
-`search/rank-index.parquet` · 180,671 rows · 3 MB
+`search/rank-index.parquet` · 181,505 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -993,7 +1052,7 @@ Decisions:
     one row group.
 ```
 
-`search/synonym-index.parquet` · 2,320,294 rows · 56 MB
+`search/synonym-index.parquet` · 2,331,013 rows · 56 MB
 
 | column | type | |
 |---|---|---|
@@ -1133,9 +1192,9 @@ Decisions:
 
 | column | type | |
 |---|---|---|
-| `redlist_release` | text | the versions linked: a link holds between one Red List release and one CoL release (the XR GBIF's snapshot is keyed to; checks against the curated release), so a review of it names the versions it holds for |
-| `col_xr` | text | the versions linked: a link holds between one Red List release and one CoL release (the XR GBIF's snapshot is keyed to; checks against the curated release), so a review of it names the versions it holds for |
-| `col_checklist` | text | the versions linked: a link holds between one Red List release and one CoL release (the XR GBIF's snapshot is keyed to; checks against the curated release), so a review of it names the versions it holds for |
+| `redlist_release` | text | the versions linked: a link holds between one Red List release and one CoL release (CoL's newest XR; checks against its curated release), so a review of it names the versions it holds for |
+| `col_xr` | text | the versions linked: a link holds between one Red List release and one CoL release (CoL's newest XR; checks against its curated release), so a review of it names the versions it holds for |
+| `col_checklist` | text | the versions linked: a link holds between one Red List release and one CoL release (CoL's newest XR; checks against its curated release), so a review of it names the versions it holds for |
 | `sis_taxon_id` | integer |  |
 | `iucn_name` | text |  |
 | `iucn_authority` | text |  |
@@ -1169,8 +1228,9 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 
 | Input | What it gives | Version | Code |
 |---|---|---|---|
-| **Catalogue of Life XR** | every name usage: accepted species, synonyms, infraspecifics, BOLD BINs, with lineage | the release GBIF *indexes* (asked of GBIF), not the newest, so every GBIF key resolves | `inputs/col-xr.ts` |
-| **CoL curated release** | which species are curated (Base sources) and which usages the curated release holds | the one the XR was built from (COL26.6 XR → COL26.6), never a newer one | `inputs/col-checklist.ts` |
+| **Catalogue of Life XR** | every name usage: accepted species, synonyms, infraspecifics, BOLD BINs, with lineage | CoL's newest with an archive to download (`COL_XR_DATASET` pins one) | `inputs/col-xr.ts` |
+| **CoL curated release** | which species are curated (Base sources) and which usages the curated release holds | the one the XR was built from (COL26.10 XR → COL26.10), never another | `inputs/col-checklist.ts` |
+| The snapshot's and GBIF's live XRs | their usages only, to map their ids onto the newest's | the XR holding the snapshot's keys (tested; `GBIF_SNAPSHOT_XR` pins one), and the one GBIF's API reports | `inputs/snapshot-xr.ts`, `inputs/col-xr.ts` |
 | **IUCN Red List Postgres** | every global assessment, taxonomy, synonyms, credits | the database named by `DB_NAME` | `sources/assessments.ts` |
 | **GBIF monthly snapshot** | every occurrence record, as parquet, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `inputs/gbif-snapshot.ts` |
 | iNaturalist taxonomy | one preferred English common name per species | the calendar month | `inputs/inat-names.ts` |
@@ -1229,18 +1289,22 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v3.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v4.png)
 
 The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
 
-**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is the extended release (XR) GBIF's occurrence snapshot was keyed to, not CoL's newest: every occurrence carries that XR's ids, so linking to another release would link to ids the records don't use. GBIF re-indexes a few times a year, so the XR trails CoL's newest by up to a few months (here COL26.6 XR, 2026-06-19, while COL26.10 is out), and the gap closes with the first snapshot keyed to the newer XR. GBIF has re-indexed in July and November 2026, skipping three CoL releases between; monthly re-indexing is its stated aim (gbif/pipelines#1259), not yet its practice. Everything else CoL-related uses the same release, including the curated release (the one the XR was built from) and so the CoL-differences card, so every count, list and difference on a page describes one taxonomy. What the gap means:
+**Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is CoL's newest extended release (XR) with an archive to download, with the curated release it was built from (`inputs/col-xr.ts`, `inputs/col-checklist.ts`); taxa, the link, the lists and the CoL-differences card all follow it, so the taxonomy is as current as CoL. Two other XRs can be in play, and most months all three are one:
 
-- A name CoL added or changed since the XR isn't there to match: the species queues (*no species match*), or matches the older treatment.
-- The CoL-differences card describes CoL as of that release. A difference CoL has since resolved stays on the card until GBIF re-indexes; one CoL has since introduced appears then. Measured once (Red List 2026-1 against COL26.6 XR and COL26.10 XR, matcher answers compared by accepted name): about 1,450 assessed species (0.8%) land on a different CoL species in the newer release, 993 of them CoL moving away from IUCN's name and 215 moving to it.
-- "The Red List lags CoL" is measured against a CoL a few months old.
-- GBIF's *live* API moves before the snapshot does: once GBIF re-indexes, it files records under the newer XR's ids, and the app's live panels (map, record breakdown, photos, nearby species, country map) ask it by id. So when GBIF's live index runs a newer XR than the snapshot, the link stage runs again against that XR, never for counts, only to give each species its live id (`link/live-keys.ts`): COL26.6 XR → COL26.10 XR changed 9,096 assessed species' ids and those of 5 country-map groups. The app asks GBIF with the live id, or with the snapshot's while GBIF is still re-filing (`src/lib/gbif-live-keys.ts`).
+- **The snapshot's.** A GBIF snapshot is keyed by the XR GBIF indexed when it was made. GBIF re-indexes a few times a year (July and November 2026, skipping three CoL releases between; monthly is its stated aim, gbif/pipelines#1259, not yet its practice), so the snapshot's XR can trail CoL's newest by months. Snapshots don't say which XR they use (gbif/occurrence#559), so the sync finds it by testing: the XR that holds all but 0.1% of the snapshot's keys (`inputs/snapshot-xr.ts`; the wrong one leaves out about 2%). Its usages are then mapped onto the newest release's (`sources/release-map.ts`): the same id with the same name and rank, else the usage with the same name, rank and authorship, else the usages with the same name and rank if they all lead to one species, else the usage's species. That is how GBIF's own re-index treats records, by the name they carry. Every record is then counted where the newest release puts its name: lumps add up, renames follow.
+- **GBIF's live index's.** The app's live panels (map, record breakdown, photos, nearby species, country map, gbif.org links) ask GBIF's API by id, and it runs the XR GBIF last re-indexed against. Where that isn't the newest, the newest release's usages are mapped onto it the same way, and the app asks with the live id (`link/live-keys.ts`, `src/lib/gbif-live-keys.ts`).
 
-How big the gap is, measured once (the 2026-11-01 snapshot on COL26.6 XR, against COL26.10 XR): 96.7% of the snapshot's records sit on CoL records the newer release leaves unchanged, and about 0.5% would count for a different species, gain one or lose one if refiled against it (*Corvus corone* → *C. cornix*, 1.4M records; but also CoL's own new errors, a truncated *Artamus leucoryn*). Refiling the mirror ourselves by each record's written name would take minutes, and was decided against: the dashboard's counts would stop matching GBIF's for the same snapshot, and CoL's newest errors would arrive here before anywhere else. The gap closes when GBIF re-indexes.
+What the gap between the snapshot's XR and the newest costs, measured on the 2026-11-01 snapshot (COL26.6 XR) mapped onto COL26.10 XR:
+
+- 98.6% of records keep their usage's id, 1.3% follow a name or a species, and 0.08% have no counterpart and count for nothing (mostly genera and bacteria, but also CoL's own new errors: COL26.10 truncates *Artamus leucorynchus* to *A. leucoryn*). The sync stops if more than 0.5% would be dropped.
+- A count can't follow a split, since records filed under the old combined name can't be divided, and a species new since the snapshot's XR has had no records filed under it. Those counts carry a note in the app (`count_note`: 586 assessed species split, 250 new, in this pair; *Cathormion umbellatum*, which COL26.10 folds into *Albizia umbellata* while raising its subspecies *moniliforme* to a species, is one).
+- Counts stop matching gbif.org's for the same snapshot until GBIF re-indexes; they match how GBIF will file the records once it has.
+
+Measured once against the decision this replaced (the snapshot's XR for everything): about 1,450 assessed species (0.8%) land on a different CoL species in COL26.10 XR than in COL26.6 XR, 993 of them CoL moving away from IUCN's name and 215 moving to it.
 
 Matching is two questions, answered separately so each can be explained on its own:
 
@@ -1253,7 +1317,7 @@ Every assessed species' name is sent to **[matching-ws](https://github.com/gbif/
 
 The authority is deliberately not sent. Most records carry none, so GBIF files them on CoL's accepted record; asked with it, the matcher prefers whichever CoL record has the identical author string, often a provisional duplicate the records aren't on (*Melospiza melodia* (Wilson, 1810) went to that copy, not the accepted "(A. Wilson, 1810)"). Sending it, measured on COL26.6 XR, cost 301 species 42.6M records, 282 of them all their records, and gained 9 species 404. The authority does its work after the match: the acceptance rule below compares it against the matcher's alternatives, which is how same-spelled names by different authors are told apart.
 
-![How matching-ws picks a CoL name](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-624-link-audit/02-matcher-flow-v2.png)
+![How matching-ws picks a CoL name](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/04-matcher-flow.png)
 
 What the matcher does with a query, step by step from its source (`MatchingService` at the pinned release): it finds up to 50 CoL usages spelled the same or nearly so, scores each on the name, the authority, the hints, the rank and the usage's status, takes the best, and goes up a rank when nothing at the name's own rank is good enough. The examples are live answers with the scores the matcher itself reports (`verbose=true`): `python3 -I docs/diagrams/matcher_flow.py <matcher url> <build dir> <out.dot>`, with the sync's matcher serving. Like the matching diagram, it stops if an example no longer answers the way its box says.
 
@@ -1281,7 +1345,7 @@ The 266 undecided are mostly names the Red List marks as unsettled (145) and nam
 
 What the chosen CoL usage makes the species. `assessment_link.method` says what kind of usage it is (`accepted`, `synonym`, `provisional`, `ambiguous_synonym`) and `basis` how it was chosen (`matcher`, `decision`).
 
-- **An accepted species is the species.** One the curated release demotes would be followed to its accepted species; against the XR's own curated release, none are.
+- **An accepted species is the species.** The curated release could demote one (call it a synonym where the XR accepts it), but read against its own XR it demotes none (COL26.6, COL26.10), and the sync stops if one appears.
 - **A synonym is the species renamed, or a lump.** Each gets a verdict from `decideKey` in `app/scripts/sync/link/species-key.ts`:
   - **own**: the target is this species, under this name or a rename. It counts the target's records (minus anything others own). That includes a CoL synonym CoL itself marks as a respelling of its accepted name, with the same author citation (*Meandrina danae* / *danai*).
   - **lumped**: CoL folds it into another species, so its own usage (and anything under it) is its records. Where CoL files the synonym under an infraspecific (*Fringilla polatzeki* → *F. teydea polatzeki*), its records start at that infraspecific. Never at a nominate one (*Rosa villosa* subsp. *villosa*): that is the accepted species' core.
@@ -1350,7 +1414,7 @@ Four layers, from strict to advisory.
 - **each GBIF usage counts towards at most one species, once** (the `unique` test on `usage_owner.usage_key`; dbt builds nothing downstream if it fails). A violation means some number is inflated.
 - **specialist_group_species agrees with the remits as `taxonomy-sql.ts` applies them** (`checks/specialist-groups.ts`): the same species in every Specialist Group, assessed and CoL. Everything else reads the table (`specialist_group`), but the CoL breakdown popovers still apply a remit narrowed to one family or order in SQL, so a disagreement would show a breakdown that doesn't add up to its group. The check goes when the breakdowns move into dbt.
 - **every species in an IUCN group the Specialist Groups cover is in one of them** (`dbt/tests/specialist_groups_cover_their_sections.sql`; assessed species, and the described CoL species): each section ends with a catch-all, so a species no remit holds means a remit went wrong.
-- the occurrence table holds exactly the snapshot's records, and at most 0.1% of them have keys `taxa` doesn't hold
+- the occurrence table holds exactly the snapshot's records less those the release map has no counterpart for, at most 0.5% are dropped, and at most 0.1% of the rest have keys `taxa` doesn't hold
 
 **Link audit, which stops nothing.** `link_audit` (`dbt/models/audit/`) gives every assessed species' link with the evidence for checking it: how it was made (its stratum: exact name, CoL synonym, decision), and where IUCN and CoL differ (genus, epithet, family, order, author year, a shared CoL species), or agree (IUCN listing CoL's name among its synonyms). A difference is a reason to look, not a verdict: it may be our link going wrong, or a real taxonomic one, a lag or a disagreement between authorities. `sample_rank` orders each stratum in a fixed random order, so reviewing its first n links measures that stratum's error rate. `sync.json` records each stratum's links and signals.
 
@@ -1395,7 +1459,7 @@ Needs: Docker (for the matcher), uv (`brew install uv`, for dbt), the Red List P
 - link changes (`link_col_id`), since each one moves a species' records
 - species leaving or joining the NE list in bulk
 
-**When CoL moves.** A new XR (GBIF re-indexes a few times a year) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes the XR GBIF indexes *now*, but a snapshot is keyed by the XR GBIF indexed when it was *made*: between GBIF moving and the next snapshot (COL26.10 XR went live just after the 1 November 2026 snapshot) the two disagree, and the occurrences builder stops if more than 0.1% of the snapshot's records have keys the taxonomy doesn't hold. Wait for the next snapshot, or set `COL_XR_DATASET` to the snapshot's XR. The curated release follows the XR on its own.
+**When CoL moves.** A new XR (CoL releases monthly) renumbers about 2% of ids and moves names between species, so expect a few thousand link and count differences that month. The fixtures are by name for this reason. The sync takes it on its own, a few days after release once its archive is built, and maps the snapshot's keys onto it; the log names the three XRs and how many usages, splits and new species the mapping found. The curated release follows the XR on its own. When GBIF re-indexes, the next snapshot's XR moves and the mapping shrinks; when GBIF runs the newest XR, the maps, notes and live keys are all empty.
 
 **When IUCN publishes.** Point `DB_NAME` at the new database, and update `validate-table1a.test.ts` to the new Table 1a. Expect new species, new categories and count changes from moved assessment years, and a longer matching queue: new species go through the matcher, and a renamed species' decision is asked again.
 
@@ -1412,7 +1476,7 @@ Each comparison then explains one source's changes. Publish the second (or both,
 
 ### Running parts
 
-`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count`, `lists` and the precomputed stage's SQL tables are one dbt run, so any of them reruns it all), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The sources stage records the releases its tables came from (`core/sources-releases.json`), and a later stage refuses to run when the releases it resolves differ: a `--from link` run without `COL_XR_DATASET` once matched against a newer XR than the build's taxa. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot.
+`npm run sync -- --from <stage>` reruns from that stage on (`link`, `count`, `lists`, `precomputed` or `checks`; `count`, `lists` and the precomputed stage's SQL tables are one dbt run, so any of them reruns it all), reusing the build's earlier tables, which is how to try a change to one stage in a minute or two instead of the whole sync. The sources stage records the releases its tables came from (`core/sources-releases.json`), and a later stage refuses to run when the releases it resolves differ (any of the three XRs, the curated release or the snapshot): a `--from link` run once matched against a newer XR than the build's taxa. The inputs are always checked, which costs nothing once they're cached. `npx tsx scripts/sync/inputs/col.ts` fetches the CoL inputs alone; `npx tsx scripts/sync/inputs/matcher.ts` builds and starts the matcher alone, which then stays running between syncs as `redlist-matcher-<xr>` on port 8190 (`MATCHER_PORT`). `npm run sync -- --skip-compare` skips the comparison; `-- --baseline <data dir>` compares against that directory instead of production's sync. `npm run sync:compare -- --candidate ~/.cache/redlist-dashboard/build/data --report-only` reruns only the comparison. `PIPELINE_BUILD_DIR` builds somewhere else; `GBIF_SNAPSHOT=<date>` pins a snapshot, `GBIF_SNAPSHOT_XR=<key or alias>` the XR it is keyed by, `COL_XR_DATASET=<key>` the taxonomy's XR.
 
 ### Tracing a species
 
@@ -1455,7 +1519,7 @@ Choices made on purpose, which a reader might otherwise take for bugs:
 - **Every record type counts, for every kingdom.** Museum specimens, fossils and literature records are in both the all-records and georeferenced totals, as on gbif.org; the occurrence map applies its own filters.
 - **Outdated is as of the sync date.**
 - **The XR, not the curated release, decides `species_id`**, because that is what GBIF indexes.
-- **One CoL release for everything**: the XR GBIF filed the snapshot under, and the curated release it was built from. CoL's newer releases are never mixed in, so a page never shows two taxonomies at once; the footer names the release.
+- **CoL's newest release for every CoL question**, and the snapshot read through it rather than in its own release's ids, so a page shows one taxonomy, the newest; the footer names it. Where the snapshot can't count a species as the newest release has it (a split, a new species), the count says so.
 - **Every decision a person made is a seed**, a row in a file under `seeds/` with its reason, not a constant in code, so the list of human judgements the sync applies can be read in one place.
 
 Known limits:
@@ -1467,7 +1531,7 @@ Known limits:
 - NE country lists come from the snapshot, so they differ a little from gbif.org's live counts.
 - `decideKey`'s genus-transfer rule accepts a shared epithet under another genus without comparing authors; the covered rows do. Whether it should too is open.
 - The acceptance rule, the decisions file and the counting rule have unit tests on small synthetic tables (`pipeline-accept-match.test.ts`, `pipeline-decisions.test.ts`, `pipeline-usage-owners.test.ts`, `pipeline-record-counts.test.ts`); the link's concept rules are checked against real data only (the fixtures above, on every run).
-- The CoL release lags CoL's newest (COL26.6 XR against COL26.10 in November 2026): GBIF re-indexes a few times a year, and the sync follows GBIF.
+- Between GBIF re-indexes, counts follow a mapping of the snapshot's ids, not GBIF's own filing: 0.08% of records have no counterpart (COL26.6 XR onto COL26.10 XR), and split and new species' counts carry a note.
 
 Follow-ups:
 

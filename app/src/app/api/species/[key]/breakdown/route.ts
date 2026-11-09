@@ -99,8 +99,8 @@ export async function GET(
   try {
     // Build base params using occurrence/search with limit=0 to get counts
     // This supports hasCoordinate and hasGeospatialIssue unlike /count endpoint
-    // GBIF's live index may run a newer CoL release than the snapshot this
-    // species was keyed by (gbif-live-keys.ts).
+    // GBIF's live index may run another CoL release than the one this
+    // species is keyed by (gbif-live-keys.ts).
     const gbifKey = await liveGbifKey(speciesKey);
     const buildParams = (extraParams: Record<string, string> = {}) => {
       const params = new URLSearchParams({

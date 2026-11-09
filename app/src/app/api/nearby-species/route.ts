@@ -13,7 +13,7 @@
  * to be compared against.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { liveKeys, snapshotKey } from "@/lib/gbif-live-keys";
+import { liveKeys, appKey } from "@/lib/gbif-live-keys";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifJson } from "@/lib/gbif-fetch";
 import { normalizeCategory } from "@/config/taxa";
@@ -98,10 +98,10 @@ export async function GET(request: NextRequest) {
     ])) as [GbifSearchResponse, GbifSearchResponse];
 
     const counts: GbifFacetCount[] = faceted?.facets?.[0]?.counts ?? [];
-    // GBIF names species by its live index's keys, which can be a newer CoL
-    // release than the snapshot the lists are keyed by (gbif-live-keys.ts).
+    // GBIF names species by its live index's keys, which can be another CoL
+    // release than the one the lists are keyed by (gbif-live-keys.ts).
     const keyMap = await liveKeys();
-    const byKey = new Map(counts.map((c) => [snapshotKey(keyMap, String(c.name)), c.count]));
+    const byKey = new Map(counts.map((c) => [appKey(keyMap, String(c.name)), c.count]));
     if (exclude) byKey.delete(exclude);
 
     const assessed = await getAssessedByGbifKeys([...byKey.keys()]);

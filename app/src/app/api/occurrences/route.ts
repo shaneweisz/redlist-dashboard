@@ -492,7 +492,7 @@ export async function GET(request: NextRequest) {
     // Shared across all three record sets; each bucket adds its own
     // hasCoordinate/hasGeospatialIssue pair on top.
     const baseParams = new URLSearchParams({
-      // The live index's key where it runs a newer CoL release (gbif-live-keys.ts)
+      // The live index's key where it runs another CoL release (gbif-live-keys.ts)
       speciesKey: await liveGbifKey(speciesKey),
       checklistKey: GBIF_CHECKLIST_KEY,
     });

@@ -35,8 +35,9 @@ beforeAll(async () => {
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
       usage_id AS col_id, 'exact' AS method, 'matcher' AS basis, NULL::VARCHAR AS decided_by
     FROM (VALUES (1, 'A1'), (2, 'A2')) t(sis, usage_id)`, "assessment_link.parquet");
-  // GBIF's live index on a newer XR has filed A2 under another id (link/live-keys.ts).
-  await copy(`SELECT * FROM (VALUES ('assessed', '2', 'A2-live'), ('assessed', '1', 'A1')) t(kind, id, live_key)`, "live_keys.parquet");
+  // The snapshot's older XR holds A2 together with another species the taxonomy
+  // separates, and N1 not at all (sources/release-map.ts).
+  await copy(`SELECT * FROM (VALUES ('A2', 'split', 'Accipiter duo'), ('N1', 'new', NULL)) t(col_id, note, snapshot_name)`, "snapshot_notes.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
       false AS possibly_extinct_in_the_wild, NULL::VARCHAR AS population_trend, ['CU']::VARCHAR[] AS countries,
@@ -103,9 +104,10 @@ describe("GBIF counts in the lists", () => {
     expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
   });
 
-  it("carries the live index's key only where it differs from the snapshot's", () => {
-    expect(rows["2"].gbif_live_key).toBe("A2-live");
-    expect(rows["1"].gbif_live_key).toBeNull();
+  it("notes a count the snapshot can't give in full, by the species it links to", () => {
+    expect(rows["2"].count_note).toBe("split");
+    expect(rows["1"].count_note).toBeNull();
+    expect(ne.N1.count_note).toBe("new");
   });
 
   it("has no window for an assessment dated after today", () => {

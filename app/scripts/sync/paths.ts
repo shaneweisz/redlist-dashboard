@@ -28,6 +28,13 @@ export function tables(buildDir = BUILD_DIR) {
     // 1. Sources
     sourcesReleases: core("sources-releases.json"),
     taxa: core("taxa.parquet"),
+    // The snapshot's and GBIF's live index's XRs, when they differ from the
+    // taxonomy's, and their usages mapped onto it (sources/release-map.ts)
+    snapshotTaxa: core("snapshot_taxa.parquet"),
+    snapshotUsages: core("snapshot_usages.parquet"),
+    snapshotNotes: core("snapshot_notes.parquet"),
+    liveTaxa: core("live_taxa.parquet"),
+    liveUsages: core("live_usages.parquet"),
     assessments: core("assessments.parquet"),
     occurrences: core("occurrences.parquet"),
     occurrenceCountries: core("occurrence_countries.parquet"),
@@ -38,12 +45,6 @@ export function tables(buildDir = BUILD_DIR) {
     matches: core("matches.parquet"),
     link: core("assessment_link.parquet"),
     matchQueue: path.join(buildDir, "match-queue.tsv"),
-    // The same link, on the XR GBIF's live index runs, when it is newer (link/live-keys.ts)
-    liveTaxa: core("live_taxa.parquet"),
-    liveMatches: core("live_matches.parquet"),
-    liveLink: core("live_assessment_link.parquet"),
-    liveMatchQueue: path.join(buildDir, "live-match-queue.tsv"),
-    liveKeys: core("live_keys.parquet"),
     // 3. Count
     usageOwner: core("usage_owner.parquet"),
     recordCounts: core("record_counts.parquet"),

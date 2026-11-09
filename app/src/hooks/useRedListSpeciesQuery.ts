@@ -2,6 +2,7 @@
 // by RedListView. (The data is fetched inline in RedListView; this module is the
 // canonical type definition imported across the app.)
 
+import type { CountNote } from "@/lib/count-note";
 import type { ColRevision } from "@/lib/col-revision";
 
 export interface RedListSpecies {
@@ -42,6 +43,8 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
+  /** Why the snapshot can't count it in full (src/lib/count-note.ts); null most months. */
+  count_note?: CountNote | null;
   /**
    * The counts the view shows, for the record mode it is in. Set by RedListView
    * when species arrive (inGbifMode), so charts, filters, sorting and the table

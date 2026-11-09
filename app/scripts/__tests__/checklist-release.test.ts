@@ -1,7 +1,7 @@
 /**
  * The curated checklist the sync reads is the release its XR was built from
- * (COL26.6 XR → COL26.6), never CoL's newest: a newer one brought CoL's later
- * taxonomy into links and counts that otherwise follow GBIF's XR.
+ * (COL26.10 XR → COL26.10), never another: read against another XR, it demotes
+ * that XR's species, which the sync doesn't handle.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
@@ -48,22 +48,14 @@ afterEach(() => {
 });
 
 describe("resolveChecklistDataset", () => {
-  it("takes the curated release the XR was built from, not the newest", async () => {
+  it("takes the curated release the XR was built from, not the newest curated one", async () => {
     stubChecklistBank([315448, 316595]);
     expect(await resolveChecklistDataset({ alias: "COL26.6 XR" })).toEqual({ key: "315448", alias: "COL26.6", issued: "2026-06-12" });
   });
 
-  it("follows the XR when GBIF moves on", async () => {
+  it("follows the XR", async () => {
     stubChecklistBank([315448, 316595]);
     expect((await resolveChecklistDataset({ alias: "COL26.10 XR" })).key).toBe("316595");
-  });
-
-  it("takes COL_CHECKLIST_DATASET, by key or alias, over the XR's own release", async () => {
-    stubChecklistBank([315149, 315448, 316595]);
-    vi.stubEnv("COL_CHECKLIST_DATASET", "316595");
-    expect((await resolveChecklistDataset({ alias: "COL26.6 XR" })).alias).toBe("COL26.10");
-    vi.stubEnv("COL_CHECKLIST_DATASET", "COL26.5");
-    expect((await resolveChecklistDataset({ alias: "COL26.6 XR" })).key).toBe("315149");
   });
 
   it("stops when the XR's release isn't listed, rather than falling back to another", async () => {

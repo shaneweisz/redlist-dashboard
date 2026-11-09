@@ -88,8 +88,8 @@ if unhinted["diagnostics"]["matchType"] != "NONE":
 plant, ant = hinted, hinted["diagnostics"]["alternatives"][0]
 
 
-_, tie = ask("Xylopia laevigata")
-expect(tie, "Annonaceae", "HIGHERRANK", "Xylopia laevigata")
+_, tie = ask("Licania parviflora")
+expect(tie, "Chrysobalanaceae", "HIGHERRANK", "Licania parviflora")
 
 _, higher = ask("Diospyros sp. nov. 'mahaboensis'")
 expect(higher, "Diospyros", "HIGHERRANK", "Diospyros sp. nov. 'mahaboensis'")
@@ -137,7 +137,7 @@ out.append(f'  query [label={box("src", "The query, one per assessed species", [
 out.append(f'  parse [label={box("step", "1. Parse the name", ["name-parser reduces it to its canonical form, and a binomial is read as a species", "an informal name (<I>sp. nov.</I>, <I>aff.</I>) keeps only what parses; hybrid formulas and codes get no fuzzy search"])}];')
 out.append(f'  find [label={box("step", "2. Find candidates in the XR", ["up to 50 CoL usages: the same spelling (EXACT), or a VARIANT: the same once normalised", "(accents, Latin gender endings, doubled letters), or a letter away (two, for names over 10 letters)"], [eg(f"<I>Saprosma corymbosa</I> → {usage(variant['usage'])}, VARIANT, {E(scores(d(variant)))}")])}];')
 out.append(f'  score [label={box("step", "3. Score every candidate", ["name: the same spelling 100, +10 for a binomial; a variant by its similarity, −10 if the genus differs", "authority, when one is sent (the sync sends none): agrees +12, the identical string +8 more, differs −36", "hints: kingdom +5 (plant against animal −51), phylum +10, class +15, order +15, family +25,", "   each mismatch −10 to −15, the total held to −60…+50", "status: accepted +1, synonym 0, ambiguous synonym −1, provisional −5, misapplied −10; rank a few points"], [eg(f"<I>Solenopsis bicolor</I> {E(plant['usage'].get('authorship') or '')}, a bellflower: {E(scores(d(plant)))}"), f"   against the ant of that name, {E(ant['usage'].get('authorship') or '')}: {E(scores(d(ant)))}", "   with no hints the two tie, and nothing is returned"])}];')
-out.append(f'  pick [label={box("step", "4. Pick the best", ["the top score, plus up to 5 for its lead over the next, rescaled to a confidence of 0–100 (a raw 175 or more is 100)", "a tie: if the candidates share a classification, the oldest CoL id (CoL holding one name twice);", "   if not, the lowest taxon they share (HIGHERRANK), or nothing", "below 80 confidence: nothing"], [eg(f"<I>Xylopia laevigata</I>: two ambiguous synonyms, by different authors, tie at {tie_score} → the family {usage(tie['usage'])}")])}];')
+out.append(f'  pick [label={box("step", "4. Pick the best", ["the top score, plus up to 5 for its lead over the next, rescaled to a confidence of 0–100 (a raw 175 or more is 100)", "a tie: if the candidates share a classification, the oldest CoL id (CoL holding one name twice);", "   if not, the lowest taxon they share (HIGHERRANK), or nothing", "below 80 confidence: nothing"], [eg(f"<I>Licania parviflora</I>: two ambiguous synonyms, by different authors, tie at {tie_score} → the family {usage(tie['usage'])}")])}];')
 out.append(f'  up [label={box("step", "5. No match at its own rank? Go up", ["a subspecies tries its species, then the genus, then the hints from family up to kingdom", "each a HIGHERRANK answer, which needs 90 confidence"], [eg(f"<I>Diospyros</I> sp. nov. \'mahaboensis\' → the genus {usage(higher['usage'])}")])}];')
 out.append(f'  ans [label={box("out", "The answer", ["one CoL usage, which may be a synonym, with the accepted name it points to;", "its match type and confidence, and every alternative with its score",
             f"this build: EXACT {counts.get('EXACT', 0):,}, VARIANT {counts.get('VARIANT', 0):,}, HIGHERRANK {counts.get('HIGHERRANK', 0):,}, none {counts.get('NONE', 0):,}"], [eg(f"<I>Glossopsitta porphyrocephala</I>: a synonym, of {usage(syn['acceptedUsage'])}")])}];')

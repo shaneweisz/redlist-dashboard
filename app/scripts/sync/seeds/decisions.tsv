@@ -526,7 +526,7 @@ sis_taxon_id	redlist_name	col_name	col_authorship	col_id	by	reviewed	date	note
 166195	Siniperca knerii	Siniperca knerii	Garman, 1912	6Z3FJ	heuristic	no	2026-11-05	accepted pass
 166259	Galba pervia	Galba pervia	(E. von Martens, 1867)	BHTHG	heuristic	no	2026-11-05	synonym pass
 166263	Sermyla riqueti	Sermyla riquetii	(Grateloup, 1840)	4WW87	heuristic	no	2026-11-05	accepted variant pass
-166265	Cipangopaludina chinensis	Cipangopaludina chinensis	(Gray, 1834)	VHXLS	heuristic	no	2026-11-05	provisional pass
+166265	Cipangopaludina chinensis	Cipangopaludina chinensis	(J. E. Gray, 1833)	VFND	agent:claude-opus-5-5	no	2026-11-09	the same name as the provisional pass chose; COL26.10 writes the authorship (J. E. Gray, 1833) and holds it only as an ambiguous synonym of Margarya chinensis
 166275	Cuneopsis capitatus	Cuneopsis capitata	(Heude, 1874)	7QWFV	heuristic	no	2026-11-05	synonym variant pass
 166286	Lamprotula leai	Lamprotula leaii	(J. E. Gray, 1833)	3S5RH	heuristic	no	2026-11-05	accepted variant pass
 166299	Cipangopaludina ampulliformis	Cipangopaludina ampulliformis	Eydoux & Souleyet, 1852	MFQVG	heuristic	no	2026-11-05	provisional pass
@@ -1568,6 +1568,7 @@ sis_taxon_id	redlist_name	col_name	col_authorship	col_id	by	reviewed	date	note
 145700143	Schoenobiblus peruvianus	Schoenobiblus peruviana	Standl.	79WTK	heuristic	no	2026-11-05	accepted variant pass
 146069065	Dendropanax oblongifolius	Dendropanax oblongifolium	Rusby	34R6K	heuristic	no	2026-11-05	accepted variant pass
 146073923	Swartzia jororii	Swartzia jorori	Harms	53JDJ	heuristic	no	2026-11-05	accepted variant pass
+146114175	Brachistus stramoniifolius	Brachistus stramonifolius	(Kunth) Miers	VLDMV	agent:claude-opus-5-5	no	2026-11-09	the same name and author, spelled stramonifolius in COL26.10 (a synonym of Witheringia stramonifolia); IUCN writes stramoniifolius
 146114335	Cestrum strigilatum	Cestrum strigillatum	Ruiz & Pav.	T5VY	heuristic	no	2026-11-05	orthographic variant pass
 146119463	Cestrum tomentosum	Cestrum tomentosum	L.fil.	T5WP	heuristic	no	2026-11-05	accepted pass
 146120396	Solanum rudepannum	Solanum rude-pannum	Dunal	4Y42Y	heuristic	no	2026-11-05	orthographic variant pass

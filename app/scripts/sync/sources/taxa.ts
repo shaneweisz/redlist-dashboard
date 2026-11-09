@@ -28,12 +28,15 @@
  *                        human), else NULL
  *
  * Decisions:
- *   - species_id follows the XR, which is what GBIF indexes, so totals match
- *     gbif.org. The curated release only demotes: curated silence never removes
- *     a species (macroalgae, whose source isn't in the curated release), only
- *     curated contradiction does. Read against the release its XR was built
- *     from, it demotes nothing (COL26.6 XR); a newer one demoted 8,738 species,
- *     which was CoL's later taxonomy, not an XR error.
+ *   - species_id follows the XR, which is what GBIF indexes. The curated
+ *     release only demotes: curated silence never removes a species
+ *     (macroalgae, whose source isn't in the curated release), only curated
+ *     contradiction does. Read against the release its XR was built from, it
+ *     demotes nothing (COL26.6, COL26.10), and the sync stops if it ever does;
+ *     read against an older XR it demoted 8,738 species.
+ *   - The same builder makes the snapshot's and GBIF's live XRs' taxa, from
+ *     their NameUsage alone, for sources/release-map.ts: only ids, names,
+ *     ranks and species_id are read from those.
  *   - A misapplied name is someone else's concept and counts towards nothing.
  *   - A usage takes its species' group, so a synonym can't land in another group
  *     than the species it counts towards.

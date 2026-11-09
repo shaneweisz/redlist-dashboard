@@ -33,7 +33,8 @@ const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync
 function dataVersions(): string {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "sync", "sync.json"), "utf-8"));
-    return JSON.stringify({ redlist: s.redlist?.database, gbifSnapshot: s.gbif?.snapshot, col: s.col?.xr?.alias });
+    return JSON.stringify({ redlist: s.redlist?.database, gbifSnapshot: s.gbif?.snapshot, col: s.col?.xr?.alias,
+      snapshotCol: s.col?.snapshotXr?.alias });
   } catch {
     return "{}";
   }

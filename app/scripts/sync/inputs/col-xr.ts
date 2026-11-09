@@ -1,16 +1,19 @@
 /**
- * The Catalogue of Life eXtended Release (XR): every name usage the taxa table
- * is built from.
+ * The Catalogue of Life eXtended Releases (XR) the sync reads, and which is which.
  *
- * Not the newest XR, but the one GBIF's occurrence index runs on. GBIF adopts
- * each release about three weeks after CoL publishes it, and CoL renumbers about
- * 2% of usage ids per release, so the newest is normally one ahead and a slice
- * of GBIF's keys would resolve to nothing (measured once: 504 assessed and 9,092
- * unassessed keys against the newest, none against the indexed one).
+ * Up to three can be in play, and most months they are one:
+ *   - the taxonomy's: CoL's newest XR whose archive ChecklistBank serves
+ *     (resolveXrDataset). Taxa, the link and every list follow it.
+ *   - the snapshot's: the XR GBIF indexed when it made the snapshot, which the
+ *     snapshot's keys are ids of (inputs/snapshot-xr.ts). Its usages are mapped
+ *     onto the taxonomy's (sources/release-map.ts) before anything is counted.
+ *   - the live index's: the XR GBIF's occurrence API runs now (resolveLiveXr),
+ *     whose ids the app's live GBIF queries need.
+ * GBIF re-indexes a few times a year (July and November 2026), so CoL is
+ * normally a release or more ahead of both, and CoL renumbers about 2% of usage
+ * ids per release: ids from one XR can't be read as another's.
  *
- * The release is resolved in this order: COL_XR_DATASET, then the release GBIF
- * reports, then the one the last sync used (src/config/col-release.json) when
- * GBIF can't be reached, and only with nothing pinned the newest, which is a guess and says so.
+ * COL_XR_DATASET pins the taxonomy's XR.
  *
  * Three tables are taken from the ColDP export: NameUsage (the usages),
  * Reference (the publication year of botanical and fungal names, whose author
@@ -55,42 +58,62 @@ async function gbifIndexedRelease(): Promise<string | null> {
 }
 
 /**
- * The XR GBIF's live occurrence index uses, whatever COL_XR_DATASET pins: the
- * app's live GBIF queries (maps, breakdowns, photos) go to that index, so they
- * need ids from it. Null when GBIF can't be asked.
+ * The XR GBIF's live occurrence index uses: the app's live GBIF queries (maps,
+ * breakdowns, photos, gbif.org links) go to that index, so they need ids from
+ * it. Null when GBIF can't be asked.
  */
 export async function resolveLiveXr(): Promise<XrDatasetInfo | null> {
   const key = await gbifIndexedRelease();
-  if (!key) return null;
+  return key ? datasetInfo(key) : null;
+}
+
+async function datasetInfo(key: string): Promise<XrDatasetInfo> {
   const res = await fetch(`https://api.checklistbank.org/dataset/${key}`);
   if (!res.ok) throw new Error(`col-xr: ChecklistBank lookup failed for ${key}: ${res.status}`);
   const ds = await res.json();
   return { key: String(ds.key), alias: ds.alias, doi: ds.doi ?? null, issued: ds.issued ?? null };
 }
 
-/** @param pinned the XR the last sync used, to stand on if GBIF can't be asked */
-export async function resolveXrDataset(pinned: string | null): Promise<XrDatasetInfo> {
-  const indexed = process.env.COL_XR_DATASET ?? (await gbifIndexedRelease());
-  const key = indexed ?? pinned;
-  if (!indexed) {
-    console.warn(key
-      ? `   could not reach GBIF to confirm its indexed release; keeping the pinned ${key}`
-      : "   could not reach GBIF and nothing is pinned; using the newest XR, so some GBIF keys may not resolve");
+const exportUrl = (key: string) => `https://api.checklistbank.org/dataset/${key}/export.zip?format=ColDP&extended=true`;
+
+/** Whether ChecklistBank will serve this dataset's archive yet (HEAD, following its redirect to the file). */
+export async function hasArchive(key: string): Promise<boolean> {
+  try {
+    return (await fetch(exportUrl(key), { method: "HEAD", redirect: "follow" })).ok;
+  } catch {
+    return false;
   }
-  const res = key
-    ? await fetch(`https://api.checklistbank.org/dataset/${key}`)
-    : await fetch("https://api.checklistbank.org/dataset?origin=xrelease&limit=1&sortBy=created");
-  if (!res.ok) throw new Error(`col-xr: ChecklistBank lookup failed: ${res.status}`);
-  const body = await res.json();
-  const ds = key ? body : body.result?.[0];
-  if (!ds) throw new Error("col-xr: no xrelease datasets returned");
-  return { key: String(ds.key), alias: ds.alias, doi: ds.doi ?? null, issued: ds.issued ?? null };
+}
+
+/** CoL's XRs, newest first. */
+export async function xreleases(limit = 12): Promise<XrDatasetInfo[]> {
+  const res = await fetch(`https://api.checklistbank.org/dataset?releasedFrom=3&origin=xrelease&limit=${limit}&sortBy=created`);
+  if (!res.ok) throw new Error(`col-xr: XR listing failed: ${res.status}`);
+  const body = (await res.json()) as { result?: { key: number | string; alias: string; doi?: string; issued?: string }[] };
+  return (body.result ?? [])
+    .map((d) => ({ key: String(d.key), alias: d.alias, doi: d.doi ?? null, issued: d.issued ?? null }))
+    .sort((a, b) => (b.issued ?? "").localeCompare(a.issued ?? ""));
+}
+
+/**
+ * The taxonomy's XR: COL_XR_DATASET, else the newest XR `usable` accepts (its
+ * archive, and its curated release's, can be downloaded). CoL names a release
+ * days before its archive is built, so a newer one without an archive is
+ * stepped past, and said so.
+ */
+export async function resolveXrDataset(usable: (xr: XrDatasetInfo) => Promise<boolean>): Promise<XrDatasetInfo> {
+  if (process.env.COL_XR_DATASET) return datasetInfo(process.env.COL_XR_DATASET);
+  for (const xr of await xreleases(4)) {
+    if (await usable(xr)) return xr;
+    console.warn(`   ${xr.alias} (${xr.key}) can't be downloaded yet; trying the release before it`);
+  }
+  throw new Error("col-xr: none of CoL's four newest XRs can be downloaded");
 }
 
 /** Download `xr`'s ColDP export into `destDir` and keep the three tables. */
 export function fetchXr(xr: XrDatasetInfo, destDir: string): void {
   const zip = path.join(destDir, "coldp_xr.zip");
-  const url = `https://api.checklistbank.org/dataset/${xr.key}/export.zip?format=ColDP&extended=true`;
+  const url = exportUrl(xr.key);
   console.log(`   downloading ${xr.alias} (${xr.key})`);
   // Resumable and retried: a 1.4 GB download, the largest in the sync.
   execFileSync("curl", ["-fsSL", "--retry", "5", "--retry-all-errors", "--retry-delay", "10",

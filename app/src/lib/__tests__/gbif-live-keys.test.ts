@@ -36,7 +36,7 @@ describe("gbif-live-keys", () => {
     expect(gbifJson.mock.calls[0][0]).toContain("taxonKey=VJFB9");
   });
 
-  it("keeps the snapshot key while the live key still finds nothing (GBIF mid-reprocess)", async () => {
+  it("keeps the app's key while the live key still finds nothing (GBIF mid-reprocess)", async () => {
     const { liveGbifKey } = await load(map);
     gbifJson.mockResolvedValue({ count: 0 });
     expect(await liveGbifKey("3Y3C6")).toBe("3Y3C6");
@@ -51,9 +51,9 @@ describe("gbif-live-keys", () => {
   });
 
   it("maps a key GBIF returns back to the one the lists use", async () => {
-    const { liveKeys, snapshotKey } = await load(map);
+    const { liveKeys, appKey } = await load(map);
     const keys = await liveKeys();
-    expect(snapshotKey(keys, "VJFB9")).toBe("3Y3C6");
-    expect(snapshotKey(keys, "4CGXP")).toBe("4CGXP");
+    expect(appKey(keys, "VJFB9")).toBe("3Y3C6");
+    expect(appKey(keys, "4CGXP")).toBe("4CGXP");
   });
 });

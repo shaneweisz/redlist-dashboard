@@ -4,7 +4,7 @@
  * tooltips, nearby species, search), which species/'s partitions can't prune.
  *
  * Built from: species/, assessment_link, record_counts, occurrence_countries
- * with usage_owner, common_names.
+ * with usage_owner, common_names, snapshot_notes.
  *
  * Columns:
  *   id, col_id, gbif_species_key   the CoL id, three times: the app reads each
@@ -14,8 +14,8 @@
  *   countries                      GBIF countries of its georeferenced records
  *   gbif_all_records_countries     … of all its records
  *   gbif_georeferenced_records_count, gbif_all_records_count
- *   gbif_live_key                  the id GBIF's live index uses for it, where
- *                                  that differs (live_keys). NULL most months
+ *   count_note                     'split' | 'new' (snapshot_notes, see
+ *                                  lists/assessed); NULL most months
  *
  * Decisions:
  *   - Not Evaluated: described (species/), linked by no assessment_link row of
@@ -38,9 +38,9 @@ SELECT s.col_id AS id, s.col_id, s.scientific_name,
        c.countries, c.all_records_countries AS gbif_all_records_countries,
        s.col_id AS gbif_species_key,
        rc.georef AS gbif_georeferenced_records_count, rc.all_records AS gbif_all_records_count,
-       live.live_key AS gbif_live_key
+       note.note AS count_note
 FROM {{ ref('species') }} s
-LEFT JOIN {{ source('core', 'live_keys') }} live ON live.kind = 'species' AND live.id = s.col_id
+LEFT JOIN {{ source('core', 'snapshot_notes') }} note ON note.col_id = s.col_id
 JOIN {{ ref('record_counts') }} rc ON rc.col_id = s.col_id
 LEFT JOIN ne_countries c ON c.col_id = s.col_id
 LEFT JOIN {{ source('core', 'common_names') }} col ON col.source = 'col' AND col.kind = 'display' AND col.col_id = s.col_id

@@ -1,9 +1,9 @@
 /**
- * GET /api/gbif-link?key=<snapshot key>&page=species|occurrences&<gbif.org params>
+ * GET /api/gbif-link?key=<the lists' key>&page=species|occurrences&<gbif.org params>
  *
  * A link to gbif.org for a species, sent there with the key GBIF's live index
- * uses (gbif-live-keys.ts): between GBIF re-indexing against a newer CoL
- * release and our next sync, the key in the lists can name nothing on gbif.org.
+ * uses (gbif-live-keys.ts): the lists follow CoL's newest release and GBIF
+ * re-indexes a few times a year, so a key in the lists can name nothing on gbif.org.
  * Every other parameter is passed through to the occurrence search unchanged.
  */
 import { NextRequest, NextResponse } from "next/server";

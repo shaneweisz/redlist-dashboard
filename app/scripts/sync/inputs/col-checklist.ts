@@ -2,19 +2,17 @@
  * The curated Catalogue of Life checklist: what catalogueoflife.org shows.
  *
  * The XR is a curated release plus the sources CoL merges in around it. The sync
- * uses the curated release the XR was built from (COL26.6 XR → COL26.6), never a
- * newer one: sources/taxa.ts reads it for which species are curated (in_base),
- * which usages it holds (in_checklist), and to demote an XR species the
- * curated release treats as a synonym. Against its own release that demotes
- * nothing; against a newer one it did (8,738 species on COL26.6 XR with
- * COL26.10), which brought CoL's later taxonomy into links and counts that
- * otherwise follow the XR GBIF filed its records under.
- *
- * COL_CHECKLIST_DATASET (a key or an alias) overrides the choice, for measuring.
+ * uses the curated release the XR was built from (COL26.10 XR → COL26.10), never
+ * another: sources/taxa.ts reads it for which species are curated (in_base) and
+ * which usages it holds (in_checklist). Read against its own XR it demotes no
+ * species (COL26.6 and COL26.10 both); read against an older XR, it demoted
+ * 8,738 (COL26.10 on COL26.6 XR), which the sync no longer handles, so the
+ * sources stage stops if any appear.
  */
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
+import { hasArchive } from "./col-xr";
 
 export interface ChecklistInfo {
   key: string;
@@ -24,15 +22,6 @@ export interface ChecklistInfo {
 
 const exportUrl = (key: string) =>
   `https://api.checklistbank.org/dataset/${key}/export.zip?format=ColDP&extended=true`;
-
-/** Whether ChecklistBank will serve this release's archive (HEAD, following its redirect to the file). */
-async function hasArchive(key: string): Promise<boolean> {
-  try {
-    return (await fetch(exportUrl(key), { method: "HEAD", redirect: "follow" })).ok;
-  } catch {
-    return false;
-  }
-}
 
 /** The curated releases, newest first. origin=release leaves out the XRs. */
 async function curatedReleases(): Promise<ChecklistInfo[]> {
@@ -47,11 +36,9 @@ async function curatedReleases(): Promise<ChecklistInfo[]> {
 
 /** The curated release `xr` was built from, the one its alias names, checked to be downloadable. */
 export async function resolveChecklistDataset(xr: { alias: string }): Promise<ChecklistInfo> {
-  const pinned = process.env.COL_CHECKLIST_DATASET;
-  const want = pinned || xr.alias.replace(/\s*XR$/, "");
-  const release = (await curatedReleases()).find((r) => r.key === want || r.alias === want);
-  if (!release) throw new Error(`col-checklist: no curated release ${want} on ChecklistBank` +
-    (pinned ? " (COL_CHECKLIST_DATASET)" : ` for ${xr.alias}`));
+  const want = xr.alias.replace(/\s*XR$/, "");
+  const release = (await curatedReleases()).find((r) => r.alias === want);
+  if (!release) throw new Error(`col-checklist: no curated release ${want} on ChecklistBank for ${xr.alias}`);
   if (!(await hasArchive(release.key))) throw new Error(`col-checklist: ${release.alias} (${release.key}) has no archive to download`);
   return release;
 }

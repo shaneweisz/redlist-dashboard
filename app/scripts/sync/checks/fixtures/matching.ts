@@ -79,15 +79,15 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Verreauxia africana",
-    why: "Linked to CoL's non-Base Verreauxia africana; its IUCN synonym Sasia africana is CoL's Base name for the same bird and must not reappear as Not Evaluated.",
+    why: "Linked to CoL's non-Base Verreauxia africana until COL26.10 made it a synonym of Sasia africana, its IUCN synonym and CoL's Base name for the same bird, which must not appear as Not Evaluated.",
     source: "link/assessment-link.ts covered rows",
-    expect: { linkedTo: "Verreauxia africana", hasRecords: true, neListed: { "Sasia africana": false } },
+    expect: { linkedTo: "Sasia africana", hasRecords: true, neListed: { "Sasia africana": false } },
   },
   {
     name: "Andropogon virginicus",
-    why: "Has an ambiguous synonym in CoL; the breakdown once reported it under whichever target the scan reached first.",
+    why: "Has an ambiguous synonym in CoL; the breakdown once reported it under whichever target the scan reached first. COL26.10 moves it to Anatherum.",
     source: "col-breakdown.ts syn_in_checklist",
-    expect: { linkedTo: "Andropogon virginicus", hasRecords: true },
+    expect: { linkedTo: "Anatherum virginicum", hasRecords: true },
   },
 
   // ── Two organisms that look alike ──────────────────────────────────────────
@@ -114,9 +114,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Agrotis sabine",
-    why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490).",
+    why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490). COL26.10 accepts Agrotis sabine itself, so it links there and never to sabura; new since the snapshot's XR, it has no records filed under it yet (count_note new).",
     source: "accept-match.ts; name-variants.ts",
-    expect: { linkedTo: null, gbifKeyName: null },
+    expect: { linkedTo: "Agrotis sabine" },
   },
 
   // ── Lumped: a synonym in CoL keeps its own records ─────────────────────────
@@ -167,9 +167,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Cipangopaludina chinensis",
-    why: "Provisionally accepted under exactly this name, and also an ambiguous synonym of Margarya chinensis; the ambiguous synonym won and counted 448 records.",
-    source: "link/assessment-link.ts offer kind 4",
-    expect: { linkedTo: "Cipangopaludina chinensis", minRecords: 2_000 },
+    why: "Was provisionally accepted under exactly this name and also an ambiguous synonym of Margarya chinensis; the ambiguous synonym won and counted 448 records. COL26.10 keeps only the ambiguous synonym, which counts the records under this name (5,048), not Margarya's.",
+    source: "link/assessment-link.ts (ambiguous synonym verdict); seeds/decisions.tsv",
+    expect: { linkedTo: "Margarya chinensis", minRecords: 2_000 },
   },
   {
     name: "Vicia grandiflora",
@@ -203,9 +203,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Cathormion umbellatum",
-    why: "COL26.10's curators fold it into Albizia umbellata, but GBIF files its records under the XR's Cathormion umbellatum. Read against the curated release its XR was built from, the checklist leaves it accepted, so it links where its records are.",
-    source: "inputs/col-checklist.ts (the XR's own curated release)",
-    expect: { linkedTo: "Cathormion umbellatum", minRecords: 500 },
+    why: "COL26.10 folds it into Albizia umbellata and raises its subspecies moniliforme to Albizia moniliforme. Its records follow (395 under its own name, into Albizia umbellata; 215 georeferenced in all); the 809 under subsp. moniliforme go to that species, so the count carries a split note.",
+    source: "sources/release-map.ts (snapshot_notes)",
+    expect: { linkedTo: "Albizia umbellata", minRecords: 150, maxRecords: 1_000 },
   },
   {
     name: "Cladorhynchus leucocephalus",
@@ -221,9 +221,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Dasycercus hillieri",
-    why: "CoL's Dasycercus cristicauda covers both IUCN species; each keeps its own records.",
+    why: "CoL's Dasycercus cristicauda covered both IUCN species, each keeping its own records; COL26.10 accepts D. hillieri again.",
     source: "precomputed/col-revisions.ts",
-    expect: { linkedTo: "Dasycercus cristicauda", gbifKeyName: "Dasycercus hillieri", hasRecords: true },
+    expect: { linkedTo: "Dasycercus hillieri", gbifKeyName: "Dasycercus hillieri", hasRecords: true },
   },
   {
     name: "Dasycercus cristicauda",
@@ -338,9 +338,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Brachistus stramoniifolius",
-    why: "Assessed under an old genus; CoL's Witheringia stramoniifolia (stramonifolia in the release) is the same plant and must not reappear as Not Evaluated.",
-    source: "sources/taxa.ts checklist_name",
-    expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false } },
+    why: "Assessed under an old genus; CoL's Witheringia stramonifolia is the same plant and must not reappear as Not Evaluated.",
+    source: "sources/taxa.ts checklist_name; seeds/decisions.tsv",
+    expect: { linkedTo: "Witheringia stramonifolia", neListed: { "Witheringia stramonifolia": false } },
   },
   {
     name: "Syllepte belialis",
