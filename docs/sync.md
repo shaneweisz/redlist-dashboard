@@ -225,6 +225,15 @@ Decisions:
     ('name only': a duplicate an XR source added and the next release
     dropped, Anas americana "Gmelin, 1789" beside "J. F. Gmelin, 1789"). That
     is how GBIF's re-index treats the records: by the name they carry.
+  - Except a homonym: 'name only' never takes a usage whose authors don't
+    agree (no shared year or surname) when, in the older XR, that usage was
+    another, differently named species'. COL26.10 dropped Alopecurus pratensis
+    L.; the A. pratensis left is "Bourg. ex Lange", a synonym of A.
+    arundinaceus, which would have taken meadow foxtail's 581k records.
+    Formatting alone ("L.f." / "L.fil.") can look like disagreement, so the
+    block needs both; it costs a few dozen usages their records.
+    name-only-moves.tsv lists the 'name only' moves between species that
+    remain, largest first, for a person to read.
   - Failing those, its species' usage ('species'), so a renamed
     infraspecific's records stay with their species. Else nothing: 0.08% of
     records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
@@ -246,7 +255,7 @@ Decisions:
 | `to_key` | text | the usage in the XR mapped onto; NULL when it has none (a snapshot record on it counts for nothing) |
 | `how` | text | 'name' \| 'name only' \| 'species' (below) |
 
-`core/snapshot_notes.parquet` · 33,722 rows · 71 kB
+`core/snapshot_notes.parquet` · 33,711 rows · 71 kB
 
 | column | type | |
 |---|---|---|
@@ -293,7 +302,7 @@ Checks: every snapshot record is in the table or dropped by the map; at most
 built from the wrong XR).
 ```
 
-`core/occurrences.parquet` · 327,758,025 rows · 921 MB
+`core/occurrences.parquet` · 327,790,273 rows · 922 MB
 
 | column | type | |
 |---|---|---|
@@ -304,7 +313,7 @@ built from the wrong XR).
 | `georef` | boolean | has coordinates and none of GBIF's geospatial issues (the API's hasCoordinate=true&hasGeospatialIssue=false) |
 | `n` | integer | records |
 
-`core/occurrence_countries.parquet` · 15,296,086 rows · 41 MB
+`core/occurrence_countries.parquet` · 15,298,311 rows · 41 MB
 
 | column | type | |
 |---|---|---|
@@ -597,7 +606,7 @@ Decisions:
     date: nothing can postdate it yet.
 ```
 
-`core/record_counts.parquet` · 1,727,596 rows · 9 MB
+`core/record_counts.parquet` · 1,727,606 rows · 9 MB
 
 | column | type | |
 |---|---|---|
@@ -750,7 +759,7 @@ Decisions:
   - Common name: iNaturalist's, else CoL's.
 ```
 
-`lists/ne.parquet` · 1,330,108 rows · 36 MB
+`lists/ne.parquet` · 1,330,120 rows · 36 MB
 
 | column | type | |
 |---|---|---|
@@ -986,7 +995,7 @@ Decisions:
     so a prefix query reads about a megabyte, fast even on a cold container.
 ```
 
-`search/name-index.parquet` · 3,823,846 rows · 169 MB
+`search/name-index.parquet` · 3,823,868 rows · 169 MB
 
 | column | type | |
 |---|---|---|
@@ -1029,7 +1038,7 @@ Decisions:
     scientific row wins); one shared by several ranks follows the same rule.
 ```
 
-`search/rank-index.parquet` · 181,505 rows · 3 MB
+`search/rank-index.parquet` · 181,506 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -1302,7 +1311,7 @@ The diagram is generated from a build, with a real species on every branch: `pyt
 
 **Versions.** A link is between one Red List release and one CoL release, and each sync records both in `sync.json` (and the diagram's title). The CoL release is CoL's newest extended release (XR) with an archive to download, with the curated release it was built from (`inputs/col-xr.ts`, `inputs/col-checklist.ts`); taxa, the link, the lists and the CoL-differences card all follow it, so the taxonomy is as current as CoL. Two other XRs can be in play, and most months all three are one:
 
-- **The snapshot's.** A GBIF snapshot is keyed by the XR GBIF indexed when it was made. GBIF re-indexes a few times a year (July and November 2026, skipping three CoL releases between; monthly is its stated aim, gbif/pipelines#1259, not yet its practice), so the snapshot's XR can trail CoL's newest by months. Snapshots don't say which XR they use (gbif/occurrence#559), so the sync finds it by testing: the XR that holds all but 0.1% of the snapshot's keys (`inputs/snapshot-xr.ts`; the wrong one leaves out about 2%). Its usages are then mapped onto the newest release's (`sources/release-map.ts`): the same id with the same name and rank, else the usage with the same name, rank and authorship, else the usages with the same name and rank if they all lead to one species, else the usage's species. That is how GBIF's own re-index treats records, by the name they carry. Every record is then counted where the newest release puts its name: lumps add up, renames follow.
+- **The snapshot's.** A GBIF snapshot is keyed by the XR GBIF indexed when it was made. GBIF re-indexes a few times a year (July and November 2026, skipping three CoL releases between; monthly is its stated aim, gbif/pipelines#1259, not yet its practice), so the snapshot's XR can trail CoL's newest by months. Snapshots don't say which XR they use (gbif/occurrence#559), so the sync finds it by testing: the XR that holds all but 0.1% of the snapshot's keys (`inputs/snapshot-xr.ts`; the wrong one leaves out about 2%). Its usages are then mapped onto the newest release's (`sources/release-map.ts`, by example below): by id where CoL kept it, else by the name and authors the records were filed under, else by the usage's species. That is how GBIF's own re-index treats records, by the name they carry. Every record is then counted where the newest release puts its name: lumps add up, renames follow.
 - **GBIF's live index's.** The app's live panels (map, record breakdown, photos, nearby species, country map, gbif.org links) ask GBIF's API by id, and it runs the XR GBIF last re-indexed against. Where that isn't the newest, the newest release's usages are mapped onto it the same way. And while GBIF re-indexes (about five days), its records sit partly under the previous XR's ids. So each key that differs gets the ids to try in order, the live XR's then the snapshot's, and the app asks with the first GBIF has records under (`link/live-keys.ts`, `src/lib/gbif-live-keys.ts`).
 
 What the gap between the snapshot's XR and the newest costs, measured on the 2026-11-01 snapshot (COL26.6 XR) mapped onto COL26.10 XR:
@@ -1310,6 +1319,20 @@ What the gap between the snapshot's XR and the newest costs, measured on the 202
 - 98.6% of records keep their usage's id, 1.3% follow a name or a species, and 0.08% have no counterpart and count for nothing (mostly genera and bacteria, but also CoL's own new errors: COL26.10 truncates *Artamus leucorynchus* to *A. leucoryn*). The sync stops if more than 0.5% would be dropped.
 - Lumps, renames and splits follow on their own: each record sits on the usage its own name matched, and that usage follows its name into the newer release, which is how GBIF's re-index will file it (COL26.10 raises *Corvus corone cornix* to *C. cornix*; the 1.38M records filed under the subspecies go to *C. cornix*, those filed as *C. corone* stay). A species new since the snapshot's XR can't: records carrying its name were matched to something else (*Agrotis sabine*'s to *A. sabura*) and move only when GBIF re-indexes. Its count carries a note in the app (`count_note = 'new'`: 40 assessed species in this pair).
 - Counts stop matching gbif.org's for the same snapshot until GBIF re-indexes; they match how GBIF will file the records once it has.
+
+**The release map, by example.** Each snapshot usage with records is looked up in the newest release, and the first rule that answers decides where its records go (2026-11-01 snapshot, COL26.6 XR onto COL26.10 XR):
+
+| Rule | When | Records | Example |
+|---|---|---:|---|
+| same id | the newest release has the id, with the same name and rank | 98.61% | *Panthera leo*: nothing changes |
+| name | a usage with the same name, rank and authors, under another id | 0.85% | the American wigeon, `3Y3C6` → `VJFB9`; *Parus caeruleus* Linnaeus, 1758, a synonym in both, so its records still reach *Cyanistes caeruleus* |
+| name only | the same name and rank, with the authors written differently, as long as every such usage leads to one species | 0.40% | *Anas superciliosa* "Gmelin, 1789", a duplicate CoL dropped, → "J. F. Gmelin, 1789"; *Elytrigia repens* "(L.) Desv. ex Nevski" → "(L.) Nevski", which COL26.10 files under *Elymus repens* |
+| species | no usage with its name: its species' | 0.05% | *Colias crocea* → *Colias croceus*; *Senecio jacobaea* → *Jacobaea vulgaris* |
+| none | nothing: its records count for nothing | 0.08% | mostly bacterial genera; *Atriplex prostrata* Boucher ex DC., 153k records |
+
+Splits come out right because a record follows the usage its own name matched: *Corvus corone cornix* has its own usage, so its 1.38M records go where COL26.10 puts that name, *Corvus cornix*.
+
+*Name only* has one exception, the homonym. When CoL drops a name, the only usage left with that spelling can be another author's name for another organism. COL26.10 no longer has *Alopecurus pratensis* L., meadow foxtail; the *A. pratensis* left is "Bourg. ex Lange", a synonym of *A. arundinaceus*, so its 581k records would have made the assessed *A. arundinaceus* 629,723 instead of 48,220. Likewise *Limenitis camilla* (Linnaeus, 1764), the white admiral, would have gone to *L. reducta*. So *name only* never takes a usage whose authors share no year or surname, when, in the snapshot's release, that usage belonged to a differently named species. Both conditions are needed: author strings differ by formatting alone ("L.f." / "L.fil."), and a duplicate's twin is often another species of the same name (*Anas superciliosa* above). Blocked, a usage falls to its species (the white admiral's records stay with *Ladoga camilla*) or to nothing (meadow foxtail's, since COL26.10 has no such species). Each sync writes `build/name-only-moves.tsv`: the *name only* moves left that change species, largest first (2,774 usages, 2.3M records this month), mostly renames and lumps (*Anas americana* → *Mareca americana*). Read it for a homonym the rule let through.
 
 **Where names meet ids.** Three steps turn names into CoL ids, and only the first is a judgement:
 
@@ -1460,7 +1483,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes once inputs are cached)
 cd app && npm run sync
 
-# 3. Read ~/.cache/redlist-dashboard/build/compare/report.md, and build/match-queue.tsv for species waiting on a decision
+# 3. Read ~/.cache/redlist-dashboard/build/compare/report.md, and build/match-queue.tsv for species waiting on a decision, and build/name-only-moves.tsv for homonyms
 
 # 4. Publish: copies the build into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish

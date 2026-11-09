@@ -45,6 +45,7 @@ export function tables(buildDir = BUILD_DIR) {
     matches: core("matches.parquet"),
     link: core("assessment_link.parquet"),
     matchQueue: path.join(buildDir, "match-queue.tsv"),
+    nameOnlyMoves: path.join(buildDir, "name-only-moves.tsv"),
     // 3. Count
     usageOwner: core("usage_owner.parquet"),
     recordCounts: core("record_counts.parquet"),

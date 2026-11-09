@@ -39,7 +39,19 @@ beforeAll(async () => {
     ('S10', 'Eus b', 'species', 'accepted', 'L.', 'S10'),
     ('S11', 'Gus a', 'species', 'accepted', 'L.', 'S11'),
     ('S12', 'Hus a', 'species', 'accepted', 'L.', 'S12'),
-    ('S14', 'Hus minor', 'species', 'synonym', 'L.', 'S11')`), "snapshot_taxa.parquet");
+    ('S14', 'Hus minor', 'species', 'synonym', 'L.', 'S11'),
+    -- Meadow foxtail: the newer XR drops Jus a L.; its homonym, another species' synonym, stays.
+    ('S15', 'Jus a', 'species', 'accepted', 'L.', 'S15'),
+    ('S16', 'Jus a', 'species', 'synonym', 'Bourg. ex Lange', 'S17'),
+    ('S17', 'Jus b', 'species', 'accepted', 'Poir.', 'S17'),
+    -- White admiral: Kus a (Linnaeus), a synonym of Lus a, is dropped; Kus a D&S, Kus b's, stays.
+    ('S18', 'Kus a', 'species', 'synonym', '(Linnaeus, 1764)', 'S19'),
+    ('S19', 'Lus a', 'species', 'accepted', '(Linnaeus, 1764)', 'S19'),
+    ('S20', 'Kus a', 'species', 'synonym', '[Denis & Schiffermüller], 1775', 'S21'),
+    ('S21', 'Kus b', 'species', 'accepted', '[Denis & Schiffermüller], 1775', 'S21'),
+    -- A duplicate CoL held as two species, one dropped: not a homonym.
+    ('S22', 'Mus a', 'species', 'provisionally accepted', 'Gmelin, 1789', 'S22'),
+    ('S23', 'Mus a', 'species', 'accepted', 'J. F. Gmelin, 1789', 'S23')`), "snapshot_taxa.parquet");
   // The taxonomy's, a few releases on.
   await copy(taxa(`
     ('S1', 'Aus bus', 'species', 'accepted', 'L.', 'S1'),
@@ -52,10 +64,16 @@ beforeAll(async () => {
     ('S10', 'Eus b', 'species', 'synonym', 'L.', 'S9'),
     ('S11', 'Gus a', 'species', 'synonym', 'L.', 'S12'),
     ('S12', 'Hus a', 'species', 'accepted', 'L.', 'S12'),
-    ('S14', 'Hus minor', 'species', 'accepted', 'L.', 'S14')`), "taxa.parquet");
+    ('S14', 'Hus minor', 'species', 'accepted', 'L.', 'S14'),
+    ('S16', 'Jus a', 'species', 'synonym', 'Bourg. ex Lange', 'S17'),
+    ('S17', 'Jus b', 'species', 'accepted', 'Poir.', 'S17'),
+    ('S19', 'Lus a', 'species', 'accepted', '(Linnaeus, 1764)', 'S19'),
+    ('S20', 'Kus a', 'species', 'synonym', '[Denis & Schiffermüller], 1775', 'S21'),
+    ('S21', 'Kus b', 'species', 'accepted', '[Denis & Schiffermüller], 1775', 'S21'),
+    ('S23', 'Mus a', 'species', 'accepted', 'J. F. Gmelin, 1789', 'S23')`), "taxa.parquet");
   const mapped = await buildSnapshotMap({ snapshotTaxa: f("snapshot_taxa.parquet"), taxa: f("taxa.parquet") },
     { usages: f("snapshot_usages.parquet"), notes: f("snapshot_notes.parquet") });
-  expect(mapped).toMatchObject({ unmapped: 1, new: 1 });
+  expect(mapped).toMatchObject({ unmapped: 2, new: 1 });
   usages = Object.fromEntries((await read("snapshot_usages.parquet")).map((r) => [r.from_key, r])) as typeof usages;
   notes = Object.fromEntries((await read("snapshot_notes.parquet")).map((r) => [r.col_id, r])) as typeof notes;
 });
@@ -74,6 +92,15 @@ describe("the snapshot's usages, as the taxonomy's", () => {
 
   it("follows a dropped duplicate to the usage with its name, when they lead to one species", () => {
     expect(usages.S3).toMatchObject({ to_key: "N3", how: "name only" });
+  });
+
+  it("doesn't take a homonym: other authors, and another species' in the older XR", () => {
+    expect(usages.S15).toMatchObject({ to_key: null, how: null }); // not onto Jus b's synonym
+    expect(usages.S18).toMatchObject({ to_key: "S19", how: "species" }); // its own species, not Kus b
+  });
+
+  it("still follows a duplicate whose twin was a species of the same name", () => {
+    expect(usages.S22).toMatchObject({ to_key: "S23", how: "name only" });
   });
 
   it("keeps a vanished infraspecific's records with its species", () => {

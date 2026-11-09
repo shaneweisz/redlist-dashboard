@@ -33,6 +33,15 @@
  *     ('name only': a duplicate an XR source added and the next release
  *     dropped, Anas americana "Gmelin, 1789" beside "J. F. Gmelin, 1789"). That
  *     is how GBIF's re-index treats the records: by the name they carry.
+ *   - Except a homonym: 'name only' never takes a usage whose authors don't
+ *     agree (no shared year or surname) when, in the older XR, that usage was
+ *     another, differently named species'. COL26.10 dropped Alopecurus pratensis
+ *     L.; the A. pratensis left is "Bourg. ex Lange", a synonym of A.
+ *     arundinaceus, which would have taken meadow foxtail's 581k records.
+ *     Formatting alone ("L.f." / "L.fil.") can look like disagreement, so the
+ *     block needs both; it costs a few dozen usages their records.
+ *     name-only-moves.tsv lists the 'name only' moves between species that
+ *     remain, largest first, for a person to read.
  *   - Failing those, its species' usage ('species'), so a renamed
  *     infraspecific's records stay with their species. Else nothing: 0.08% of
  *     records, COL26.6 XR onto COL26.10 XR, mostly genera and bacteria.
@@ -53,20 +62,47 @@ import { output, parquet } from "../paths";
 const usages = (file: string) =>
   `SELECT col_id, scientific_name AS nm, rank, coalesce(authorship, '') AS au, species_id FROM ${parquet(file)}`;
 
+/**
+ * Whether two author citations can be one: either is empty, they share a year,
+ * or a surname (accents, initials and connectives aside; "Ehrenb." is
+ * "Ehrenberg"). Generous on purpose: it only ever blocks together with a
+ * species clash (mapUsages).
+ */
+const AUTHORS_AGREE = `
+  CREATE OR REPLACE TEMP MACRO au_names(a) AS list_filter(regexp_split_to_array(lower(strip_accents(a)), '[^a-z]+'),
+    lambda x: length(x) >= 2 AND x NOT IN ('ex', 'et', 'in', 'and', 'de', 'von', 'van', 'der', 'den', 'al'));
+  CREATE OR REPLACE TEMP MACRO au_year(a) AS regexp_extract(a, '(1[5-9]|20)[0-9]{2}');
+  CREATE OR REPLACE TEMP MACRO authors_agree(a, b) AS a = '' OR b = '' OR (au_year(a) <> '' AND au_year(a) = au_year(b))
+    OR coalesce(list_bool_or(list_transform(au_names(a), lambda x:
+         coalesce(list_bool_or(list_transform(au_names(b), lambda y: starts_with(x, y) OR starts_with(y, x))), false))), false);`;
+
 async function mapUsages(conn: DuckDBConnection, from: string, to: string): Promise<void> {
+  await conn.run(AUTHORS_AGREE);
   await conn.run(`CREATE OR REPLACE TEMP TABLE f AS ${usages(from)}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE t AS ${usages(to)}`);
+  // Each older usage's species, and that species' name.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE f_sp AS
+    SELECT f.col_id, coalesce(f.species_id, f.col_id) AS sp, coalesce(s.nm, f.nm) AS sp_nm FROM f LEFT JOIN f s ON s.col_id = f.species_id`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE same AS
+    SELECT f.col_id, f.col_id AS to_key, 'id' AS how FROM f JOIN t USING (col_id) WHERE f.nm = t.nm AND f.rank = t.rank`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE by_name AS
+    SELECT f.col_id, any_value(t.col_id) AS to_key, 'name' AS how
+    FROM (SELECT * FROM f ANTI JOIN same USING (col_id)) f JOIN t ON t.nm = f.nm AND t.rank = f.rank AND t.au = f.au
+    GROUP BY 1 HAVING count(*) = 1`);
+  // The newer usages an older one already reaches by id or by name, with whose species it was.
+  await conn.run(`CREATE OR REPLACE TEMP TABLE held AS
+    SELECT DISTINCT d.to_key, s.sp, s.sp_nm FROM (SELECT * FROM same UNION ALL SELECT * FROM by_name) d JOIN f_sp s USING (col_id)`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE direct AS
-    WITH same AS (SELECT f.col_id, f.col_id AS to_key, 'id' AS how FROM f JOIN t USING (col_id) WHERE f.nm = t.nm AND f.rank = t.rank),
-    by_name AS (
-      SELECT f.col_id, any_value(t.col_id) AS to_key, 'name' AS how
-      FROM (SELECT * FROM f ANTI JOIN same USING (col_id)) f JOIN t ON t.nm = f.nm AND t.rank = f.rank AND t.au = f.au
-      GROUP BY 1 HAVING count(*) = 1),
-    by_name_only AS (
-      SELECT f.col_id, min(t.col_id) AS to_key, 'name only' AS how
+    WITH cand AS (
+      SELECT f.col_id, t.col_id AS to_key, coalesce(t.species_id, t.col_id) AS t_sp, f.au AS f_au, t.au AS t_au, s.sp, s.sp_nm
       FROM (SELECT * FROM f ANTI JOIN same USING (col_id) ANTI JOIN by_name USING (col_id)) f
-      JOIN t ON t.nm = f.nm AND t.rank = f.rank
-      GROUP BY 1 HAVING count(DISTINCT coalesce(t.species_id, t.col_id)) = 1)
+      JOIN f_sp s USING (col_id) JOIN t ON t.nm = f.nm AND t.rank = f.rank),
+    homonym AS (
+      SELECT DISTINCT c.col_id, c.to_key FROM cand c JOIN held h ON h.to_key = c.to_key
+      WHERE h.sp <> c.sp AND h.sp_nm <> c.sp_nm AND NOT authors_agree(c.f_au, c.t_au)),
+    by_name_only AS (
+      SELECT col_id, min(to_key) AS to_key, 'name only' AS how FROM (SELECT * FROM cand ANTI JOIN homonym USING (col_id, to_key))
+      GROUP BY 1 HAVING count(DISTINCT t_sp) = 1)
     SELECT * FROM same UNION ALL SELECT * FROM by_name UNION ALL SELECT * FROM by_name_only`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE mapped AS
     SELECT f.col_id AS from_key, coalesce(d.to_key, s.to_key) AS to_key,
@@ -113,4 +149,37 @@ export async function buildSnapshotMap(
   const [r] = (await conn.runAndReadAll(`SELECT count(*)::INTEGER AS new FROM ${parquet(out.notes)}`)).getRowObjects();
   const [u] = (await conn.runAndReadAll(`SELECT count(*) FILTER (to_key IS NULL)::INTEGER AS n FROM ${parquet(out.usages)}`)).getRowObjects();
   return { changed, unmapped: Number(u.n), new: Number(r.new) };
+}
+
+/**
+ * build/name-only-moves.tsv: the snapshot's usages mapped by name alone onto a
+ * usage of a differently named species, largest first, with their records. A
+ * rename or a lump looks like this too (Anas americana onto Mareca americana),
+ * so it is a list to read, not a check: what to look for is a homonym the
+ * block let through, records landing on an unrelated species.
+ */
+export async function writeNameOnlyMoves(
+  inputs: { snapshotTaxa: string; taxa: string; snapshotUsages: string; snapshotCounts: string },
+  out: string,
+): Promise<{ moves: number; records: number; top: { name: string; from: string; to: string; records: number }[] }> {
+  const conn = await openDuckDB();
+  const withSpecies = (file: string) => `(SELECT u.col_id, u.scientific_name, u.authorship,
+      coalesce(s.scientific_name, u.scientific_name) AS species
+    FROM ${parquet(file)} u LEFT JOIN ${parquet(file)} s ON s.col_id = u.species_id)`;
+  await conn.run(`CREATE OR REPLACE TEMP TABLE moves AS
+    WITH n AS (SELECT usage_key, sum(n)::BIGINT AS records FROM read_parquet(${lit(`${inputs.snapshotCounts}/counts-*.parquet`)}) GROUP BY 1)
+    SELECT n.records, m.from_key, f.scientific_name AS name, f.authorship AS from_authorship, f.species AS from_species,
+           m.to_key, t.authorship AS to_authorship, t.species AS to_species
+    FROM ${parquet(inputs.snapshotUsages)} m
+    JOIN n ON n.usage_key = m.from_key
+    JOIN ${withSpecies(inputs.snapshotTaxa)} f ON f.col_id = m.from_key
+    JOIN ${withSpecies(inputs.taxa)} t ON t.col_id = m.to_key
+    WHERE m.how = 'name only' AND f.species <> t.species`);
+  await conn.run(`COPY (SELECT * FROM moves ORDER BY records DESC, from_key)
+    TO ${lit(output(out))} (FORMAT csv, DELIMITER '\t', HEADER true)`);
+  const [r] = (await conn.runAndReadAll(`SELECT count(*)::INTEGER AS moves, coalesce(sum(records), 0)::BIGINT AS records FROM moves`)).getRowObjects();
+  const top = (await conn.runAndReadAll(`SELECT name, from_species AS "from", to_species AS "to", records::BIGINT AS records
+    FROM moves ORDER BY records DESC, from_key LIMIT 3`)).getRowObjects();
+  return { moves: Number(r.moves), records: Number(r.records),
+    top: top.map((t) => ({ name: String(t.name), from: String(t.from), to: String(t.to), records: Number(t.records) })) };
 }

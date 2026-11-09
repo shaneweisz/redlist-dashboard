@@ -47,7 +47,7 @@ import { buildTaxa, demotedCount } from "./sources/taxa";
 import { writeGbifLiveKeys } from "./link/live-keys";
 import { resolveLiveXr, type XrDatasetInfo } from "./inputs/col-xr";
 import { resolveSnapshotXr } from "./inputs/snapshot-xr";
-import { buildReleaseMap, buildSnapshotMap } from "./sources/release-map";
+import { buildReleaseMap, buildSnapshotMap, writeNameOnlyMoves } from "./sources/release-map";
 import { readSourcesReleases, sourcesMismatch, writeSourcesReleases } from "./sources-releases";
 import { buildAssessments, REDLIST_DB } from "./sources/assessments";
 import { buildOccurrences } from "./sources/occurrences";
@@ -137,6 +137,11 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     if (!sameSnapshot) {
       console.log(`   snapshot ${snapshotXr.alias} onto ${col.xr.alias}: ${mapped.changed.toLocaleString()} usages change id ` +
         `(${mapped.unmapped.toLocaleString()} have none); ${mapped.new.toLocaleString()} species it has no name for`);
+      const moves = await writeNameOnlyMoves({ snapshotTaxa: T.snapshotTaxa, taxa: T.taxa, snapshotUsages: T.snapshotUsages,
+        snapshotCounts: snapshot.dir }, T.nameOnlyMoves);
+      console.log(`   ${moves.moves.toLocaleString()} usages move by name alone to another species (${moves.records.toLocaleString()} records; ` +
+        `read ${T.nameOnlyMoves} for homonyms), largest: ` +
+        moves.top.map((m) => `${m.name} ${m.from} → ${m.to} ${m.records.toLocaleString()}`).join("; "));
     }
     const sameLive = !liveXr || liveXr.key === col.xr.key;
     const liveTaxa = sameLive ? null : liveXr!.key === snapshotXr.key ? T.snapshotTaxa : T.liveTaxa;
