@@ -15,8 +15,7 @@
  *                for lumped, NULL when nothing counts
  *   verdict      own | lumped | refused | none | duplicate
  *   method       what kind of usage the name is (accepted, synonym,
- *                checklist_synonym, provisional, ambiguous_synonym, or the
- *                covered row's rule)
+ *                provisional, ambiguous_synonym, or the covered row's rule)
  *   basis        matcher | decision | rule
  *   decided_by   who made the decision, for basis = decision
  *   reason       one sentence on why
@@ -34,8 +33,7 @@
  *      someone decides.
  *
  * 2. Concept: what that usage makes the species.
- *      - An accepted CoL species is the species (own). One the curated
- *        checklist demotes is followed to the checklist's species.
+ *      - An accepted CoL species is the species (own).
  *      - A synonym of a species the Red List treats the same way is the
  *        species too, renamed (own); one CoL folds into another species
  *        keeps only the records filed under its own name (lumped), or
@@ -59,8 +57,8 @@ const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', '
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
 /** Ownership order: the more direct the name, the stronger the claim. */
-const METHODS = ["accepted", "synonym", "checklist_synonym", "provisional", "ambiguous_synonym",
-  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "checklist_demoted", "same_name_synonym"] as const;
+const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
+  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym"] as const;
 
 export interface LinkRow {
   sis_taxon_id: number;
@@ -103,7 +101,7 @@ export async function buildLink(
     FROM ${parquet(inputs.assessments)} WHERE is_latest`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE col_usages AS
     SELECT col_id, parent_id, status, rank, scientific_name, authorship, family, class_name, phylum, kingdom, species_id, demoted,
-           checklist_parent_id, ${NAME("scientific_name")} AS name_key
+           ${NAME("scientific_name")} AS name_key
     FROM ${parquet(inputs.taxa)}`);
 
   // IUCN and CoL name one phylum differently (the brown algae); unknown lineage is no evidence.
@@ -167,10 +165,7 @@ export async function buildLink(
   await writeTable(conn, "picks", { sis: "INTEGER", usage_id: "VARCHAR", basis: "VARCHAR", by_: "VARCHAR" }, picks);
 
   // ── 2. Concept ─────────────────────────────────────────────────────────────
-  // The species each usage makes it: itself if accepted, a synonym's species,
-  // or a demoted XR species' checklist species when that is an accepted XR
-  // species (Pagrus auratus' release parent is an ambiguous synonym in the XR
-  // that resolves to Sparus aurata, another fish).
+  // The species each usage makes it: itself if accepted, or a synonym's species.
   const primary = await rows<{
     sis: number; name: string; authority: string | null; basis: "matcher" | "decision"; by_: string | null; method: string;
     usage_id: string; usage_name: string; usage_authorship: string | null; usage_status: string;
@@ -179,15 +174,12 @@ export async function buildLink(
   }>(conn, `
     WITH picked AS (
       SELECT pick.sis, pick.basis, pick.by_, usage.*,
-             CASE WHEN usage.demoted THEN 'checklist_synonym' WHEN usage.status = 'accepted' THEN 'accepted'
+             CASE WHEN usage.status = 'accepted' THEN 'accepted'
                   WHEN usage.status = 'provisionally accepted' THEN 'provisional' WHEN usage.status = 'synonym' THEN 'synonym'
                   WHEN usage.status = 'ambiguous synonym' THEN 'ambiguous_synonym' ELSE replace(usage.status, ' ', '_') END AS method,
-             CASE WHEN usage.status IN ('accepted', 'provisionally accepted') THEN
-                    CASE WHEN usage.demoted AND checklist_parent.status = 'accepted' AND checklist_parent.rank = 'species'
-                              AND NOT checklist_parent.demoted THEN checklist_parent.col_id ELSE usage.col_id END
+             CASE WHEN usage.status IN ('accepted', 'provisionally accepted') THEN usage.col_id
                   WHEN usage.status IN ('synonym', 'ambiguous synonym') THEN usage.species_id END AS target_col_id
-      FROM picks pick JOIN col_usages usage ON usage.col_id = pick.usage_id
-      LEFT JOIN col_usages checklist_parent ON checklist_parent.col_id = usage.checklist_parent_id)
+      FROM picks pick JOIN col_usages usage ON usage.col_id = pick.usage_id)
     SELECT r.sis, r.name, r.authority, picked.basis, picked.by_, picked.method,
            picked.col_id AS usage_id, picked.scientific_name AS usage_name, picked.authorship AS usage_authorship,
            picked.status AS usage_status, picked.parent_id AS usage_parent,
@@ -270,16 +262,13 @@ export async function buildLink(
   //     both Vigors, 1825): one bird CoL holds twice
   //   - for a lumped species, every synonym usage with its exact name (Rubus
   //     fruticosus is filed under three parents)
-  // What an IUCN synonym can name: an accepted species (kind 0), a strict
-  // synonym's species (1), or a demoted XR species' checklist species (2).
+  // What an IUCN synonym can name: an accepted species (kind 0), or a strict
+  // synonym's species (1).
   const covered = await rows<{ sis: number; name: string; authority: string | null; target_id: string; target_name: string; target_authorship: string | null; kind: number; src: string }>(conn, `
     WITH offer AS (
       SELECT name_key, col_id AS target_id, 0 AS kind FROM col_usages WHERE rank = 'species' AND status = 'accepted' AND NOT demoted
       UNION ALL
-      SELECT name_key, species_id, 1 FROM col_usages WHERE rank = 'species' AND status = 'synonym' AND species_id IS NOT NULL
-      UNION ALL
-      SELECT t.name_key, CASE WHEN p.status = 'accepted' AND p.rank = 'species' AND NOT p.demoted THEN p.col_id ELSE t.col_id END, 2
-      FROM col_usages t LEFT JOIN col_usages p ON p.col_id = t.checklist_parent_id WHERE t.demoted),
+      SELECT name_key, species_id, 1 FROM col_usages WHERE rank = 'species' AND status = 'synonym' AND species_id IS NOT NULL),
     syn AS (SELECT sis, name, authority, kingdom, phylum, ${NAME("s.name")} AS synonym_name_key FROM redlist_species, unnest(synonyms) AS u(s))
     SELECT DISTINCT r.sis, r.name, r.authority, target.col_id AS target_id, target.scientific_name AS target_name, target.authorship AS target_authorship, o.kind, 'iucn' AS src
     FROM syn r JOIN offer o ON o.name_key = r.synonym_name_key JOIN col_usages target ON target.col_id = o.target_id AND ${sameLineage}
@@ -361,18 +350,6 @@ export async function buildLink(
         add(id, "duplicate_concept", `${byId.get(id)!.scientific_name} has the same epithet and author citation (${t.authorship}): one organism held twice`);
       }
     }
-  }
-
-  // A checklist demotion followed to the checklist's species: the demoted XR
-  // species is where GBIF files the records (Cathormion umbellatum, 200; its
-  // checklist species Albizia umbellata has none), and it is on no list.
-  const pickedUsage = new Map(primary.map((p) => [p.sis, p]));
-  for (const l of [...links]) {
-    if (l.role !== "primary" || l.verdict !== "own" || l.method !== "checklist_synonym") continue;
-    const p = pickedUsage.get(l.sis_taxon_id);
-    if (!p || p.usage_id === p.target_id) continue;
-    cover({ sis_taxon_id: l.sis_taxon_id, role: "covered", col_id: p.usage_id, usage_id: p.usage_id, verdict: "own", method: "checklist_demoted",
-      reason: `${p.usage_name} is the XR species the checklist folds into ${p.target_name}; GBIF files its records there`, counted: true });
   }
 
   // A lumped species owns every synonym usage carrying its exact name.

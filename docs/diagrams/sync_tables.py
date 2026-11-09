@@ -25,6 +25,7 @@ CARDS = [
     ("Sources", "sources/specialist-groups.ts", ["core/specialist_group_remits.parquet", "core/rank_aliases.parquet"]),
     ("Link", "link/matches.ts", ["core/matches.parquet"]),
     ("Link", "link/assessment-link.ts", ["core/assessment_link.parquet"]),
+    ("Link", "link/live-keys.ts", ["core/live_keys.parquet", "data/taxonomy/gbif-live-keys.json"]),
     ("Count", "dbt/models/count/usage_owner.sql", ["core/usage_owner.parquet"]),
     ("Count", "dbt/models/count/record_counts.sql", ["core/record_counts.parquet"]),
     ("Lists", "dbt/models/lists/assessed.sql", ["data/lists/assessed.parquet"]),

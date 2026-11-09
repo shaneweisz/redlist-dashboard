@@ -11,6 +11,7 @@
  * that everything was collected from.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { liveGbifKey } from "@/lib/gbif-live-keys";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifJson } from "@/lib/gbif-fetch";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = (await gbifJson(nearbyPointsUrl({ ...where, speciesKey }))) as {
+    const data = (await gbifJson(nearbyPointsUrl({ ...where, speciesKey: await liveGbifKey(speciesKey) }))) as {
       results?: GbifOccurrence[];
       count?: number;
     };

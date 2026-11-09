@@ -46,8 +46,9 @@ async function baseSources(checklist: ChecklistInfo): Promise<string[]> {
   return JSON.parse(fs.readFileSync(path.join(dir, "sources.json"), "utf-8")) as string[];
 }
 
-export async function ensureColInputs(): Promise<ColInputs> {
-  const xr = await resolveXrDataset(pinnedXrKey());
+/** @param release an XR to fetch instead of the one the sync resolves (GBIF's live one, for live ids) */
+export async function ensureColInputs(release?: XrDatasetInfo): Promise<ColInputs> {
+  const xr = release ?? await resolveXrDataset(pinnedXrKey());
   const checklist = await resolveChecklistDataset(xr);
   const xrDir = await cachedDir(path.join(COL_CACHE, `xr-${xr.key}`), (d) => fetchXr(xr, d));
   const clDir = await cachedDir(path.join(COL_CACHE, `checklist-${checklist.key}`), (d) => fetchChecklist(checklist, d));

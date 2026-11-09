@@ -3291,7 +3291,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         newDetails[s.species_key] = {
           criteria: null,
           commonName: s.common_name || null,
-          gbifUrl: `https://www.gbif.org/species/${s.gbif_species_key}`,
+          gbifUrl: `/api/gbif-link?page=species&key=${s.gbif_species_key}`,
           gbifMatchStatus: { matchType: 'EXACT' },
           inatDefaultImage: undefined, // Loading — fetched per-page below
         };
@@ -6595,7 +6595,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {s.gbif_records != null && s.gbif_species_key ? (
                         <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
+                          href={`/api/gbif-link?key=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={TABLE_NUMBER_LINK}
@@ -6622,7 +6622,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       ) : (() => {
                         const newObs = s.gbif_records_since_assessment;
                         if (newObs == null) return "—";
-                        const key = details?.gbifUrl?.split('/').pop() ?? s.gbif_species_key;
+                        const key = s.gbif_species_key ?? details?.gbifUrl?.split('/').pop();
                         // The count starts the day after the assessment date, and
                         // so does the search it links to. A null count already
                         // means there is no window (an assessment dated today or later).
@@ -6630,7 +6630,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         if (key && since) {
                           return (
                             <a
-                              href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
+                              href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={TABLE_NUMBER_LINK}

@@ -18,7 +18,7 @@
  *     or EW, which IUCN agrees with), and not excluded (seeds/ne-excluded.tsv).
  *     This is the one definition: every reader filters on it, so no two counts
  *     can disagree about which species exist.
- *   - Accepted in the XR and not demoted by the checklist.
+ *   - Accepted in the XR and not demoted by the curated release (none are, against the XR's own release).
  */
 
 WITH ex_ew_linked AS (

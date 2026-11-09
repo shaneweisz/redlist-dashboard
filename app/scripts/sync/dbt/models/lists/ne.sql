@@ -14,6 +14,8 @@
  *   countries                      GBIF countries of its georeferenced records
  *   gbif_all_records_countries     … of all its records
  *   gbif_georeferenced_records_count, gbif_all_records_count
+ *   gbif_live_key                  the id GBIF's live index uses for it, where
+ *                                  that differs (live_keys). NULL most months
  *
  * Decisions:
  *   - Not Evaluated: described (species/), linked by no assessment_link row of
@@ -35,8 +37,10 @@ SELECT s.col_id AS id, s.col_id, s.scientific_name,
        s.taxon_group, s.class_name, s.order_name, s.family, 'NE' AS iucn_category,
        c.countries, c.all_records_countries AS gbif_all_records_countries,
        s.col_id AS gbif_species_key,
-       rc.georef AS gbif_georeferenced_records_count, rc.all_records AS gbif_all_records_count
+       rc.georef AS gbif_georeferenced_records_count, rc.all_records AS gbif_all_records_count,
+       live.live_key AS gbif_live_key
 FROM {{ ref('species') }} s
+LEFT JOIN {{ source('core', 'live_keys') }} live ON live.kind = 'species' AND live.id = s.col_id
 JOIN {{ ref('record_counts') }} rc ON rc.col_id = s.col_id
 LEFT JOIN ne_countries c ON c.col_id = s.col_id
 LEFT JOIN {{ source('core', 'common_names') }} col ON col.source = 'col' AND col.kind = 'display' AND col.col_id = s.col_id

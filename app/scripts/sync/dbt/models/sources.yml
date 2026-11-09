@@ -19,6 +19,8 @@ sources:
         description: sources/common-names.ts
       - name: assessment_link
         description: link/assessment-link.ts
+      - name: live_keys
+        description: link/live-keys.ts (ids in GBIF's live index, when it runs a newer XR than the snapshot)
       - name: specialist_group_remits
         description: sources/specialist-groups.ts (each SSC Specialist Group's remit)
       - name: rank_aliases

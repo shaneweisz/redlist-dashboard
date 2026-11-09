@@ -42,7 +42,9 @@ import { ensureColInputs, writeColReleasePin } from "./inputs/col";
 import { ensureInatNames } from "./inputs/inat-names";
 import { resolveSnapshot, ensureSnapshotCounts } from "./inputs/gbif-snapshot";
 import { ensureMatcher } from "./inputs/matcher";
-import { buildTaxa } from "./sources/taxa";
+import { buildTaxa, demotedCount } from "./sources/taxa";
+import { buildLiveKeys, writeGbifLiveKeys } from "./link/live-keys";
+import { resolveLiveXr } from "./inputs/col-xr";
 import { readSourcesReleases, sourcesMismatch, writeSourcesReleases } from "./sources-releases";
 import { buildAssessments, REDLIST_DB } from "./sources/assessments";
 import { buildOccurrences } from "./sources/occurrences";
@@ -90,8 +92,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   const inat = await ensureInatNames();
   const snapshot = await ensureSnapshotCounts(resolveSnapshot());
   const matcher = await ensureMatcher(col.xr, col.nameUsage);
+  const liveXr = await resolveLiveXr();
   manifest.col = { xr: col.xr, checklist: col.checklist };
-  manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
+  manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows, liveXr };
   manifest.inat = path.basename(path.dirname(inat));
   const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot };
   if (from > 0) {
@@ -107,6 +110,15 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   if (runs("sources")) {
     done = step("1 sources");
     await buildTaxa(col, T.taxa);
+    // Against the curated release its XR was built from, nothing is demoted, and
+    // the link stage no longer handles a demotion. One appearing means a newer
+    // curated release slipped in (inputs/col-checklist.ts), or CoL changed how it
+    // builds an XR: either way, stop rather than count it the old way.
+    const demoted = await demotedCount(T.taxa);
+    if (demoted > 0 && !process.env.COL_CHECKLIST_DATASET) {
+      throw new Error(`sync: ${col.checklist.alias} demotes ${demoted.toLocaleString()} ${col.xr.alias} species; ` +
+        `the curated release the XR was built from should demote none`);
+    }
     await buildAssessments(T.assessments);
     await buildOccurrences({ snapshotCounts: snapshot.dir, sourceRows: snapshot.sourceRows, taxa: T.taxa },
       { occurrences: T.occurrences, occurrenceCountries: T.occurrenceCountries });
@@ -120,6 +132,21 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     const asked = await askMatcher({ assessments: T.assessments, matcher }, T.matches);
     console.log(`   ${asked.asked.toLocaleString()} names asked, ${asked.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
     await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link, matchQueue: T.matchQueue });
+    // GBIF's live index can run a newer XR than the snapshot (it re-indexes
+    // between snapshots), and the app's live GBIF queries need that index's ids.
+    // The same link, run on that XR, gives them; it never feeds a count.
+    let live: { taxa: string; link: string } | null = null;
+    if (liveXr && liveXr.key !== col.xr.key) {
+      console.log(`   GBIF's live index runs ${liveXr.alias}, the snapshot ${col.xr.alias}: linking against ${liveXr.alias} for live ids`);
+      const liveCol = await ensureColInputs(liveXr);
+      await buildTaxa(liveCol, T.liveTaxa);
+      const liveMatcher = await ensureMatcher(liveCol.xr, liveCol.nameUsage);
+      await askMatcher({ assessments: T.assessments, matcher: liveMatcher }, T.liveMatches);
+      await buildLink({ taxa: T.liveTaxa, assessments: T.assessments, matches: T.liveMatches }, { link: T.liveLink, matchQueue: T.liveMatchQueue });
+      live = { taxa: T.liveTaxa, link: T.liveLink };
+    }
+    const changed = await buildLiveKeys({ taxa: T.taxa, live }, T.liveKeys);
+    if (live) console.log(`   live ids: ${changed.toLocaleString()} CoL species differ in ${liveXr!.alias}`);
     done();
   }
 
@@ -147,6 +174,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     // Into the repo, not the sync: the app's client code imports these at build time.
     await buildColTaxonIds({ appTaxa: T.appTaxa });
     writeColReleasePin(col.xr, col.checklist);
+    const liveKeyed = await writeGbifLiveKeys({ assessed: T.assessed, ne: T.ne, liveKeys: T.liveKeys }, T.gbifLiveKeys);
+    console.log(`   ${liveKeyed.toLocaleString()} species with a different key in GBIF's live index`);
     done();
   }
 

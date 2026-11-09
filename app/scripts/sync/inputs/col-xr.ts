@@ -54,6 +54,20 @@ async function gbifIndexedRelease(): Promise<string | null> {
   return null;
 }
 
+/**
+ * The XR GBIF's live occurrence index uses, whatever COL_XR_DATASET pins: the
+ * app's live GBIF queries (maps, breakdowns, photos) go to that index, so they
+ * need ids from it. Null when GBIF can't be asked.
+ */
+export async function resolveLiveXr(): Promise<XrDatasetInfo | null> {
+  const key = await gbifIndexedRelease();
+  if (!key) return null;
+  const res = await fetch(`https://api.checklistbank.org/dataset/${key}`);
+  if (!res.ok) throw new Error(`col-xr: ChecklistBank lookup failed for ${key}: ${res.status}`);
+  const ds = await res.json();
+  return { key: String(ds.key), alias: ds.alias, doi: ds.doi ?? null, issued: ds.issued ?? null };
+}
+
 /** @param pinned the XR the last sync used, to stand on if GBIF can't be asked */
 export async function resolveXrDataset(pinned: string | null): Promise<XrDatasetInfo> {
   const indexed = process.env.COL_XR_DATASET ?? (await gbifIndexedRelease());

@@ -72,6 +72,13 @@ export interface TaxaInputs {
   neExcluded?: Record<string, string>;
 }
 
+/** XR species the curated release demotes (taxa.demoted). */
+export async function demotedCount(taxaFile: string): Promise<number> {
+  const conn = await openDuckDB();
+  const [r] = (await conn.runAndReadAll(`SELECT count(*) FILTER (demoted)::INTEGER AS n FROM read_parquet(${lit(taxaFile)})`)).getRowObjects();
+  return Number(r.n);
+}
+
 export async function buildTaxa(inputs: TaxaInputs, taxaFile: string): Promise<void> {
   const conn = await openDuckDB();
   const out = output(taxaFile);

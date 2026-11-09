@@ -35,6 +35,8 @@ beforeAll(async () => {
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
       usage_id AS col_id, 'exact' AS method, 'matcher' AS basis, NULL::VARCHAR AS decided_by
     FROM (VALUES (1, 'A1'), (2, 'A2')) t(sis, usage_id)`, "assessment_link.parquet");
+  // GBIF's live index on a newer XR has filed A2 under another id (link/live-keys.ts).
+  await copy(`SELECT * FROM (VALUES ('assessed', '2', 'A2-live'), ('assessed', '1', 'A1')) t(kind, id, live_key)`, "live_keys.parquet");
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
       false AS possibly_extinct_in_the_wild, NULL::VARCHAR AS population_trend, ['CU']::VARCHAR[] AS countries,
@@ -99,6 +101,11 @@ describe("GBIF counts in the lists", () => {
     expect(Number(rows["1"].gbif_georeferenced_records_since_assessment)).toBe(21);
     // Plus the 2 ungeoreferenced in June 2025 and 1 in 2026.
     expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
+  });
+
+  it("carries the live index's key only where it differs from the snapshot's", () => {
+    expect(rows["2"].gbif_live_key).toBe("A2-live");
+    expect(rows["1"].gbif_live_key).toBeNull();
   });
 
   it("has no window for an assessment dated after today", () => {

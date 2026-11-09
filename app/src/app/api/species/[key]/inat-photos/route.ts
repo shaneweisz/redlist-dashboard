@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { liveGbifKey } from "@/lib/gbif-live-keys";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_CHECKLIST_KEY } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
@@ -33,7 +34,7 @@ export async function GET(
 
   try {
     const queryParams = new URLSearchParams({
-      taxonKey: speciesKey,
+      taxonKey: await liveGbifKey(speciesKey),
       checklistKey: GBIF_CHECKLIST_KEY,
       datasetKey: INAT_DATASET_KEY,
       hasCoordinate: "true",
