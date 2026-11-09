@@ -1,11 +1,17 @@
 {
-  "key": "315557",
-  "alias": "COL26.6 XR",
-  "doi": "10.48580/dgy8b",
-  "issued": "2026-06-19",
+  "key": "316691",
+  "alias": "COL26.10 XR",
+  "doi": "10.48580/dgzlf",
+  "issued": "2026-10-16",
   "checklist": {
-    "key": "315448",
-    "alias": "COL26.6",
-    "issued": "2026-06-12"
+    "key": "316595",
+    "alias": "COL26.10",
+    "issued": "2026-10-14"
+  },
+  "snapshotXr": {
+    "key": "315557",
+    "alias": "COL26.6 XR",
+    "doi": "10.48580/dgy8b",
+    "issued": "2026-06-19"
   }
 }

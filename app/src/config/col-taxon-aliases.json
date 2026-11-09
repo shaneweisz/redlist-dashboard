@@ -55,6 +55,10 @@
     "name": "Anolis",
     "rank": "genus"
   },
+  "genus:dactyloa": {
+    "name": "Anolis",
+    "rank": "genus"
+  },
   "genus:deiroptyx": {
     "name": "Anolis",
     "rank": "genus"
@@ -69,6 +73,10 @@
   },
   "genus:nanozostera": {
     "name": "Zostera",
+    "rank": "genus"
+  },
+  "genus:norops": {
+    "name": "Anolis",
     "rank": "genus"
   },
   "species:arachnochium mirabile": {
