@@ -164,7 +164,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   done = step("6 checks");
   Object.assign(manifest, await describeBuild(T, matcher));
   const conn = await openDuckDB();
-  const obs = await observe(conn, PUBLISH_DIR, MATCHING_CASES);
+  const obs = await observe(conn, PUBLISH_DIR, MATCHING_CASES, T.assessments);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
   // Each case says which releases it last passed on: a failure on those is a regression, one on newer ones may be the data moving.
   const versions = buildVersions(manifest as Parameters<typeof buildVersions>[0]);

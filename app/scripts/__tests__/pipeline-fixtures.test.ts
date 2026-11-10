@@ -8,7 +8,7 @@ import { mismatches, failureKind, buildVersions, type Observed } from "../sync/c
 import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
-  assessed: true, category: "VU", linkedTo: "Malus domestica", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
+  assessed: true, category: "VU", linkedTo: "Malus domestica", linkedAuthorship: "Borkh.", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
   records: 8_413, neListed: { "Malus domestica": false },
 };
 const confirmed = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
@@ -59,6 +59,23 @@ describe("mismatches", () => {
     const none: Observed = { ...seen, gbifKeyName: null, records: null };
     expect(mismatches(c({ gbifKeyName: null, hasRecords: false, maxRecords: 0 }), none)).toEqual([]);
     expect(mismatches(c({ hasRecords: true }), none)).toEqual(["has records: expected true, got false"]);
+  });
+
+  it("tells homonyms apart by the linked species' citation (Centropogon australis, a fish and a plant)", () => {
+    const fish = { ...seen, linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)" };
+    const want = c({ linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)" });
+    expect(mismatches(want, fish)).toEqual([]);
+    expect(mismatches(want, { ...fish, linkedAuthorship: "(J. White, 1790)" })).toEqual([]);
+    expect(mismatches(want, { ...fish, linkedAuthorship: "(E.Wimm.) Gleason" })).toEqual([
+      "linked to: expected Centropogon australis (White, 1790), got Centropogon australis (E.Wimm.) Gleason",
+    ]);
+  });
+
+  it("flags a case whose Red List authority now names clearly other authors, when the build gives it", () => {
+    const m = { ...c({}), authority: "(Shaw, 1790)" };
+    expect(mismatches(m, { ...seen, authority: "(Shaw, 1790)" })).toEqual([]);
+    expect(mismatches(m, { ...seen })).toEqual([]);
+    expect(mismatches(m, { ...seen, authority: "Smith, 1950" })[0]).toMatch(/^Red List authority: the case is about/);
   });
 
   it("checks NE-list visibility per name", () => {
