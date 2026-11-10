@@ -15,7 +15,7 @@
  *
  * Decisions:
  *   - described: in a curated Base source, extant (or extinct and assessed EX
- *     or EW, which IUCN agrees with), and not excluded (seeds/ne-excluded.tsv).
+ *     or EW, which IUCN agrees with), and not excluded (seeds/domesticated-and-humans.tsv).
  *     This is the one definition: every reader filters on it, so no two counts
  *     can disagree about which species exist.
  *   - Accepted in the XR and not demoted by the curated release (none are, against the XR's own release).

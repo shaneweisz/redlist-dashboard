@@ -8,7 +8,7 @@ Render: dot -Tpng -Gdpi=110 <out.dot> -o <out.png>
 import html, json, os, sys, urllib.request
 
 BUILD, OUT = sys.argv[1], sys.argv[2]
-m = json.load(open(os.path.join(BUILD, "published", "sync.json")))
+m = json.load(open(os.path.join(BUILD, "publish", "sync.json")))
 xr, checklist = m["col"]["xr"], m["col"]["checklist"]
 with urllib.request.urlopen("https://api.gbif.org/v2/species/match/metadata?checklistKey=xcol", timeout=30) as r:
     live = json.load(r).get("mainIndex", {})
@@ -48,7 +48,7 @@ out = ['digraph versions {',
             "#fff4e6" if moved else "#e7f5ff", "#e8590c" if moved else "#1c7ed6"),
        node("panels", "the app's live panels", "map, record breakdown, photos, nearby, gbif.org links"),
        node("redlist", f'Red List {m["redlist"]["database"]}', f'{m["redlist"]["assessed_species"]:,} assessed species'),
-       node("names", "match decisions · fixtures", "seeds/decisions.tsv, checks/fixtures/"),
+       node("names", "match decisions · fixtures", "seeds/match-overrides.tsv, checks/fixtures/"),
        '  { rank=same; snapshot; live; }',
        '  { rank=same; redlist; names; }',
        edge("snapshot", "xr", "filed under: the build stops if more than\n0.1% of records have ids the XR lacks", CHECK),

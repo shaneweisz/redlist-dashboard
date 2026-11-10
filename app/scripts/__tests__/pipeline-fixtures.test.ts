@@ -4,14 +4,42 @@
  * case list itself stays well-formed.
  */
 import { describe, it, expect } from "vitest";
-import { mismatches, type Observed } from "../sync/checks/check-fixtures";
+import { mismatches, failureKind, buildVersions, type Observed } from "../sync/checks/check-fixtures";
 import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
-  assessed: true, category: "VU", linkedTo: "Malus domestica", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
+  assessed: true, category: "VU", linkedTo: "Malus domestica", linkedAuthorship: "Borkh.", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
   records: 8_413, neListed: { "Malus domestica": false },
 };
-const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", expect });
+const confirmed = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
+const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", confirmed, expect });
+
+describe("failureKind", () => {
+  it("calls a failure on the releases a case last passed on a regression", () => {
+    expect(failureKind(c({ linkedTo: "X" }), confirmed)).toBe("a regression: it passed on these same releases");
+  });
+  it("names the releases that moved since, the snapshot only for a case about records", () => {
+    const newer = { redlist: "2026-1", col: "COL26.10 XR", snapshot: "2026-12-01" };
+    expect(failureKind(c({ linkedTo: "X" }), newer)).toMatch(/^confirmed on older releases \(col COL26.6 XR → COL26.10 XR\)/);
+    expect(failureKind(c({ minRecords: 5 }), newer)).toMatch(/col COL26.6 XR → COL26.10 XR, snapshot 2026-11-01 → 2026-12-01/);
+    expect(failureKind(c({ linkedTo: "X" }), { ...confirmed, snapshot: "2026-12-01" })).toBe("a regression: it passed on these same releases");
+  });
+  it("reads a build's releases from its sync.json", () => {
+    expect(buildVersions({ redlist: { database: "redlist_2026_1" }, col: { xr: { alias: "COL26.6 XR" } }, gbif: { snapshot: "2026-11-01" } })).toEqual(confirmed);
+  });
+});
+
+describe("the cases", () => {
+  it("an update to a why says when and against which release it was checked", () => {
+    for (const m of MATCHING_CASES) for (const u of m.why.match(/Update \([^)]*\)/g) ?? []) {
+      expect(u, m.name).toMatch(/^Update \(\d{4}-\d{2}, (Red List \d|COL\d|snapshot \d)[^)]*\)$/);
+    }
+  });
+
+  it("every case says which releases it last passed on", () => {
+    for (const m of MATCHING_CASES) expect(m.confirmed, m.name).toMatchObject({ redlist: expect.any(String), col: expect.any(String), snapshot: expect.any(String) });
+  });
+});
 
 describe("mismatches", () => {
   it("passes when every stated expectation holds and ignores unstated ones", () => {
@@ -31,6 +59,23 @@ describe("mismatches", () => {
     const none: Observed = { ...seen, gbifKeyName: null, records: null };
     expect(mismatches(c({ gbifKeyName: null, hasRecords: false, maxRecords: 0 }), none)).toEqual([]);
     expect(mismatches(c({ hasRecords: true }), none)).toEqual(["has records: expected true, got false"]);
+  });
+
+  it("tells homonyms apart by the linked species' citation (Centropogon australis, a fish and a plant)", () => {
+    const fish = { ...seen, linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)" };
+    const want = c({ linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)" });
+    expect(mismatches(want, fish)).toEqual([]);
+    expect(mismatches(want, { ...fish, linkedAuthorship: "(J. White, 1790)" })).toEqual([]);
+    expect(mismatches(want, { ...fish, linkedAuthorship: "(E.Wimm.) Gleason" })).toEqual([
+      "linked to: expected Centropogon australis (White, 1790), got Centropogon australis (E.Wimm.) Gleason",
+    ]);
+  });
+
+  it("flags a case whose Red List authority now names clearly other authors, when the build gives it", () => {
+    const m = { ...c({}), authority: "(Shaw, 1790)" };
+    expect(mismatches(m, { ...seen, authority: "(Shaw, 1790)" })).toEqual([]);
+    expect(mismatches(m, { ...seen })).toEqual([]);
+    expect(mismatches(m, { ...seen, authority: "Smith, 1950" })[0]).toMatch(/^Red List authority: the case is about/);
   });
 
   it("checks NE-list visibility per name", () => {

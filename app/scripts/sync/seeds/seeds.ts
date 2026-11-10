@@ -3,15 +3,15 @@
  * one row per decision, each with its reason. Kept as data rather than code so
  * that "what did a person decide, and why" is a list you can read in one place.
  *
- *   decisions.tsv            which CoL name each hard-to-match Red List species
- *                            is (link/decisions.ts reads and writes it)
- *   ne-excluded.tsv          species never listed as Not Evaluated: domestic
+ *   match-overrides.tsv            which CoL name a Red List species is, where the
+ *                            matcher's answer isn't taken on its own, with the
+ *                            releases it was decided against (link/match-overrides.ts)
+ *   domesticated-and-humans.tsv
+ *                            species never listed as Not Evaluated: domestic
  *                            forms, whose wild relatives are what IUCN assesses,
  *                            and humans (sources/taxa.ts). The domestic pigeon
  *                            is deliberately absent: IUCN's "Columba domestica"
  *                            is a synonym of the assessed Rock Dove in CoL.
- *   forced-latest.tsv        assessments counted as a species' latest although
- *                            the database doesn't flag them so (sources/assessments.ts)
  *   tree-homonyms.tsv        which CoL taxon a taxonomy-tree name means where
  *                            several share it and the tree can't tell
  *                            (precomputed/col-taxon-ids.ts)

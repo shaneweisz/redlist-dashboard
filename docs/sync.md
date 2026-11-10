@@ -12,7 +12,7 @@ flowchart LR
   assessments --> link
   link["<b>link</b><br/>assessment_link<br/>which CoL species each<br/>assessed species is"] --> count
   occurrences --> count
-  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>published</b><br/>what the app reads: lists/,<br/>taxonomy/, search/, summaries/"]
+  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>publish</b><br/>what the app reads: lists/,<br/>taxonomy/, search/, summaries/"]
   style link fill:#fde68a
   style count fill:#fde68a
 ```
@@ -21,7 +21,7 @@ Only the two highlighted stages make judgements. If a number looks wrong, the ca
 
 Every table and what it reads, which shows how many moving parts there are behind those five boxes:
 
-![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/01-sync-overview-v2.png)
+![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/02-sync-overview.png)
 
 Generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`.
 
@@ -49,7 +49,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 Stages meet at a single table: `assessment_link` out of link, `usage_owner` out of count. Their columns are each stage's contract with the rest, so the inside of a stage can be rewritten without touching the others.
 
-- **`seeds/`** holds every decision a person made, one file per kind and one row per decision with its reason: `decisions.tsv` (which CoL name a hard-to-match species is), `ne-excluded.tsv` (domestic forms and humans), `forced-latest.tsv`, and the taxonomy tree's CoL homonyms and equivalents.
+- **`seeds/`** holds every decision a person made, one file per kind and one row per decision with its reason: `match-overrides.tsv` (which CoL name a species is, where the matcher's answer isn't taken), `domesticated-and-humans.tsv` (domestic forms and humans), and the taxonomy tree's CoL homonyms and equivalents.
 - **Count, lists and the precomputed SQL are dbt models** (`dbt/`, dbt-oss with DuckDB, installed by uv on first use). A model's `ref()`s are what it reads; its `.yml` holds its tests. `npm run sync:lineage` serves dbt's docs for the build: every model's SQL, columns, tests and lineage graph. By hand, from `app/scripts/sync/dbt`:
 
 ```bash
@@ -64,7 +64,7 @@ A run builds into `.sync/` at the repo root, in three folders, by what you do wi
 .sync/
   working/     what the stages pass to each other, never published: sources/ link/ count/ lists/,
                and dbt/ (its sync.duckdb, compiled SQL and logs)
-  published/   exactly what is uploaded and what the app reads: lists/ taxonomy/ search/ summaries/,
+  publish/     exactly what sync:publish uploads and what the app reads: lists/ taxonomy/ search/ summaries/,
                sync.json, sync.log
   review/      what you read before publishing: changes/ (report.md, the comparison with production)
                and match-queue.tsv (species waiting for a decision)
@@ -118,9 +118,9 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 ## Matching: which CoL species an assessed species is
 
-`link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
+`link/`: `matches.ts`, `accept-match.ts`, `match-overrides.ts` (with `seeds/match-overrides.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-627-col-snapshot-release/01-link-flow.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/01-link-flow-v2.png)
 
 Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
 
@@ -134,11 +134,16 @@ The authority is deliberately not sent: most records carry none, and asked with 
 
 The answer is taken without review (`accept-match.ts`) when:
 
-> the name is found exactly, as a species, with full confidence, it leads to an accepted CoL species, and no other CoL name spelled the same way leads to a different species, unless the author citation picks one.
+> the name is found exactly, or spelt differently only as the codes allow, as a species, with full confidence, it leads to an accepted CoL species, and no other CoL name spelled the same way leads to a different species, unless the author citation picks one.
+
+Three details make that sentence work on real names:
+- **A spelling the codes allow is the same name**: Latin endings and transliteration (`link/name-variants.ts`: *Pseudechis pailsi* / *pailsei*), as long as the authors aren't clearly others. The matcher finds the candidate; the spelling rules only confirm it.
+- **Two citations written alike are the same author**, even a bare "L.": that is what lets *Quercus robur* L. be told from its homonyms.
+- **CoL's provisional copy of a name isn't a rival**: CoL often holds a species twice, accepted and provisionally, the second with the Red List's own citation (*Cygnus buccinator* Richardson, 1831 and 1832).
 
 A person decides instead when the Red List marks the name as unsettled (aff., cf., sp., ined., sensu…), when the match is a synonym by other authors than the Red List's (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775, and what's left is Schilsky's, a synonym of another beetle), and in every other case the rule doesn't settle. Author citations are compared in one place, `app/src/lib/authors.ts`.
 
-Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases; a decision is asked again when its names stop resolving or the Red List renames the species. A decision always beats the matcher. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0.
+Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each overriding the matcher for it, naming the Red List name and authority it was decided for, the CoL name it is (and its authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species or now cites clearly other authors for it, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be stay off the Not Evaluated list: any CoL species their own name leads to, as an accepted name or as a synonym filed under it, and the matcher's guess. That is broad on purpose until the decision is made (it also keeps off the small heath, *Coenonympha pamphilus*, under which CoL files the assessed *C. gardetta*'s name).
 
 ### 2. The concept: what does that CoL name make the species?
 
@@ -149,18 +154,19 @@ Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL
 - **An ambiguous synonym** only counts records filed under that name.
 - **No link crosses a phylum**: old genus names are homonyms across kingdoms (*Hepatus* was a fish and is a crab).
 - **Covered rows**: where one organism sits under more than one accepted CoL species (*Hylatomus* / *Dryocopus pileatus*), each extra one is a *covered* row, which keeps it off the Not Evaluated list and, where the evidence is direct, counts its records too.
-- **One owner per usage**: if two assessed species claim the same usage, one wins (primary before covered, *own* before *lumped*, matcher before decision, then lower SIS id) and the other becomes `duplicate`, counting nothing.
+- **One owner per usage**: if two assessed species claim the same usage, one wins (primary before covered, *own* before *lumped*, matcher before decision, the more direct name, the name CoL spells exactly before a variant of it, then lower SIS id) and the other becomes `duplicate`, counting nothing.
 
 The rules after the concept step are named functions in `link/rules.ts`, applied in order, each with a unit test (`__tests__/link-rules.test.ts`). Every sync logs how many species each one touched, and records it in `sync.json` (`link_rules`), so a rule that touches almost nothing shows up as a candidate to drop or turn into a decision. In the 10 November build:
 
 | Rule | Species |
 |---|---:|
-| covered: another accepted species IUCN's synonyms or CoL's name it | 5,463 |
-| covered: CoL holds the name twice | 3,116 |
-| covered: one organism under two genera | 535 |
-| covered: a lumped species' other same-name synonyms | 1,218 |
+| covered: another accepted species IUCN's synonyms or CoL's name it | 5,660 |
+| covered: CoL holds the name twice, identically or spelt two ways the codes make one name | 3,164 |
+| covered: one organism under two genera | 525 |
+| covered: a lumped species' other same-name synonyms | 1,037 |
+| covered: what a species waiting for a decision might be, kept off the NE list | 629 |
 | no link across a phylum | 3 |
-| one owner per usage | 68 |
+| one owner per usage | 70 |
 
 Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
 
@@ -168,7 +174,7 @@ To review links, `dbt/analyses/link_audit.sql` gives every link with the evidenc
 
 ### Versions
 
-![The versions a sync holds together](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/02-versions.png)
+![The versions a sync holds together](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/03-versions.png)
 
 Generated from a build and GBIF's live index: `python3 -I docs/diagrams/versions.py .sync <out.dot>`, then `dot -Tpng -Gdpi=110`. The orange arrows are the ones a person has to keep right.
 
@@ -178,11 +184,11 @@ It trails CoL's newest by up to a few months: GBIF re-indexes a few times a year
 
 ## The Not Evaluated list
 
-`ne.parquet`, built by `dbt/models/lists/ne.sql`, keyed by `col_id` (also its GBIF key). A CoL species is on it when it is *described* (`species/`'s `described`: accepted, curated, not extinct, not domesticated or human per `seeds/ne-excluded.tsv`), no assessed species links to it by any row, and GBIF has records for it under the counting rule.
+`ne.parquet`, built by `dbt/models/lists/ne.sql`, keyed by `col_id` (also its GBIF key). A CoL species is on it when it is *described* (`species/`'s `described`: accepted, curated, not extinct, not domesticated or human per `seeds/domesticated-and-humans.tsv`), no assessed species links to it by any row, and GBIF has records for it under the counting rule.
 
 ## What the app reads
 
-`.sync/published/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
+`.sync/publish/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
 
 | Folder | What |
 |---|---|
@@ -197,7 +203,7 @@ Two files go into the repo instead, because client code imports them at build ti
 ## Checks
 
 - **Invariants stop the build**: the Red List session is read-only, the snapshot complete, each GBIF usage counts towards at most one species, every domesticated-species name is an accepted CoL species, Specialist Group membership covers its sections, and the occurrence table holds exactly the snapshot's records.
-- **Matching fixtures stop the build**: `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number, with what must stay true of it. Expectations are by name, since CoL renumbers about 2% of ids each release. Reading it next to `link/assessment-link.ts` is the quickest way to see what each rule is for.
+- **Matching fixtures stop the build**: `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number, with what must stay true of it. Expectations are by name, since CoL renumbers about 2% of ids each release, with the authorities that tell homonyms apart: each case gives the Red List's authority for its species, and an expected link the CoL authorship of the species it must be (*Centropogon australis* (White, 1790), the fish, not the plant (E.Wimm.) Gleason), compared as authors, so a release reformatting a citation doesn't fail it. Each also says which releases it last passed on (`confirmed`: the Red List release, the CoL XR, and the snapshot for a case about records), so a failure says what kind it is: on those same releases, a regression in the code; on newer ones, maybe the data moving, to check against the new releases before updating `confirmed`. Each case's `why` was checked against those releases too: where the situation it describes no longer holds there, or only partly, the why ends with an update saying when, against which release, and what the data shows now ("Update (2026-11, COL26.6 XR): …"; 10 of the 50 partly, 2 not at all: *Mayaheros ericymba*'s amendment is now flagged latest by the database itself, so the seed that forced it in was removed, and COL26.6 XR demotes nothing, so *Pycnonotus tricolor* no longer exercises the demotion rule). Such a case stays, in case a later release brings the situation back. Reading it next to `link/assessment-link.ts` is the quickest way to see what each rule is for.
 - **Data tests stop publishing**: assessed totals per group against IUCN's Table 1a, the tree's summaries against its config, and so on (`DATA_TESTS` in `sync.ts`). When the Red List publishes, `validate-table1a.test.ts` fails until updated: that is its job.
 - **The comparison is for review**: `checks/compare.ts` diffs the new sync against production's, field by field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. A reason must be bounded by what the change predicts, or it can hide a bug. Read the unexplained list by size, **falls first**: a number dropping is where a matching regression shows.
 
@@ -214,7 +220,7 @@ cd app && npm run sync
 
 # 3. Read .sync/review/changes/report.md, and .sync/review/match-queue.tsv for species waiting on a decision
 
-# 4. Publish: copies .sync/published/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
+# 4. Publish: copies .sync/publish/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
 
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.
@@ -271,7 +277,7 @@ Choices made on purpose:
 
 Known limits (sync of 10 November 2026):
 
-- 2,368 species are in the match queue: 753 spelling variants, 621 homonyms the authors don't decide, 322 with no species match, 172 informal names. 2,016 have a decision, all carried over from the old matching passes and none reviewed; 352 are undecided and count nothing.
+- 1,178 species wait for a decision and count nothing: 322 with no species match, 219 provisional names, 172 informal names, 150 homonyms the authors don't decide, 148 at lower confidence, 97 synonyms by other authors, and a few others. Two have a decision.
 - Ownership walks three levels below a lumped species' root; a deeper case would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so differ a little from gbif.org's live counts.

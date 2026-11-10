@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, dropCrossPhylum, oneOwnerPerUsage,
+  coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum, oneOwnerPerUsage,
   type LinkRow, type AcceptedSpecies,
 } from "../sync/link/rules";
 
@@ -66,6 +66,28 @@ describe("coverTwins", () => {
   });
 });
 
+describe("coverTwins: a name CoL spells two ways", () => {
+  it("counts the other spelling the codes make one name, in one class (Pica nutallii / nuttalli)", () => {
+    const links = [primary(1, "P1")];
+    const accepted = [sp("P1", "Pica nutallii", "(Audubon, 1837)", "Corvidae", "Aves"), sp("P2", "Pica nuttalli", null, "Corvidae", "Aves")];
+    expect(coverTwins(links, coverer(links), accepted, new Map([[1, "pica nutalli"]]), new Set()).size).toBe(1);
+    expect(covered(links)[0]).toMatchObject({ col_id: "P2", method: "respelled_twin", counted: true });
+  });
+  it("not two spellings whose citations disagree on the year (Mycalesis ita, 1863 / itys, 1867)", () => {
+    const links = [primary(1, "M2")];
+    const accepted = [sp("M1", "Mycalesis ita", "Felder, 1863", "Nymphalidae", "Insecta"), sp("M2", "Mycalesis itys", "Felder, 1867", "Nymphalidae", "Insecta")];
+    expect(coverTwins(links, coverer(links), accepted, new Map(), new Set()).size).toBe(0);
+  });
+  it("not by clearly other authors, nor one the Red List assesses separately", () => {
+    const accepted = [sp("W1", "Witheringia stramoniifolia", "Kunth", "Solanaceae", "Magnoliopsida"), sp("W2", "Witheringia stramonifolia", "Smith, 1990", "Solanaceae", "Magnoliopsida")];
+    const a = [primary(1, "W1")];
+    expect(coverTwins(a, coverer(a), accepted, new Map(), new Set()).size).toBe(0);
+    const kunth = [accepted[0], { ...accepted[1], authorship: "Kunth" }];
+    const b = [primary(1, "W1")];
+    expect(coverTwins(b, coverer(b), kunth, new Map(), new Set(["witheringia stramonifolia"])).size).toBe(0);
+  });
+});
+
 describe("coverDuplicateConcepts", () => {
   const accepted = [sp("C1", "Charadrius nivosus", "(Cassin, 1858)", "Charadriidae"), sp("A1", "Anarhynchus nivosus", "(Cassin, 1858)", "Charadriidae")];
   it("counts the same epithet and dated citation under another genus in one family", () => {
@@ -93,6 +115,16 @@ describe("coverSameNameSynonyms", () => {
   });
 });
 
+describe("coverUndecidedCandidates", () => {
+  it("keeps what a waiting species might be off the NE list, counting nothing; not for a linked species", () => {
+    const links = [primary(1, null, { verdict: "none", method: "unmatched", counted: false }), primary(2, "B")];
+    const touched = coverUndecidedCandidates(links, coverer(links), [
+      { sis: 1, target_id: "C1", target_name: "Coenonympha pamphilus" }, { sis: 2, target_id: "X", target_name: "Other" }]);
+    expect([...touched]).toEqual([1]);
+    expect(covered(links)).toEqual([expect.objectContaining({ sis_taxon_id: 1, col_id: "C1", verdict: "refused", counted: false, usage_id: null })]);
+  });
+});
+
 describe("dropCrossPhylum", () => {
   it("unlinks a primary row and drops a covered one across a phylum", () => {
     const links = [primary(1, "CRAB"), { ...primary(2, "FISH"), role: "covered" as const }, primary(3, "OK")];
@@ -102,6 +134,12 @@ describe("dropCrossPhylum", () => {
 });
 
 describe("oneOwnerPerUsage", () => {
+  it("gives a usage two spellings claim to the one CoL writes exactly (Peltophorum dasyrhachis / dasyrachis)", () => {
+    const links = [primary(62522, "U"), primary(226500158, "U")];
+    oneOwnerPerUsage(links, new Set([226500158]));
+    expect(links.map((l) => [l.sis_taxon_id, l.verdict])).toEqual([[62522, "duplicate"], [226500158, "own"]]);
+  });
+
   it("gives a usage to the primary row, then the matcher, then the lower SIS id", () => {
     const links = [
       primary(5, "U", { basis: "decision" }),

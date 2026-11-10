@@ -11,7 +11,7 @@
  *     working/    what the stages pass to each other, never published: one
  *                 folder per stage (sources/, link/, count/, lists/), and dbt/
  *                 (its sync.duckdb, compiled SQL and logs)
- *     published/  exactly what is uploaded and what the app reads, laid out as
+ *     publish/    exactly what `npm run sync:publish` uploads and what the app reads, laid out as
  *                 src/lib/data/sync-layout.ts says
  *     review/     what a person reads before publishing: changes/ (the
  *                 comparison with production) and match-queue.tsv (the species
@@ -29,7 +29,7 @@ export const BUILD_DIR = process.env.PIPELINE_BUILD_DIR ?? path.join(__dirname, 
 /** Where the sync's DuckDB instances spill to disk (left to itself, DuckDB uses ./.tmp in the repo). */
 export const DUCKDB_TMP = path.join(CACHE_ROOT, "duckdb-tmp");
 export const WORKING_DIR = path.join(BUILD_DIR, "working");
-export const PUBLISHED_DIR = path.join(BUILD_DIR, "published");
+export const PUBLISH_DIR = path.join(BUILD_DIR, "publish");
 export const REVIEW_DIR = path.join(BUILD_DIR, "review");
 /** dbt's own files for a build: its database (every model's table), compiled SQL and logs. */
 export const dbtDir = (buildDir = BUILD_DIR) => path.join(buildDir, "working", "dbt");
@@ -37,7 +37,7 @@ export const dbtDir = (buildDir = BUILD_DIR) => path.join(buildDir, "working", "
 /** Every file a sync builds, by stage, under `buildDir`. sync.ts passes these between the builders. */
 export function tables(buildDir = BUILD_DIR) {
   const working = (stage: "sources" | "link" | "count" | "lists", f: string) => path.join(buildDir, "working", stage, f);
-  const data = (f: string) => path.join(buildDir, "published", syncPath(f));
+  const data = (f: string) => path.join(buildDir, "publish", syncPath(f));
   return {
     // 1. Sources
     sourcesReleases: working("sources", "sources-releases.json"),

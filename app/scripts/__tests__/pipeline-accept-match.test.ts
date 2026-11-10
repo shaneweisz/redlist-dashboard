@@ -23,7 +23,7 @@ describe("acceptMatch", () => {
   });
 
   it.each([
-    [{ match_type: "VARIANT" }, "spelling variant"],
+    [{ match_type: "VARIANT", usage_name: "Puma concolar" }, "spelling variant"],
     [{ match_type: "HIGHERRANK", usage_rank: "GENUS" }, "no species match"],
     [{ usage_id: null }, "no species match"],
     [{ usage_status: "PROVISIONALLY_ACCEPTED" }, "provisional name"],
@@ -33,6 +33,18 @@ describe("acceptMatch", () => {
     [{ confidence: 95 }, "lower confidence"],
   ] as [Partial<MatchAnswer>, string][])("queues %o as %s", (over, reason) => {
     expect(acceptMatch(puma, answer(over), speciesOf({}))).toEqual({ accepted: false, reason });
+  });
+
+  it("takes a spelling variant the codes' rules make the same name, whatever its confidence (Pseudechis pailsi / pailsei)", () => {
+    const m = answer({ match_type: "VARIANT", confidence: 92, usage_name: "Pseudechis pailsei", usage_authorship: "(Hoser, 1998)" });
+    expect(acceptMatch({ name: "Pseudechis pailsi", authority: "(Hoser, 1998)" }, m, speciesOf({})).accepted).toBe(true);
+  });
+
+  it("queues a spelling variant by other authors, or one the rules don't make the same name", () => {
+    const other = answer({ match_type: "VARIANT", usage_name: "Pseudechis pailsei", usage_authorship: "Smith, 1900" });
+    expect(acceptMatch({ name: "Pseudechis pailsi", authority: "(Hoser, 1998)" }, other, speciesOf({}))).toEqual({ accepted: false, reason: "spelling variant" });
+    const sabine = answer({ match_type: "FUZZY", usage_name: "Agrotis sabura", usage_authorship: null });
+    expect(acceptMatch({ name: "Agrotis sabine", authority: null }, sabine, speciesOf({}))).toEqual({ accepted: false, reason: "spelling variant" });
   });
 
   it("queues a synonym by other authors: the species CoL dropped (Tritoma bipustulata)", () => {
@@ -90,6 +102,27 @@ describe("acceptMatch", () => {
         alternatives: [{ usage_id: "R1", name: "Sipyloidea brevicerci", authorship: "Hasenpusch & Brock, 2007", rank: "SPECIES", status: "ACCEPTED" }] });
       expect(acceptMatch({ name: "Sipyloidea brevicerci", authority: "Hasenpusch & Brock, 2007" }, m, speciesOf({ U1: "Tersomia" })))
         .toEqual({ accepted: false, reason: "accepted and a synonym in CoL" });
+    });
+
+    it("takes an accepted match beside CoL's provisional copy of it (Cygnus buccinator)", () => {
+      const m = answer({ usage_name: "Cygnus buccinator", usage_authorship: "Richardson, 1831",
+        alternatives: [{ usage_id: "VN748", name: "Cygnus buccinator", authorship: "Richardson, 1832", rank: "SPECIES", status: "PROVISIONALLY_ACCEPTED" }] });
+      expect(acceptMatch({ name: "Cygnus buccinator", authority: "Richardson, 1832" }, m, speciesOf({})))
+        .toEqual({ accepted: true, why: "CoL holds it twice" });
+    });
+
+    it("but not a provisional name by other authors", () => {
+      const m = answer({ usage_name: "Cygnus buccinator", usage_authorship: "Richardson, 1831",
+        alternatives: [{ usage_id: "VN748", name: "Cygnus buccinator", authorship: "Gould, 1850", rank: "SPECIES", status: "PROVISIONALLY_ACCEPTED" }] });
+      expect(acceptMatch({ name: "Cygnus buccinator", authority: "Richardson, 1832" }, m, speciesOf({})).accepted).toBe(false);
+    });
+
+    it("takes a Linnaean name its citation picks (Urtica dioica L., beside Vell. and Thunb.)", () => {
+      const m = answer({ usage_name: "Urtica dioica", usage_authorship: "L.", alternatives: [
+        { usage_id: "R1", name: "Urtica dioica", authorship: "Vell.", rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" },
+        { usage_id: "R2", name: "Urtica dioica", authorship: "Thunb.", rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" }] });
+      expect(acceptMatch({ name: "Urtica dioica", authority: "L." }, m, speciesOf({ R1: "spatulata", R2: "thunbergiana" })))
+        .toEqual({ accepted: true, why: "authors pick it" });
     });
 
     it("ignores misapplied names and rivals leading to the same species", () => {

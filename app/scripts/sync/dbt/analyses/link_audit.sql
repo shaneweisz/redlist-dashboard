@@ -18,7 +18,7 @@
  *   stratum          how the link was made, the unit the accuracy is measured
  *                    per: 'exact' (the Red List name is an accepted CoL species),
  *                    'synonym' (a CoL synonym, linked to the species it points
- *                    to), 'decision' (decisions.tsv), or
+ *                    to), 'decision' (match-overrides.tsv), or
  *                    'unmatched'
  *   decided_by       who decided it, for a decision ('heuristic' when carried
  *                    over from the old name-matching passes, unreviewed)

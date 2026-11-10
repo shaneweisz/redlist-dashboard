@@ -12,7 +12,7 @@
 
 import { sameOrganism, isSeparatelyAssessed, type Verdict } from "./species-key";
 import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
-import { speciesNameParts, canonicalEpithet } from "./name-variants";
+import { speciesNameParts, canonicalEpithet, orthographicKey } from "./name-variants";
 
 export interface LinkRow {
   sis_taxon_id: number;
@@ -29,7 +29,7 @@ export interface LinkRow {
 
 /** Ownership order: the more direct the name, the stronger the claim. */
 const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
-  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym"] as const;
+  "iucn_synonym_covered", "same_name_twin", "respelled_twin", "duplicate_concept", "same_name_synonym", "undecided_candidate"] as const;
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 const genus = (n: string) => n.split(" ")[0].toLowerCase();
@@ -119,20 +119,40 @@ const twinKeys = (x: AcceptedSpecies) => [
  * Utricularia × ochroleuca) in one class or under one author citation, is one
  * organism, so both count (Andoa berthelotiana sits in two moss families, both
  * "(Mont.) Ochyra"). Class, not kingdom: Centropogon australis is a plant and a fish.
+ *
+ * So is the name spelt two ways the codes make one name (name-variants.ts), in
+ * one class, where the citations name the same author and year, or one has
+ * none (CoL's extra copies often don't): CoL holds the yellow-billed magpie as
+ * Pica nutallii and, outside its curated core, as Pica nuttalli with 121,763
+ * records; and Witheringia stramoniifolia beside stramonifolia, both Kunth.
+ * Folded endings alone are too loose: Mycalesis ita Felder, 1863 and M. itys
+ * Felder, 1867 fold alike and are two butterflies. A respelling the Red List
+ * assesses separately is left alone.
  */
 export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
   assessedNames: Set<string>): Set<number> {
   const byId = new Map(accepted.map((x) => [x.col_id, x]));
   const twins = new Map<string, string[]>();
   for (const x of accepted) for (const t of twinKeys(x)) twins.set(t, [...(twins.get(t) ?? []), x.col_id]);
+  const spellingKey = (x: AcceptedSpecies) => { const k = x.class_name ? orthographicKey(x.scientific_name) : null; return k ? `${x.class_name}|${k}` : null; };
+  const respellings = new Map<string, string[]>();
+  for (const x of accepted) { const k = spellingKey(x); if (k) respellings.set(k, [...(respellings.get(k) ?? []), x.col_id]); }
   const touched = new Set<number>();
   for (const l of ownTargets(links)) {
     const t = byId.get(l.col_id!);
     if (!t) continue;
-    for (const id of new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []))) {
+    const same = new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []));
+    for (const id of same) {
       if (coverAlongside(cover, l, t, byId.get(id)!, listedName.get(l.sis_taxon_id), assessedNames, "same_name_twin", `CoL holds ${t.scientific_name} twice`)) {
         touched.add(l.sis_taxon_id);
       }
+    }
+    const k = spellingKey(t);
+    for (const id of k ? respellings.get(k) ?? [] : []) {
+      const other = byId.get(id)!;
+      if (same.has(id) || (t.authorship && other.authorship && compareAuthors(t.authorship, other.authorship) !== "same")) continue;
+      if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "respelled_twin",
+        `CoL holds ${t.scientific_name} twice, the second time spelt ${other.scientific_name}`)) touched.add(l.sis_taxon_id);
     }
   }
   return touched;
@@ -193,6 +213,31 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
   return touched;
 }
 
+/** A CoL species a species waiting for a decision might be: its name leads there, or the matcher guessed it. */
+export interface Candidate { sis: number; target_id: string; target_name: string }
+
+/**
+ * Rule: while a species waits for a decision, every CoL species its own name
+ * leads to (as an accepted name, or as a synonym CoL files under it), and the
+ * matcher's guess, stay off the Not Evaluated list, counting nothing. Not knowing
+ * which CoL species it is mustn't list as unassessed the species it is, under
+ * CoL's name: Agama armata and ~150 others would otherwise appear there while
+ * their links wait. Broad on purpose, as the retired passes' lumps were: CoL
+ * files the assessed Coenonympha gardetta's name as a synonym under the small
+ * heath, C. pamphilus, which the Red List hasn't assessed, and that stays off
+ * the list too until gardetta is decided.
+ */
+export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
+  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_id).map((l) => l.sis_taxon_id));
+  const touched = new Set<number>();
+  for (const c of candidates) {
+    if (!waiting.has(c.sis)) continue;
+    if (cover({ sis_taxon_id: c.sis, col_id: c.target_id, usage_id: null, verdict: "refused", method: "undecided_candidate",
+      reason: `waiting for a decision; ${c.target_name} may be it, so it is kept out of the Not Evaluated list`, counted: false })) touched.add(c.sis);
+  }
+  return touched;
+}
+
 /**
  * Rule: no link crosses a phylum, however it was made: old genus names are
  * homonyms across kingdoms (the surgeonfish Acanthurus lineatus and the crab
@@ -216,12 +261,17 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
 /**
  * Rule: each usage counts for one assessed species at most. When two claim it,
  * one wins: primary before covered, own before lumped, the matcher before a
- * decision, the more direct name, then the lower SIS id. The loser counts
- * nothing; a losing primary row becomes a duplicate.
+ * decision, the more direct name, the name CoL spells exactly before a spelling
+ * variant of it, then the lower SIS id. The loser counts nothing; a losing
+ * primary row becomes a duplicate. The spelling matters where the Red List
+ * assesses one plant twice under two spellings (Peltophorum dasyrhachis, as CoL
+ * writes it, and dasyrachis): the exact one keeps the records.
+ *
+ * `exactName`: the species whose primary row's CoL name is their Red List name, as written.
  */
-export function oneOwnerPerUsage(links: LinkRow[]): Set<number> {
+export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new Set()): Set<number> {
   const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
-    Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.sis_taxon_id];
+    Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.role === "primary" && exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted).sort((a, b) => {
     const x = rank(a), y = rank(b);
     for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];

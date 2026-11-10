@@ -4,7 +4,7 @@
  * same organism. Its columns are the link's contract with the rest of the sync:
  * whatever builds it, the count stage and the lists read only these.
  *
- * Built from: taxa, assessments, matches, link/decisions.tsv.
+ * Built from: taxa, assessments, matches, seeds/match-overrides.tsv.
  *
  * Columns:
  *   sis_taxon_id
@@ -26,7 +26,7 @@
  * Decisions, in two steps kept apart so each can be explained on its own:
  *
  * 1. Name: which CoL usage the Red List name is.
- *      a decision in decisions.tsv, if there is one and it still resolves;
+ *      a decision in match-overrides.tsv, if there is one and it still resolves;
  *      else GBIF's matcher's answer (matches.ts), when accept-match.ts takes it
  *      without review;
  *      else nothing yet: the species is queued and counts no records until
@@ -45,17 +45,19 @@
  *    with how many species it touched:
  *      - covered rows: other CoL species the same organism sits under (IUCN's
  *        synonyms, CoL holding a name twice, one organism under two genera, a
- *        lumped species' other same-name synonyms)
+ *        lumped species' other same-name synonyms), and for a species waiting
+ *        for a decision, the CoL species it might be, kept off the NE list
  *      - no link across a phylum
  *      - every usage counts for one assessed species at most
  */
 
 import * as fs from "fs";
 import { decideKey, isSeparatelyAssessed, isCoLRespelling } from "./species-key";
-import { coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, dropCrossPhylum, oneOwnerPerUsage,
-  type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym } from "./rules";
+import { coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum,
+  oneOwnerPerUsage, type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym, type Candidate as UndecidedCandidate } from "./rules";
 import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
-import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";
+import { orthographicallySame } from "./name-variants";
+import { readOverrides, resolveOverride, type Candidate, type MatchOverride } from "./match-overrides";
 import { output, parquet } from "../paths";
 import { lit, rows, writeTable, openDuckDB } from "../sql";
 
@@ -80,11 +82,11 @@ export interface QueueRow {
 }
 
 export async function buildLink(
-  inputs: { taxa: string; assessments: string; matches: string; decisions?: Map<number, Decision> },
+  inputs: { taxa: string; assessments: string; matches: string; decisions?: Map<number, MatchOverride> },
   out: { link: string; matchQueue: string },
 ): Promise<LinkSummary> {
   const conn = await openDuckDB();
-  const decisions = inputs.decisions ?? readDecisions();
+  const decisions = inputs.decisions ?? readOverrides();
 
   await conn.run(`CREATE OR REPLACE TEMP TABLE redlist_species AS
     SELECT sis_taxon_id::INTEGER AS sis, scientific_name AS name, ${NAME("scientific_name")} AS name_key, authority,
@@ -113,7 +115,8 @@ export async function buildLink(
   if (decidedNames.length > 0) {
     await conn.run(`CREATE OR REPLACE TEMP TABLE decided_names AS SELECT unnest([${decidedNames.map(lit).join(", ")}]::VARCHAR[]) AS name_key`);
     for (const c of await rows<Candidate & { name_key: string }>(conn, `
-        SELECT t.name_key, t.col_id, t.scientific_name, t.authorship, t.status FROM col_usages t JOIN decided_names USING (name_key) WHERE t.rank = 'species'`)) {
+        SELECT t.name_key, t.col_id, t.scientific_name, t.authorship, t.status, s.scientific_name AS species_name
+        FROM col_usages t JOIN decided_names USING (name_key) LEFT JOIN col_usages s ON s.col_id = t.species_id WHERE t.rank = 'species'`)) {
       candidates.set(c.name_key, [...(candidates.get(c.name_key) ?? []), c]);
     }
   }
@@ -132,7 +135,7 @@ export async function buildLink(
     });
     const d = decisions.get(s.sis);
     if (d) {
-      const res = resolveDecision(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : []);
+      const res = resolveOverride(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : [], s.authority);
       if (res.kind !== "stale") {
         if (!d.reviewed) enqueue("proposed", acc.accepted ? "the matcher would take its answer" : acc.reason, d.by);
         if (res.kind === "usage") picks.push({ sis: s.sis, usage_id: res.colId, basis: "decision", by_: d.by });
@@ -197,9 +200,10 @@ export async function buildLink(
   const links: LinkRow[] = [];
   for (const p of primary) {
     if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, `${p.usage_name} leads to no accepted species`); continue; }
-    // A decision says the Red List name IS this CoL name, however spelled, so
-    // decideKey may be asked about either spelling: the author comparison
-    // can't undo what the decision settled.
+    // A decision says the Red List name IS this CoL name, however spelled, and so
+    // does a spelling the codes' rules make the same name (name-variants.ts:
+    // Sminthopsis fuliginosa / fuliginosus), so decideKey may be asked about
+    // either spelling: the author comparison can't undo what was settled.
     const asListed = { scientificName: p.name, authorship: p.authority ?? undefined };
     const asDecided = { scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
     const usage = { key: p.usage_id, scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
@@ -217,7 +221,8 @@ export async function buildLink(
       : (() => {
           const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.target_id !== p.usage_id ? target : undefined, assessedNames });
           const listed = ask(asListed);
-          return p.basis === "decision" && listed.verdict !== "own" ? ask(asDecided) : listed;
+          const sameName = p.basis === "decision" || orthographicallySame(p.name, p.usage_name);
+          return sameName && listed.verdict !== "own" ? ask(asDecided) : listed;
         })();
     // A lumped species' records start at its own usage, or at the infraspecific
     // CoL files that synonym under (Fringilla polatzeki → F. teydea polatzeki).
@@ -259,6 +264,15 @@ export async function buildLink(
     SELECT r.sis, t.col_id AS usage, t.species_id AS target FROM redlist_species r
     JOIN col_usages t ON t.name_key = r.name_key AND t.rank = 'species' AND t.status IN ('synonym', 'ambiguous synonym') AND t.species_id IS NOT NULL`);
   const listedName = new Map(species.map((s) => [s.sis, norm(s.name)]));
+  // What a species waiting for a decision might be: every CoL species a usage with
+  // its own name leads to, and the species the matcher's answer leads to.
+  const undecidedCandidates = await rows<UndecidedCandidate>(conn, `
+    SELECT DISTINCT r.sis, target.col_id AS target_id, target.scientific_name AS target_name
+    FROM redlist_species r JOIN col_usages u ON u.name_key = r.name_key AND u.rank = 'species' AND u.species_id IS NOT NULL
+    JOIN col_usages target ON target.col_id = u.species_id
+    UNION
+    SELECT DISTINCT m.sis_taxon_id, target.col_id, target.scientific_name
+    FROM ${parquet(inputs.matches)} m JOIN col_usages u ON u.col_id = m.usage_id JOIN col_usages target ON target.col_id = u.species_id`);
   // The pairs whose lineages differ, asked of the build once every row exists.
   const crossing = async () => {
     await writeTable(conn, "linked_pairs", { sis: "INTEGER", col_id: "VARCHAR" },
@@ -268,14 +282,16 @@ export async function buildLink(
       WHERE NOT ${sameLineage}`)).map((x) => x.k));
   };
 
+  const exactName = new Set(primary.filter((p) => norm(p.name) === norm(p.usage_name)).map((p) => p.sis));
   const cover = coverer(links);
   const rules: [string, () => Set<number> | Promise<Set<number>>][] = [
     ["covered: another accepted species IUCN's synonyms or CoL's name it", () => coverSynonymSpecies(cover, synonymCandidates, assessedNames)],
     ["covered: CoL holds the name twice", () => coverTwins(links, cover, accepted, listedName, assessedNames)],
     ["covered: one organism under two genera", () => coverDuplicateConcepts(links, cover, accepted, listedName, assessedNames)],
     ["covered: a lumped species' other same-name synonyms", () => coverSameNameSynonyms(links, cover, sameNameSynonyms)],
+    ["covered: what a species waiting for a decision might be, kept off the NE list", () => coverUndecidedCandidates(links, cover, undecidedCandidates)],
     ["no link across a phylum", async () => dropCrossPhylum(links, await crossing())],
-    ["one owner per usage", () => oneOwnerPerUsage(links)],
+    ["one owner per usage", () => oneOwnerPerUsage(links, exactName)],
   ];
   const touchedBy: Record<string, number> = {};
   for (const [name, apply] of rules) touchedBy[name] = (await apply()).size;
@@ -290,7 +306,7 @@ export async function buildLink(
     SELECT count(*) FILTER (basis = 'matcher')::INT AS matcher, count(*) FILTER (basis = 'decision')::INT AS decision,
            count(*) FILTER (basis IS NULL)::INT AS unlinked
     FROM ${parquet(out.link)} WHERE role = 'primary'`);
-  console.log(`   ${basis.matcher.toLocaleString()} by the matcher, ${basis.decision.toLocaleString()} by decisions.tsv, ` +
+  console.log(`   ${basis.matcher.toLocaleString()} by the matcher, ${basis.decision.toLocaleString()} by match-overrides.tsv, ` +
     `${queue.length.toLocaleString()} queued for review (${out.matchQueue})`);
   return { byMatcher: basis.matcher, byDecision: basis.decision, unlinked: basis.unlinked, queue: summariseQueue(queue), rules: touchedBy };
 }

@@ -1,16 +1,26 @@
 /**
  * When the matcher's answer is taken without review.
  *
- * The rule, in one sentence: the Red List name is found exactly, as a species,
- * with full confidence, it leads to an accepted CoL species, and no other CoL
- * name spelled the same way leads to a different species, unless the author
- * citation picks one. Everything else waits for a decision (decisions.tsv).
+ * The rule, in one sentence: the Red List name is found exactly (or spelt
+ * differently only as the codes allow), as a species, with full confidence, it
+ * leads to an accepted CoL species, and no other CoL name spelled the same way
+ * leads to a different species, unless the author citation picks one.
+ * Everything else waits for a decision (match-overrides.tsv).
  *
- * Two kinds of "other name spelled the same way" are not rivals:
+ * A spelling variant counts as found when it is the same name under the codes'
+ * rules for Latin endings and transliteration (name-variants.ts: Pseudechis
+ * pailsi / pailsei), and the authors are not clearly others. The matcher found
+ * the candidate; the spelling rules only corroborate it.
+ *
+ * Three kinds of "other name spelled the same way" are not rivals:
  *   - one with the same author citation as the match: CoL holding one name
  *     twice (assessment-link.ts's twin rule then counts both). Not when the match is
  *     a synonym and the twin an accepted species: CoL then says both that it
  *     is a species and that it is another one (Sipyloidea brevicerci)
+ *   - a provisionally accepted copy of an accepted match, by authors that are
+ *     not clearly others: CoL holding the name twice, once provisionally, often
+ *     with the Red List's own citation (Cygnus buccinator Richardson, 1832 beside
+ *     the accepted Richardson, 1831)
  *   - a misapplied name: CoL saying that name was used wrongly, not that it
  *     is another species
  *
@@ -23,6 +33,7 @@
  * Author citations are compared in authors.ts.
  */
 import { compareAuthors } from "../../../src/lib/authors";
+import { orthographicallySame } from "./name-variants";
 
 export interface MatchAnswer {
   usage_id: string | null;
@@ -73,9 +84,12 @@ export function acceptMatch(
   if (m.usage_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
   if (m.usage_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
   if (m.usage_status === "MISAPPLIED") return no("misapplied name");
-  if (m.match_type !== "EXACT") return no("spelling variant");
+  // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
+  const variant = m.match_type !== "EXACT" && !!m.usage_name && orthographicallySame(binomial(species.name), binomial(m.usage_name))
+    && compareAuthors(species.authority, m.usage_authorship) !== "other";
+  if (m.match_type !== "EXACT" && !variant) return no("spelling variant");
   if (m.usage_rank !== "SPECIES") return no("matched another rank");
-  if ((m.confidence ?? 0) < 99) return no("lower confidence");
+  if (!variant && (m.confidence ?? 0) < 99) return no("lower confidence");
   const mine = speciesOf(m.usage_id);
   if (!mine) return no("synonym of no species");
   if (m.usage_status === "SYNONYM" && compareAuthors(species.authority, m.usage_authorship) === "other") return no("synonym by other authors");
@@ -84,7 +98,9 @@ export function acceptMatch(
     && speciesOf(a.usage_id) !== mine);
   if (rivals.length === 0) return { accepted: true, why: "unique name" };
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
-  const twins = rivals.filter((a) => same(m.usage_authorship, a.authorship));
+  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.usage_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
+    && compareAuthors(m.usage_authorship, a.authorship) !== "other";
+  const twins = rivals.filter((a) => same(m.usage_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
     if (m.usage_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
     return { accepted: true, why: "CoL holds it twice" };

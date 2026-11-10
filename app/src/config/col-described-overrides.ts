@@ -11,7 +11,7 @@
  */
 
 // Domestic forms and humans aren't here: they are left out of the described
-// species once, in the sync (scripts/sync/seeds/ne-excluded.tsv, which
+// species once, in the sync (scripts/sync/seeds/domesticated-and-humans.tsv, which
 // sets species/'s `described`), so every count and list agrees.
 
 // CoL lumps genus Bison entirely into Bos (no "Bison" genus exists in this release —

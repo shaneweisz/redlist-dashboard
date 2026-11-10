@@ -34,7 +34,7 @@ QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, q
 
 # Each branch: how to count it, and a species that takes it (checked below).
 NAME_BRANCHES = {
-    "decision": ("basis = 'decision'", "Acer divergens"),
+    "decision": ("basis = 'decision'", "Cipangopaludina chinensis"),
     "matcher": ("basis = 'matcher'", "Panthera leo"),
     "unlinked": ("col_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
 }
@@ -43,14 +43,13 @@ CONCEPT_BRANCHES = {
     "renamed": ("verdict = 'own' AND method IN ('synonym', 'provisional')", "Glossopsitta porphyrocephala"),
     "lumped": ("verdict = 'lumped' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
     "refused": ("verdict = 'refused'", "Turcichondrostoma fahirae"),
-    "ambiguous": ("method = 'ambiguous_synonym'", "Astragalus albanicus"),
     "duplicate": ("verdict = 'duplicate'", "Agapanthia probsti"),
 }
 QUEUE_REASONS = [  # reason, example: the commonest reasons the matcher's answer waits for a person
-    ("spelling variant", "Pseudechis pailsi"),
-    ("homonym the authors don't decide", "Boscia senegalensis"),
     ("no species match", "Breviceps batrachophiliorum"),
+    ("provisional name", "Acanthinomerus wollastoni"),
     ("informal or qualified name", "Diospyros sp. nov. 'malcomberi'"),
+    ("homonym the authors don't decide", "Galium palustre"),
 ]
 
 
@@ -76,7 +75,7 @@ for reason, example in QUEUE_REASONS:
 [queued] = duck(f"SELECT count(*) AS n FROM {QUEUE}")
 
 # The versions matched: one Red List release against one CoL release, as this build's sync.json records them.
-manifest = json.load(open(os.path.join(BUILD, "published", "sync.json")))
+manifest = json.load(open(os.path.join(BUILD, "publish", "sync.json")))
 RL = manifest["redlist"]["database"].replace("redlist_", "Red List ").replace("_", "-")
 XR = manifest["col"]["xr"]
 CK = manifest["col"]["checklist"]
@@ -122,15 +121,14 @@ def queue_line(reason, n, e, a, m, ma):
 
 out.append(f'  start [label={box("src", "A Red List species: its name and authority")}];')
 out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
-out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly, as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
+out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly (or spelt only as the codes allow), as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide;", "CoL's provisional copy of the name is not a rival);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
 out.append(f'  queue [label={box("q", "Otherwise a person decides: the match queue", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
-out.append(f'  dec [label={box("own", "Decided: a row in decisions.tsv", ["all carried over from the old matching passes so far, none reviewed", eg("Acer divergens", name["decision"][1])], name["decision"][0])}];')
-out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
+out.append(f'  dec [label={box("own", "Decided: a row in match-overrides.tsv", ["for the releases it names, while what it rested on still holds", eg("Cipangopaludina chinensis", name["decision"][1])], name["decision"][0])}];')
+out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides;", "what it might be stays off the Not Evaluated list", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
 out.append(f'  acc [label={box("own", "An accepted species: the species itself", [eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
 out.append(f'  ren [label={box("own", "A synonym: the species, renamed", [eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
 out.append(f'  lum [label={box("part", "A synonym CoL folds into another species: lumped", ["counts only the records filed under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
-out.append(f'  amb [label={box("part", "An ambiguous synonym: its own name\'s records only", [eg("Astragalus albanicus", concept["ambiguous"][1])], concept["ambiguous"][0])}];')
 out.append(f'  ref [label={box("none", "Folded into a species IUCN assesses too: refused", ["counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
 out.append(f'  dup [label={box("none", "Its CoL name is already another assessment\'s: duplicate", ["each CoL name counts for one assessed species, so this counts nothing", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
 
@@ -138,8 +136,8 @@ out += ['  start -> q1; q1 -> mat [label="  certain"]; q1 -> queue [label="  not
         '  queue -> dec; queue -> und;',
         '  { rank=same; mat; queue }',
         '  mat -> q2; dec -> q2;',
-        '  q2 -> acc; q2 -> ren; q2 -> lum; q2 -> amb;',
-        '  { rank=same; acc; ren; lum; amb }',
+        '  q2 -> acc; q2 -> ren; q2 -> lum;',
+        '  { rank=same; acc; ren; lum }',
         '  lum -> ref [label="  if IUCN assesses that species"];',
         '  ren -> dup [label="  if another assessment\\n  already has that name", style=dotted];',
         '}']

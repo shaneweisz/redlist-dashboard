@@ -22,13 +22,18 @@ import * as path from "path";
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { loadFacts, inSync } from "./compare/facts";
-import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
+import { MATCHING_CASES, type MatchCase, type Versions } from "./fixtures/matching";
 import { lit, openDuckDB } from "../sql";
+import { compareAuthors } from "../../../src/lib/authors";
 
 export interface Observed {
   assessed: boolean;
   category: string | null;
   linkedTo: string | null;
+  /** The CoL authorship of the species it links to. */
+  linkedAuthorship: string | null;
+  /** The Red List's authority for it; undefined when the build's working tables aren't to hand. */
+  authority?: string | null;
   gbifKey: string | null;
   gbifKeyName: string | null;
   records: number | null;
@@ -36,25 +41,31 @@ export interface Observed {
 }
 
 
-export async function observe(conn: DuckDBConnection, dir: string, cases: MatchCase[]): Promise<Map<string, Observed>> {
+/**
+ * What the build in `dir` (a published sync) shows for each case. `assessments`,
+ * the build's working Red List table, adds the Red List's authority, which the
+ * published files don't carry.
+ */
+export async function observe(conn: DuckDBConnection, dir: string, cases: MatchCase[], assessments?: string): Promise<Map<string, Observed>> {
   await loadFacts(conn, "f", dir);
   const tax = `read_parquet(${lit(inSync(dir, "taxa.parquet"))})`;
   // species_name: the accepted species a usage belongs to (a synonym's accepted
   // name, an infraspecific's species), so a link reads the same whether it
   // points at the usage or at the species.
   await conn.run(`CREATE TEMP TABLE names AS
-    WITH t AS (SELECT col_id, parent_id, status, rank, scientific_name FROM ${tax}),
+    WITH t AS (SELECT col_id, parent_id, status, rank, scientific_name, authorship FROM ${tax}),
     s1 AS (SELECT t.col_id, t.scientific_name,
              CASE WHEN t.status ILIKE '%synonym%' OR t.status ILIKE 'misapplied' THEN p.col_id ELSE t.col_id END AS acc
            FROM t LEFT JOIN t p ON p.col_id = t.parent_id)
     SELECT s1.col_id, s1.scientific_name,
-           CASE WHEN a.rank <> 'species' AND sp.rank = 'species' THEN sp.scientific_name ELSE a.scientific_name END AS species_name
+           CASE WHEN a.rank <> 'species' AND sp.rank = 'species' THEN sp.scientific_name ELSE a.scientific_name END AS species_name,
+           CASE WHEN a.rank <> 'species' AND sp.rank = 'species' THEN sp.authorship ELSE a.authorship END AS species_authorship
     FROM s1 LEFT JOIN t a ON a.col_id = s1.acc LEFT JOIN t sp ON sp.col_id = a.parent_id`);
 
   const out = new Map<string, Observed>();
   for (const c of cases) {
     const [row] = (await conn.runAndReadAll(`
-      SELECT a.iucn_category AS category, l.species_name AS linked, a.gbif_species_key AS gkey,
+      SELECT a.iucn_category AS category, l.species_name AS linked, l.species_authorship AS linked_auth, a.gbif_species_key AS gkey,
              g.scientific_name AS gname, a.gbif_georeferenced_records_count AS n
       FROM f.assessed a
       LEFT JOIN names l ON l.col_id = a.link_col_id
@@ -70,6 +81,8 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
       assessed: row !== undefined,
       category: row ? (row.category as string | null) : null,
       linkedTo: row ? (row.linked as string | null) : null,
+      linkedAuthorship: row ? (row.linked_auth as string | null) : null,
+      ...(assessments ? { authority: await authorityOf(conn, assessments, c.name) } : {}),
       gbifKey: row ? (row.gkey as string | null) : null,
       gbifKeyName: row ? (row.gname as string | null) : null,
       records: row && row.n !== null ? Number(row.n) : null,
@@ -77,6 +90,37 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
     });
   }
   return out;
+}
+
+/** The releases a build was made from, as `confirmed` names them, from its sync.json. */
+export function buildVersions(syncJson: { redlist?: { database?: string }; col?: { xr?: { alias?: string } }; gbif?: { snapshot?: string } }): Versions {
+  return {
+    redlist: (syncJson.redlist?.database ?? "?").replace(/^redlist_/, "").replace(/_/g, "-"),
+    col: syncJson.col?.xr?.alias ?? "?",
+    snapshot: syncJson.gbif?.snapshot ?? "?",
+  };
+}
+
+/**
+ * What a failing case's releases say about the failure: the same releases it last
+ * passed on make it a regression in the code; newer ones may be the data moving.
+ * The snapshot counts only for a case about records.
+ */
+export function failureKind(c: MatchCase, build: Versions): string {
+  const e = c.expect;
+  const aboutRecords = e.hasRecords !== undefined || e.minRecords !== undefined || e.maxRecords !== undefined;
+  const moved = (["redlist", "col", "snapshot"] as const)
+    .filter((k) => (k !== "snapshot" || aboutRecords) && c.confirmed[k] !== build[k])
+    .map((k) => `${k} ${c.confirmed[k]} → ${build[k]}`);
+  return moved.length === 0
+    ? "a regression: it passed on these same releases"
+    : `confirmed on older releases (${moved.join(", ")}): check it against these, then update its \`confirmed\``;
+}
+
+async function authorityOf(conn: DuckDBConnection, assessments: string, name: string): Promise<string | null> {
+  const [r] = (await conn.runAndReadAll(`SELECT any_value(authority) AS a FROM read_parquet(${lit(assessments)})
+    WHERE is_latest AND scientific_name = ${lit(name)}`)).getRowObjects();
+  return (r?.a as string | null) ?? null;
 }
 
 /** Every way the observation misses the case's expectations (empty = pass). */
@@ -88,6 +132,15 @@ export function mismatches(c: MatchCase, o: Observed): string[] {
   };
   want("assessed", e.assessed, o.assessed);
   want("linked to", e.linkedTo, o.linkedTo);
+  // A homonym's name is the same for both; the citation says which one it is. Compared
+  // as authors, not as strings: a release reformatting the citation isn't another species.
+  if (e.linkedAuthorship !== undefined && (o.linkedAuthorship == null || compareAuthors(e.linkedAuthorship, o.linkedAuthorship) === "other")) {
+    miss.push(`linked to: expected ${e.linkedTo ?? ""} ${e.linkedAuthorship}, got ${o.linkedTo ?? "nothing"} ${o.linkedAuthorship ?? ""}`.replace(/\s+/g, " "));
+  }
+  // The case is about the name as the Red List cites it; clearly other authors make it another name.
+  if (c.authority && o.authority !== undefined && compareAuthors(c.authority, o.authority) === "other") {
+    miss.push(`Red List authority: the case is about ${c.name} ${c.authority}, the Red List now cites ${o.authority}`);
+  }
   want("GBIF key name", e.gbifKeyName, o.gbifKeyName);
   if (e.hasRecords !== undefined) want("has records", e.hasRecords, (o.records ?? 0) > 0);
   if (e.minRecords !== undefined && (o.records ?? 0) < e.minRecords) {
@@ -108,18 +161,22 @@ if (isDirectRun) {
     const dir = path.resolve(process.argv.slice(2).find((a) => !a.startsWith("--")) ?? DATA_DIR);
     if (!fs.existsSync(dir)) throw new Error(`No data directory at ${dir}`);
     const conn = await openDuckDB();
-    const obs = await observe(conn, dir, MATCHING_CASES);
+    // A build's working Red List table, beside its publish/, gives the Red List authority.
+    const working = path.join(dir, "..", "working", "sources", "assessments.parquet");
+    const obs = await observe(conn, dir, MATCHING_CASES, fs.existsSync(working) ? working : undefined);
 
     if (process.argv.includes("--observe")) {
       for (const c of MATCHING_CASES) console.log(c.name.padEnd(28), JSON.stringify(obs.get(c.name)));
       return;
     }
+    const syncJson = path.join(dir, "sync.json");
+    const build = buildVersions(fs.existsSync(syncJson) ? JSON.parse(fs.readFileSync(syncJson, "utf-8")) : {});
     let failed = 0;
     for (const c of MATCHING_CASES) {
       const miss = mismatches(c, obs.get(c.name)!);
       if (miss.length === 0) continue;
       failed++;
-      console.log(`FAIL    ${c.name}: ${miss.join("; ")}`);
+      console.log(`FAIL    ${c.name}: ${miss.join("; ")} (${failureKind(c, build)})`);
     }
     console.log(`\n${MATCHING_CASES.length} cases: ${failed} failed.`);
     if (failed > 0) process.exitCode = 1;

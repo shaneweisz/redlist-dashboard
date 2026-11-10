@@ -130,7 +130,7 @@ Live external APIs:
 ### GBIF integration
 The key innovation — linking assessment data to real-world observations:
 
-1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a reviewed decisions file (`app/scripts/sync/seeds/decisions.tsv`) where it isn't, and its GBIF records follow from that.
+1. **One taxonomy**: GBIF indexes its records against the Catalogue of Life eXtended Release, so a GBIF key *is* a CoL id. Each assessed species is matched once, to CoL (`assessment_link.parquet`), by GBIF's own name matcher where its answer is certain and by a file of decisions (`app/scripts/sync/seeds/match-overrides.tsv`) where it isn't, and its GBIF records follow from that.
 2. **Observation counts**: from GBIF's monthly snapshot, not the API. A species counts every record filed under its own name, its synonyms, its subspecies and their DNA-barcode BINs, minus any usage another assessed species owns (a split IUCN assesses that CoL files as a subspecies, for instance). Every count comes two ways, all records (the default) and georeferenced records only, and the GBIF Records toggle switches every number on the page between them. **Total GBIF** is the species' records; **Since Assessment** is the records dated after its assessment date. Both count every record type: all records is every record, the number gbif.org shows (the default); georeferenced is the ones with coordinates and no geospatial issue. The occurrence map applies its own record-type defaults.
 3. **Record-type breakdown**: human observations (incl. iNaturalist), preserved specimens, machine observations.
 4. **Quality filters**: georeferenced means coordinates without a GBIF geospatial issue (the codes GBIF's own `hasGeospatialIssue` acts on, checked against the API).
@@ -166,7 +166,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 cd app && npm run sync
 
 # 3. Read .sync/review/changes/report.md (and .sync/review/match-queue.tsv, the species waiting on a decision), then publish
-npm run sync:publish        # copies .sync/published/ into app/data/sync, uploads to R2, bumps app/latest-sync.txt
+npm run sync:publish        # copies .sync/publish/ into app/data/sync, uploads to R2, bumps app/latest-sync.txt
 ```
 
 `npm run sync:publish` prints the `git add` line for the data PR. The inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).

@@ -18,6 +18,10 @@ describe("compareAuthors", () => {
     ["Fabricius, 1775", "(Fabr., 1775)"],
     ["Düben", "Dueben"],
     ["Lægaard", "Laegaard"],
+    // Written alike: the same author, even when it is only an initial.
+    ["L.", "L."],
+    ["L.", "L. "],
+    ["(L.) Hill", "(L.)  Hill"],
   ])("same: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("same"));
 
   it.each([
@@ -38,9 +42,9 @@ describe("compareAuthors", () => {
     // A misspelling with the same year.
     ["Klutter, 1950", "Kutter, 1950"],
     ["Milen-Edwards & Haime, 1948", "(Milne Edwards & Haime, 1848)"],
-    // Nothing beyond an initial.
-    ["L.", "L."],
+    // Nothing beyond an initial, against another citation.
     ["L.", "Jacq."],
+    ["L.", "L.f."],
     // An abbreviation as short as two letters.
     ["Bl.", "Blume"],
     // Spelt differently: a swap, a typo (both one author).
