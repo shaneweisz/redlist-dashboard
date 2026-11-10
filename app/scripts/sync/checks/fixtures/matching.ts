@@ -6,7 +6,7 @@
  * list name the CoL species to look for in `expect.neListed`.
  *
  * `confirmed` is the releases a case last passed on, and on which its `why` was
- * checked: `situation` says if that why no longer holds (fully) there. A case failing on those same releases is a regression in the code; one
+ * checked: where that why no longer (fully) holds there, it ends with an update. A case failing on those same releases is a regression in the code; one
  * failing on newer ones may be the data moving (CoL renamed the species, a
  * snapshot dropped records), and needs checking against the new releases, then
  * `confirmed` updated. The snapshot counts only for a case about records.
@@ -34,17 +34,12 @@ export interface MatchCase {
   name: string;
   /** The releases it last passed on, and on which its `why` was checked. */
   confirmed: Versions;
-  /** What goes wrong without the rule, in a sentence. */
-  why: string;
   /**
-   * Whether the situation `why` describes (as distinct from its history, what an
-   * older version of the code showed) is still in the data of `confirmed`'s
-   * releases. Each was checked against the build of 10 November 2026. Absent: it
-   * is. "partly": some of it is, and `now` says what differs. "prior releases":
-   * it isn't any more; the case stays, in case a later release brings it back,
-   * and `now` says what the data shows instead.
+   * What goes wrong without the rule, in a sentence. Each was checked against
+   * `confirmed`'s releases; where the situation it describes has changed since it
+   * was written, an "Update (<yyyy-mm>, <release>):" sentence says what the data shows now.
    */
-  situation?: { holds: "partly" | "prior releases"; now: string };
+  why: string;
   /** Where the rule or the case lives in today's code. */
   source: string;
   expect: {
@@ -80,16 +75,14 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Pica nutalli",
-    why: "Spelling variant of nuttallii (same authorship, one edit).",
-    situation: { holds: "partly", now: "CoL now spells the accepted name Pica nutallii and holds Pica nutalli as its own synonym, so the link goes through a CoL synonym rather than a respelling." },
+    why: "Spelling variant of nuttallii (same authorship, one edit). Update (2026-11, COL26.6 XR): CoL now spells the accepted name Pica nutallii and holds Pica nutalli as its own synonym, so the link goes through a CoL synonym rather than a respelling.",
     source: "species-key.ts sameOrganism",
     confirmed: NOVEMBER_2026,
     expect: { hasRecords: true, neListed: { "Pica nuttallii": false } },
   },
   {
     name: "Sminthopsis fuliginosa",
-    why: "Gender agreement: CoL spells it fuliginosus.",
-    situation: { holds: "partly", now: "CoL's fuliginosus spelling holds, but CoL now has it as a synonym of Sminthopsis griseoventer, so the link is a lump keeping the synonym's own records, not a plain gender variant." },
+    why: "Gender agreement: CoL spells it fuliginosus. Update (2026-11, COL26.6 XR): CoL's fuliginosus spelling holds, but CoL now has it as a synonym of Sminthopsis griseoventer, so the link is a lump keeping the synonym's own records, not a plain gender variant.",
     source: "name-variants.ts; accept-match.ts (a spelling variant the codes allow)",
     confirmed: NOVEMBER_2026,
     expect: { hasRecords: true },
@@ -110,16 +103,14 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Colostygia puengeleri",
-    why: "CoL spells it pungeleri (both for Püngeler). Accepted by pass 7 only because the GBIF key and the spelling rule agree.",
-    situation: { holds: "partly", now: "The spelling still differs; the matching passes were retired (#593, #629), and the matcher now returns the variant itself, which the acceptance rule takes." },
+    why: "CoL spells it pungeleri (both for Püngeler). Accepted by pass 7 only because the GBIF key and the spelling rule agree. Update (2026-11, COL26.6 XR, #629): The spelling still differs; the matching passes were retired (#593, #629), and the matcher now returns the variant itself, which the acceptance rule takes.",
     source: "accept-match.ts; name-variants.ts",
     confirmed: NOVEMBER_2026,
     expect: { hasRecords: true },
   },
   {
     name: "Agelaius phoeniceus",
-    why: "Without classification context GBIF's matcher backed off to the genus and the bird lost its 20M records.",
-    situation: { holds: "partly", now: "The homonym that drew the matcher off is still in CoL (a synonym in the mite genus Syringophilopsis), but the matcher is now asked with classification hints, so whether it would still back off without them can't be checked from a build." },
+    why: "Without classification context GBIF's matcher backed off to the genus and the bird lost its 20M records. Update (2026-11, COL26.6 XR): The homonym that drew the matcher off is still in CoL (a synonym in the mite genus Syringophilopsis), but the matcher is now asked with classification hints, so whether it would still back off without them can't be checked from a build.",
     source: "link/matches.ts (the classification hints)",
     confirmed: NOVEMBER_2026,
     expect: { gbifKeyName: "Agelaius phoeniceus", minRecords: 1_000_000 },
@@ -152,8 +143,7 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Acacia koaia",
-    why: "Two edits from Acacia koa but a different author: a different tree. Must not show koa's records.",
-    situation: { holds: "partly", now: "COL26.6 XR holds Acacia koaia as a synonym of A. koa, so the risk now runs through the lumped-synonym path rather than a near-name match; the different-author near-name still exists." },
+    why: "Two edits from Acacia koa but a different author: a different tree. Must not show koa's records. Update (2026-11, COL26.6 XR): COL26.6 XR holds Acacia koaia as a synonym of A. koa, so the risk now runs through the lumped-synonym path rather than a near-name match; the different-author near-name still exists.",
     source: "species-key.ts sameOrganism",
     confirmed: NOVEMBER_2026,
     expect: { gbifKeyName: "Acacia koaia", maxRecords: 1_000 },
@@ -277,8 +267,7 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Cladorhynchus leucocephalus",
-    why: "The banded stilt (Vieillot, 1816). Its IUCN synonyms name Himantopus leucocephalus, which CoL has as the pied stilt (Gould, 1837); the shared epithet counted the pied stilt's 400k records.",
-    situation: { holds: "partly", now: "IUCN's synonym list for the banded stilt is empty in 2026-1; Himantopus leucocephalus now reaches it through CoL's same-name synonym Cladorhynchus leucocephalus Gould, not through an IUCN synonym." },
+    why: "The banded stilt (Vieillot, 1816). Its IUCN synonyms name Himantopus leucocephalus, which CoL has as the pied stilt (Gould, 1837); the shared epithet counted the pied stilt's 400k records. Update (2026-11, Red List 2026-1): IUCN's synonym list for the banded stilt is empty in 2026-1; Himantopus leucocephalus now reaches it through CoL's same-name synonym Cladorhynchus leucocephalus Gould, not through an IUCN synonym.",
     source: "link/assessment-link.ts covered rows (authorsAgree)",
     confirmed: NOVEMBER_2026,
     expect: { maxRecords: 100_000 },
@@ -337,8 +326,7 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Catapodium borgesii",
-    why: "Azores endemic once matched via a synonym onto Catapodium marinum and shown its 19,901 records.",
-    situation: { holds: "partly", now: "The synonym trap holds (C. marinum, 21,464 records), but the Red List gives its range as Greece, not the Azores, so 'Azores endemic' doesn't match the 2026-1 assessment." },
+    why: "Azores endemic once matched via a synonym onto Catapodium marinum and shown its 19,901 records. Update (2026-11, Red List 2026-1): The synonym trap holds (C. marinum, 21,464 records), but the Red List gives its range as Greece, not the Azores, so 'Azores endemic' doesn't match the 2026-1 assessment.",
     source: "dbt/models/count/usage_owner.sql; species-key.ts decideKey",
     confirmed: NOVEMBER_2026,
     expect: { maxRecords: 100 },
@@ -369,16 +357,14 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Mayaheros ericymba",
-    why: "Its latest assessment is an amendment flagged latest=false and has to be forced in.",
-    situation: { holds: "prior releases", now: "In Red List 2026-1 the database itself flags the amendment 288151174 latest, so seeds/forced-latest.tsv no longer changes anything for it." },
+    why: "Its latest assessment is an amendment flagged latest=false and has to be forced in. Update (2026-11, Red List 2026-1): In Red List 2026-1 the database itself flags the amendment 288151174 latest, so seeds/forced-latest.tsv no longer changes anything for it. Kept in case a later release brings it back.",
     source: "seeds/forced-latest.tsv",
     confirmed: NOVEMBER_2026,
     expect: { assessed: true, linkedTo: "Mayaheros ericymba" },
   },
   {
     name: "Romankenkius pedderensis",
-    why: "Turbellaria isn't a CoL class; the group's facet root came back empty.",
-    situation: { holds: "partly", now: "CoL does have a class Turbellaria (provisionally accepted, 13 species), but not one holding Tricladida, where the species sits with no class: the class misses the species rather than not existing." },
+    why: "Turbellaria isn't a CoL class; the group's facet root came back empty. Update (2026-11, COL26.6 XR): CoL does have a class Turbellaria (provisionally accepted, 13 species), but not one holding Tricladida, where the species sits with no class: the class misses the species rather than not existing.",
     source: "scripts/config/derive-gbif-taxon-keys.ts",
     confirmed: NOVEMBER_2026,
     expect: { linkedTo: "Romankenkius pedderensis" },
@@ -423,24 +409,21 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Pycnonotus tricolor",
-    why: "An XR over-split the curated checklist demotes; it showed as a spurious Not Evaluated bulbul.",
-    situation: { holds: "prior releases", now: "In COL26.6 XR Pycnonotus tricolor is already a synonym of P. barbatus tricolor, and the curated release demotes nothing, so the case no longer exercises the demoted rule." },
+    why: "An XR over-split the curated checklist demotes; it showed as a spurious Not Evaluated bulbul. Update (2026-11, COL26.6 XR): In COL26.6 XR Pycnonotus tricolor is already a synonym of P. barbatus tricolor, and the curated release demotes nothing, so the case no longer exercises the demoted rule. Kept in case a later release brings it back.",
     source: "sources/taxa.ts demoted",
     confirmed: NOVEMBER_2026,
     expect: { assessed: false, neListed: { "Pycnonotus tricolor": false } },
   },
   {
     name: "Brachistus stramoniifolius",
-    why: "Assessed under an old genus; CoL's Witheringia stramoniifolia (stramonifolia in the release) is the same plant and must not reappear as Not Evaluated.",
-    situation: { holds: "partly", now: "The release spelling is a separate XR usage, Witheringia stramonifolia Kunth, not a checklist name of the linked one, and it is on the Not Evaluated list (266 records): the fixture checks only the stramoniifolia spelling." },
+    why: "Assessed under an old genus; CoL's Witheringia stramoniifolia (stramonifolia in the release) is the same plant and must not reappear as Not Evaluated. Update (2026-11, COL26.6 XR): The release spelling is a separate XR usage, Witheringia stramonifolia Kunth, not a checklist name of the linked one, and it is on the Not Evaluated list (266 records): the fixture checks only the stramoniifolia spelling.",
     source: "sources/taxa.ts checklist_name",
     confirmed: NOVEMBER_2026,
     expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false } },
   },
   {
     name: "Syllepte belialis",
-    why: "Unassessed, GBIF-observed only through BOLD barcode records (a BIN under the species): an ordinary NE species, so the list is checked for over-filtering, and BINs for being counted.",
-    situation: { holds: "partly", now: "A BIN (BOLD:AAB2537, 81 records) still counts towards it, but 221 of its 302 records now sit on the species usage itself, so it is no longer observed only through BOLD." },
+    why: "Unassessed, GBIF-observed only through BOLD barcode records (a BIN under the species): an ordinary NE species, so the list is checked for over-filtering, and BINs for being counted. Update (2026-11, snapshot 2026-11-01): A BIN (BOLD:AAB2537, 81 records) still counts towards it, but 221 of its 302 records now sit on the species usage itself, so it is no longer observed only through BOLD.",
     source: "sources/taxa.ts BELOW_SPECIES",
     confirmed: NOVEMBER_2026,
     expect: { assessed: false, neListed: { "Syllepte belialis": true } },

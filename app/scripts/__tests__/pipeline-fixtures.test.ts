@@ -30,8 +30,10 @@ describe("failureKind", () => {
 });
 
 describe("the cases", () => {
-  it("a case whose why no longer fully holds says what the data shows now", () => {
-    for (const m of MATCHING_CASES) if (m.situation) expect(m.situation.now.length, m.name).toBeGreaterThan(20);
+  it("an update to a why says when and against which release it was checked", () => {
+    for (const m of MATCHING_CASES) for (const u of m.why.match(/Update \([^)]*\)/g) ?? []) {
+      expect(u, m.name).toMatch(/^Update \(\d{4}-\d{2}, (Red List \d|COL\d|snapshot \d)[^)]*\)$/);
+    }
   });
 
   it("every case says which releases it last passed on", () => {
