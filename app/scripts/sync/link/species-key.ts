@@ -12,7 +12,7 @@
  */
 
 import { canonicalEpithet } from "../../../src/lib/name-parts";
-import { normaliseAuthorship } from "./authors";
+import { normaliseAuthorship } from "../../../src/lib/authors";
 
 const genusOf = (scientificName: string) => scientificName.trim().toLowerCase().split(/\s+/)[0] ?? "";
 

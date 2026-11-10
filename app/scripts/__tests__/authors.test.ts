@@ -1,10 +1,10 @@
 /**
- * Author citations compared (scripts/sync/link/authors.ts): IUCN and CoL format
+ * Author citations compared (src/lib/authors.ts): IUCN and CoL format
  * one citation many ways, so equality is too strict, but a different author or
  * year must still refuse, and only clear evidence says "other authors".
  */
 import { describe, it, expect } from "vitest";
-import { compareAuthors } from "../sync/link/authors";
+import { compareAuthors } from "../../src/lib/authors";
 
 describe("compareAuthors", () => {
   it.each([

@@ -47,7 +47,7 @@
 
 import * as fs from "fs";
 import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, type Verdict } from "./species-key";
-import { compareAuthors, normaliseAuthorship } from "./authors";
+import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
 import { speciesNameParts, canonicalEpithet } from "./name-variants";
 import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
 import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";

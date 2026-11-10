@@ -1,6 +1,6 @@
 /**
- * Author citations, compared. The one place the sync decides whether two
- * citations name the same author.
+ * Author citations, compared. The one place the sync, and the app's live GBIF
+ * lookups (gbif-live-keys.ts), decide whether two citations name the same author.
  *
  * Two questions, two strictnesses:
  *   - normaliseAuthorship: the same citation, written alike once brackets,
@@ -10,7 +10,8 @@
  *   - compareAuthors: are these the same author, clearly other authors, or
  *     can't it be told? Formats vary too much between IUCN and CoL for equality
  *     ("Hook.f." / "Hook.fil.", "A.Shaw" / "Airy Shaw", "Silhavy" / "Šilhavý"),
- *     so it compares author words and years (accept-match.ts, assessment-link.ts).
+ *     so it compares author words and years (the sync's link/accept-match.ts
+ *     and link/assessment-link.ts, and gbif-live-keys.ts).
  */
 
 /**
@@ -41,7 +42,7 @@ const shareWord = (a: string[], b: string[], min: number) =>
   a.some((x) => b.some((y) => x === y || (x.length >= min && y.startsWith(x)) || (y.length >= min && x.startsWith(y))));
 
 /** One typo apart: a letter changed, added or dropped, or two neighbours swapped ("Kujit" / "Kuijt"). */
-function oneTypo(x: string, y: string): boolean {
+export function oneTypo(x: string, y: string): boolean {
   if (x === y) return true;
   if (Math.min(x.length, y.length) < 4 || Math.abs(x.length - y.length) > 1) return false;
   let i = 0;

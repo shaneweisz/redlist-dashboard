@@ -426,47 +426,6 @@ Decisions, in two steps kept apart so each can be explained on its own:
 | `reason` | text | one sentence on why |
 | `counted` | boolean | whether the row's records count |
 
-#### `link/live-keys.ts`
-
-```text
-live_keys: the id GBIF's *live* occurrence index files a species' records
-under, where that differs from the snapshot's. The app's live GBIF queries
-(maps, record breakdowns, photos, nearby species) go to that index, not the
-snapshot, so they need its ids.
-
-The two differ for the weeks between GBIF re-indexing against a newer XR and
-the first snapshot filed under it; CoL renumbers about 2% of ids per release.
-Every other month the releases are the same and this table is empty.
-
-Built from: the snapshot's taxa, and the same link stage run on GBIF's live
-XR (its taxa, matcher answers and link), see sync.ts.
-
-Decisions:
-  - An assessed species takes its live link's usage_id: where its records
-    start, by the same rules as the snapshot's link (a rename follows to the
-    new accepted species, a lump keeps to its own name's usage). Refused,
-    duplicate and unlinked species get no row.
-  - Any other CoL species follows its name: the live usage with its id and
-    name, else the one usage with its name and authorship, and then that
-    usage's species (taxa.species_id, the species GBIF counts its records
-    towards).
-  - A group follows its name and rank to the live release's accepted taxon
-    (Ostracoda, B8TXJ in COL26.6 XR, is another id in COL26.10 XR).
-  - Only differences are kept for CoL species (a few percent of 2.3M); every
-    assessed species gets a row, and the lists keep it only where it differs.
-  - Never used for counts or taxonomy: those come from the snapshot's release.
-```
-
-`core/live_keys.parquet` · 222,598 rows · 2 MB
-
-| column | type | |
-|---|---|---|
-| `kind` | text | 'assessed' (id is a SIS taxon id) \| 'species' \| 'group' (id is a CoL id; a group is a higher taxon the app asks GBIF about, src/config/gbif-taxon-keys.json) |
-| `id` | text | the species, as the snapshot names it |
-| `live_key` | text | the live index's id for it |
-
-`taxonomy/gbif-live-keys.json` · 354 kB
-
 ### Count
 
 #### `dbt/models/count/usage_owner.sql`
@@ -576,7 +535,6 @@ Decisions:
 | `year_published` | text |  |
 | `countries` | text | lists, ';'-joined (the app's filter SQL reads them so) |
 | `gbif_species_key` | text | see record_counts |
-| `gbif_live_key` | text | the id GBIF's live index uses for it, where that differs (live_keys); the app's live GBIF queries ask it first. NULL most months |
 | `count_note` | text | 'unlinked' when it is linked to no CoL species (waiting in the match queue), so no records are counted; else NULL |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
@@ -702,7 +660,6 @@ Decisions:
 | `gbif_species_key` | text | the CoL id, three times: the app reads each name in a different place |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
-| `gbif_live_key` | text | the id GBIF's live index uses for it, where that differs (live_keys). NULL most months |
 
 #### `dbt/models/lists/app_taxa.sql`
 
@@ -1239,7 +1196,7 @@ It is not CoL's newest. GBIF re-indexes a few times a year (July and November 20
 
 - A name CoL added or changed since that release isn't there to match: the species queues (*no species match*), or matches the older treatment.
 - The CoL-differences card, and "the Red List lags CoL", describe CoL as of that release.
-- GBIF's *live* API moves before the snapshot does: once GBIF re-files its records against a newer XR, the app's live panels (map, record breakdown, photos, nearby species) ask it with the older XR's ids, and the ~2% CoL renumbered find fewer or none until the next sync. Counts are unaffected.
+- GBIF's *live* API moves before the snapshot does: once GBIF re-files its records against a newer XR, our ids can find few or none there. The app's live panels (map, record breakdown, photos, nearby points, country map) then also ask with the id GBIF's matcher gives our name in the newer release (`src/lib/gbif-live-keys.ts`, see docs/app.md). Counts are unaffected, and nothing in the sync changes.
 
 Following CoL's newest release instead was tried and dropped (PR #626): counting an older snapshot in a newer taxonomy means guessing where GBIF's next re-index will file each record, and the guess failed without a sign (meadow foxtail's 581k records landed on *Alopecurus arundinaceus* through a homonym CoL left behind).
 
@@ -1264,7 +1221,7 @@ The answer is taken without review (`accept-match.ts`) when:
 
 A same-spelled name with the match's own author citation isn't a rival: that is CoL holding the name twice, and the twin rule below counts both. Except when the match is a synonym and its twin an accepted species: CoL is then saying both that the name is a species and that it is another one (*Sipyloidea brevicerci*), so a person decides. Names the Red List itself marks as unsettled (aff., cf., sp., `[...]` in the name; ined., auct., non, sensu in the authority) always go to a person: the matcher read *Heliotropium* aff. *wagneri* "[non Vierh.]" as *H. wagneri* Vierh. So does a synonym match by other authors than the Red List's: when CoL drops a species, the only name left spelled like it can be another author's, for another organism (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775; what was left, Schilsky, 1888, is a synonym of *Mycetophagus quadripustulatus*).
 
-Author citations are compared in one place, `link/authors.ts`: *same* (an author word in common, abbreviations allowed, and no conflicting year), *other* (no word, not even one a typo off, and no year in common, and not the same author in brackets), or *unclear* (everything between: a year out, a misspelling, a bare "L."). Only *other* queues a synonym; only *same* lets the authors pick between homonyms.
+Author citations are compared in one place, `app/src/lib/authors.ts` (the app uses it too): *same* (an author word in common, abbreviations allowed, and no conflicting year), *other* (no word, not even one a typo off, and no year in common, and not the same author in brackets), or *unclear* (everything between: a year out, a misspelling, a bare "L."). Only *other* queues a synonym; only *same* lets the authors pick between homonyms.
 
 Everything else is a case for **`decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart) the Red List name is, who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases: each sync re-applies a decision while its names still resolve, and asks again when they don't (or when the Red List renames the species). A decision always beats the matcher. Undecided species link to nothing and count no records until someone decides.
 

@@ -22,7 +22,7 @@
  *
  * Author citations are compared in authors.ts.
  */
-import { compareAuthors } from "./authors";
+import { compareAuthors } from "../../../src/lib/authors";
 
 export interface MatchAnswer {
   usage_id: string | null;

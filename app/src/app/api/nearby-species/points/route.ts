@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifJson } from "@/lib/gbif-fetch";
+import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_POINTS_LIMIT,
@@ -70,7 +71,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const data = (await gbifJson(nearbyPointsUrl({ ...where, speciesKey }))) as {
+    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
+    const url = new URL(nearbyPointsUrl({ ...where, speciesKey }));
+    setKeys(url.searchParams, "taxonKey", await liveGbifKeys(speciesKey));
+    const data = (await gbifJson(url.toString())) as {
       results?: GbifOccurrence[];
       count?: number;
     };

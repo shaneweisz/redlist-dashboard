@@ -6611,7 +6611,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         </HoverTooltip>
                       ) : s.gbif_records != null && s.gbif_species_key ? (
                         <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
+                          href={`/api/gbif-link?key=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={TABLE_NUMBER_LINK}
@@ -6647,7 +6647,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         if (key && since) {
                           return (
                             <a
-                              href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
+                              href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={TABLE_NUMBER_LINK}
