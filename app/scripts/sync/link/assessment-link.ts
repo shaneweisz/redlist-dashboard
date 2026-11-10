@@ -105,11 +105,11 @@ export async function buildLink(
   // ── 1. Name ────────────────────────────────────────────────────────────────
   const answers = new Map((await rows<Omit<MatchAnswer, "alternatives"> & { sis_taxon_id: number; alts: string | null }>(conn, `
     SELECT sis_taxon_id, matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
-           to_json(alternatives)::VARCHAR AS alts
+           alternatives AS alts
     FROM ${parquet(inputs.matches)}`)).map((m) => [m.sis_taxon_id, { ...m, alternatives: (m.alts ? JSON.parse(m.alts) : null) ?? [] } as MatchAnswer]));
   const speciesOf = new Map((await rows<{ col_id: string; species_id: string | null }>(conn, `
     WITH ids AS (SELECT matcher_col_id AS id FROM ${parquet(inputs.matches)} UNION
-                 SELECT unnest(list_transform(alternatives, lambda a: a.col_id)) FROM ${parquet(inputs.matches)})
+                 SELECT unnest(json_extract_string(alternatives, '$[*].col_id')) FROM ${parquet(inputs.matches)})
     SELECT t.col_id, t.species_id FROM ids JOIN col_usages t ON t.col_id = ids.id`)).map((r) => [r.col_id, r.species_id]));
   const decidedNames = [...new Set([...decisions.values()].flatMap((d) => (d.colName ? [norm(d.colName)] : [])))];
   const candidates = new Map<string, Candidate[]>();

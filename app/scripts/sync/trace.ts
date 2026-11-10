@@ -51,12 +51,16 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   // ── 1. The name
   say(); say("1. The name");
   const [m] = await rows<{ matcher_col_id: string | null; matcher_name: string | null; matcher_authorship: string | null; matcher_rank: string | null;
-    matcher_status: string | null; match_type: string | null; confidence: number | null; score: string | null; alts: string | null }>(conn, `
-    SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence, to_json(matcher_score)::VARCHAR AS score,
-           to_json(alternatives)::VARCHAR AS alts FROM ${pq(T.matches)} WHERE sis_taxon_id = ${s.sis}`);
+    matcher_status: string | null; match_type: string | null; confidence: number | null; score: string | null; alts: string | null;
+    matcher_version: string | null; matcher_xr: string | null }>(conn, `
+    SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
+           CASE WHEN score_total IS NOT NULL THEN to_json({'name': score_name, 'authorship': score_authorship, 'classification': score_classification,
+             'rank': score_rank, 'status': score_status, 'total': score_total})::VARCHAR END AS score,
+           alternatives AS alts, matcher_version, matcher_xr FROM ${pq(T.matches)} WHERE sis_taxon_id = ${s.sis}`);
   if (!m || !m.matcher_col_id) {
     say(`  The matcher found no CoL record (${m?.match_type ?? "not asked"}).`);
   } else {
+    say(`  Asked matching-ws ${m.matcher_version ?? "?"}, indexed from XR ${m.matcher_xr ?? "?"}.`);
     say(`  The matcher answered: ${m.matcher_name} ${m.matcher_authorship ?? ""} [${m.matcher_col_id}, ${m.matcher_status?.toLowerCase()} ${m.matcher_rank?.toLowerCase()}], ${m.match_type}, ${m.confidence}% sure`);
     const score = (m.score ? JSON.parse(m.score) : null) as Score;
     say(`    points: ${score ? points(score) : m.match_type === "HIGHERRANK" ? "none: a fallback to a higher rank, which the matcher doesn't score" : "none recorded"}`);

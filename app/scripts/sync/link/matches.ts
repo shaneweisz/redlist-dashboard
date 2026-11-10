@@ -15,12 +15,17 @@
  *                  before any rule
  *   match_type     exact, variant, fuzzy, higher rank, none
  *   confidence     0-100
- *   matcher_score  why the matcher ranked its answer first: the points it gave
- *                  {name, authorship, classification, rank, status, total}, as
- *                  matching-ws reports them (MatchingService at the pinned
- *                  release; authorship is 0, since none is sent)
- *   alternatives   the other CoL records the matcher weighed, each with its score:
- *                  [{col_id, name, authorship, rank, status, confidence, match_type, score}]
+ *   score_name, score_authorship, score_classification, score_rank, score_status, score_total
+ *                  why the matcher ranked its answer first: the points it gave
+ *                  each part, as matching-ws reports them (MatchingService at the
+ *                  pinned release; authorship is 0, since none is sent). Empty
+ *                  for a fallback to a higher rank the matcher didn't score
+ *   alternatives   the other CoL records the matcher weighed, as JSON text, each
+ *                  with its points: [{col_id, name, authorship, rank, status,
+ *                  confidence, match_type, score: {name, ..., total}}]
+ *   matcher_version, matcher_xr
+ *                  what answered: the matching-ws release and the CoL XR its
+ *                  index was built from
  *
  * Decisions:
  *   - Each name is asked as GBIF sees most records: the name, with IUCN's
@@ -166,9 +171,13 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
            answer->>'$.usage.authorship' AS matcher_authorship, answer->>'$.usage.rank' AS matcher_rank,
            answer->>'$.usage.status' AS matcher_status, answer->>'$.match_type' AS match_type,
            (answer->>'$.confidence')::INTEGER AS confidence,
-           CAST(answer->'$.score' AS ${SCORE}) AS matcher_score,
-           list_transform(CAST(answer->'$.alternatives' AS ${ALT}[]), lambda a: {'col_id': a.usage_id, 'name': a.name, 'authorship': a.authorship,
-             'rank': a.rank, 'status': a.status, 'confidence': a.confidence, 'match_type': a.match_type, 'score': a.score}) AS alternatives
+           (answer->>'$.score.name')::INTEGER AS score_name, (answer->>'$.score.authorship')::INTEGER AS score_authorship,
+           (answer->>'$.score.classification')::INTEGER AS score_classification, (answer->>'$.score.rank')::INTEGER AS score_rank,
+           (answer->>'$.score.status')::INTEGER AS score_status, (answer->>'$.score.total')::INTEGER AS score_total,
+           -- JSON text, not a list of structs: readable in any parquet viewer, and DuckDB still queries it.
+           to_json(list_transform(CAST(answer->'$.alternatives' AS ${ALT}[]), lambda a: {'col_id': a.usage_id, 'name': a.name, 'authorship': a.authorship,
+             'rank': a.rank, 'status': a.status, 'confidence': a.confidence, 'match_type': a.match_type, 'score': a.score}))::VARCHAR AS alternatives,
+           ${lit(matcher.version)} AS matcher_version, ${lit(matcher.datasetKey)} AS matcher_xr
     FROM match_rows ORDER BY sis_taxon_id
   ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
   return { asked: missing.length, cached: jobs.length - missing.length };
