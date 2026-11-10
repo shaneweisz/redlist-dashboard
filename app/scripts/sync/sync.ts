@@ -54,7 +54,7 @@ import { runDbt, exportDbtTables } from "./dbt";
 import { buildColRevisions } from "./precomputed/col-revisions";
 import { buildSummaries } from "./precomputed/summaries";
 import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
-import { observe, mismatches } from "./checks/check-fixtures";
+import { observe, mismatches, buildVersions, failureKind } from "./checks/check-fixtures";
 import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
@@ -166,10 +166,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   const conn = await openDuckDB();
   const obs = await observe(conn, PUBLISH_DIR, MATCHING_CASES);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
-  manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };
+  // Each case says which releases it last passed on: a failure on those is a regression, one on newer ones may be the data moving.
+  const versions = buildVersions(manifest as Parameters<typeof buildVersions>[0]);
+  manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => ({ name: c.name, kind: failureKind(c, versions) })) };
   if (failed.length > 0) {
     writeManifest(T.syncJson, manifest);
-    throw new Error(`sync: ${failed.length} matching fixtures fail: ${failed.map((c) => `${c.name} (${mismatches(c, obs.get(c.name)!).join("; ")})`).join(", ")}`);
+    throw new Error(`sync: ${failed.length} matching fixtures fail:\n  ${failed.map((c) => `${c.name}: ${mismatches(c, obs.get(c.name)!).join("; ")}\n    ${failureKind(c, versions)}`).join("\n  ")}`);
   }
   const groupMismatches = await specialistGroupMismatches(conn, T);
   manifest.specialist_groups = { mismatches: groupMismatches };

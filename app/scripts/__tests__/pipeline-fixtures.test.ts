@@ -4,14 +4,36 @@
  * case list itself stays well-formed.
  */
 import { describe, it, expect } from "vitest";
-import { mismatches, type Observed } from "../sync/checks/check-fixtures";
+import { mismatches, failureKind, buildVersions, type Observed } from "../sync/checks/check-fixtures";
 import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
   assessed: true, category: "VU", linkedTo: "Malus domestica", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
   records: 8_413, neListed: { "Malus domestica": false },
 };
-const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", expect });
+const confirmed = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
+const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", confirmed, expect });
+
+describe("failureKind", () => {
+  it("calls a failure on the releases a case last passed on a regression", () => {
+    expect(failureKind(c({ linkedTo: "X" }), confirmed)).toBe("a regression: it passed on these same releases");
+  });
+  it("names the releases that moved since, the snapshot only for a case about records", () => {
+    const newer = { redlist: "2026-1", col: "COL26.10 XR", snapshot: "2026-12-01" };
+    expect(failureKind(c({ linkedTo: "X" }), newer)).toMatch(/^confirmed on older releases \(col COL26.6 XR → COL26.10 XR\)/);
+    expect(failureKind(c({ minRecords: 5 }), newer)).toMatch(/col COL26.6 XR → COL26.10 XR, snapshot 2026-11-01 → 2026-12-01/);
+    expect(failureKind(c({ linkedTo: "X" }), { ...confirmed, snapshot: "2026-12-01" })).toBe("a regression: it passed on these same releases");
+  });
+  it("reads a build's releases from its sync.json", () => {
+    expect(buildVersions({ redlist: { database: "redlist_2026_1" }, col: { xr: { alias: "COL26.6 XR" } }, gbif: { snapshot: "2026-11-01" } })).toEqual(confirmed);
+  });
+});
+
+describe("the cases", () => {
+  it("every case says which releases it last passed on", () => {
+    for (const m of MATCHING_CASES) expect(m.confirmed, m.name).toMatchObject({ redlist: expect.any(String), col: expect.any(String), snapshot: expect.any(String) });
+  });
+});
 
 describe("mismatches", () => {
   it("passes when every stated expectation holds and ignores unstated ones", () => {

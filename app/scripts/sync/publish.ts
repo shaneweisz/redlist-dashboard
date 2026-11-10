@@ -23,7 +23,7 @@ export async function publish(opts: { upload?: boolean } = {}): Promise<void> {
     throw new Error(`publish: no finished build at ${PUBLISH_DIR} (run npm run sync first)`);
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(PUBLISH_DIR, syncPath("sync.json")), "utf-8"));
-  if (manifest.fixtures?.failed?.length) throw new Error(`publish: the build's fixtures failed: ${manifest.fixtures.failed.join(", ")}`);
+  if (manifest.fixtures?.failed?.length) throw new Error(`publish: the build's fixtures failed: ${manifest.fixtures.failed.map((f: { name: string } | string) => (typeof f === "string" ? f : f.name)).join(", ")}`);
   if (manifest.data_tests?.passed !== true) throw new Error("publish: the build's data tests didn't pass (see npm run sync's checks)");
 
   const appData = path.join(__dirname, "..", "..", "data", "sync");

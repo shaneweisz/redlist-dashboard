@@ -22,7 +22,7 @@ import * as path from "path";
 import { type DuckDBConnection } from "@duckdb/node-api";
 import { DATA_DIR } from "../../lib/utils";
 import { loadFacts, inSync } from "./compare/facts";
-import { MATCHING_CASES, type MatchCase } from "./fixtures/matching";
+import { MATCHING_CASES, type MatchCase, type Versions } from "./fixtures/matching";
 import { lit, openDuckDB } from "../sql";
 
 export interface Observed {
@@ -79,6 +79,31 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
   return out;
 }
 
+/** The releases a build was made from, as `confirmed` names them, from its sync.json. */
+export function buildVersions(syncJson: { redlist?: { database?: string }; col?: { xr?: { alias?: string } }; gbif?: { snapshot?: string } }): Versions {
+  return {
+    redlist: (syncJson.redlist?.database ?? "?").replace(/^redlist_/, "").replace(/_/g, "-"),
+    col: syncJson.col?.xr?.alias ?? "?",
+    snapshot: syncJson.gbif?.snapshot ?? "?",
+  };
+}
+
+/**
+ * What a failing case's releases say about the failure: the same releases it last
+ * passed on make it a regression in the code; newer ones may be the data moving.
+ * The snapshot counts only for a case about records.
+ */
+export function failureKind(c: MatchCase, build: Versions): string {
+  const e = c.expect;
+  const aboutRecords = e.hasRecords !== undefined || e.minRecords !== undefined || e.maxRecords !== undefined;
+  const moved = (["redlist", "col", "snapshot"] as const)
+    .filter((k) => (k !== "snapshot" || aboutRecords) && c.confirmed[k] !== build[k])
+    .map((k) => `${k} ${c.confirmed[k]} → ${build[k]}`);
+  return moved.length === 0
+    ? "a regression: it passed on these same releases"
+    : `confirmed on older releases (${moved.join(", ")}): check it against these, then update its \`confirmed\``;
+}
+
 /** Every way the observation misses the case's expectations (empty = pass). */
 export function mismatches(c: MatchCase, o: Observed): string[] {
   const e = c.expect;
@@ -114,12 +139,14 @@ if (isDirectRun) {
       for (const c of MATCHING_CASES) console.log(c.name.padEnd(28), JSON.stringify(obs.get(c.name)));
       return;
     }
+    const syncJson = path.join(dir, "sync.json");
+    const build = buildVersions(fs.existsSync(syncJson) ? JSON.parse(fs.readFileSync(syncJson, "utf-8")) : {});
     let failed = 0;
     for (const c of MATCHING_CASES) {
       const miss = mismatches(c, obs.get(c.name)!);
       if (miss.length === 0) continue;
       failed++;
-      console.log(`FAIL    ${c.name}: ${miss.join("; ")}`);
+      console.log(`FAIL    ${c.name}: ${miss.join("; ")} (${failureKind(c, build)})`);
     }
     console.log(`\n${MATCHING_CASES.length} cases: ${failed} failed.`);
     if (failed > 0) process.exitCode = 1;
