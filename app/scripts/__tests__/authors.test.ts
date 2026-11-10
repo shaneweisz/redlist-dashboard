@@ -17,6 +17,7 @@ describe("compareAuthors", () => {
     ["(Stertz, 1902)", "(Stertz, 1902)"],
     ["Fabricius, 1775", "(Fabr., 1775)"],
     ["Düben", "Dueben"],
+    ["Lægaard", "Laegaard"],
   ])("same: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("same"));
 
   it.each([
@@ -25,6 +26,9 @@ describe("compareAuthors", () => {
     ["Macfarlane", "Hemsl."],
     ["Hillebr.", "A.Gray"],
     ["(Lesson, 1831)", "(Vieillot, 1817)"],
+    // Real homonyms the queue caught on COL26.6 XR.
+    ["Boisduval, 1833", "Herrich-Schäffer, 1844"],
+    ["(Draparnaud, 1801)", "(O. F. Müller, 1774)"],
   ])("other: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("other"));
 
   it.each([
@@ -39,6 +43,9 @@ describe("compareAuthors", () => {
     ["L.", "Jacq."],
     // An abbreviation as short as two letters.
     ["Bl.", "Blume"],
+    // Spelt differently: a swap, a typo (both one author).
+    ["Kujit", "Kuijt"],
+    ["Tamaka & Limada", "Yu.Tanaka & Shimada"],
   ])("unclear: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("unclear"));
 
   it("is unclear when either side has no authorship", () => {
