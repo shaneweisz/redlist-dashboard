@@ -32,16 +32,16 @@
 
 -- 1. What each lumped species owns.
 WITH RECURSIVE down(sis, root, usage_key, depth) AS (
-  SELECT sis_taxon_id, usage_id, usage_id, 0 FROM {{ source('core', 'assessment_link') }} WHERE verdict = 'lumped' AND counted
+  SELECT sis_taxon_id, usage_id, usage_id, 0 FROM {{ source('link', 'assessment_link') }} WHERE verdict = 'lumped' AND counted
   UNION ALL
-  SELECT d.sis, d.root, t.col_id, d.depth + 1 FROM down d JOIN {{ source('core', 'taxa') }} t ON t.parent_id = d.usage_key WHERE d.depth < 3
+  SELECT d.sis, d.root, t.col_id, d.depth + 1 FROM down d JOIN {{ source('sources', 'taxa') }} t ON t.parent_id = d.usage_key WHERE d.depth < 3
 ),
 lumped AS (
   SELECT sis, root, usage_key FROM down
   QUALIFY row_number() OVER (PARTITION BY usage_key ORDER BY depth, sis, root) = 1
 ),
-link AS (SELECT * FROM {{ source('core', 'assessment_link') }}),
-taxa AS (SELECT col_id, parent_id, species_id FROM {{ source('core', 'taxa') }})
+link AS (SELECT * FROM {{ source('link', 'assessment_link') }}),
+taxa AS (SELECT col_id, parent_id, species_id FROM {{ source('sources', 'taxa') }})
 
 -- Every claim on a usage; the tests check there is one per usage.
 SELECT usage_key, sis AS sis_taxon_id, root AS link_usage_id, NULL::VARCHAR AS col_id FROM lumped

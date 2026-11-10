@@ -25,7 +25,7 @@ unit_tests:
         rows: |
           SELECT * FROM (VALUES (10::BIGINT, 'Gazella gazella', 'VU'), (11, 'Giraffa camelopardalis', 'VU'), (12, 'Vallonia costata', 'LC'))
             t(id, scientific_name, iucn_category)
-      - input: source('core', 'assessment_link')
+      - input: source('link', 'assessment_link')
         format: sql
         rows: |
           SELECT * FROM (VALUES (12::BIGINT, 'VC')) t(sis_taxon_id, col_id)
@@ -59,7 +59,7 @@ unit_tests:
         rows: |
           SELECT * FROM (VALUES (1::BIGINT, 'Clean species', 'LC'), (3, 'Renamed away', 'LC'), (4, 'Demoted one', 'LC'), (5, 'Lump winner', 'LC'))
             t(id, scientific_name, iucn_category)
-      - input: source('core', 'assessment_link')
+      - input: source('link', 'assessment_link')
         format: sql
         rows: |
           SELECT * FROM (VALUES (1::BIGINT, 'IN1')) t(sis_taxon_id, col_id)

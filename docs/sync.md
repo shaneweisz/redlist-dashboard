@@ -58,7 +58,7 @@ uv run dbt build --profiles-dir . --select record_counts+    # a model and every
 uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
 ```
 
-A run builds into `.sync/` at the repo root: `core/` holds working tables, `data/` the published sync. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
+A run builds into `.sync/` at the repo root: `core/` holds the working tables, one folder per stage (`core/sources/`, `core/link/`, `core/count/`, `core/lists/`), and `data/` the published sync. A full run empties both first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
 
 ## Inputs
 
@@ -217,17 +217,17 @@ SET VARIABLE sp = 'Zosterops simplex';
 
 -- its link rows: what it is in CoL, and why
 SELECT l.role, l.verdict, l.method, c.scientific_name AS col_species, u.scientific_name AS records_start_at, l.counted, l.reason
-FROM 'assessment_link.parquet' l
-JOIN 'assessments.parquet' a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-LEFT JOIN 'taxa.parquet' c ON c.col_id = l.col_id
-LEFT JOIN 'taxa.parquet' u ON u.col_id = l.usage_id
+FROM 'link/assessment_link.parquet' l
+JOIN 'sources/assessments.parquet' a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+LEFT JOIN 'sources/taxa.parquet' c ON c.col_id = l.col_id
+LEFT JOIN 'sources/taxa.parquet' u ON u.col_id = l.usage_id
 WHERE a.scientific_name = getvariable('sp');
 
 -- what its count is made of: each usage it owns, and its records
 SELECT w.link_usage_id, u.scientific_name AS usage, u.rank, u.status, sum(o.n) FILTER (o.georef) AS georef, sum(o.n) AS all_records
-FROM 'usage_owner.parquet' w JOIN 'taxa.parquet' u ON u.col_id = w.usage_key
-LEFT JOIN 'occurrences.parquet' o ON o.usage_key = w.usage_key
-WHERE w.sis_taxon_id = (SELECT sis_taxon_id FROM 'assessments.parquet' WHERE is_latest AND scientific_name = getvariable('sp'))
+FROM 'count/usage_owner.parquet' w JOIN 'sources/taxa.parquet' u ON u.col_id = w.usage_key
+LEFT JOIN 'sources/occurrences.parquet' o ON o.usage_key = w.usage_key
+WHERE w.sis_taxon_id = (SELECT sis_taxon_id FROM 'sources/assessments.parquet' WHERE is_latest AND scientific_name = getvariable('sp'))
 GROUP BY ALL ORDER BY georef DESC NULLS LAST;
 ```
 

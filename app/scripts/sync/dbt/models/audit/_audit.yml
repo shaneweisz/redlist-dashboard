@@ -19,7 +19,7 @@ unit_tests:
       accepted name among its synonyms backs the link.
     model: link_audit
     given:
-      - input: source('core', 'assessments')
+      - input: source('sources', 'assessments')
         format: sql
         rows: |
           SELECT * FROM (VALUES
@@ -28,7 +28,7 @@ unit_tests:
                [{'name': 'Parvipsitta porphyrocephala', 'status': 'SYNONYM'}]),
             (3, true, 'Odd thing', 'Smith, 1900', 'mammals', DATE '2020-01-01', 'MAMMALIA', 'RODENTIA', 'MURIDAE', []::STRUCT(name VARCHAR, status VARCHAR)[])
           ) t(sis_taxon_id, is_latest, scientific_name, authority, taxon_group, assessment_date, class_name, order_name, family, synonyms)
-      - input: source('core', 'assessment_link')
+      - input: source('link', 'assessment_link')
         format: sql
         rows: |
           SELECT * FROM (VALUES
@@ -36,7 +36,7 @@ unit_tests:
             (2, 'primary', 'C2', 'S2', 'synonym', 'matcher', NULL),
             (3, 'primary', 'C3', 'C3', 'accepted', 'decision', 'heuristic')
           ) t(sis_taxon_id, role, col_id, usage_id, method, basis, decided_by)
-      - input: source('core', 'taxa')
+      - input: source('sources', 'taxa')
         format: sql
         rows: |
           SELECT * FROM (VALUES
@@ -45,7 +45,7 @@ unit_tests:
             ('S2', 'Glossopsitta porphyrocephala', '(Dietrichsen, 1837)', 1837, 'Aves', 'Psittaciformes', 'Psittaculidae'),
             ('C3', 'Odd thing', 'Smith, 1901', 2021, 'Mammalia', 'Eulipotyphla', 'Soricidae')
           ) t(col_id, scientific_name, authorship, described_year, class_name, order_name, family)
-      - input: source('core', 'rank_aliases')
+      - input: source('sources', 'rank_aliases')
         format: sql
         rows: |
           SELECT * FROM (VALUES ('order', 'pinales', 'cupressales')) t(rank, name, alias)

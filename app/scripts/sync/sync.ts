@@ -59,7 +59,7 @@ import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
-import { BUILD_DIR, OUT_DIR, tables, parquet } from "./paths";
+import { BUILD_DIR, CORE_DIR, OUT_DIR, tables, parquet } from "./paths";
 import { openDuckDB, rows } from "./sql";
 
 const APP = path.join(__dirname, "..", "..");
@@ -76,9 +76,11 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   if (from < 0) throw new Error(`sync: --from takes one of ${STAGES.join(", ")}`);
   const runs = (stage: Stage) => STAGES.indexOf(stage) >= from;
 
-  // data/ is exactly what gets uploaded, so a full run starts it empty: a file
-  // only an older version wrote would otherwise be published with every sync after it.
-  if (from === 0) fs.rmSync(OUT_DIR, { recursive: true, force: true });
+  // A full run starts the build empty. data/ is exactly what gets uploaded, so a
+  // file only an older version wrote would otherwise be published with every sync
+  // after it; and a stale working table in core/ looks like a real one to anyone
+  // tracing a species. Downloads and the matcher's answers live in ~/.cache.
+  if (from === 0) for (const dir of [OUT_DIR, CORE_DIR]) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(T.syncLog), { recursive: true });
   teeOutput(T.syncLog);
   const manifest: Record<string, unknown> = { built_at: new Date().toISOString(), commit: git("rev-parse", "HEAD"),

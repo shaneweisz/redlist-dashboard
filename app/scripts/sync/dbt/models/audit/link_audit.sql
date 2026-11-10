@@ -55,17 +55,17 @@
 
 WITH latest AS (
   SELECT sis_taxon_id, scientific_name, authority, taxon_group, assessment_date, class_name, order_name, family, synonyms
-  FROM {{ source('core', 'assessments') }} WHERE is_latest
+  FROM {{ source('sources', 'assessments') }} WHERE is_latest
 ),
 link AS (
   SELECT sis_taxon_id, any_value(col_id) AS col_id, any_value(usage_id) AS usage_id, any_value(method) AS method,
          any_value(basis) AS basis, any_value(decided_by) AS decided_by
-  FROM {{ source('core', 'assessment_link') }} WHERE role = 'primary' GROUP BY sis_taxon_id
+  FROM {{ source('link', 'assessment_link') }} WHERE role = 'primary' GROUP BY sis_taxon_id
 ),
-taxa AS (SELECT * FROM {{ source('core', 'taxa') }}),
-aliases AS (SELECT * FROM {{ source('core', 'rank_aliases') }}),
+taxa AS (SELECT * FROM {{ source('sources', 'taxa') }}),
+aliases AS (SELECT * FROM {{ source('sources', 'rank_aliases') }}),
 lumps AS (
-  SELECT col_id, count(DISTINCT sis_taxon_id) AS n FROM {{ source('core', 'assessment_link') }}
+  SELECT col_id, count(DISTINCT sis_taxon_id) AS n FROM {{ source('link', 'assessment_link') }}
   WHERE role = 'primary' AND col_id IS NOT NULL GROUP BY col_id
 ),
 joined AS (

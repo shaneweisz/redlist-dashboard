@@ -26,9 +26,9 @@ def duck(sql):
 
 
 LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
-  FROM read_parquet('{CORE}/assessment_link.parquet') l
-  JOIN read_parquet('{CORE}/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-  LEFT JOIN read_parquet('{CORE}/taxa.parquet') t ON t.col_id = l.col_id
+  FROM read_parquet('{CORE}/link/assessment_link.parquet') l
+  JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+  LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_id
   WHERE l.role = 'primary')"""
 QUEUE = f"read_csv('{BUILD}/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
 

@@ -8,7 +8,9 @@
  *               other. Copied into app/data only to publish, so app/data keeps
  *               matching the sync production serves meanwhile.
  *               PIPELINE_BUILD_DIR builds somewhere else.
- *     core/     working tables: what the stages pass to each other, not published
+ *     core/     working tables: what the stages pass to each other, not published,
+ *               one folder per stage (sources/, link/, count/, lists/), and dbt's
+ *               sync.duckdb. A full run starts it empty, like data/.
  *     data/     what the app reads, laid out as src/lib/data/sync-layout.ts says
  */
 
@@ -26,28 +28,28 @@ export const OUT_DIR = path.join(BUILD_DIR, "data");
 
 /** Every file a sync builds, by stage, under `buildDir`. sync.ts passes these between the builders. */
 export function tables(buildDir = BUILD_DIR) {
-  const core = (f: string) => path.join(buildDir, "core", f);
+  const core = (stage: "sources" | "link" | "count" | "lists", f: string) => path.join(buildDir, "core", stage, f);
   const data = (f: string) => path.join(buildDir, "data", syncPath(f));
   return {
     // 1. Sources
-    sourcesReleases: core("sources-releases.json"),
-    taxa: core("taxa.parquet"),
-    assessments: core("assessments.parquet"),
-    occurrences: core("occurrences.parquet"),
-    occurrenceCountries: core("occurrence_countries.parquet"),
-    commonNames: core("common_names.parquet"),
-    specialistGroupRemits: core("specialist_group_remits.parquet"),
-    rankAliases: core("rank_aliases.parquet"),
+    sourcesReleases: core("sources", "sources-releases.json"),
+    taxa: core("sources", "taxa.parquet"),
+    assessments: core("sources", "assessments.parquet"),
+    occurrences: core("sources", "occurrences.parquet"),
+    occurrenceCountries: core("sources", "occurrence_countries.parquet"),
+    commonNames: core("sources", "common_names.parquet"),
+    specialistGroupRemits: core("sources", "specialist_group_remits.parquet"),
+    rankAliases: core("sources", "rank_aliases.parquet"),
     // 2. Link
-    matches: core("matches.parquet"),
-    link: core("assessment_link.parquet"),
+    matches: core("link", "matches.parquet"),
+    link: core("link", "assessment_link.parquet"),
     matchQueue: path.join(buildDir, "match-queue.tsv"),
     // 3. Count
-    usageOwner: core("usage_owner.parquet"),
-    recordCounts: core("record_counts.parquet"),
-    specialistGroupSpecies: core("specialist_group_species.parquet"),
-    linkAudit: core("link_audit.parquet"),
+    usageOwner: core("count", "usage_owner.parquet"),
+    recordCounts: core("count", "record_counts.parquet"),
+    linkAudit: core("count", "link_audit.parquet"),
     // 4. Lists
+    specialistGroupSpecies: core("lists", "specialist_group_species.parquet"),
     assessed: data("assessed.parquet"),
     assessmentHistory: data("assessments.parquet"),
     species: data("species"),

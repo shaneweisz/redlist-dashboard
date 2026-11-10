@@ -14,4 +14,4 @@
  */
 
 SELECT col_id, parent_id, status, rank, scientific_name, authorship, in_checklist, checklist_parent_id, checklist_name
-FROM {{ source('core', 'taxa') }}
+FROM {{ source('sources', 'taxa') }}

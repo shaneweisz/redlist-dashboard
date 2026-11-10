@@ -16,7 +16,7 @@
 WITH links AS (
   SELECT l.col_id, l.sis_taxon_id AS assessed_id, a.scientific_name AS assessed_name,
          row_number() OVER (PARTITION BY l.col_id ORDER BY (CASE WHEN l.method = 'accepted' THEN 0 ELSE 1 END), l.sis_taxon_id) AS rn
-  FROM {{ source('core', 'assessment_link') }} l
+  FROM {{ source('link', 'assessment_link') }} l
   JOIN {{ ref('assessed') }} a ON a.id = l.sis_taxon_id
   WHERE l.col_id IS NOT NULL AND l.role = 'primary'
 )
