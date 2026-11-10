@@ -8,9 +8,12 @@
  * Built from: assessments, assessment_link, matches, taxa, usage_owner,
  * occurrences, rank_aliases; the releases from the sync.
  *
- * Columns, in groups:
- *   the Red List   sis_taxon_id, redlist_release, redlist_name, redlist_authority,
- *                  category, taxon_group, class, order, family, assessment_date
+ * Columns, in groups, the ones a review reads first at the front:
+ *   at a glance    redlist_name, redlist_authority, col_taxon_name,
+ *                  col_taxon_authorship, col_taxon_rank, col_species_name,
+ *                  verdict, counted, records, name_reason, reason, signals, stratum
+ *   the Red List   sis_taxon_id, redlist_release, category, taxon_group, class,
+ *                  order, family, assessment_date
  *   CoL            role (primary | covered), col_xr, col_taxon_id, col_taxon_name,
  *                  col_taxon_authorship, col_taxon_rank, col_taxon_status
  *                  (the taxon it is), col_species_id, col_species_name,
@@ -121,15 +124,24 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
         CASE WHEN judged THEN lumps_with END AS lumped_with
       FROM evidence
     )
-    SELECT sis_taxon_id, redlist_release, redlist_name, redlist_authority, category, taxon_group, class, "order", family, assessment_date,
-           role, col_xr, col_taxon_id, col_taxon_name, col_taxon_authorship, col_taxon_rank, col_taxon_status,
-           col_species_id, col_species_name, col_species_authorship, col_described_year,
-           verdict, method, basis, decided_by, name_reason, reason, counted, records, georeferenced_records,
-           matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score,
-           stratum, genus_differs, epithet_differs, class_differs, order_differs, family_differs, author_year_differs,
-           iucn_lists_col_name, described_after_assessment, lumped_with,
+    SELECT
+           -- 1. at a glance: what each side calls it, what was decided, and why
+           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, col_taxon_rank, col_species_name,
+           verdict, counted, records, name_reason, reason,
            CASE WHEN judged THEN genus_differs::INT + epithet_differs::INT + class_differs::INT + order_differs::INT + family_differs::INT
              + author_year_differs::INT + (lumped_with > 0)::INT END AS signals,
+           stratum,
+           -- 2. the Red List
+           sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date,
+           -- 3. CoL
+           role, col_xr, col_taxon_id, col_taxon_status, col_species_id, col_species_authorship, col_described_year,
+           -- 4. the decision
+           method, basis, decided_by, georeferenced_records,
+           -- 5. the matcher
+           matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score,
+           -- 6. the evidence
+           genus_differs, epithet_differs, class_differs, order_differs, family_differs, author_year_differs,
+           iucn_lists_col_name, described_after_assessment, lumped_with,
            CASE WHEN role = 'primary' THEN row_number() OVER (PARTITION BY stratum, role = 'primary' ORDER BY hash(sis_taxon_id, 'link-audit-v1')) END AS sample_rank
     FROM signals
     ORDER BY role DESC, stratum, sample_rank, sis_taxon_id, col_species_id
