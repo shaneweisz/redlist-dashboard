@@ -1229,7 +1229,7 @@ To follow any species yourself, see [Tracing a species](#tracing-a-species).
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-626-col-versions/01-link-flow-v3.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-627-col-snapshot-release/01-link-flow.png)
 
 The diagram is generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, so it can't show an example its own data contradicts.
 
