@@ -10,7 +10,7 @@ import {
 
 const primary = (sis: number, col_species_id: string | null, over: Partial<LinkRow> = {}): LinkRow => ({
   sis_taxon_id: sis, role: "primary", col_species_id, col_taxon_id: col_species_id, verdict: "own", method: "accepted", basis: "matcher",
-  decided_by: null, name_reason: null, reason: "", counted: true, ...over,
+  decided_by: null, name_reason: null, to_review: null, reason: "", counted: true, ...over,
 });
 const sp = (col_id: string, scientific_name: string, authorship: string | null, family = "F", class_name = "C"): AcceptedSpecies =>
   ({ col_id, scientific_name, authorship, family, class_name });

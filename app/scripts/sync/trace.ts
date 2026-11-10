@@ -5,7 +5,7 @@
  *   1. the name: GBIF's matcher's answer for the Red List name, with the points
  *      it gave each candidate, and why the sync took that answer, took an
  *      override's instead, or left the species waiting (match-overrides.tsv,
- *      the match queue)
+ *      to_review)
  *   2. the concept: each link row, the CoL taxon and species it names, its
  *      verdict and the reason for it
  *   3. the count: every CoL record whose GBIF records count for it, and the
@@ -72,20 +72,20 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   }
   const o = readOverrides().get(s.sis);
   if (o) say(`  Override (match-overrides.tsv): ${o.colName ?? "not in CoL"} ${o.colAuthorship ?? ""}, by ${o.by}${o.reviewed ? ", reviewed" : ""}, against ${o.redlistVersion ?? "?"} × ${o.colVersion ?? "?"}: ${o.note}`);
-  const queue = fs.existsSync(T.matchQueue) ? fs.readFileSync(T.matchQueue, "utf-8").split("\n").find((l) => l.startsWith(`${s.sis}\t`)) : undefined;
-  if (queue) { const f = queue.split("\t"); say(`  In the match queue: ${f[3]}, ${f[4]}`); }
 
   // ── 2. The concept
   say(); say("2. The concept");
   const links = await rows<{ role: string; verdict: string; method: string; basis: string | null; name_reason: string | null; reason: string; counted: boolean;
-    taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null }>(conn, `
-    SELECT l.role, l.verdict, l.method, l.basis, l.name_reason, l.reason, l.counted, l.col_taxon_id, l.col_species_id,
+    taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null;
+    to_review: string | null }>(conn, `
+    SELECT l.role, l.verdict, l.method, l.basis, l.name_reason, l.to_review, l.reason, l.counted, l.col_taxon_id, l.col_species_id,
            t.scientific_name || coalesce(' ' || t.authorship, '') AS taxon, t.rank AS taxon_rank, t.status AS taxon_status,
            c.scientific_name || coalesce(' ' || c.authorship, '') AS species
     FROM ${pq(T.link)} l LEFT JOIN ${pq(T.taxa)} t ON t.col_id = l.col_taxon_id LEFT JOIN ${pq(T.taxa)} c ON c.col_id = l.col_species_id
     WHERE l.sis_taxon_id = ${s.sis} ORDER BY l.role DESC, l.counted DESC, l.col_species_id`);
   for (const l of links) {
     if (l.role === "primary" && l.name_reason) say(`  Why this name: ${l.name_reason}`);
+    if (l.role === "primary" && l.to_review) say(`  To review: ${l.to_review}`);
     const where = !l.col_species_id ? "no CoL species"
       : l.col_taxon_id && l.col_taxon_id !== l.col_species_id ? `CoL taxon ${l.taxon} [${l.col_taxon_id}, ${l.taxon_status} ${l.taxon_rank}], in species ${l.species} [${l.col_species_id}]`
       : `CoL species ${l.species} [${l.col_species_id}]`;

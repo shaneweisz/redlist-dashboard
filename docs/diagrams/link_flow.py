@@ -30,7 +30,13 @@ LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_species_id
   WHERE l.role = 'primary')"""
-QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
+# The queue: the links that need a person (assessment_link.to_review), with the Red List's name and the matcher's answer.
+QUEUE = f"""(SELECT a.scientific_name AS name, a.authority, m.matcher_name, m.matcher_authorship,
+  regexp_replace(l.to_review, '^no decision yet: ', '') AS reason
+  FROM read_parquet('{CORE}/link/assessment_link.parquet') l
+  JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+  LEFT JOIN read_parquet('{CORE}/link/matches.parquet') m ON m.sis_taxon_id = l.sis_taxon_id
+  WHERE l.role = 'primary' AND l.to_review IS NOT NULL)"""
 
 # Each branch: how to count it, and a species that takes it (checked below).
 NAME_BRANCHES = {
@@ -122,7 +128,7 @@ def queue_line(reason, n, e, a, m, ma):
 out.append(f'  start [label={box("src", "A Red List species: its name and authority")}];')
 out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
 out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly (or spelt only as the codes allow), as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide;", "CoL's provisional copy of the name is not a rival);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
-out.append(f'  queue [label={box("q", "Otherwise a person decides: the match queue", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
+out.append(f'  queue [label={box("q", "Otherwise a person decides: to_review", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
 out.append(f'  dec [label={box("own", "Decided: a row in match-overrides.tsv", ["for the releases it names, while what it rested on still holds", eg("Cipangopaludina chinensis", name["decision"][1])], name["decision"][0])}];')
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides;", "what it might be stays off the Not Evaluated list", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')

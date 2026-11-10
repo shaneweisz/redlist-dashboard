@@ -42,7 +42,7 @@ NODES = [
     ("remits", "sources", 3.55, "core", "specialist_group_remits", "+ rank_aliases; written every run"),
     ("matches", "link", 1.5, "core", "matches", "matching-ws's answer per species"),
     ("link", "link", 0.75, "core", "assessment_link", "assessed species → CoL species it is"),
-    ("queue", "link", 2.25, "else", "match-queue.tsv", "review/: species waiting for a person"),
+    ("queue", "link", 2.25, "else", "links.parquet", "review/: every link, readable; to_review"),
     ("owner", "count", 1.0, "core", "usage_owner", "dbt · one row per usage: whose records"),
     ("counts", "count", 2.0, "core", "record_counts", "dbt · one row per species with records"),
     ("species", "lists", 0.0, "data", "species/", "dbt · lists/: the universe, described"),

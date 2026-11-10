@@ -11,7 +11,8 @@
  * Columns, in groups, the ones a review reads first at the front:
  *   at a glance    redlist_name, redlist_authority, col_taxon_name,
  *                  col_taxon_authorship, name_reason (why this name), reason
- *                  (what it makes the species)
+ *                  (what it makes the species), to_review (why a person needs to
+ *                  look, when one does: the queue is WHERE to_review IS NOT NULL)
  *   the Red List   sis_taxon_id, redlist_release, category, taxon_group, class,
  *                  order, family, assessment_date
  *   CoL            role (primary | covered), col_xr, col_taxon_id, col_taxon_name,
@@ -24,7 +25,9 @@
  *                  georeferenced_records (what this row counts)
  *   the matcher    matcher_version, matcher_name, matcher_authorship,
  *                  matcher_status, match_type, confidence, matcher_score (its
- *                  answer for the name, primary rows; JSON points)
+ *                  answer for the name, primary rows; JSON points),
+ *                  matcher_alternatives (the other candidates, each with its
+ *                  points, JSON)
  *   the evidence   primary rows only. link_kind: how the link was made, the unit
  *                  an error rate is measured per ('accepted name': the Red List
  *                  name is an accepted CoL species; 'synonym': a CoL synonym, linked
@@ -82,7 +85,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
              l.role, ${lit(releases.colXr)} AS col_xr,
              l.col_taxon_id, tx.scientific_name AS col_taxon_name, tx.authorship AS col_taxon_authorship, tx.rank AS col_taxon_rank, tx.status AS col_taxon_status,
              l.col_species_id, sp.scientific_name AS col_species_name, sp.authorship AS col_species_authorship, sp.described_year AS col_described_year,
-             l.verdict, l.method, l.basis, l.decided_by, l.name_reason, l.reason, l.counted,
+             l.verdict, l.method, l.basis, l.decided_by, l.name_reason, l.to_review, l.reason, l.counted,
              CASE WHEN l.counted THEN c.records END AS records, CASE WHEN l.counted THEN c.georeferenced_records END AS georeferenced_records,
              CASE WHEN l.role = 'primary' THEN m.matcher_version END AS matcher_version,
              CASE WHEN l.role = 'primary' THEN m.matcher_name END AS matcher_name,
@@ -91,6 +94,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
              CASE WHEN l.role = 'primary' THEN m.match_type END AS match_type,
              CASE WHEN l.role = 'primary' THEN m.confidence END AS confidence,
              CASE WHEN l.role = 'primary' THEN m.matcher_score END AS matcher_score,
+             CASE WHEN l.role = 'primary' THEN m.alternatives END AS matcher_alternatives,
              -- for the evidence
              lower(a.scientific_name) AS iname, lower(sp.scientific_name) AS cname,
              lower(a.class_name) AS ic, lower(sp.class_name) AS cc, lower(a.order_name) AS io, lower(sp.order_name) AS co,
@@ -130,7 +134,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     )
     SELECT
            -- 1. at a glance: what each side calls it, and why the link is what it is
-           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, name_reason, reason,
+           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, name_reason, reason, to_review,
            -- 2. the Red List
            sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date,
            -- 3. CoL
@@ -138,7 +142,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
            -- 4. the decision
            verdict, counted, records, georeferenced_records, method, basis, decided_by,
            -- 5. the matcher
-           matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score,
+           matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score, matcher_alternatives,
            -- 6. the evidence
            link_kind,
            CASE WHEN judged THEN genus_differs::INT + epithet_differs::INT + class_differs::INT + order_differs::INT + family_differs::INT

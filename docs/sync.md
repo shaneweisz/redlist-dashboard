@@ -67,7 +67,7 @@ A run builds into `.sync/` at the repo root, in three folders, by what you do wi
   publish/     exactly what sync:publish uploads and what the app reads: lists/ taxonomy/ search/ summaries/,
                sync.json, sync.log
   review/      what you read before publishing: changes/ (report.md, the comparison with production),
-               match-queue.tsv (species waiting for a decision) and links.parquet (every link, readable)
+               and links.parquet (every link, readable; to_review marks the ones waiting for a person)
 ```
 
 A full run empties all three first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
@@ -143,7 +143,7 @@ Three details make that sentence work on real names:
 
 A person decides instead when the Red List marks the name as unsettled (aff., cf., sp., ined., sensu…), when the match is a synonym by other authors than the Red List's (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775, and what's left is Schilsky's, a synonym of another beetle), and in every other case the rule doesn't settle. Author citations are compared in one place, `app/src/lib/authors.ts`.
 
-Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each overriding the matcher for it, naming the Red List name and authority it was decided for, the CoL name it is (and its authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species or now cites clearly other authors for it, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be stay off the Not Evaluated list: any CoL species their own name leads to, as an accepted name or as a synonym filed under it, and the matcher's guess. That is broad on purpose until the decision is made (it also keeps off the small heath, *Coenonympha pamphilus*, under which CoL files the assessed *C. gardetta*'s name).
+Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each overriding the matcher for it, naming the Red List name and authority it was decided for, the CoL name it is (and its authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species or now cites clearly other authors for it, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. Every link a person needs to look at says why in `assessment_link.to_review`: no decision yet (with the rule's reason), an override that no longer holds, or one not yet reviewed. That's the queue, read in `.sync/review/links.parquet` with the matcher's answer and candidates beside it. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be stay off the Not Evaluated list: any CoL species their own name leads to, as an accepted name or as a synonym filed under it, and the matcher's guess. That is broad on purpose until the decision is made (it also keeps off the small heath, *Coenonympha pamphilus*, under which CoL files the assessed *C. gardetta*'s name).
 
 ### 2. The concept: what does that CoL name make the species?
 
@@ -220,7 +220,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes once inputs are cached)
 cd app && npm run sync
 
-# 3. Read .sync/review/changes/report.md, and .sync/review/match-queue.tsv for species waiting on a decision
+# 3. Read .sync/review/changes/report.md, and the links waiting for a person: .sync/review/links.parquet WHERE to_review IS NOT NULL
 
 # 4. Publish: copies .sync/publish/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish

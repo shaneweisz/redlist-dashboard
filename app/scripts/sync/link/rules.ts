@@ -34,6 +34,8 @@ export interface LinkRow {
    * gave it, or why the species waits. Primary rows only.
    */
   name_reason: string | null;
+  /** Why a person needs to look at this link: no decision yet, an override that no longer holds or isn't reviewed. Empty when nothing needs a person. */
+  to_review: string | null;
   reason: string;
   counted: boolean;
 }
@@ -51,7 +53,7 @@ const genus = (n: string) => n.split(" ")[0].toLowerCase();
  * rules, so a row the first rule adds isn't added again by a later one.
  * Returns whether the row was added.
  */
-export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role" | "name_reason">) => boolean;
+export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role" | "name_reason" | "to_review">) => boolean;
 
 export function coverer(links: LinkRow[]): Cover {
   const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_species_id]));
@@ -61,7 +63,7 @@ export function coverer(links: LinkRow[]): Cover {
     const k = `${row.sis_taxon_id}|${row.col_species_id}|${row.counted ? row.col_taxon_id : ""}`;
     if (seen.has(k) || (row.verdict !== "lumped" && primaryTarget.get(row.sis_taxon_id) === row.col_species_id)) return false;
     seen.add(k);
-    links.push({ ...row, role: "covered", basis: "rule", decided_by: null, name_reason: null });
+    links.push({ ...row, role: "covered", basis: "rule", decided_by: null, name_reason: null, to_review: null });
     return true;
   };
 }

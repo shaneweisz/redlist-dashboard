@@ -165,7 +165,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes from cached inputs)
 cd app && npm run sync
 
-# 3. Read .sync/review/changes/report.md (and .sync/review/match-queue.tsv, the species waiting on a decision), then publish
+# 3. Read .sync/review/changes/report.md (and .sync/review/links.parquet WHERE to_review IS NOT NULL: the links waiting for a person), then publish
 npm run sync:publish        # copies .sync/publish/ into app/data/sync, uploads to R2, bumps app/latest-sync.txt
 ```
 
