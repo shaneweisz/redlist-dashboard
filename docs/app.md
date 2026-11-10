@@ -49,6 +49,10 @@ No route reads the Red List database: that only happens in the sync. Supabase ho
 
 ### Live data in the detail panel and maps
 
+These routes ask GBIF's live API, which re-indexes against a newer CoL release a few times a year, between our syncs. So each asks with `liveGbifKeys(key)` (`src/lib/gbif-live-keys.ts`): when GBIF's matcher runs a newer release than our data, both our id and the id GBIF's matcher gives our name there, if that answer really is our name (a respelling allowed; another author's accepted species not). GBIF ORs the two, so a species' records are found while GBIF is still re-filing them, and after. Links to gbif.org go through `/api/gbif-link` for the same reason. Nothing in the sync is involved.
+
+An assessed species linked to no CoL species yet (waiting in the sync's match queue) carries `count_note = 'unlinked'` in `assessed.parquet`: nothing is counted, so Total and New GBIF show a dash with the reason on hover (`src/lib/count-note.ts`), not a 0 that reads as "no records exist".
+
 | Route | Reads | Called by |
 |---|---|---|
 | `/api/occurrences` | GBIF | the occurrence map |

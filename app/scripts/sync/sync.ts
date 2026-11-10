@@ -3,7 +3,7 @@
  *
  * Run monthly, locally, once a new GBIF snapshot is mirrored (docs/sync.md,
  * "Running it each month"). Nothing is uploaded: the build lands in
- * ~/.cache/redlist-dashboard/build/ (core/: working tables, data/: what the app
+ * .sync/ at the repo root (core/: working tables, data/: what the app
  * reads), and `npm run sync:publish` copies data/ into app/data/sync and
  * uploads it.
  *
@@ -42,7 +42,8 @@ import { ensureColInputs, writeColReleasePin } from "./inputs/col";
 import { ensureInatNames } from "./inputs/inat-names";
 import { resolveSnapshot, ensureSnapshotCounts } from "./inputs/gbif-snapshot";
 import { ensureMatcher } from "./inputs/matcher";
-import { buildTaxa } from "./sources/taxa";
+import { buildTaxa, demotedCount } from "./sources/taxa";
+import { readSourcesReleases, sourcesMismatch, writeSourcesReleases } from "./sources-releases";
 import { buildAssessments, REDLIST_DB } from "./sources/assessments";
 import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
@@ -92,6 +93,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
   manifest.inat = path.basename(path.dirname(inat));
+  const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot };
+  if (from > 0) {
+    const why = sourcesMismatch(readSourcesReleases(T.sourcesReleases), releases);
+    if (why) throw new Error(`sync: --from ${opts.from} would reuse tables built from other releases (${why}). ` +
+      `Run from sources, or pin the build's XR (COL_XR_DATASET).`);
+  }
   // The Specialist Groups' remits come from the app's config, not the data, so
   // they are written every run: an edited remit takes effect whatever --from says.
   await buildSpecialistGroups({ remits: T.specialistGroupRemits, rankAliases: T.rankAliases });
@@ -100,10 +107,19 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   if (runs("sources")) {
     done = step("1 sources");
     await buildTaxa(col, T.taxa);
+    // Against the curated release its XR was built from, nothing is demoted, and
+    // the link stage doesn't handle a demotion. One appearing means CoL changed
+    // how it builds an XR: stop rather than count it wrongly.
+    const demoted = await demotedCount(T.taxa);
+    if (demoted > 0) {
+      throw new Error(`sync: ${col.checklist.alias} demotes ${demoted.toLocaleString()} ${col.xr.alias} species; ` +
+        `the curated release the XR was built from should demote none`);
+    }
     await buildAssessments(T.assessments);
     await buildOccurrences({ snapshotCounts: snapshot.dir, sourceRows: snapshot.sourceRows, taxa: T.taxa },
       { occurrences: T.occurrences, occurrenceCountries: T.occurrenceCountries });
     await buildCommonNames({ colVernacularNames: col.vernacularNames, taxa: T.taxa, inatNames: inat }, T.commonNames);
+    writeSourcesReleases(T.sourcesReleases, releases);
     done();
   }
 

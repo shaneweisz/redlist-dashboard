@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_CHECKLIST_KEY } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
+import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
 
 interface InatObservation {
   url: string;
@@ -41,6 +42,8 @@ export async function GET(
       offset: offset.toString(),
       ...(country ? { country: country.toUpperCase() } : {}),
     });
+    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
+    setKeys(queryParams, "taxonKey", await liveGbifKeys(speciesKey));
 
     // Through gbifJson (User-Agent, 429/5xx/network backoff), and a failure is
     // an error, not an empty page: this used to answer any non-OK GBIF response

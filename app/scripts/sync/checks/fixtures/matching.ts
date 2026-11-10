@@ -203,9 +203,9 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Cathormion umbellatum",
-    why: "An XR species the checklist folds into Albizia umbellata, which has no records; GBIF files them under the XR name, which counted for nobody.",
-    source: "link/assessment-link.ts checklist_demoted",
-    expect: { linkedTo: "Albizia umbellata", minRecords: 500 },
+    why: "COL26.10's curators fold it into Albizia umbellata, but GBIF files its records under the XR's Cathormion umbellatum. Read against the curated release its XR was built from, the checklist leaves it accepted, so it links where its records are.",
+    source: "inputs/col-checklist.ts (the XR's own curated release)",
+    expect: { linkedTo: "Cathormion umbellatum", minRecords: 500 },
   },
   {
     name: "Cladorhynchus leucocephalus",

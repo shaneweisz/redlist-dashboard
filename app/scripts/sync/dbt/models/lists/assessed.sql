@@ -3,7 +3,7 @@
  * key and counts, its latest credits.
  *
  * Built from: assessments (latest), record_counts, lists/assessments (how many
- * years it was assessed in), common_names.
+ * years it was assessed in), common_names, assessment_link.
  *
  * Columns:
  *   id                       the SIS taxon id
@@ -13,6 +13,9 @@
  *   countries, systems, growth_forms, threat_codes, habitat_codes
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
+ *   count_note               'unlinked' when it is linked to no CoL species
+ *                            (waiting in the match queue), so no records are
+ *                            counted; else NULL
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,
@@ -37,6 +40,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CAST(latest.assessment_date AS VARCHAR) AS assessment_date, latest.year_published,
        {{ semicolon_list("latest.countries") }} AS countries,
        gbif.gbif_species_key,
+       CASE WHEN link.col_id IS NULL THEN 'unlinked' END AS count_note,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,
        CASE WHEN gbif.sis_taxon_id IS NOT NULL THEN gbif.georef_since
@@ -55,6 +59,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
 FROM {{ source('core', 'assessments') }} latest
 LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
+LEFT JOIN {{ source('core', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
   ON history.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ source('core', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'

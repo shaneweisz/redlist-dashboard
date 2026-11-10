@@ -1,8 +1,8 @@
 /**
  * The Catalogue of Life inputs, cached by dataset key:
  *   - the XR GBIF indexes (col-xr.ts): the usages the taxa table is built from
- *   - the curated checklist (col-checklist.ts): demotes XR over-splits, and says
- *     whether a usage is visible on catalogueoflife.org
+ *   - the curated release that XR was built from (col-checklist.ts): which
+ *     species are curated, and which usages catalogueoflife.org shows
  *   - the checklist's Base sources: tell curated species from the XR's tail of
  *     single fossil papers
  *
@@ -48,7 +48,7 @@ async function baseSources(checklist: ChecklistInfo): Promise<string[]> {
 
 export async function ensureColInputs(): Promise<ColInputs> {
   const xr = await resolveXrDataset(pinnedXrKey());
-  const checklist = await resolveChecklistDataset();
+  const checklist = await resolveChecklistDataset(xr);
   const xrDir = await cachedDir(path.join(COL_CACHE, `xr-${xr.key}`), (d) => fetchXr(xr, d));
   const clDir = await cachedDir(path.join(COL_CACHE, `checklist-${checklist.key}`), (d) => fetchChecklist(checklist, d));
   return {

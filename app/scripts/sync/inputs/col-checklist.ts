@@ -1,26 +1,17 @@
 /**
  * The curated Catalogue of Life checklist: what catalogueoflife.org shows.
  *
- * The XR maximises coverage but doesn't reconcile its sources, so it over-splits:
- * Pycnonotus tricolor is an accepted species in the XR and a synonym of the
- * assessed P. barbatus in the checklist. sources/taxa.ts uses the checklist only to
- * demote such species, never to add or delete any: groups the checklist lacks
- * (macroalgae) are kept. col_ids are shared, so the join is exact where both
- * datasets carry a usage, though about 95k checklist usages have no XR row.
- *
- * `3LR` (COL_CHECKLIST_DATASET) names the newest release the day CoL publishes
- * it, but ChecklistBank builds its export days later (one day for COL26.8, three
- * for COL26.7, more than four for COL26.9). So the release is probed, and when
- * its archive isn't built yet the newest one that is gets used, up to three
- * releases back. Only the extended archive is asked for: the simple one would do
- * but lags further, and ChecklistBank won't build either on request.
+ * The XR is a curated release plus the sources CoL merges in around it. The sync
+ * uses the curated release the XR was built from (COL26.6 XR → COL26.6), never
+ * another: sources/taxa.ts reads it for which species are curated (in_base) and
+ * which usages it holds (in_checklist). Read against its own XR it demotes no
+ * species (COL26.6 and COL26.10 both); read against an older XR it demoted
+ * 8,738 (COL26.10 on COL26.6 XR), which the sync doesn't handle, so the
+ * sources stage stops if any appear.
  */
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-
-const CHECKLIST_DATASET = process.env.COL_CHECKLIST_DATASET || "3LR";
-const MAX_FALLBACK_RELEASES = 3;
 
 export interface ChecklistInfo {
   key: string;
@@ -40,7 +31,7 @@ async function hasArchive(key: string): Promise<boolean> {
   }
 }
 
-/** The curated releases, newest first. origin=release leaves out the XRs, which this exists to correct. */
+/** The curated releases, newest first. origin=release leaves out the XRs. */
 async function curatedReleases(): Promise<ChecklistInfo[]> {
   const res = await fetch("https://api.checklistbank.org/dataset?releasedFrom=3&origin=release&limit=100");
   if (!res.ok) throw new Error(`col-checklist: release listing failed: ${res.status}`);
@@ -51,29 +42,13 @@ async function curatedReleases(): Promise<ChecklistInfo[]> {
     .sort((a, b) => b.issued.localeCompare(a.issued));
 }
 
-/** The newest curated release whose archive can be downloaded. */
-export async function resolveChecklistDataset(): Promise<ChecklistInfo> {
-  const res = await fetch(`https://api.checklistbank.org/dataset/${CHECKLIST_DATASET}`);
-  if (!res.ok) throw new Error(`col-checklist: metadata fetch failed (${CHECKLIST_DATASET}): ${res.status}`);
-  const d = (await res.json()) as { key?: number | string; alias?: string; issued?: string; version?: string };
-  const issued = d.issued ?? d.version ?? "";
-  if (!d.key || !issued) throw new Error(`col-checklist: metadata missing key/issued for ${CHECKLIST_DATASET}`);
-  const latest: ChecklistInfo = { key: String(d.key), alias: d.alias ?? CHECKLIST_DATASET, issued };
-  if (await hasArchive(latest.key)) return latest;
-
-  console.warn(`   ${latest.alias} (${latest.key}) has no archive built yet; looking for the newest release that does`);
-  // Older by issue date, not key: keys are allocation order.
-  const older = (await curatedReleases()).filter((r) => r.issued < latest.issued).slice(0, MAX_FALLBACK_RELEASES);
-  for (const candidate of older) {
-    if (await hasArchive(candidate.key)) {
-      console.warn(`   using ${candidate.alias} (${candidate.key}) until ${latest.alias}'s archive is built`);
-      return candidate;
-    }
-  }
-  throw new Error(
-    `col-checklist: no archive for ${latest.alias} (${latest.key}) or the ${older.length} release(s) before it ` +
-      `(${older.map((r) => r.alias).join(", ") || "none found"}); that's longer than the gap has ever been, so check CoL.`
-  );
+/** The curated release `xr` was built from, the one its alias names, checked to be downloadable. */
+export async function resolveChecklistDataset(xr: { alias: string }): Promise<ChecklistInfo> {
+  const want = xr.alias.replace(/\s*XR$/, "");
+  const release = (await curatedReleases()).find((r) => r.alias === want);
+  if (!release) throw new Error(`col-checklist: no curated release ${want} on ChecklistBank for ${xr.alias}`);
+  if (!(await hasArchive(release.key))) throw new Error(`col-checklist: ${release.alias} (${release.key}) has no archive to download`);
+  return release;
 }
 
 /** Download `checklist`'s archive into `destDir` and keep NameUsage.tsv. */

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_CHECKLIST_KEY } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
+import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
 
 const GBIF_SEARCH = "https://api.gbif.org/v1/occurrence/search";
 
@@ -96,6 +97,8 @@ export async function GET(
   }
 
   try {
+    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
+    const gbifKeys = await liveGbifKeys(speciesKey);
     // Build base params using occurrence/search with limit=0 to get counts
     // This supports hasCoordinate and hasGeospatialIssue unlike /count endpoint
     const buildParams = (extraParams: Record<string, string> = {}) => {
@@ -107,6 +110,7 @@ export async function GET(
         limit: "0",
         ...extraParams,
       });
+      setKeys(params, "taxonKey", gbifKeys);
 
       if (country) {
         params.set("country", country.toUpperCase());
@@ -152,14 +156,14 @@ export async function GET(
       // dataset filter returns 0, and 2,771 with checklistKey. For the 3,416
       // species whose CoL id happens to be all digits it is worse than empty, as
       // the id is a valid Backbone key for an unrelated taxon.
-      gbifJson(`${GBIF_SEARCH}?${new URLSearchParams({
+      gbifJson(`${GBIF_SEARCH}?${setKeys(new URLSearchParams({
         taxonKey: speciesKey,
         checklistKey: GBIF_CHECKLIST_KEY,
         datasetKey: INAT_DATASET_KEY,
         hasCoordinate: "true",
         limit: "10",
         ...(country ? { country: country.toUpperCase() } : {}),
-      })}`),
+      }), "taxonKey", gbifKeys)}`),
     ])) as [GbifSearchResponse, GbifSearchResponse, GbifSearchResponse];
 
     // A 200 without a count is a failure too — never let it become a zero.

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifOccurrenceParams, gbifTaxonKeysForGroup } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
+import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
 import { GBIF_RECORDS_PARAM, parseGbifRecordMode } from "@/lib/gbif-records";
 
 interface CountryStats {
@@ -51,14 +52,16 @@ export async function GET(request: NextRequest) {
     // The keys come from the generated config, derived from the Red List group
     // definitions — a hand-kept list of backbone integers once went stale when the
     // pipeline moved to Catalogue of Life, and GBIF quietly returned nothing.
-    const keys = new Set(taxonIds.flatMap((t) => gbifTaxonKeysForGroup(t)));
+    // Each as GBIF's live index files it (gbif-live-keys.ts).
+    const groupKeys = taxonIds.flatMap((t) => gbifTaxonKeysForGroup(t));
+    const keys = new Set((await Promise.all(groupKeys.map((k) => liveGbifKeys(k)))).flat());
     const params = gbifOccurrenceParams({ facet: "country", facetLimit: "300", limit: "0" }, { mode });
-    for (const key of keys) params.append("taxonKey", key);
+    setKeys(params, "taxonKey", [...keys]);
 
     // gbifJson identifies us to GBIF and retries 429/5xx; anything it still can't
     // get throws, so a failed query is a 502 rather than a group silently missing
     // from the map (and cached that way for an hour).
-    const results = keys.size > 0
+    const results = groupKeys.length > 0
       ? [await gbifJson(`https://api.gbif.org/v1/occurrence/search?${params}`) as GbifFacetResponse]
       : [];
 

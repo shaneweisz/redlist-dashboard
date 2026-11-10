@@ -27,12 +27,25 @@ const ONLY_SMALL_SUMMARIES = [...ONLY_SUMMARIES,
 // asks for exactly the files its own deployment was built with.
 const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync.txt"), "utf-8").trim();
 
+// The releases the data comes from, for the footer's source credits: read from
+// the sync's own record (data/sync/sync.json, fetched with the rest of the sync
+// in prebuild), so the footer always names the data this deployment serves.
+function dataVersions(): string {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "sync", "sync.json"), "utf-8"));
+    return JSON.stringify({ redlist: s.redlist?.database, gbifSnapshot: s.gbif?.snapshot, col: s.col?.xr?.alias });
+  } catch {
+    return "{}";
+  }
+}
+
 const nextConfig: NextConfig = {
   // CI's typecheck job checks the types on every PR,
   // so the deploy build doesn't check them again (24 of its 41 seconds).
   typescript: { ignoreBuildErrors: true },
   env: {
     NEXT_PUBLIC_SPECIES_LISTS_SYNC: SPECIES_LISTS_SYNC,
+    NEXT_PUBLIC_DATA_VERSIONS: dataVersions(),
   },
   // The species-list files are stored brotli-compressed. Without these headers Vercel
   // serves them as application/octet-stream and compresses the already-compressed

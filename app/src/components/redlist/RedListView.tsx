@@ -12,6 +12,8 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
+import { countNoteText } from "@/lib/count-note";
+import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
@@ -5286,6 +5288,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
+                ) : isSingleSpecies && singleSpecies?.count_note === 'unlinked' ? (
+                  // Linked to no CoL species: nothing was counted, so no number (as in the table).
+                  <HoverTooltip text={countNoteText(singleSpecies.count_note, DATA_VERSIONS)}>
+                    <span className="text-4xl font-bold text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                  </HoverTooltip>
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
@@ -5366,6 +5373,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
+                ) : isSingleSpecies && singleSpecies?.count_note === 'unlinked' ? (
+                  // Linked to no CoL species: nothing was counted, so no number (as in the table).
+                  <HoverTooltip text={countNoteText(singleSpecies.count_note, DATA_VERSIONS)}>
+                    <span className="text-4xl font-bold text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                  </HoverTooltip>
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
@@ -6593,9 +6605,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     )}
                     {/* Total GBIF */}
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {s.gbif_records != null && s.gbif_species_key ? (
+                      {s.count_note === 'unlinked' ? (
+                        <HoverTooltip text={countNoteText(s.count_note, DATA_VERSIONS)}>
+                          <span className="text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                        </HoverTooltip>
+                      ) : s.gbif_records != null && s.gbif_species_key ? (
                         <a
-                          href={`https://www.gbif.org/occurrence/search?taxonKey=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
+                          href={`/api/gbif-link?key=${s.gbif_species_key}&${gbifFiltersFor(s.taxon_group)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={TABLE_NUMBER_LINK}
@@ -6621,7 +6637,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         <span className="text-zinc-400">N/A</span>
                       ) : (() => {
                         const newObs = s.gbif_records_since_assessment;
-                        if (newObs == null) return "—";
+                        // Not linked to a CoL species: nothing was counted, so no number (Total GBIF says why).
+                        if (newObs == null || s.count_note === 'unlinked') return "—";
                         const key = details?.gbifUrl?.split('/').pop() ?? s.gbif_species_key;
                         // The count starts the day after the assessment date, and
                         // so does the search it links to. A null count already
@@ -6630,7 +6647,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         if (key && since) {
                           return (
                             <a
-                              href={`https://www.gbif.org/occurrence/search?taxonKey=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
+                              href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={TABLE_NUMBER_LINK}

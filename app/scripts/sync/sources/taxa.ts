@@ -2,8 +2,9 @@
  * taxa: one row per Catalogue of Life XR usage (accepted names, synonyms,
  * infraspecifics, BOLD BINs). Every list of species is a filter over it.
  *
- * Built from: the CoL XR (NameUsage.tsv, Reference.tsv), the curated
- * checklist's NameUsage.tsv, the curated Base source ids, seeds/ne-excluded.tsv.
+ * Built from: the CoL XR (NameUsage.tsv, Reference.tsv), the NameUsage.tsv and
+ * Base source ids of the curated release that XR was built from,
+ * seeds/ne-excluded.tsv.
  *
  * Columns:
  *   col_id, parent_id, status, rank, scientific_name, authorship   from the XR
@@ -17,7 +18,7 @@
  *                        the usage as the curated release (catalogueoflife.org)
  *                        has it
  *   demoted              an XR accepted species the curated release treats as a
- *                        synonym or infraspecific (Pycnonotus tricolor)
+ *                        synonym or infraspecific (none, against the XR's own release)
  *   species_id           the accepted species this usage's GBIF records count
  *                        towards: itself, a synonym's accepted species, or an
  *                        infraspecific's or BIN's species. NULL above species
@@ -28,9 +29,11 @@
  *
  * Decisions:
  *   - species_id follows the XR, which is what GBIF indexes, so totals match
- *     gbif.org. The checklist only demotes: curated silence never removes a
- *     species (macroalgae, whose source isn't in the curated release), only
- *     curated contradiction does.
+ *     gbif.org. The curated release only demotes: curated silence never removes
+ *     a species (macroalgae, whose source isn't in the curated release), only
+ *     curated contradiction does. Read against the release its XR was built
+ *     from, it demotes nothing (COL26.6 XR); a newer one demoted 8,738 species,
+ *     which was CoL's later taxonomy, not an XR error.
  *   - A misapplied name is someone else's concept and counts towards nothing.
  *   - A usage takes its species' group, so a synonym can't land in another group
  *     than the species it counts towards.
@@ -67,6 +70,13 @@ export interface TaxaInputs {
   baseSourceIds: string[];
   /** name → kind; defaults to seeds/ne-excluded.tsv, tests pass their own. */
   neExcluded?: Record<string, string>;
+}
+
+/** XR species the curated release demotes (taxa.demoted). */
+export async function demotedCount(taxaFile: string): Promise<number> {
+  const conn = await openDuckDB();
+  const [r] = (await conn.runAndReadAll(`SELECT count(*) FILTER (demoted)::INTEGER AS n FROM read_parquet(${lit(taxaFile)})`)).getRowObjects();
+  return Number(r.n);
 }
 
 export async function buildTaxa(inputs: TaxaInputs, taxaFile: string): Promise<void> {

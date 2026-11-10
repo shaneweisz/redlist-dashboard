@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_USER_AGENT } from "@/lib/gbif-fetch";
+import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
 import { getQualityFlags } from "@/lib/mapping/coordinate-cleaning";
 import { GBIF_CHECKLIST_KEY, GBIF_COORDINATE_NOTES, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
 
@@ -494,6 +495,8 @@ export async function GET(request: NextRequest) {
       speciesKey,
       checklistKey: GBIF_CHECKLIST_KEY,
     });
+    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
+    setKeys(baseParams, "speciesKey", await liveGbifKeys(speciesKey));
 
     if (country) {
       baseParams.set("country", country.toUpperCase());

@@ -10,6 +10,9 @@ node_modules/
 .next/
 out/
 
+# A sync's build (app/scripts/sync/paths.ts)
+/.sync*/
+
 # Build
 build/
 dist/
