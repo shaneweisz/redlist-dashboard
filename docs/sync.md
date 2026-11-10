@@ -120,7 +120,7 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 `link/`: `matches.ts`, `accept-match.ts`, `match-overrides.ts` (with `seeds/match-overrides.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/01-link-flow.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/01-link-flow-v2.png)
 
 Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
 
@@ -161,12 +161,12 @@ The rules after the concept step are named functions in `link/rules.ts`, applied
 | Rule | Species |
 |---|---:|
 | covered: another accepted species IUCN's synonyms or CoL's name it | 5,660 |
-| covered: CoL holds the name twice | 3,056 |
-| covered: one organism under two genera | 528 |
+| covered: CoL holds the name twice, identically or spelt two ways the codes make one name | 3,164 |
+| covered: one organism under two genera | 525 |
 | covered: a lumped species' other same-name synonyms | 1,037 |
 | covered: what a species waiting for a decision might be, kept off the NE list | 629 |
 | no link across a phylum | 3 |
-| one owner per usage | 68 |
+| one owner per usage | 70 |
 
 Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
 
