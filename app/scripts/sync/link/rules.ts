@@ -198,10 +198,14 @@ export interface Candidate { sis: number; target_id: string; target_name: string
 
 /**
  * Rule: while a species waits for a decision, every CoL species its own name
- * leads to, and the matcher's guess, stay off the Not Evaluated list, counting
- * nothing. Not knowing which CoL species it is mustn't list them as species the
- * Red List hasn't assessed: the small heath, Coenonympha pamphilus, 1.9M records,
- * would otherwise appear there while its link waits.
+ * leads to (as an accepted name, or as a synonym CoL files under it), and the
+ * matcher's guess, stay off the Not Evaluated list, counting nothing. Not knowing
+ * which CoL species it is mustn't list as unassessed the species it is, under
+ * CoL's name: Agama armata and ~150 others would otherwise appear there while
+ * their links wait. Broad on purpose, as the retired passes' lumps were: CoL
+ * files the assessed Coenonympha gardetta's name as a synonym under the small
+ * heath, C. pamphilus, which the Red List hasn't assessed, and that stays off
+ * the list too until gardetta is decided.
  */
 export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
   const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_id).map((l) => l.sis_taxon_id));
