@@ -50,13 +50,13 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Sminthopsis fuliginosa",
     why: "Gender agreement: CoL spells it fuliginosus.",
-    source: "name-variants.ts; accept-match.ts; seeds/decisions.tsv",
+    source: "name-variants.ts; accept-match.ts (a spelling variant the codes allow)",
     expect: { hasRecords: true },
   },
   {
     name: "Ochotona pallasii",
     why: "Patronymic -ii vs CoL's -i.",
-    source: "name-variants.ts; accept-match.ts; seeds/decisions.tsv",
+    source: "name-variants.ts; accept-match.ts (a spelling variant the codes allow)",
     expect: { hasRecords: true },
   },
   {
