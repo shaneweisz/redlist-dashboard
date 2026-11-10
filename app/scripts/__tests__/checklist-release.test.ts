@@ -58,14 +58,6 @@ describe("resolveChecklistDataset", () => {
     expect((await resolveChecklistDataset({ alias: "COL26.10 XR" })).key).toBe("316595");
   });
 
-  it("takes COL_CHECKLIST_DATASET, by key or alias, over the XR's own release", async () => {
-    stubChecklistBank([315149, 315448, 316595]);
-    vi.stubEnv("COL_CHECKLIST_DATASET", "316595");
-    expect((await resolveChecklistDataset({ alias: "COL26.6 XR" })).alias).toBe("COL26.10");
-    vi.stubEnv("COL_CHECKLIST_DATASET", "COL26.5");
-    expect((await resolveChecklistDataset({ alias: "COL26.6 XR" })).key).toBe("315149");
-  });
-
   it("stops when the XR's release isn't listed, rather than falling back to another", async () => {
     stubChecklistBank([316595]);
     await expect(resolveChecklistDataset({ alias: "COL26.11 XR" })).rejects.toThrow(/no curated release COL26.11 .*COL26.11 XR/);

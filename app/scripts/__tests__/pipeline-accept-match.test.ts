@@ -4,7 +4,7 @@
  * against COL26.6 XR, trimmed to the fields the rule reads.
  */
 import { describe, it, expect } from "vitest";
-import { acceptMatch, sameAuthors, type MatchAnswer } from "../sync/link/accept-match";
+import { acceptMatch, type MatchAnswer } from "../sync/link/accept-match";
 
 const answer = (over: Partial<MatchAnswer>): MatchAnswer => ({
   usage_id: "U1", usage_name: "Puma concolor", usage_authorship: "(Linnaeus, 1771)", usage_rank: "SPECIES",
@@ -33,6 +33,21 @@ describe("acceptMatch", () => {
     [{ confidence: 95 }, "lower confidence"],
   ] as [Partial<MatchAnswer>, string][])("queues %o as %s", (over, reason) => {
     expect(acceptMatch(puma, answer(over), speciesOf({}))).toEqual({ accepted: false, reason });
+  });
+
+  it("queues a synonym by other authors: the species CoL dropped (Tritoma bipustulata)", () => {
+    const m = answer({ usage_status: "SYNONYM", usage_name: "Tritoma bipustulata", usage_authorship: "Schilsky, 1888" });
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: "Fabricius, 1775" }, m, speciesOf({ U1: "Mycetophagus" })))
+      .toEqual({ accepted: false, reason: "synonym by other authors" });
+    // The same authors written differently, or an authority missing on either side, still count as a rename.
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: "(Fabr., 1775)" }, answer({ usage_status: "SYNONYM",
+      usage_authorship: "Fabricius, 1775" }), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Tritoma bipustulata", authority: null }, m, speciesOf({ U1: "S1" })).accepted).toBe(true);
+    // A year out, a misspelling, or a bare "L.": not evidence of another author.
+    const syn = (au: string) => answer({ usage_status: "SYNONYM", usage_authorship: au });
+    expect(acceptMatch({ name: "Drepanis coccinea", authority: "(Forster, 1781)" }, syn("(Forster, 1780)"), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Meandrina danae", authority: "Milen-Edwards & Haime, 1948" }, syn("(Milne Edwards & Haime, 1848)"), speciesOf({ U1: "S1" })).accepted).toBe(true);
+    expect(acceptMatch({ name: "Epilobium angustifolium", authority: "L." }, syn("L."), speciesOf({ U1: "S1" })).accepted).toBe(true);
   });
 
   it("queues a synonym that leads nowhere (Vestia roschitzi)", () => {
@@ -83,11 +98,4 @@ describe("acceptMatch", () => {
         speciesOf({ R2: "U1" })).accepted).toBe(true);
     });
   });
-});
-
-describe("sameAuthors", () => {
-  it.each([
-    ["Hook.f.", "Hook.fil."], ["Pitard", "Pit."], ["A.Shaw", "Airy Shaw"], ["Silhavy, 1937", "Šilhavý, 1937"],
-  ])("accepts %s / %s", (a, b) => expect(sameAuthors(a, b)).toBe(true));
-  it.each([["(Férussac, 1921)", "(A. Férussac, 1821)"], ["Macfarlane", "Hemsl."]])("refuses %s / %s", (a, b) => expect(sameAuthors(a, b)).toBe(false));
 });

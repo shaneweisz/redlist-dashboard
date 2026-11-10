@@ -25,7 +25,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { SEEDS_DIR } from "../seeds/seeds";
-import { normaliseAuthorship } from "./species-key";
+import { normaliseAuthorship } from "./authors";
 
 export const DECISIONS_FILE = path.join(SEEDS_DIR, "decisions.tsv");
 export const COLUMNS = ["sis_taxon_id", "redlist_name", "col_name", "col_authorship", "col_id", "by", "reviewed", "date", "note"] as const;

@@ -38,7 +38,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, spawnSync } from "child_process";
 import { loadEnvFiles } from "../lib/utils";
-import { ensureColInputs, writeColReleasePin } from "./inputs/col";
+import { ensureColInputs, lastXr, writeColReleasePin } from "./inputs/col";
+import { resolveSnapshotXr } from "./inputs/snapshot-xr";
 import { ensureInatNames } from "./inputs/inat-names";
 import { resolveSnapshot, ensureSnapshotCounts } from "./inputs/gbif-snapshot";
 import { ensureMatcher } from "./inputs/matcher";
@@ -88,19 +89,21 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   console.log(`sync ${manifest.built_at} at ${String(manifest.commit).slice(0, 8)}${manifest.dirty ? " (uncommitted changes)" : ""}`);
 
   let done = step("inputs");
-  const col = await ensureColInputs();
-  const inat = await ensureInatNames();
+  // One CoL release for everything: the XR the snapshot is filed under, so every
+  // count, link and list uses the ids GBIF filed its records with.
   const snapshot = await ensureSnapshotCounts(resolveSnapshot());
-  const matcher = await ensureMatcher(col.xr, col.nameUsage);
   const liveXr = await resolveLiveXr();
+  const col = await ensureColInputs(await resolveSnapshotXr(snapshot.dir, [lastXr(), liveXr]));
+  const inat = await ensureInatNames();
+  const matcher = await ensureMatcher(col.xr, col.nameUsage);
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows, liveXr };
   manifest.inat = path.basename(path.dirname(inat));
-  const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot };
+  const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot, liveXr: liveXr?.key ?? null };
   if (from > 0) {
     const why = sourcesMismatch(readSourcesReleases(T.sourcesReleases), releases);
     if (why) throw new Error(`sync: --from ${opts.from} would reuse tables built from other releases (${why}). ` +
-      `Run from sources, or pin the build's releases (COL_XR_DATASET, COL_CHECKLIST_DATASET).`);
+      `Run from sources.`);
   }
   // The Specialist Groups' remits come from the app's config, not the data, so
   // they are written every run: an edited remit takes effect whatever --from says.
@@ -111,11 +114,10 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done = step("1 sources");
     await buildTaxa(col, T.taxa);
     // Against the curated release its XR was built from, nothing is demoted, and
-    // the link stage no longer handles a demotion. One appearing means a newer
-    // curated release slipped in (inputs/col-checklist.ts), or CoL changed how it
-    // builds an XR: either way, stop rather than count it the old way.
+    // the link stage doesn't handle a demotion. One appearing means CoL changed
+    // how it builds an XR: stop rather than count it wrongly.
     const demoted = await demotedCount(T.taxa);
-    if (demoted > 0 && !process.env.COL_CHECKLIST_DATASET) {
+    if (demoted > 0) {
       throw new Error(`sync: ${col.checklist.alias} demotes ${demoted.toLocaleString()} ${col.xr.alias} species; ` +
         `the curated release the XR was built from should demote none`);
     }

@@ -10,6 +10,7 @@
  * that's fetched lazily per species (getAssessmentHistory) when a detail panel
  * opens. Search / summaries land in later steps.
  */
+import { isCountNote } from "@/lib/count-note";
 import * as fs from "fs";
 import * as path from "path";
 import { syncPath } from "./sync-layout";
@@ -144,7 +145,7 @@ const ASSESSED_SELECT = `
   id, assessment_id, scientific_name, common_name, family, iucn_category AS category,
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
-  gbif_all_records_count, gbif_all_records_since_assessment,
+  gbif_all_records_count, gbif_all_records_since_assessment, count_note,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -195,6 +196,7 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     gbif_georeferenced_records_since_assessment: num(r.gbif_georeferenced_records_since_assessment),
     gbif_all_records_count: num(r.gbif_all_records_count),
     gbif_all_records_since_assessment: num(r.gbif_all_records_since_assessment),
+    count_note: isCountNote(r.count_note) ? r.count_note : null,
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,

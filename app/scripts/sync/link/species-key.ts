@@ -12,6 +12,7 @@
  */
 
 import { canonicalEpithet } from "../../../src/lib/name-parts";
+import { normaliseAuthorship } from "./authors";
 
 const genusOf = (scientificName: string) => scientificName.trim().toLowerCase().split(/\s+/)[0] ?? "";
 
@@ -32,19 +33,6 @@ export function epithetOf(scientificName: string): string {
   const parts = scientificName.trim().toLowerCase().split(/\s+/);
   const raw = parts[1] ?? "";
   return raw.replace(/^[×x]$/, "") === "" ? (parts[2] ?? "") : raw.replace(/^×/, "");
-}
-
-/**
- * Authorship reduced to what is actually being compared: brackets, punctuation
- * and spacing vary between sources for the same citation.
- * "(Ledeb.) M.Roem." and "(Ledeb.)  M. Roem." are one author, not two.
- */
-export function normaliseAuthorship(authorship?: string): string {
-  return (authorship ?? "")
-    .toLowerCase()
-    .replace(/[()[\].,;]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /** Edit distance, capped — only ever used to ask "is this a respelling?". */

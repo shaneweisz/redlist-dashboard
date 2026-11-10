@@ -13,7 +13,16 @@
  *     is a species and that it is another one (Sipyloidea brevicerci)
  *   - a misapplied name: CoL saying that name was used wrongly, not that it
  *     is another species
+ *
+ * And a synonym match by other authors than the Red List's (authors.ts) waits
+ * too: when CoL drops a species, the only name left spelled like it can be
+ * another author's, for another organism. COL26.10 dropped Tritoma bipustulata
+ * Fabricius, 1775; the one left, Schilsky, 1888, is a synonym of Mycetophagus
+ * quadripustulatus, and the beetle IUCN assessed would have shown its records.
+ *
+ * Author citations are compared in authors.ts.
  */
+import { compareAuthors } from "./authors";
 
 export interface MatchAnswer {
   usage_id: string | null;
@@ -37,7 +46,8 @@ export type QueueReason =
   | "lower confidence"
   | "synonym of no species"
   | "homonym the authors don't decide"
-  | "accepted and a synonym in CoL";
+  | "accepted and a synonym in CoL"
+  | "synonym by other authors";
 
 export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice" }
@@ -46,24 +56,6 @@ export type Acceptance =
 /** Names the Red List itself marks as unsettled: aff., cf., sp., "[...]" in the name; ined., auct., non, sensu in the authority. */
 const INFORMAL_NAME = /\b(aff|cf|sp|spp|nov|indet)\.|\[|\bsp\b/i;
 const DISOWNED_AUTHORITY = /\b(ined|auct)\b\.?|\bnon\b|\bsensu\b/i;
-
-/**
- * Do two author citations name the same author? Formats vary too much between
- * IUCN and CoL for equality ("Hook.f." / "Hook.fil.", "A.Shaw" / "Airy Shaw",
- * "Silhavy" / "Šilhavý"), so: some author word in common once diacritics are
- * folded (one may abbreviate the other, "Pit." / "Pitard"), and the same year
- * where both give one.
- */
-export function sameAuthors(a: string | null | undefined, b: string | null | undefined): boolean {
-  const words = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-    .split(/[^a-z]+/).filter((w) => w.length >= 2 && !["ex", "in", "et", "de", "van", "von", "fil", "f"].includes(w));
-  const year = (s: string) => s.match(/\b(1[7-9]\d\d|20\d\d)\b/)?.[1];
-  if (!a || !b) return false;
-  const ya = year(a), yb = year(b);
-  if (ya && yb && ya !== yb) return false;
-  const wb = words(b);
-  return words(a).some((x) => wb.some((y) => x === y || (x.length >= 3 && y.startsWith(x)) || (y.length >= 3 && x.startsWith(y))));
-}
 
 const binomial = (n: string | null) => (n ?? "").replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
 
@@ -86,16 +78,18 @@ export function acceptMatch(
   if ((m.confidence ?? 0) < 99) return no("lower confidence");
   const mine = speciesOf(m.usage_id);
   if (!mine) return no("synonym of no species");
+  if (m.usage_status === "SYNONYM" && compareAuthors(species.authority, m.usage_authorship) === "other") return no("synonym by other authors");
 
   const rivals = m.alternatives.filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === binomial(m.usage_name)
     && speciesOf(a.usage_id) !== mine);
   if (rivals.length === 0) return { accepted: true, why: "unique name" };
-  const twins = rivals.filter((a) => sameAuthors(m.usage_authorship, a.authorship));
+  const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
+  const twins = rivals.filter((a) => same(m.usage_authorship, a.authorship));
   if (twins.length > 0) {
     if (m.usage_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
     return { accepted: true, why: "CoL holds it twice" };
   }
-  if (sameAuthors(species.authority, m.usage_authorship) && !rivals.some((a) => sameAuthors(species.authority, a.authorship))) {
+  if (same(species.authority, m.usage_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
     return { accepted: true, why: "authors pick it" };
   }
   return no("homonym the authors don't decide");

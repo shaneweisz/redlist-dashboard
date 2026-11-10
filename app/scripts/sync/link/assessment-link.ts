@@ -46,9 +46,10 @@
  */
 
 import * as fs from "fs";
-import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, normaliseAuthorship, type Verdict } from "./species-key";
+import { decideKey, sameOrganism, isSeparatelyAssessed, isCoLRespelling, type Verdict } from "./species-key";
+import { compareAuthors, normaliseAuthorship } from "./authors";
 import { speciesNameParts, canonicalEpithet } from "./name-variants";
-import { acceptMatch, sameAuthors, type MatchAnswer, type QueueReason } from "./accept-match";
+import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
 import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";
 import { output, parquet } from "../paths";
 import { lit, rows, writeTable, openDuckDB } from "../sql";
@@ -290,7 +291,7 @@ export async function buildLink(
     // banded stilt Cladorhynchus leucocephalus (Vieillot, 1816), whose IUCN
     // synonyms name it. Where either citation is missing there is nothing to check.
     const otherGenus = c.name.split(" ")[0].toLowerCase() !== c.target_name.split(" ")[0].toLowerCase();
-    const authorsAgree = !c.authority || !c.target_authorship || sameAuthors(c.authority, c.target_authorship);
+    const authorsAgree = !c.authority || !c.target_authorship || compareAuthors(c.authority, c.target_authorship) === "same";
     const same = (c.kind === 0 || c.src === "own_name_synonym")
       && sameOrganism({ scientificName: c.name, authorship: c.authority ?? undefined }, { scientificName: c.target_name, authorship: c.target_authorship ?? undefined })
       && (!otherGenus || authorsAgree)

@@ -1,7 +1,7 @@
 /**
  * src/config/col-release.json: the releases a sync was built from. The app cites
- * the XR from it (its "Source" link), and the sync stands on its XR when GBIF
- * can't be asked which release it indexes.
+ * the XR from it (its "Source" link), and the next sync tests its snapshot
+ * against that XR first (inputs/snapshot-xr.ts).
  *
  * Written to a temp file, not the real pin: other tests hash the repo's source
  * files (build-prebuilt's cache key), and rewriting one mid-run changes it.
@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { writeColReleasePin } from "../sync/inputs/col";
+import { lastXr, writeColReleasePin } from "../sync/inputs/col";
 
 describe("col-release pin", () => {
   it("keeps the XR citation fields the app reads, with the checklist beside them", () => {
@@ -25,5 +25,9 @@ describe("col-release pin", () => {
     // The checklist's own date must not shadow the XR's.
     expect(pin.checklist).toEqual({ key: "316115", alias: "COL26.8", issued: "2026-08-20" });
     fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  });
+
+  it("offers the last sync's XR as the first to test the next snapshot against", () => {
+    expect(lastXr()).toMatchObject({ key: expect.any(String), alias: expect.stringMatching(/XR$/) });
   });
 });

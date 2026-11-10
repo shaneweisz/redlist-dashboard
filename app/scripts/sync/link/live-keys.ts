@@ -5,9 +5,8 @@
  * snapshot, so they need its ids.
  *
  * The two differ for the weeks between GBIF re-indexing against a newer XR and
- * the first snapshot keyed to it (COL26.6 XR → COL26.10 XR in November 2026:
- * 1,130 assessed species' ids gone, 4,494 turned synonyms). Every other month
- * the releases are the same and this table is empty.
+ * the first snapshot filed under it; CoL renumbers about 2% of ids per release.
+ * Every other month the releases are the same and this table is empty.
  *
  * Built from: the snapshot's taxa, and the same link stage run on GBIF's live
  * XR (its taxa, matcher answers and link), see sync.ts.

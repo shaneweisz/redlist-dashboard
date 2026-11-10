@@ -16,7 +16,7 @@
  * and is left running between syncs. It is checked to be serving the right
  * release before any name is sent.
  *
- * Usage (build and start only):  npx tsx scripts/sync/inputs/matcher.ts
+ * Usage (build and start only, on the last sync's XR):  npx tsx scripts/sync/inputs/matcher.ts
  */
 
 import * as fs from "fs";
@@ -24,7 +24,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, cachedDir } from "../paths";
-import { ensureColInputs } from "./col";
+import { ensureColInputs, lastXr } from "./col";
 import { lit, openDuckDB } from "../sql";
 
 export const MATCHER_VERSION = "v1.0.12";
@@ -144,7 +144,9 @@ export async function ensureMatcher(xr: { key: string; alias: string }, nameUsag
 const isDirectRun = process.argv[1]?.endsWith("inputs/matcher.ts");
 if (isDirectRun) {
   loadEnvFiles();
-  ensureColInputs()
+  const xr = lastXr();
+  if (!xr) throw new Error("matcher: no XR recorded in src/config/col-release.json");
+  ensureColInputs(xr)
     .then((col) => ensureMatcher(col.xr, col.nameUsage))
     .then((m) => console.log(`matching-ws ${m.version} serving XR ${m.datasetKey} (${m.nameUsages.toLocaleString()} usages) at ${m.url}`))
     .catch((e) => { console.error(e); process.exit(1); });
