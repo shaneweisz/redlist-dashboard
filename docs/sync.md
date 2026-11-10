@@ -12,7 +12,7 @@ flowchart LR
   assessments --> link
   link["<b>link</b><br/>assessment_link<br/>which CoL species each<br/>assessed species is"] --> count
   occurrences --> count
-  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["lists, search, summaries<br/>what the app reads"]
+  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>what the app reads</b><br/>data/lists/, taxonomy/,<br/>search/, summaries/"]
   style link fill:#fde68a
   style count fill:#fde68a
 ```
@@ -21,7 +21,7 @@ Only the two highlighted stages make judgements. If a number looks wrong, the ca
 
 Every table and what it reads, which shows how many moving parts there are behind those five boxes:
 
-![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-622-system-diagrams/01-sync-overview.png)
+![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/01-sync-overview.png)
 
 Generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`.
 
@@ -138,6 +138,17 @@ Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL
 - **No link crosses a phylum**: old genus names are homonyms across kingdoms (*Hepatus* was a fish and is a crab).
 - **Covered rows**: where one organism sits under more than one accepted CoL species (*Hylatomus* / *Dryocopus pileatus*), each extra one is a *covered* row, which keeps it off the Not Evaluated list and, where the evidence is direct, counts its records too.
 - **One owner per usage**: if two assessed species claim the same usage, one wins (primary before covered, *own* before *lumped*, matcher before decision, then lower SIS id) and the other becomes `duplicate`, counting nothing.
+
+The rules after the concept step are named functions in `link/rules.ts`, applied in order, each with a unit test (`__tests__/link-rules.test.ts`). Every sync logs how many species each one touched, and records it in `sync.json` (`link_rules`), so a rule that touches almost nothing shows up as a candidate to drop or turn into a decision. In the 10 November build:
+
+| Rule | Species |
+|---|---:|
+| covered: another accepted species IUCN's synonyms or CoL's name it | 5,463 |
+| covered: CoL holds the name twice | 3,116 |
+| covered: one organism under two genera | 535 |
+| covered: a lumped species' other same-name synonyms | 1,218 |
+| no link across a phylum | 3 |
+| one owner per usage | 68 |
 
 Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
 
