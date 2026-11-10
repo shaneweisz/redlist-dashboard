@@ -41,30 +41,31 @@ import { compareAuthors, oneTypo, type AuthorVerdict } from "@/lib/authors";
 import { canonicalEpithet } from "@/lib/name-parts";
 import { gbifJson } from "@/lib/gbif-fetch";
 
-const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 const RETRY = 10 * 60 * 1000;
 
 interface Usage { name: string; authorship: string; rank: string }
 
 const cache = new Map<string, { at: number; ttl: number; value: Promise<unknown> }>();
 
-/** One cached answer per key: a day when it worked, ten minutes when it threw. */
-function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+/** One cached answer per key: for `ttl` when it worked, ten minutes when it threw. */
+function cached<T>(key: string, load: () => Promise<T>, ttl = DAY): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < hit.ttl) return hit.value as Promise<T>;
-  const entry = { at: Date.now(), ttl: DAY, value: load() as Promise<unknown> };
+  const entry = { at: Date.now(), ttl, value: load() as Promise<unknown> };
   entry.value.catch(() => { entry.ttl = RETRY; });
   cache.set(key, entry);
   return entry.value as Promise<T>;
 }
 
-/** The CoL release GBIF's matcher, and so its re-indexing, runs. */
+/** The CoL release GBIF's matcher, and so its re-indexing, runs. Asked hourly, so a switch shows within the hour. */
 function gbifRelease(): Promise<string | null> {
   return cached("release", async () => {
     const m = (await gbifJson("https://api.gbif.org/v2/species/match/metadata?checklistKey=xcol")) as
       { mainIndex?: { clbDatasetKey?: string | number } };
     return m.mainIndex?.clbDatasetKey != null ? String(m.mainIndex.clbDatasetKey) : null;
-  });
+  }, HOUR);
 }
 
 /** Our id's name, authorship and rank in our release, or null if it doesn't have the id (a group key from another release). */

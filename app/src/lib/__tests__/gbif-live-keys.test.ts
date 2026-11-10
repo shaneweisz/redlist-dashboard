@@ -111,6 +111,24 @@ describe("liveGbifKeys", () => {
   });
 });
 
+describe("liveGbifKeys, over time", () => {
+  it("asks GBIF which release it runs again after an hour, and keeps the rest for a day", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls = stub({ release: OURS });
+      await liveGbifKeys("3Y3C6", OURS);
+      vi.advanceTimersByTime(59 * 60 * 1000);
+      await liveGbifKeys("3Y3C6", OURS);
+      expect(calls.filter((u) => u.includes("/match/metadata"))).toHaveLength(1);
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      await liveGbifKeys("3Y3C6", OURS);
+      expect(calls.filter((u) => u.includes("/match/metadata"))).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("setKeys", () => {
   it("repeats the parameter once per id", () => {
     expect(setKeys(new URLSearchParams({ taxonKey: "x", limit: "0" }), "taxonKey", ["A", "B"]).toString()).toBe("limit=0&taxonKey=A&taxonKey=B");
