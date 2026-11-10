@@ -29,7 +29,7 @@ export interface LinkRow {
 
 /** Ownership order: the more direct the name, the stronger the claim. */
 const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
-  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym"] as const;
+  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym", "undecided_candidate"] as const;
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 const genus = (n: string) => n.split(" ")[0].toLowerCase();
@@ -193,6 +193,27 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
   return touched;
 }
 
+/** A CoL species a species waiting for a decision might be: its name leads there, or the matcher guessed it. */
+export interface Candidate { sis: number; target_id: string; target_name: string }
+
+/**
+ * Rule: while a species waits for a decision, every CoL species its own name
+ * leads to, and the matcher's guess, stay off the Not Evaluated list, counting
+ * nothing. Not knowing which CoL species it is mustn't list them as species the
+ * Red List hasn't assessed: the small heath, Coenonympha pamphilus, 1.9M records,
+ * would otherwise appear there while its link waits.
+ */
+export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
+  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_id).map((l) => l.sis_taxon_id));
+  const touched = new Set<number>();
+  for (const c of candidates) {
+    if (!waiting.has(c.sis)) continue;
+    if (cover({ sis_taxon_id: c.sis, col_id: c.target_id, usage_id: null, verdict: "refused", method: "undecided_candidate",
+      reason: `waiting for a decision; ${c.target_name} may be it, so it is kept out of the Not Evaluated list`, counted: false })) touched.add(c.sis);
+  }
+  return touched;
+}
+
 /**
  * Rule: no link crosses a phylum, however it was made: old genus names are
  * homonyms across kingdoms (the surgeonfish Acanthurus lineatus and the crab
@@ -216,12 +237,17 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
 /**
  * Rule: each usage counts for one assessed species at most. When two claim it,
  * one wins: primary before covered, own before lumped, the matcher before a
- * decision, the more direct name, then the lower SIS id. The loser counts
- * nothing; a losing primary row becomes a duplicate.
+ * decision, the more direct name, the name CoL spells exactly before a spelling
+ * variant of it, then the lower SIS id. The loser counts nothing; a losing
+ * primary row becomes a duplicate. The spelling matters where the Red List
+ * assesses one plant twice under two spellings (Peltophorum dasyrhachis, as CoL
+ * writes it, and dasyrachis): the exact one keeps the records.
+ *
+ * `exactName`: the species whose primary row's CoL name is their Red List name, as written.
  */
-export function oneOwnerPerUsage(links: LinkRow[]): Set<number> {
+export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new Set()): Set<number> {
   const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
-    Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.sis_taxon_id];
+    Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.role === "primary" && exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted).sort((a, b) => {
     const x = rank(a), y = rank(b);
     for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];

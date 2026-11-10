@@ -10,16 +10,25 @@
  *   col_name        the CoL name it is, as CoL spells it; empty means "not in CoL"
  *   col_authorship  that name's CoL authorship, to tell homonyms apart
  *   col_id          the usage's id in the release decided against (a hint: ids move)
- *   by              who decided: a GitHub handle, "agent:<model>", or
- *                   "heuristic" for answers carried over from the name-matching
- *                   passes used before matching-ws (#593)
+ *   col_status      what CoL said that name was then (accepted, provisionally
+ *                   accepted, synonym, ...)
+ *   col_species     the accepted species it led to then
+ *   redlist_version, col_version
+ *                   the releases it was decided against: Red List 2026-1,
+ *                   COL26.6 XR
+ *   by              who decided: a GitHub handle, "agent:<model>", or "fixture"
+ *                   for a case checks/fixtures/matching.ts pins down
  *   reviewed        yes once a person has checked it
  *   date            YYYY-MM-DD
  *   note            the evidence, in a sentence
  *
  * A decision names a name, not an outcome: the same concept rules as for a
- * matched name then say what it owns (link/assessment-link.ts). It is re-applied every
- * sync while its names still resolve, and asked again when they don't.
+ * matched name then say what it owns (link/assessment-link.ts). It holds for the
+ * releases it names, and is carried to a newer one while what it rested on is
+ * still true there: the Red List still calls the species by that name, and CoL
+ * still holds that name, with the same status, leading to the same species. When
+ * any of that moves it is stale, and asked again; until then the matcher's
+ * answer applies if it passes the rule on its own.
  */
 
 import * as fs from "fs";
@@ -28,7 +37,8 @@ import { SEEDS_DIR } from "../seeds/seeds";
 import { normaliseAuthorship } from "../../../src/lib/authors";
 
 export const DECISIONS_FILE = path.join(SEEDS_DIR, "decisions.tsv");
-export const COLUMNS = ["sis_taxon_id", "redlist_name", "col_name", "col_authorship", "col_id", "by", "reviewed", "date", "note"] as const;
+export const COLUMNS = ["sis_taxon_id", "redlist_name", "col_name", "col_authorship", "col_id", "col_status", "col_species",
+  "redlist_version", "col_version", "by", "reviewed", "date", "note"] as const;
 
 export interface Decision {
   sis: number;
@@ -36,6 +46,10 @@ export interface Decision {
   colName: string | null;
   colAuthorship: string | null;
   colId: string | null;
+  colStatus: string | null;
+  colSpecies: string | null;
+  redlistVersion: string | null;
+  colVersion: string | null;
   by: string;
   reviewed: boolean;
   date: string;
@@ -57,7 +71,8 @@ export function readDecisions(file = DECISIONS_FILE): Map<number, Decision> {
     if (!get("by")) throw new Error(`${path.basename(file)}: SIS ${sis} has no "by"`);
     out.set(sis, {
       sis, redlistName: get("redlist_name"), colName: get("col_name") || null, colAuthorship: get("col_authorship") || null,
-      colId: get("col_id") || null, by: get("by"), reviewed: get("reviewed").toLowerCase() === "yes", date: get("date"), note: get("note"),
+      colId: get("col_id") || null, colStatus: get("col_status") || null, colSpecies: get("col_species") || null,
+      redlistVersion: get("redlist_version") || null, colVersion: get("col_version") || null, by: get("by"), reviewed: get("reviewed").toLowerCase() === "yes", date: get("date"), note: get("note"),
     });
   }
   return out;
@@ -66,12 +81,14 @@ export function readDecisions(file = DECISIONS_FILE): Map<number, Decision> {
 export function writeDecisions(decisions: Iterable<Decision>, file = DECISIONS_FILE): void {
   const clean = (s: string | null) => (s ?? "").replace(/[\t\n]/g, " ");
   const rows = [...decisions].sort((a, b) => a.sis - b.sis).map((d) => [
-    d.sis, d.redlistName, d.colName, d.colAuthorship, d.colId, d.by, d.reviewed ? "yes" : "no", d.date, d.note,
+    d.sis, d.redlistName, d.colName, d.colAuthorship, d.colId, d.colStatus, d.colSpecies, d.redlistVersion, d.colVersion,
+    d.by, d.reviewed ? "yes" : "no", d.date, d.note,
   ].map((x) => clean(x === null ? null : String(x))).join("\t"));
   fs.writeFileSync(file, [COLUMNS.join("\t"), ...rows].join("\n") + "\n");
 }
 
-export interface Candidate { col_id: string; scientific_name: string; authorship: string | null; status: string }
+/** A CoL usage a decision may mean, and the accepted species it leads to (itself, when accepted). */
+export interface Candidate { col_id: string; scientific_name: string; authorship: string | null; status: string; species_name: string | null }
 
 export type Resolution =
   | { kind: "usage"; colId: string }
@@ -90,11 +107,19 @@ export function resolveDecision(d: Decision, currentName: string, candidates: Ca
   if (norm(d.redlistName) !== norm(currentName)) return { kind: "stale", why: `decided for ${d.redlistName}; the Red List now calls it ${currentName}` };
   if (!d.colName) return { kind: "not in CoL" };
   const named = candidates.filter((c) => norm(c.scientific_name) === norm(d.colName!));
-  if (d.colId && named.some((c) => c.col_id === d.colId)) return { kind: "usage", colId: d.colId };
   const auth = normaliseAuthorship(d.colAuthorship ?? undefined);
   const same = named.filter((c) => normaliseAuthorship(c.authorship ?? undefined) === auth);
-  if (same.length === 0) return { kind: "stale", why: `CoL has no ${d.colName}${d.colAuthorship ? ` ${d.colAuthorship}` : ""} any more` };
   const order = (s: string) => { const i = STATUS_ORDER.indexOf(s); return i < 0 ? STATUS_ORDER.length : i; };
   same.sort((a, b) => order(a.status) - order(b.status) || a.col_id.localeCompare(b.col_id));
-  return { kind: "usage", colId: same[0].col_id };
+  const hit = (d.colId ? named.find((c) => c.col_id === d.colId) : undefined) ?? same[0];
+  if (!hit) return { kind: "stale", why: `CoL has no ${d.colName}${d.colAuthorship ? ` ${d.colAuthorship}` : ""} any more` };
+  // What the decision rested on must still hold in this release.
+  const since = d.colVersion ? ` (decided against ${d.colVersion})` : "";
+  if (d.colStatus && hit.status !== d.colStatus) {
+    return { kind: "stale", why: `CoL now holds ${d.colName} as ${hit.status}, not ${d.colStatus}${since}` };
+  }
+  if (d.colSpecies && hit.species_name && norm(hit.species_name) !== norm(d.colSpecies)) {
+    return { kind: "stale", why: `CoL now files ${d.colName} under ${hit.species_name}, not ${d.colSpecies}${since}` };
+  }
+  return { kind: "usage", colId: hit.col_id };
 }

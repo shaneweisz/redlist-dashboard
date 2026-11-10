@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, dropCrossPhylum, oneOwnerPerUsage,
+  coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum, oneOwnerPerUsage,
   type LinkRow, type AcceptedSpecies,
 } from "../sync/link/rules";
 
@@ -93,6 +93,16 @@ describe("coverSameNameSynonyms", () => {
   });
 });
 
+describe("coverUndecidedCandidates", () => {
+  it("keeps what a waiting species might be off the NE list, counting nothing; not for a linked species", () => {
+    const links = [primary(1, null, { verdict: "none", method: "unmatched", counted: false }), primary(2, "B")];
+    const touched = coverUndecidedCandidates(links, coverer(links), [
+      { sis: 1, target_id: "C1", target_name: "Coenonympha pamphilus" }, { sis: 2, target_id: "X", target_name: "Other" }]);
+    expect([...touched]).toEqual([1]);
+    expect(covered(links)).toEqual([expect.objectContaining({ sis_taxon_id: 1, col_id: "C1", verdict: "refused", counted: false, usage_id: null })]);
+  });
+});
+
 describe("dropCrossPhylum", () => {
   it("unlinks a primary row and drops a covered one across a phylum", () => {
     const links = [primary(1, "CRAB"), { ...primary(2, "FISH"), role: "covered" as const }, primary(3, "OK")];
@@ -102,6 +112,12 @@ describe("dropCrossPhylum", () => {
 });
 
 describe("oneOwnerPerUsage", () => {
+  it("gives a usage two spellings claim to the one CoL writes exactly (Peltophorum dasyrhachis / dasyrachis)", () => {
+    const links = [primary(62522, "U"), primary(226500158, "U")];
+    oneOwnerPerUsage(links, new Set([226500158]));
+    expect(links.map((l) => [l.sis_taxon_id, l.verdict])).toEqual([[62522, "duplicate"], [226500158, "own"]]);
+  });
+
   it("gives a usage to the primary row, then the matcher, then the lower SIS id", () => {
     const links = [
       primary(5, "U", { basis: "decision" }),
