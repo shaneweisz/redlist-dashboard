@@ -168,6 +168,10 @@ To review links, `dbt/analyses/link_audit.sql` gives every link with the evidenc
 
 ### Versions
 
+![The versions a sync holds together](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/02-versions.png)
+
+Generated from a build and GBIF's live index: `python3 -I docs/diagrams/versions.py .sync <out.dot>`, then `dot -Tpng -Gdpi=110`. The orange arrows are the ones a person has to keep right.
+
 A link is between one Red List release and one CoL release, both recorded in `sync.json` and named in the footer. The CoL release is the XR the GBIF snapshot is filed under: every occurrence carries that XR's ids, so it is the only release the records can be counted in without guessing. Everything CoL-related uses it, including the CoL-differences card, so a page describes one taxonomy.
 
 It trails CoL's newest by up to a few months: GBIF re-indexes a few times a year, and the next snapshot catches up. Following CoL's newest instead was tried and dropped (PR #626): it meant guessing where GBIF's next re-index would file each record, and the guess failed silently. GBIF's *live* API moves before the snapshot does, so the app's live panels also ask with the id GBIF's matcher gives our name in its newer release (`src/lib/gbif-live-keys.ts`, see [app.md](app.md)).
