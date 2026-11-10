@@ -36,14 +36,14 @@ import { compareAuthors } from "../../../src/lib/authors";
 import { orthographicallySame } from "./name-variants";
 
 export interface MatchAnswer {
-  usage_id: string | null;
-  usage_name: string | null;
-  usage_authorship: string | null;
-  usage_rank: string | null;
-  usage_status: string | null;
+  matcher_col_id: string | null;
+  matcher_name: string | null;
+  matcher_authorship: string | null;
+  matcher_rank: string | null;
+  matcher_status: string | null;
   match_type: string | null;
   confidence: number | null;
-  alternatives: { usage_id: string; name: string; authorship: string | null; rank: string | null; status: string | null }[];
+  alternatives: { col_id: string; name: string; authorship: string | null; rank: string | null; status: string | null }[];
 }
 
 export type QueueReason =
@@ -80,32 +80,32 @@ export function acceptMatch(
 ): Acceptance {
   const no = (reason: QueueReason): Acceptance => ({ accepted: false, reason });
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
-  if (!m.usage_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
-  if (m.usage_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
-  if (m.usage_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
-  if (m.usage_status === "MISAPPLIED") return no("misapplied name");
+  if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
+  if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
+  if (m.matcher_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
+  if (m.matcher_status === "MISAPPLIED") return no("misapplied name");
   // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
-  const variant = m.match_type !== "EXACT" && !!m.usage_name && orthographicallySame(binomial(species.name), binomial(m.usage_name))
-    && compareAuthors(species.authority, m.usage_authorship) !== "other";
+  const variant = m.match_type !== "EXACT" && !!m.matcher_name && orthographicallySame(binomial(species.name), binomial(m.matcher_name))
+    && compareAuthors(species.authority, m.matcher_authorship) !== "other";
   if (m.match_type !== "EXACT" && !variant) return no("spelling variant");
-  if (m.usage_rank !== "SPECIES") return no("matched another rank");
+  if (m.matcher_rank !== "SPECIES") return no("matched another rank");
   if (!variant && (m.confidence ?? 0) < 99) return no("lower confidence");
-  const mine = speciesOf(m.usage_id);
+  const mine = speciesOf(m.matcher_col_id);
   if (!mine) return no("synonym of no species");
-  if (m.usage_status === "SYNONYM" && compareAuthors(species.authority, m.usage_authorship) === "other") return no("synonym by other authors");
+  if (m.matcher_status === "SYNONYM" && compareAuthors(species.authority, m.matcher_authorship) === "other") return no("synonym by other authors");
 
-  const rivals = m.alternatives.filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === binomial(m.usage_name)
-    && speciesOf(a.usage_id) !== mine);
+  const rivals = m.alternatives.filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === binomial(m.matcher_name)
+    && speciesOf(a.col_id) !== mine);
   if (rivals.length === 0) return { accepted: true, why: "unique name" };
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
-  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.usage_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
-    && compareAuthors(m.usage_authorship, a.authorship) !== "other";
-  const twins = rivals.filter((a) => same(m.usage_authorship, a.authorship) || provisionalCopy(a));
+  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
+    && compareAuthors(m.matcher_authorship, a.authorship) !== "other";
+  const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
-    if (m.usage_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
+    if (m.matcher_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
     return { accepted: true, why: "CoL holds it twice" };
   }
-  if (same(species.authority, m.usage_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
+  if (same(species.authority, m.matcher_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
     return { accepted: true, why: "authors pick it" };
   }
   return no("homonym the authors don't decide");

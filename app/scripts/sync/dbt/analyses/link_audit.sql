@@ -58,15 +58,15 @@ WITH latest AS (
   FROM {{ source('sources', 'assessments') }} WHERE is_latest
 ),
 link AS (
-  SELECT sis_taxon_id, any_value(col_id) AS col_id, any_value(usage_id) AS usage_id, any_value(method) AS method,
+  SELECT sis_taxon_id, any_value(col_species_id) AS col_id, any_value(col_taxon_id) AS taxon_id, any_value(method) AS method,
          any_value(basis) AS basis, any_value(decided_by) AS decided_by
   FROM {{ source('link', 'assessment_link') }} WHERE role = 'primary' GROUP BY sis_taxon_id
 ),
 taxa AS (SELECT * FROM {{ source('sources', 'taxa') }}),
 aliases AS (SELECT * FROM {{ source('sources', 'rank_aliases') }}),
 lumps AS (
-  SELECT col_id, count(DISTINCT sis_taxon_id) AS n FROM {{ source('link', 'assessment_link') }}
-  WHERE role = 'primary' AND col_id IS NOT NULL GROUP BY col_id
+  SELECT col_species_id AS col_id, count(DISTINCT sis_taxon_id) AS n FROM {{ source('link', 'assessment_link') }}
+  WHERE role = 'primary' AND col_species_id IS NOT NULL GROUP BY col_species_id
 ),
 joined AS (
   SELECT a.sis_taxon_id, a.scientific_name AS iucn_name, a.authority AS iucn_authority, a.taxon_group, a.assessment_date,
@@ -87,7 +87,7 @@ joined AS (
   FROM latest a
   LEFT JOIN link l USING (sis_taxon_id)
   LEFT JOIN taxa s ON s.col_id = l.col_id
-  LEFT JOIN taxa m ON m.col_id = l.usage_id
+  LEFT JOIN taxa m ON m.col_id = l.taxon_id
   LEFT JOIN lumps k ON k.col_id = l.col_id
 ),
 -- Two names for one rank agree when they are equal or one is the other's known alias.

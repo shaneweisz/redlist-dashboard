@@ -17,8 +17,13 @@ import { speciesNameParts, canonicalEpithet, orthographicKey } from "./name-vari
 export interface LinkRow {
   sis_taxon_id: number;
   role: "primary" | "covered";
-  col_id: string | null;
-  usage_id: string | null;
+  /** The CoL species it is part of. */
+  col_species_id: string | null;
+  /**
+   * The CoL taxon it is: the species itself, or the subspecies or synonym CoL
+   * folds it in as. Its records are counted from there down, when `counted`.
+   */
+  col_taxon_id: string | null;
   verdict: Verdict | "duplicate";
   method: string;
   basis: "matcher" | "decision" | "rule" | null;
@@ -43,11 +48,12 @@ const genus = (n: string) => n.split(" ")[0].toLowerCase();
 export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role">) => boolean;
 
 export function coverer(links: LinkRow[]): Cover {
-  const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_id]));
+  const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_species_id]));
   const seen = new Set<string>();
   return (row) => {
-    const k = `${row.sis_taxon_id}|${row.col_id}|${row.usage_id}`;
-    if (seen.has(k) || (row.verdict !== "lumped" && primaryTarget.get(row.sis_taxon_id) === row.col_id)) return false;
+    // One row per species, taxon counted from (none when nothing counts), so a refused row and an own one for one species stay two.
+    const k = `${row.sis_taxon_id}|${row.col_species_id}|${row.counted ? row.col_taxon_id : ""}`;
+    if (seen.has(k) || (row.verdict !== "lumped" && primaryTarget.get(row.sis_taxon_id) === row.col_species_id)) return false;
     seen.add(k);
     links.push({ ...row, role: "covered", basis: "rule", decided_by: null });
     return true;
@@ -83,7 +89,7 @@ export function coverSynonymSpecies(cover: Cover, candidates: SynonymCandidate[]
       && (!otherGenus || authorsAgree)
       && !isSeparatelyAssessed(c.target_name, c.name, assessedNames);
     const added = cover({
-      sis_taxon_id: c.sis, col_id: c.target_id, usage_id: same ? c.target_id : null, verdict: same ? "own" : "refused",
+      sis_taxon_id: c.sis, col_species_id: c.target_id, col_taxon_id: c.target_id, verdict: same ? "own" : "refused",
       method: "iucn_synonym_covered", reason: same ? `${c.target_name} is the same organism under another accepted name` : `${c.target_name} is named as a synonym; kept out of the Not Evaluated list only`,
       counted: same,
     });
@@ -102,11 +108,11 @@ function coverAlongside(cover: Cover, l: LinkRow, target: AcceptedSpecies, other
   // separately assessed one (Utricularia ochroleuca, matched to its × twin).
   const ownName = norm(other.scientific_name) === listedName;
   if (other.col_id === target.col_id || (!ownName && isSeparatelyAssessed(other.scientific_name, target.scientific_name, assessedNames))) return false;
-  return cover({ sis_taxon_id: l.sis_taxon_id, col_id: other.col_id, usage_id: other.col_id, verdict: "own", method, reason, counted: true });
+  return cover({ sis_taxon_id: l.sis_taxon_id, col_species_id: other.col_id, col_taxon_id: other.col_id, verdict: "own", method, reason, counted: true });
 }
 
 /** Each assessed species' own target: its primary row, when the species is that CoL species. */
-const ownTargets = (links: LinkRow[]) => links.filter((l) => l.role === "primary" && l.verdict === "own" && l.col_id);
+const ownTargets = (links: LinkRow[]) => links.filter((l) => l.role === "primary" && l.verdict === "own" && l.col_species_id);
 
 const twinName = (n: string) => n.toLowerCase().replace(/\s*×\s*/g, " ").replace(/\s+/g, " ").trim();
 const twinKeys = (x: AcceptedSpecies) => [
@@ -139,7 +145,7 @@ export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpe
   for (const x of accepted) { const k = spellingKey(x); if (k) respellings.set(k, [...(respellings.get(k) ?? []), x.col_id]); }
   const touched = new Set<number>();
   for (const l of ownTargets(links)) {
-    const t = byId.get(l.col_id!);
+    const t = byId.get(l.col_species_id!);
     if (!t) continue;
     const same = new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []));
     for (const id of same) {
@@ -177,7 +183,7 @@ export function coverDuplicateConcepts(links: LinkRow[], cover: Cover, accepted:
   for (const x of accepted) { const d = dupKey(x); if (d) dups.set(d, [...(dups.get(d) ?? []), x.col_id]); }
   const touched = new Set<number>();
   for (const l of ownTargets(links)) {
-    const t = byId.get(l.col_id!);
+    const t = byId.get(l.col_species_id!);
     const dk = t ? dupKey(t) : null;
     if (!t || !dk) continue;
     for (const id of dups.get(dk) ?? []) {
@@ -206,8 +212,8 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
   const touched = new Set<number>();
   for (const x of synonyms) {
     const l = lumped.get(x.sis);
-    if (!l || x.usage === l.usage_id) continue;
-    if (cover({ sis_taxon_id: x.sis, col_id: x.target, usage_id: x.usage, verdict: "lumped", method: "same_name_synonym",
+    if (!l || x.usage === l.col_taxon_id) continue;
+    if (cover({ sis_taxon_id: x.sis, col_species_id: x.target, col_taxon_id: x.usage, verdict: "lumped", method: "same_name_synonym",
       reason: "CoL files this name under more than one species; its records under each are its own", counted: true })) touched.add(x.sis);
   }
   return touched;
@@ -228,11 +234,11 @@ export interface Candidate { sis: number; target_id: string; target_name: string
  * the list too until gardetta is decided.
  */
 export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
-  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_id).map((l) => l.sis_taxon_id));
+  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_species_id).map((l) => l.sis_taxon_id));
   const touched = new Set<number>();
   for (const c of candidates) {
     if (!waiting.has(c.sis)) continue;
-    if (cover({ sis_taxon_id: c.sis, col_id: c.target_id, usage_id: null, verdict: "refused", method: "undecided_candidate",
+    if (cover({ sis_taxon_id: c.sis, col_species_id: c.target_id, col_taxon_id: c.target_id, verdict: "refused", method: "undecided_candidate",
       reason: `waiting for a decision; ${c.target_name} may be it, so it is kept out of the Not Evaluated list`, counted: false })) touched.add(c.sis);
   }
   return touched;
@@ -243,16 +249,16 @@ export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candida
  * homonyms across kingdoms (the surgeonfish Acanthurus lineatus and the crab
  * Hepatus lineatus), and twins and lumps are found by name alone. A covered row
  * across one goes; a primary row is unlinked. `crossing` holds the
- * "sis|col_id" pairs whose lineages differ (assessment-link.ts asks the build).
+ * "sis|col_species_id" pairs whose lineages differ (assessment-link.ts asks the build).
  */
 export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<number> {
   const touched = new Set<number>();
   for (let i = links.length - 1; i >= 0; i--) {
     const l = links[i];
-    if (!l.col_id || !crossing.has(`${l.sis_taxon_id}|${l.col_id}`)) continue;
+    if (!l.col_species_id || !crossing.has(`${l.sis_taxon_id}|${l.col_species_id}`)) continue;
     touched.add(l.sis_taxon_id);
     if (l.role === "covered") { links.splice(i, 1); continue; }
-    Object.assign(l, { col_id: null, usage_id: null, verdict: "none", method: "unmatched", counted: false,
+    Object.assign(l, { col_species_id: null, col_taxon_id: null, verdict: "none", method: "unmatched", counted: false,
       reason: "the only CoL match is in another phylum" });
   }
   return touched;
@@ -280,11 +286,12 @@ export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new 
   const owner = new Map<string, number>();
   const touched = new Set<number>();
   for (const l of claimants) {
-    const prev = owner.get(l.usage_id!);
-    if (prev === undefined) { owner.set(l.usage_id!, l.sis_taxon_id); continue; }
+    const prev = owner.get(l.col_taxon_id!);
+    if (prev === undefined) { owner.set(l.col_taxon_id!, l.sis_taxon_id); continue; }
     l.counted = false;
     touched.add(l.sis_taxon_id);
-    if (l.role === "primary") { l.verdict = "duplicate"; l.reason = `its records belong to SIS ${prev}, matched first`; l.usage_id = null; }
+    // Still that taxon: only its records go to the other species.
+    if (l.role === "primary") { l.verdict = "duplicate"; l.reason = `its records belong to SIS ${prev}, matched first`; }
   }
   return touched;
 }

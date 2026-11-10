@@ -9,7 +9,7 @@
  *   usage_key       a taxa.col_id; the occurrences' usage_key
  *   sis_taxon_id    the assessed species its records count for, else NULL
  *   link_usage_id   the assessment_link row it counts through (that row's
- *                   usage_id), for an assessed species
+ *                   col_taxon_id), for an assessed species
  *   col_id          the unassessed CoL species its records count for, else NULL
  *
  * Decisions, in order (the first that applies decides):
@@ -32,7 +32,7 @@
 
 -- 1. What each lumped species owns.
 WITH RECURSIVE down(sis, root, usage_key, depth) AS (
-  SELECT sis_taxon_id, usage_id, usage_id, 0 FROM {{ source('link', 'assessment_link') }} WHERE verdict = 'lumped' AND counted
+  SELECT sis_taxon_id, col_taxon_id, col_taxon_id, 0 FROM {{ source('link', 'assessment_link') }} WHERE verdict = 'lumped' AND counted
   UNION ALL
   SELECT d.sis, d.root, t.col_id, d.depth + 1 FROM down d JOIN {{ source('sources', 'taxa') }} t ON t.parent_id = d.usage_key WHERE d.depth < 3
 ),
@@ -47,8 +47,8 @@ taxa AS (SELECT col_id, parent_id, species_id FROM {{ source('sources', 'taxa') 
 SELECT usage_key, sis AS sis_taxon_id, root AS link_usage_id, NULL::VARCHAR AS col_id FROM lumped
 UNION ALL
 -- 2. A species' usages, for the assessed species whose own row it is.
-SELECT t.col_id, l.sis_taxon_id, l.usage_id, NULL
-FROM taxa t JOIN link l ON l.usage_id = t.species_id AND l.verdict = 'own' AND l.counted
+SELECT t.col_id, l.sis_taxon_id, l.col_taxon_id, NULL
+FROM taxa t JOIN link l ON l.col_taxon_id = t.species_id AND l.verdict = 'own' AND l.counted
 WHERE t.col_id NOT IN (SELECT usage_key FROM lumped)
 UNION ALL
 -- 3. A species no link row names: its own.
@@ -56,4 +56,4 @@ SELECT t.col_id, NULL, NULL, t.species_id
 FROM taxa t
 WHERE t.species_id IS NOT NULL
   AND t.col_id NOT IN (SELECT usage_key FROM lumped)
-  AND t.species_id NOT IN (SELECT col_id FROM link WHERE col_id IS NOT NULL)
+  AND t.species_id NOT IN (SELECT col_species_id FROM link WHERE col_species_id IS NOT NULL)

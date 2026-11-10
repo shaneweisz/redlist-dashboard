@@ -10,9 +10,10 @@
  *   sis_taxon_id
  *   role         primary (the species itself) | covered (another CoL species the
  *                same organism sits under)
- *   col_id       the CoL species it is
- *   usage_id     where its records start: the species for own, its own usage
- *                for lumped, NULL when nothing counts
+ *   col_species_id  the CoL species it is part of
+ *   col_taxon_id    the CoL taxon it is: the species itself, or the subspecies
+ *                   or synonym CoL folds it in as; its records are counted from
+ *                   there down when `counted`. Empty only when there's no link.
  *   verdict      own | lumped | refused | none | duplicate
  *   method       what kind of usage the name is (accepted, synonym,
  *                provisional, ambiguous_synonym, or the covered row's rule)
@@ -73,7 +74,7 @@ export interface QueueRow {
   /** undecided: counts nothing yet. proposed: a decision applies, but no person has checked it. stale: a decision no longer resolves. */
   status: "undecided" | "proposed" | "stale";
   reason: string;
-  matcher_usage_id: string | null;
+  matcher_col_id: string | null;
   matcher_name: string | null;
   matcher_authorship: string | null;
   match_type: string | null;
@@ -103,12 +104,12 @@ export async function buildLink(
 
   // ── 1. Name ────────────────────────────────────────────────────────────────
   const answers = new Map((await rows<Omit<MatchAnswer, "alternatives"> & { sis_taxon_id: number; alts: string | null }>(conn, `
-    SELECT sis_taxon_id, usage_id, usage_name, usage_authorship, usage_rank, usage_status, match_type, confidence,
+    SELECT sis_taxon_id, matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
            to_json(alternatives)::VARCHAR AS alts
     FROM ${parquet(inputs.matches)}`)).map((m) => [m.sis_taxon_id, { ...m, alternatives: (m.alts ? JSON.parse(m.alts) : null) ?? [] } as MatchAnswer]));
   const speciesOf = new Map((await rows<{ col_id: string; species_id: string | null }>(conn, `
-    WITH ids AS (SELECT usage_id AS id FROM ${parquet(inputs.matches)} UNION
-                 SELECT unnest(list_transform(alternatives, a -> a.usage_id)) FROM ${parquet(inputs.matches)})
+    WITH ids AS (SELECT matcher_col_id AS id FROM ${parquet(inputs.matches)} UNION
+                 SELECT unnest(list_transform(alternatives, lambda a: a.col_id)) FROM ${parquet(inputs.matches)})
     SELECT t.col_id, t.species_id FROM ids JOIN col_usages t ON t.col_id = ids.id`)).map((r) => [r.col_id, r.species_id]));
   const decidedNames = [...new Set([...decisions.values()].flatMap((d) => (d.colName ? [norm(d.colName)] : [])))];
   const candidates = new Map<string, Candidate[]>();
@@ -122,7 +123,8 @@ export async function buildLink(
   }
 
   const species = await rows<{ sis: number; name: string; authority: string | null }>(conn, `SELECT sis, name, authority FROM redlist_species ORDER BY sis`);
-  const picks: { sis: number; usage_id: string; basis: "matcher" | "decision"; by_: string | null }[] = [];
+  // Each species' picked CoL record: the matcher's answer, or an override's.
+  const picks: { sis: number; col_id: string; basis: "matcher" | "decision"; by_: string | null }[] = [];
   const queue: QueueRow[] = [];
   const unlinkedReason = new Map<number, string>();
   for (const s of species) {
@@ -130,7 +132,7 @@ export async function buildLink(
     const acc = m ? acceptMatch(s, m, (id) => speciesOf.get(id) ?? null) : { accepted: false as const, reason: "no species match" as QueueReason };
     const enqueue = (status: QueueRow["status"], reason: string, by: string | null = null) => queue.push({
       sis_taxon_id: s.sis, name: s.name, authority: s.authority, status, reason,
-      matcher_usage_id: m?.usage_id ?? null, matcher_name: m?.usage_name ?? null, matcher_authorship: m?.usage_authorship ?? null,
+      matcher_col_id: m?.matcher_col_id ?? null, matcher_name: m?.matcher_name ?? null, matcher_authorship: m?.matcher_authorship ?? null,
       match_type: m?.match_type ?? null, confidence: m?.confidence ?? null, decided_by: by,
     });
     const d = decisions.get(s.sis);
@@ -138,17 +140,17 @@ export async function buildLink(
       const res = resolveOverride(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : [], s.authority);
       if (res.kind !== "stale") {
         if (!d.reviewed) enqueue("proposed", acc.accepted ? "the matcher would take its answer" : acc.reason, d.by);
-        if (res.kind === "usage") picks.push({ sis: s.sis, usage_id: res.colId, basis: "decision", by_: d.by });
+        if (res.kind === "usage") picks.push({ sis: s.sis, col_id: res.colId, basis: "decision", by_: d.by });
         else unlinkedReason.set(s.sis, `not in CoL (decided by ${d.by})`);
         continue;
       }
       // A decision that no longer resolves is asked again; meanwhile the matcher's answer stands if it is certain.
       enqueue("stale", res.why, d.by);
-      if (acc.accepted) picks.push({ sis: s.sis, usage_id: m!.usage_id!, basis: "matcher", by_: null });
+      if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
       else unlinkedReason.set(s.sis, `waiting for a decision: ${res.why}`);
       continue;
     }
-    if (acc.accepted) { picks.push({ sis: s.sis, usage_id: m!.usage_id!, basis: "matcher", by_: null }); continue; }
+    if (acc.accepted) { picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
     enqueue("undecided", acc.reason);
     unlinkedReason.set(s.sis, `waiting for a decision: ${acc.reason}`);
   }
@@ -156,14 +158,14 @@ export async function buildLink(
   const orphaned = [...decisions.keys()].filter((k) => !rlSis.has(k));
   if (orphaned.length > 0) console.log(`  ${orphaned.length} decisions name species no longer assessed (SIS ${orphaned.slice(0, 5).join(", ")}${orphaned.length > 5 ? ", ..." : ""})`);
 
-  await writeTable(conn, "picks", { sis: "INTEGER", usage_id: "VARCHAR", basis: "VARCHAR", by_: "VARCHAR" }, picks);
+  await writeTable(conn, "picks", { sis: "INTEGER", col_id: "VARCHAR", basis: "VARCHAR", by_: "VARCHAR" }, picks);
 
   // ── 2. Concept ─────────────────────────────────────────────────────────────
   // The species each usage makes it: itself if accepted, or a synonym's species.
   const primary = await rows<{
     sis: number; name: string; authority: string | null; basis: "matcher" | "decision"; by_: string | null; method: string;
-    usage_id: string; usage_name: string; usage_authorship: string | null; usage_status: string;
-    usage_parent: string | null; usage_parent_rank: string | null; usage_parent_name: string | null;
+    picked_id: string; picked_name: string; picked_authorship: string | null; picked_status: string;
+    picked_parent: string | null; picked_parent_rank: string | null; picked_parent_name: string | null;
     target_id: string | null; target_name: string | null; target_authorship: string | null;
   }>(conn, `
     WITH picked AS (
@@ -173,15 +175,15 @@ export async function buildLink(
                   WHEN usage.status = 'ambiguous synonym' THEN 'ambiguous_synonym' ELSE replace(usage.status, ' ', '_') END AS method,
              CASE WHEN usage.status IN ('accepted', 'provisionally accepted') THEN usage.col_id
                   WHEN usage.status IN ('synonym', 'ambiguous synonym') THEN usage.species_id END AS target_col_id
-      FROM picks pick JOIN col_usages usage ON usage.col_id = pick.usage_id)
+      FROM picks pick JOIN col_usages usage ON usage.col_id = pick.col_id)
     SELECT r.sis, r.name, r.authority, picked.basis, picked.by_, picked.method,
-           picked.col_id AS usage_id, picked.scientific_name AS usage_name, picked.authorship AS usage_authorship,
-           picked.status AS usage_status, picked.parent_id AS usage_parent,
-           usage_parent.rank AS usage_parent_rank, usage_parent.scientific_name AS usage_parent_name,
+           picked.col_id AS picked_id, picked.scientific_name AS picked_name, picked.authorship AS picked_authorship,
+           picked.status AS picked_status, picked.parent_id AS picked_parent,
+           picked_parent.rank AS picked_parent_rank, picked_parent.scientific_name AS picked_parent_name,
            target.col_id AS target_id, target.scientific_name AS target_name, target.authorship AS target_authorship
     FROM picked JOIN redlist_species r ON r.sis = picked.sis
     LEFT JOIN col_usages target ON target.col_id = picked.target_col_id
-    LEFT JOIN col_usages usage_parent ON usage_parent.col_id = picked.parent_id`);
+    LEFT JOIN col_usages picked_parent ON picked_parent.col_id = picked.parent_id`);
 
   const assessedNames = new Set((await rows<{ name_key: string }>(conn, `SELECT name_key FROM redlist_species`)).map((r) => r.name_key));
   // Every CoL synonym carrying a species' own name, with the species it leads
@@ -199,14 +201,14 @@ export async function buildLink(
 
   const links: LinkRow[] = [];
   for (const p of primary) {
-    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, `${p.usage_name} leads to no accepted species`); continue; }
+    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, `${p.picked_name} leads to no accepted species`); continue; }
     // A decision says the Red List name IS this CoL name, however spelled, and so
     // does a spelling the codes' rules make the same name (name-variants.ts:
     // Sminthopsis fuliginosa / fuliginosus), so decideKey may be asked about
     // either spelling: the author comparison can't undo what was settled.
     const asListed = { scientificName: p.name, authorship: p.authority ?? undefined };
-    const asDecided = { scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
-    const usage = { key: p.usage_id, scientificName: p.usage_name, authorship: p.usage_authorship ?? undefined };
+    const asDecided = { scientificName: p.picked_name, authorship: p.picked_authorship ?? undefined };
+    const usage = { key: p.picked_id, scientificName: p.picked_name, authorship: p.picked_authorship ?? undefined };
     const target = { key: p.target_id, scientificName: p.target_name, authorship: p.target_authorship ?? undefined };
     // Its own name is a CoL synonym that CoL marks as a respelling of the
     // accepted name (same citation): the same species, whatever the Red List's
@@ -215,31 +217,32 @@ export async function buildLink(
       && (ownNameSynonyms.get(`${p.sis}|${p.target_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
       && !isSeparatelyAssessed(p.target_name, p.name, assessedNames);
     const d = p.method === "ambiguous_synonym"
-      ? { verdict: "lumped" as const, reason: `CoL lists ${p.usage_name} as an ambiguous synonym of ${p.target_name}; counting only records under this name` }
+      ? { verdict: "lumped" as const, reason: `CoL lists ${p.picked_name} as an ambiguous synonym of ${p.target_name}; counting only records under this name` }
       : respelled
-      ? { verdict: "own" as const, reason: `CoL spells it ${p.target_name} (${p.usage_name} is its orthographic variant, same citation)` }
+      ? { verdict: "own" as const, reason: `CoL spells it ${p.target_name} (${p.picked_name} is its orthographic variant, same citation)` }
       : (() => {
-          const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.target_id !== p.usage_id ? target : undefined, assessedNames });
+          const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.target_id !== p.picked_id ? target : undefined, assessedNames });
           const listed = ask(asListed);
-          const sameName = p.basis === "decision" || orthographicallySame(p.name, p.usage_name);
+          const sameName = p.basis === "decision" || orthographicallySame(p.name, p.picked_name);
           return sameName && listed.verdict !== "own" ? ask(asDecided) : listed;
         })();
     // A lumped species' records start at its own usage, or at the infraspecific
     // CoL files that synonym under (Fringilla polatzeki → F. teydea polatzeki).
     // Not a nominate infraspecific (Rosa villosa subsp. villosa): that is the
     // species' core, whose records are the accepted species', not this one's.
-    const nominate = p.usage_parent_name ? (() => { const w = p.usage_parent_name.toLowerCase().split(/\s+/); return w.length > 2 && w[w.length - 1] === w[1]; })() : false;
-    const lumpRoot = p.usage_status === "synonym" && p.usage_parent && p.usage_parent_rank && p.usage_parent_rank !== "species" && p.usage_parent !== p.target_id && !nominate
-      ? p.usage_parent : p.usage_id;
+    const nominate = p.picked_parent_name ? (() => { const w = p.picked_parent_name.toLowerCase().split(/\s+/); return w.length > 2 && w[w.length - 1] === w[1]; })() : false;
+    const lumpRoot = p.picked_status === "synonym" && p.picked_parent && p.picked_parent_rank && p.picked_parent_rank !== "species" && p.picked_parent !== p.target_id && !nominate
+      ? p.picked_parent : p.picked_id;
     links.push({
-      sis_taxon_id: p.sis, role: "primary", col_id: p.target_id,
-      usage_id: d.verdict === "own" ? p.target_id : d.verdict === "lumped" ? lumpRoot : null,
+      // The taxon it is, whether or not its records count: a refused one is still that taxon.
+      sis_taxon_id: p.sis, role: "primary", col_species_id: p.target_id,
+      col_taxon_id: d.verdict === "own" ? p.target_id : lumpRoot,
       verdict: d.verdict, method: p.method, basis: p.basis, decided_by: p.by_, reason: d.reason, counted: d.verdict === "own" || d.verdict === "lumped",
     });
   }
   const linked = new Set(links.map((l) => l.sis_taxon_id));
   for (const s of species) {
-    if (!linked.has(s.sis)) links.push({ sis_taxon_id: s.sis, role: "primary", col_id: null, usage_id: null, verdict: "none", method: "unmatched",
+    if (!linked.has(s.sis)) links.push({ sis_taxon_id: s.sis, role: "primary", col_species_id: null, col_taxon_id: null, verdict: "none", method: "unmatched",
       basis: null, decided_by: null, reason: unlinkedReason.get(s.sis) ?? "no CoL name", counted: false });
   }
 
@@ -272,17 +275,17 @@ export async function buildLink(
     JOIN col_usages target ON target.col_id = u.species_id
     UNION
     SELECT DISTINCT m.sis_taxon_id, target.col_id, target.scientific_name
-    FROM ${parquet(inputs.matches)} m JOIN col_usages u ON u.col_id = m.usage_id JOIN col_usages target ON target.col_id = u.species_id`);
+    FROM ${parquet(inputs.matches)} m JOIN col_usages u ON u.col_id = m.matcher_col_id JOIN col_usages target ON target.col_id = u.species_id`);
   // The pairs whose lineages differ, asked of the build once every row exists.
   const crossing = async () => {
     await writeTable(conn, "linked_pairs", { sis: "INTEGER", col_id: "VARCHAR" },
-      links.filter((l) => l.col_id).map((l) => ({ sis: l.sis_taxon_id, col_id: l.col_id })));
+      links.filter((l) => l.col_species_id).map((l) => ({ sis: l.sis_taxon_id, col_id: l.col_species_id })));
     return new Set((await rows<{ k: string }>(conn, `
       SELECT DISTINCT r.sis || '|' || target.col_id AS k FROM linked_pairs i JOIN redlist_species r ON r.sis = i.sis JOIN col_usages target ON target.col_id = i.col_id
       WHERE NOT ${sameLineage}`)).map((x) => x.k));
   };
 
-  const exactName = new Set(primary.filter((p) => norm(p.name) === norm(p.usage_name)).map((p) => p.sis));
+  const exactName = new Set(primary.filter((p) => norm(p.name) === norm(p.picked_name)).map((p) => p.sis));
   const cover = coverer(links);
   const rules: [string, () => Set<number> | Promise<Set<number>>][] = [
     ["covered: another accepted species IUCN's synonyms or CoL's name it", () => coverSynonymSpecies(cover, synonymCandidates, assessedNames)],
@@ -297,9 +300,9 @@ export async function buildLink(
   for (const [name, apply] of rules) touchedBy[name] = (await apply()).size;
   for (const [name, n] of Object.entries(touchedBy)) console.log(`   ${name}: ${n.toLocaleString()} species`);
 
-  await writeTable<LinkRow>(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_id: "VARCHAR", usage_id: "VARCHAR",
+  await writeTable<LinkRow>(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
     verdict: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", reason: "VARCHAR", counted: "BOOLEAN" }, links);
-  await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
+  await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
   writeQueue(queue, output(out.matchQueue));
 
   const [basis] = await rows<{ matcher: number; decision: number; unlinked: number }>(conn, `
@@ -323,7 +326,7 @@ export interface LinkSummary {
 
 /** The queue as the TSV a person works through: by status, then reason, then SIS id. */
 export function writeQueue(queue: QueueRow[], file: string): void {
-  const cols = Object.keys({ sis_taxon_id: 0, name: 0, authority: 0, status: 0, reason: 0, matcher_usage_id: 0, matcher_name: 0,
+  const cols = Object.keys({ sis_taxon_id: 0, name: 0, authority: 0, status: 0, reason: 0, matcher_col_id: 0, matcher_name: 0,
     matcher_authorship: 0, match_type: 0, confidence: 0, decided_by: 0 } satisfies Record<keyof QueueRow, 0>) as (keyof QueueRow)[];
   const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
   const sorted = [...queue].sort((a, b) => cmp(a.status, b.status) || cmp(a.reason, b.reason) || a.sis_taxon_id - b.sis_taxon_id);

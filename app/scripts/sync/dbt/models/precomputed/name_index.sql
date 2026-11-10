@@ -42,8 +42,8 @@ WITH species AS (
   LEFT JOIN (
     -- The primary link only: a covered row names another concept the species is
     -- kept out of the NE list under, not the species itself.
-    SELECT sis_taxon_id AS id, any_value(col_id) AS col_id FROM {{ source('link', 'assessment_link') }}
-    WHERE col_id IS NOT NULL AND role = 'primary' GROUP BY 1
+    SELECT sis_taxon_id AS id, any_value(col_species_id) AS col_id FROM {{ source('link', 'assessment_link') }}
+    WHERE col_species_id IS NOT NULL AND role = 'primary' GROUP BY 1
   ) ra ON ra.id = a.id
   UNION ALL
   -- Not Evaluated species GBIF has records for, keyed by col_id (also their GBIF key).

@@ -148,9 +148,9 @@ export async function buildColRevisions(
         AND col_id NOT IN (SELECT col_id FROM assessed_cids)
     ),
     parent_col AS (
-      SELECT l.sis_taxon_id AS id, any_value(l.col_id) AS col_id
+      SELECT l.sis_taxon_id AS id, any_value(l.col_species_id) AS col_id
       FROM read_parquet('${link}') l
-      WHERE l.col_id IS NOT NULL AND l.role = 'primary'
+      WHERE l.col_species_id IS NOT NULL AND l.role = 'primary'
       GROUP BY l.sis_taxon_id
     ),
     -- One split-off species per row, with the oldest-sorting synonym that
@@ -218,10 +218,10 @@ export async function buildColRevisions(
   if (Object.keys(species).length) {
     const lumpRows = await (await conn.run(`
       WITH members AS (
-        SELECT l.col_id AS col_id, a.id AS id, a.scientific_name AS name, a.iucn_category AS category
+        SELECT l.col_species_id AS col_id, a.id AS id, a.scientific_name AS name, a.iucn_category AS category
         FROM read_parquet('${link}') l
         JOIN read_parquet('${assessedPath}') a ON a.id = l.sis_taxon_id
-        WHERE l.col_id IS NOT NULL AND l.role = 'primary'
+        WHERE l.col_species_id IS NOT NULL AND l.role = 'primary'
       ),
       groups AS (SELECT col_id FROM members GROUP BY col_id HAVING count(*) > 1),
       pairs AS (
@@ -300,7 +300,7 @@ const renameRows = (await conn.runAndReadAll(`
       -- Every link, covered rows too: a species whose links reach more than one
       -- accepted name is refused below.
       JOIN read_parquet('${link}') l ON l.sis_taxon_id = a.id
-      JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_id
+      JOIN read_parquet('${taxaPath}') b ON b.col_id = l.col_species_id
       WHERE b.rank = 'species'
     ),
     resolved AS (

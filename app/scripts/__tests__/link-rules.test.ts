@@ -8,8 +8,8 @@ import {
   type LinkRow, type AcceptedSpecies,
 } from "../sync/link/rules";
 
-const primary = (sis: number, col_id: string | null, over: Partial<LinkRow> = {}): LinkRow => ({
-  sis_taxon_id: sis, role: "primary", col_id, usage_id: col_id, verdict: "own", method: "accepted", basis: "matcher",
+const primary = (sis: number, col_species_id: string | null, over: Partial<LinkRow> = {}): LinkRow => ({
+  sis_taxon_id: sis, role: "primary", col_species_id, col_taxon_id: col_species_id, verdict: "own", method: "accepted", basis: "matcher",
   decided_by: null, reason: "", counted: true, ...over,
 });
 const sp = (col_id: string, scientific_name: string, authorship: string | null, family = "F", class_name = "C"): AcceptedSpecies =>
@@ -20,10 +20,10 @@ describe("coverer", () => {
   it("adds a covered row once, and none for the species' own target", () => {
     const links = [primary(1, "A")];
     const cover = coverer(links);
-    const row = { sis_taxon_id: 1, col_id: "B", usage_id: "B", verdict: "own" as const, method: "m", reason: "", counted: true };
+    const row = { sis_taxon_id: 1, col_species_id: "B", col_taxon_id: "B", verdict: "own" as const, method: "m", reason: "", counted: true };
     expect(cover(row)).toBe(true);
     expect(cover(row)).toBe(false);
-    expect(cover({ ...row, col_id: "A", usage_id: "A" })).toBe(false);
+    expect(cover({ ...row, col_species_id: "A", col_taxon_id: "A" })).toBe(false);
     expect(covered(links)).toHaveLength(1);
   });
 });
@@ -35,13 +35,13 @@ describe("coverSynonymSpecies", () => {
     const touched = coverSynonymSpecies(coverer(links), [{ sis: 1, name: "Hylatomus pileatus", authority: "(Linnaeus, 1758)",
       target_id: "DRY", target_name: "Dryocopus pileatus", target_authorship: "(Linnaeus, 1758)", kind: 0, src: "iucn" }], species);
     expect(touched.size).toBe(1);
-    expect(covered(links)[0]).toMatchObject({ col_id: "DRY", verdict: "own", counted: true });
+    expect(covered(links)[0]).toMatchObject({ col_species_id: "DRY", verdict: "own", counted: true });
   });
   it("refuses one under another genus whose authors differ (pied stilt, not banded stilt)", () => {
     const links = [primary(1, "HIM")];
     coverSynonymSpecies(coverer(links), [{ sis: 1, name: "Himantopus leucocephalus", authority: "Gould, 1837",
       target_id: "CLA", target_name: "Cladorhynchus leucocephalus", target_authorship: "(Vieillot, 1816)", kind: 0, src: "iucn" }], species);
-    expect(covered(links)[0]).toMatchObject({ col_id: "CLA", verdict: "refused", counted: false, usage_id: null });
+    expect(covered(links)[0]).toMatchObject({ col_species_id: "CLA", verdict: "refused", counted: false, col_taxon_id: "CLA" });
   });
   it("doesn't count one reached through a CoL synonym (kind 1)", () => {
     const links = [primary(1, "X")];
@@ -57,7 +57,7 @@ describe("coverTwins", () => {
     const accepted = [sp("U1", "Utricularia ochroleuca", null, "Lentibulariaceae", "Magnoliopsida"),
       sp("U2", "Utricularia × ochroleuca", null, "Lentibulariaceae", "Magnoliopsida")];
     expect(coverTwins(links, coverer(links), accepted, new Map([[1, "utricularia ochroleuca"]]), new Set()).size).toBe(1);
-    expect(covered(links)[0]).toMatchObject({ col_id: "U2", method: "same_name_twin", counted: true });
+    expect(covered(links)[0]).toMatchObject({ col_species_id: "U2", method: "same_name_twin", counted: true });
   });
   it("leaves the same name in two classes alone (Centropogon australis, a plant and a fish)", () => {
     const links = [primary(1, "P")];
@@ -71,7 +71,7 @@ describe("coverTwins: a name CoL spells two ways", () => {
     const links = [primary(1, "P1")];
     const accepted = [sp("P1", "Pica nutallii", "(Audubon, 1837)", "Corvidae", "Aves"), sp("P2", "Pica nuttalli", null, "Corvidae", "Aves")];
     expect(coverTwins(links, coverer(links), accepted, new Map([[1, "pica nutalli"]]), new Set()).size).toBe(1);
-    expect(covered(links)[0]).toMatchObject({ col_id: "P2", method: "respelled_twin", counted: true });
+    expect(covered(links)[0]).toMatchObject({ col_species_id: "P2", method: "respelled_twin", counted: true });
   });
   it("not two spellings whose citations disagree on the year (Mycalesis ita, 1863 / itys, 1867)", () => {
     const links = [primary(1, "M2")];
@@ -93,7 +93,7 @@ describe("coverDuplicateConcepts", () => {
   it("counts the same epithet and dated citation under another genus in one family", () => {
     const links = [primary(1, "C1")];
     expect(coverDuplicateConcepts(links, coverer(links), accepted, new Map(), new Set()).size).toBe(1);
-    expect(covered(links)[0]).toMatchObject({ col_id: "A1", method: "duplicate_concept" });
+    expect(covered(links)[0]).toMatchObject({ col_species_id: "A1", method: "duplicate_concept" });
   });
   it("not when the other is a species the Red List assesses separately", () => {
     const links = [primary(1, "C1")];
@@ -103,11 +103,11 @@ describe("coverDuplicateConcepts", () => {
 
 describe("coverSameNameSynonyms", () => {
   it("gives a lumped species every synonym usage carrying its name", () => {
-    const links = [primary(1, "R1", { verdict: "lumped", method: "synonym", usage_id: "S1" })];
+    const links = [primary(1, "R1", { verdict: "lumped", method: "synonym", col_taxon_id: "S1" })];
     const touched = coverSameNameSynonyms(links, coverer(links),
       [{ sis: 1, usage: "S1", target: "R1" }, { sis: 1, usage: "S2", target: "R2" }, { sis: 1, usage: "S3", target: "R3" }]);
     expect(touched.size).toBe(1);
-    expect(covered(links).map((l) => l.usage_id)).toEqual(["S2", "S3"]);
+    expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S2", "S3"]);
   });
   it("does nothing for a species that isn't lumped", () => {
     const links = [primary(1, "R1")];
@@ -121,7 +121,7 @@ describe("coverUndecidedCandidates", () => {
     const touched = coverUndecidedCandidates(links, coverer(links), [
       { sis: 1, target_id: "C1", target_name: "Coenonympha pamphilus" }, { sis: 2, target_id: "X", target_name: "Other" }]);
     expect([...touched]).toEqual([1]);
-    expect(covered(links)).toEqual([expect.objectContaining({ sis_taxon_id: 1, col_id: "C1", verdict: "refused", counted: false, usage_id: null })]);
+    expect(covered(links)).toEqual([expect.objectContaining({ sis_taxon_id: 1, col_species_id: "C1", verdict: "refused", counted: false, col_taxon_id: "C1" })]);
   });
 });
 
@@ -129,7 +129,7 @@ describe("dropCrossPhylum", () => {
   it("unlinks a primary row and drops a covered one across a phylum", () => {
     const links = [primary(1, "CRAB"), { ...primary(2, "FISH"), role: "covered" as const }, primary(3, "OK")];
     expect(dropCrossPhylum(links, new Set(["1|CRAB", "2|FISH"])).size).toBe(2);
-    expect(links.map((l) => [l.sis_taxon_id, l.verdict, l.col_id])).toEqual([[1, "none", null], [3, "own", "OK"]]);
+    expect(links.map((l) => [l.sis_taxon_id, l.verdict, l.col_species_id])).toEqual([[1, "none", null], [3, "own", "OK"]]);
   });
 });
 

@@ -75,7 +75,7 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
       const linkUri = parquetUri("assessment_link.parquet");
       const neUri = parquetUri("ne.parquet");
       await conn.run(`CREATE TEMP TABLE ne_assessed_col_ids AS
-        SELECT DISTINCT col_id FROM read_parquet('${linkUri}') WHERE col_id IS NOT NULL`);
+        SELECT DISTINCT col_species_id AS col_id FROM read_parquet('${linkUri}') WHERE col_species_id IS NOT NULL`);
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
@@ -832,10 +832,17 @@ export async function searchSpecies(query: string, limit = 10): Promise<SearchRe
 // ─── Catalogue of Life: synonyms for a species ──────────────────────────────
 
 export interface SpeciesSynonyms {
+  /** The CoL record shown and linked to: the taxon the species is in CoL. */
   col_id: string | null;
   accepted_name: string | null;
   accepted_authorship: string | null;
   synonyms: { name: string; authorship: string | null; status: string }[];
+  /**
+   * Set when CoL holds the species as part of another species: as a subspecies
+   * (Fringilla polatzeki is CoL's F. teydea polatzeki), or as a synonym it folds
+   * into one. `accepted_name` is then that taxon, and `species_name` the species.
+   */
+  held_as?: { rank: string; status: string; species_name: string } | null;
 }
 
 // Synonyms (+ accepted name/authorship) for one species, for the detail panel's CoL tab.
@@ -1032,16 +1039,28 @@ function yearOf(date: string | null): number | null {
 export async function getSynonyms(opts: { col?: string | null; sis?: number | null }): Promise<SpeciesSynonyms> {
   const conn = await getConn();
   let colId = opts.col ?? null;
+  let speciesId: string | null = colId;
   if (!colId && opts.sis != null) {
+    // The taxon an assessed species is in CoL, which is its species unless CoL
+    // holds it as part of another (assessment_link's col_taxon_id).
     const linkUri = parquetUri("assessment_link.parquet");
     const r = (await conn.runAndReadAll(
-      `SELECT col_id FROM read_parquet('${linkUri}') WHERE role = 'primary' AND sis_taxon_id = $id AND col_id IS NOT NULL`,
+      `SELECT col_species_id, coalesce(col_taxon_id, col_species_id) AS col_taxon_id FROM read_parquet('${linkUri}')
+       WHERE role = 'primary' AND sis_taxon_id = $id AND col_species_id IS NOT NULL`,
       { id: opts.sis })).getRowObjects();
-    colId = r.length ? String(r[0].col_id) : null;
+    colId = r.length ? String(r[0].col_taxon_id) : null;
+    speciesId = r.length ? String(r[0].col_species_id) : null;
   }
   if (!colId) return { col_id: null, accepted_name: null, accepted_authorship: null, synonyms: [] };
 
   const bbUri = parquetUri("taxa.parquet");
+  let held_as: SpeciesSynonyms["held_as"] = null;
+  if (speciesId && speciesId !== colId) {
+    const t = (await conn.runAndReadAll(
+      `SELECT t.rank, t.status, s.scientific_name AS species_name FROM read_parquet('${bbUri}') t, read_parquet('${bbUri}') s
+       WHERE t.col_id = $t AND s.col_id = $s`, { t: colId, s: speciesId })).getRowObjects();
+    if (t.length) held_as = { rank: String(t[0].rank), status: String(t[0].status), species_name: String(t[0].species_name) };
+  }
   const rows = (await conn.runAndReadAll(
     `SELECT col_id, scientific_name, authorship, status FROM read_parquet('${bbUri}')
      WHERE col_id=$c OR parent_id=$c`, { c: colId })).getRowObjects();
@@ -1056,7 +1075,7 @@ export async function getSynonyms(opts: { col?: string | null; sis?: number | nu
     }
   }
   synonyms.sort((a, b) => a.name.localeCompare(b.name));
-  return { col_id: colId, accepted_name, accepted_authorship, synonyms };
+  return { col_id: colId, accepted_name, accepted_authorship, synonyms, held_as };
 }
 
 // The fallback tiers searchSpecies reaches only when nothing matched — species/**

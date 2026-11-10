@@ -11,7 +11,7 @@ export interface ColDifferenceFiles { splitCandidates: string; synonymAssessed: 
 
 /** The tables as temp tables of the names col-breakdown.ts queries, plus assessed_cids. */
 export async function loadColDifferences(conn: DuckDBConnection, files: ColDifferenceFiles & { link: string }): Promise<void> {
-  await conn.run(`CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_id FROM ${parquet(files.link)} WHERE col_id IS NOT NULL`);
+  await conn.run(`CREATE OR REPLACE TEMP TABLE assessed_cids AS SELECT DISTINCT col_species_id AS col_id FROM ${parquet(files.link)} WHERE col_species_id IS NOT NULL`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE split_candidates AS SELECT * FROM ${parquet(files.splitCandidates)}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE synonym_assessed AS SELECT * FROM ${parquet(files.synonymAssessed)}`);
   await conn.run(`CREATE OR REPLACE TEMP TABLE col_to_assessed AS SELECT * FROM ${parquet(files.colToAssessed)}`);

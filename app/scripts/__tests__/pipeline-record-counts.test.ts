@@ -31,10 +31,10 @@ beforeAll(async () => {
       'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus,
       true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
     FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, T.taxa);
-  await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
-      usage_id AS col_id, CASE WHEN usage_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
+  await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'own' AS verdict, 'primary' AS role, true AS counted,
+      col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
       'matcher' AS basis, NULL::VARCHAR AS decided_by
-    FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, usage_id)`, T.link);
+    FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
       false AS possibly_extinct_in_the_wild, NULL::VARCHAR AS population_trend, ['CU']::VARCHAR[] AS countries,

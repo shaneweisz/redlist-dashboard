@@ -42,7 +42,7 @@ link_rows AS (
   SELECT o.sis_taxon_id AS sis, o.link_usage_id AS usage_id, any_value(l.verdict) AS verdict,
          CAST(any_value(a.assessment_date) AS DATE) AS assessed_on
   FROM owner o
-  JOIN {{ source('link', 'assessment_link') }} l ON l.sis_taxon_id = o.sis_taxon_id AND l.usage_id = o.link_usage_id AND l.counted
+  JOIN {{ source('link', 'assessment_link') }} l ON l.sis_taxon_id = o.sis_taxon_id AND l.col_taxon_id = o.link_usage_id AND l.counted
   JOIN {{ source('sources', 'assessments') }} a ON a.sis_taxon_id = o.sis_taxon_id AND a.is_latest
   WHERE o.sis_taxon_id IS NOT NULL GROUP BY 1, 2
 ),

@@ -145,7 +145,7 @@ async function groupSummaries(conn: DuckDBConnection, inputs: { species: string;
   // The group's described CoL species, and the ones no assessed species is linked to.
   const col = new Map((await all(conn, `
     SELECT taxon_group, count(*) FILTER (described) AS described,
-           count(*) FILTER (described AND col_id NOT IN (SELECT col_id FROM ${parquet(inputs.link)} WHERE col_id IS NOT NULL)) AS ne
+           count(*) FILTER (described AND col_id NOT IN (SELECT col_species_id FROM ${parquet(inputs.link)} WHERE col_species_id IS NOT NULL)) AS ne
     FROM ${parquet(inputs.species)} GROUP BY taxon_group`)).map((r) => [String(r.taxon_group), r]));
   const rows: TaxonSummaryRow[] = [];
   for (const taxon of getTaxa()) {
