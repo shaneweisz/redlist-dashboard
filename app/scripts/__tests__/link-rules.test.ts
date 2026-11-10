@@ -73,6 +73,11 @@ describe("coverTwins: a name CoL spells two ways", () => {
     expect(coverTwins(links, coverer(links), accepted, new Map([[1, "pica nutalli"]]), new Set()).size).toBe(1);
     expect(covered(links)[0]).toMatchObject({ col_id: "P2", method: "respelled_twin", counted: true });
   });
+  it("not two spellings whose citations disagree on the year (Mycalesis ita, 1863 / itys, 1867)", () => {
+    const links = [primary(1, "M2")];
+    const accepted = [sp("M1", "Mycalesis ita", "Felder, 1863", "Nymphalidae", "Insecta"), sp("M2", "Mycalesis itys", "Felder, 1867", "Nymphalidae", "Insecta")];
+    expect(coverTwins(links, coverer(links), accepted, new Map(), new Set()).size).toBe(0);
+  });
   it("not by clearly other authors, nor one the Red List assesses separately", () => {
     const accepted = [sp("W1", "Witheringia stramoniifolia", "Kunth", "Solanaceae", "Magnoliopsida"), sp("W2", "Witheringia stramonifolia", "Smith, 1990", "Solanaceae", "Magnoliopsida")];
     const a = [primary(1, "W1")];

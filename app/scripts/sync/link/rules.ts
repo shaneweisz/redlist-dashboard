@@ -121,10 +121,13 @@ const twinKeys = (x: AcceptedSpecies) => [
  * "(Mont.) Ochyra"). Class, not kingdom: Centropogon australis is a plant and a fish.
  *
  * So is the name spelt two ways the codes make one name (name-variants.ts), in
- * one class, by authors that aren't clearly others: CoL holds the yellow-billed
- * magpie as Pica nutallii and, outside its curated core, as Pica nuttalli with
- * 121,763 records; and Witheringia stramoniifolia beside stramonifolia, both
- * Kunth. A respelling the Red List assesses separately is left alone.
+ * one class, where the citations name the same author and year, or one has
+ * none (CoL's extra copies often don't): CoL holds the yellow-billed magpie as
+ * Pica nutallii and, outside its curated core, as Pica nuttalli with 121,763
+ * records; and Witheringia stramoniifolia beside stramonifolia, both Kunth.
+ * Folded endings alone are too loose: Mycalesis ita Felder, 1863 and M. itys
+ * Felder, 1867 fold alike and are two butterflies. A respelling the Red List
+ * assesses separately is left alone.
  */
 export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
   assessedNames: Set<string>): Set<number> {
@@ -147,7 +150,7 @@ export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpe
     const k = spellingKey(t);
     for (const id of k ? respellings.get(k) ?? [] : []) {
       const other = byId.get(id)!;
-      if (same.has(id) || compareAuthors(t.authorship, other.authorship) === "other") continue;
+      if (same.has(id) || (t.authorship && other.authorship && compareAuthors(t.authorship, other.authorship) !== "same")) continue;
       if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "respelled_twin",
         `CoL holds ${t.scientific_name} twice, the second time spelt ${other.scientific_name}`)) touched.add(l.sis_taxon_id);
     }
