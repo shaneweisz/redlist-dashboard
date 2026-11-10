@@ -129,7 +129,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done = step("2 link");
     const asked = await askMatcher({ assessments: T.assessments, matcher }, T.matches);
     console.log(`   ${asked.asked.toLocaleString()} names asked, ${asked.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
-    await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link, matchQueue: T.matchQueue });
+    const link = await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link, matchQueue: T.matchQueue });
+    manifest.link_rules = link.rules;
     done();
   }
 

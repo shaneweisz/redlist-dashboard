@@ -1,0 +1,240 @@
+/**
+ * The link's rules after the name and concept steps (assessment-link.ts), each a
+ * named function: what it decides, in one sentence, why it exists, and the rows
+ * it adds or changes. buildLink applies them in order and logs how many species
+ * each one touched, so a rule that touches almost nothing shows up as a
+ * candidate to drop or turn into a decision.
+ *
+ * Each takes the link rows built so far and plain rows of evidence (read from
+ * the build in assessment-link.ts), so it can be tested on a few rows
+ * (__tests__/link-rules.test.ts).
+ */
+
+import { sameOrganism, isSeparatelyAssessed, type Verdict } from "./species-key";
+import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
+import { speciesNameParts, canonicalEpithet } from "./name-variants";
+
+export interface LinkRow {
+  sis_taxon_id: number;
+  role: "primary" | "covered";
+  col_id: string | null;
+  usage_id: string | null;
+  verdict: Verdict | "duplicate";
+  method: string;
+  basis: "matcher" | "decision" | "rule" | null;
+  decided_by: string | null;
+  reason: string;
+  counted: boolean;
+}
+
+/** Ownership order: the more direct the name, the stronger the claim. */
+const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
+  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym"] as const;
+
+const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+const genus = (n: string) => n.split(" ")[0].toLowerCase();
+
+/**
+ * Adds covered rows to `links`, once each, and never one for a species' own
+ * target, except as a second usage a lumped species owns. Shared by the covered
+ * rules, so a row the first rule adds isn't added again by a later one.
+ * Returns whether the row was added.
+ */
+export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role">) => boolean;
+
+export function coverer(links: LinkRow[]): Cover {
+  const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_id]));
+  const seen = new Set<string>();
+  return (row) => {
+    const k = `${row.sis_taxon_id}|${row.col_id}|${row.usage_id}`;
+    if (seen.has(k) || (row.verdict !== "lumped" && primaryTarget.get(row.sis_taxon_id) === row.col_id)) return false;
+    seen.add(k);
+    links.push({ ...row, role: "covered", basis: "rule", decided_by: null });
+    return true;
+  };
+}
+
+/** A CoL species an assessed species' name or one of IUCN's synonyms leads to. */
+export interface SynonymCandidate {
+  sis: number; name: string; authority: string | null;
+  target_id: string; target_name: string; target_authorship: string | null;
+  /** 0: the name is that accepted species; 1: it is a strict synonym of it. */
+  kind: number;
+  /** iucn: one of IUCN's synonyms; own_name_synonym: the species' own name, as a CoL synonym. */
+  src: "iucn" | "own_name_synonym";
+}
+
+/**
+ * Rule: another accepted CoL species that one of IUCN's synonyms names, or that
+ * the species' own name is a CoL synonym of, is the same organism, so it is
+ * covered: kept off the Not Evaluated list, and counted when the evidence is
+ * direct (Hylatomus / Dryocopus pileatus). Reached through a CoL synonym it is
+ * not counted: that two-hop route took Chiococca alba to the snowberry. Under
+ * another genus the authors must agree too: Himantopus leucocephalus Gould is
+ * the pied stilt, not the banded stilt Cladorhynchus leucocephalus (Vieillot).
+ */
+export function coverSynonymSpecies(cover: Cover, candidates: SynonymCandidate[], assessedNames: Set<string>): Set<number> {
+  const touched = new Set<number>();
+  for (const c of candidates) {
+    const otherGenus = genus(c.name) !== genus(c.target_name);
+    const authorsAgree = !c.authority || !c.target_authorship || compareAuthors(c.authority, c.target_authorship) === "same";
+    const same = (c.kind === 0 || c.src === "own_name_synonym")
+      && sameOrganism({ scientificName: c.name, authorship: c.authority ?? undefined }, { scientificName: c.target_name, authorship: c.target_authorship ?? undefined })
+      && (!otherGenus || authorsAgree)
+      && !isSeparatelyAssessed(c.target_name, c.name, assessedNames);
+    const added = cover({
+      sis_taxon_id: c.sis, col_id: c.target_id, usage_id: same ? c.target_id : null, verdict: same ? "own" : "refused",
+      method: "iucn_synonym_covered", reason: same ? `${c.target_name} is the same organism under another accepted name` : `${c.target_name} is named as a synonym; kept out of the Not Evaluated list only`,
+      counted: same,
+    });
+    if (added) touched.add(c.sis);
+  }
+  return touched;
+}
+
+/** An accepted (or provisionally accepted) CoL species, as the twin rules compare them. */
+export interface AcceptedSpecies { col_id: string; scientific_name: string; authorship: string | null; family: string | null; class_name: string | null }
+
+/** Adds a covered row for `id` beside a species' own target, unless it is a species the Red List assesses separately. */
+function coverAlongside(cover: Cover, l: LinkRow, target: AcceptedSpecies, other: AcceptedSpecies, listedName: string | undefined,
+  assessedNames: Set<string>, method: string, reason: string): boolean {
+  // A twin carrying this species' own Red List name is this species, not a
+  // separately assessed one (Utricularia ochroleuca, matched to its × twin).
+  const ownName = norm(other.scientific_name) === listedName;
+  if (other.col_id === target.col_id || (!ownName && isSeparatelyAssessed(other.scientific_name, target.scientific_name, assessedNames))) return false;
+  return cover({ sis_taxon_id: l.sis_taxon_id, col_id: other.col_id, usage_id: other.col_id, verdict: "own", method, reason, counted: true });
+}
+
+/** Each assessed species' own target: its primary row, when the species is that CoL species. */
+const ownTargets = (links: LinkRow[]) => links.filter((l) => l.role === "primary" && l.verdict === "own" && l.col_id);
+
+const twinName = (n: string) => n.toLowerCase().replace(/\s*×\s*/g, " ").replace(/\s+/g, " ").trim();
+const twinKeys = (x: AcceptedSpecies) => [
+  ...(x.class_name ? [`c|${x.class_name}|${twinName(x.scientific_name)}`] : []),
+  ...(x.authorship ? [`a|${normaliseAuthorship(x.authorship)}|${twinName(x.scientific_name)}`] : []),
+];
+
+/**
+ * Rule: CoL holding one name twice, the identical name (a hybrid sign aside:
+ * Utricularia × ochroleuca) in one class or under one author citation, is one
+ * organism, so both count (Andoa berthelotiana sits in two moss families, both
+ * "(Mont.) Ochyra"). Class, not kingdom: Centropogon australis is a plant and a fish.
+ */
+export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
+  assessedNames: Set<string>): Set<number> {
+  const byId = new Map(accepted.map((x) => [x.col_id, x]));
+  const twins = new Map<string, string[]>();
+  for (const x of accepted) for (const t of twinKeys(x)) twins.set(t, [...(twins.get(t) ?? []), x.col_id]);
+  const touched = new Set<number>();
+  for (const l of ownTargets(links)) {
+    const t = byId.get(l.col_id!);
+    if (!t) continue;
+    for (const id of new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []))) {
+      if (coverAlongside(cover, l, t, byId.get(id)!, listedName.get(l.sis_taxon_id), assessedNames, "same_name_twin", `CoL holds ${t.scientific_name} twice`)) {
+        touched.add(l.sis_taxon_id);
+      }
+    }
+  }
+  return touched;
+}
+
+const dupKey = (x: AcceptedSpecies) => {
+  const p = speciesNameParts(x.scientific_name);
+  const year = x.authorship?.match(/\b(1[7-9]\d\d|20\d\d)\b/)?.[1];
+  const surname = x.authorship ? normaliseAuthorship(x.authorship).replace(/\b\d{4}\b/g, "").replace(/\b[a-z]\b/g, "").replace(/\s+/g, " ").trim() : "";
+  return p && year && surname ? `${x.family}|${canonicalEpithet(p[1])}|${surname}|${year}` : null;
+};
+
+/**
+ * Rule: the same epithet stem and the same dated author citation in one family,
+ * under another genus, is one organism CoL holds twice, so both count
+ * (Charadrius nivosus / Anarhynchus nivosus, both Cassin, 1858).
+ */
+export function coverDuplicateConcepts(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
+  assessedNames: Set<string>): Set<number> {
+  const byId = new Map(accepted.map((x) => [x.col_id, x]));
+  const dups = new Map<string, string[]>();
+  for (const x of accepted) { const d = dupKey(x); if (d) dups.set(d, [...(dups.get(d) ?? []), x.col_id]); }
+  const touched = new Set<number>();
+  for (const l of ownTargets(links)) {
+    const t = byId.get(l.col_id!);
+    const dk = t ? dupKey(t) : null;
+    if (!t || !dk) continue;
+    for (const id of dups.get(dk) ?? []) {
+      const other = byId.get(id)!;
+      if (genus(other.scientific_name) === genus(t.scientific_name)) continue;
+      if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "duplicate_concept",
+        `${other.scientific_name} has the same epithet and author citation (${t.authorship}): one organism held twice`)) {
+        touched.add(l.sis_taxon_id);
+      }
+    }
+  }
+  return touched;
+}
+
+/** A CoL synonym usage carrying an assessed species' exact name, and the species CoL files it under. */
+export interface SameNameSynonym { sis: number; usage: string; target: string }
+
+/**
+ * Rule: a lumped species owns every synonym usage carrying its exact name, not
+ * just the one matched: Rubus fruticosus is filed under three species, and its
+ * records under each are its own.
+ */
+export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: SameNameSynonym[]): Set<number> {
+  const lumped = new Map(links.filter((l) => l.role === "primary" && l.verdict === "lumped" && ["synonym", "ambiguous_synonym"].includes(l.method))
+    .map((l) => [l.sis_taxon_id, l]));
+  const touched = new Set<number>();
+  for (const x of synonyms) {
+    const l = lumped.get(x.sis);
+    if (!l || x.usage === l.usage_id) continue;
+    if (cover({ sis_taxon_id: x.sis, col_id: x.target, usage_id: x.usage, verdict: "lumped", method: "same_name_synonym",
+      reason: "CoL files this name under more than one species; its records under each are its own", counted: true })) touched.add(x.sis);
+  }
+  return touched;
+}
+
+/**
+ * Rule: no link crosses a phylum, however it was made: old genus names are
+ * homonyms across kingdoms (the surgeonfish Acanthurus lineatus and the crab
+ * Hepatus lineatus), and twins and lumps are found by name alone. A covered row
+ * across one goes; a primary row is unlinked. `crossing` holds the
+ * "sis|col_id" pairs whose lineages differ (assessment-link.ts asks the build).
+ */
+export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<number> {
+  const touched = new Set<number>();
+  for (let i = links.length - 1; i >= 0; i--) {
+    const l = links[i];
+    if (!l.col_id || !crossing.has(`${l.sis_taxon_id}|${l.col_id}`)) continue;
+    touched.add(l.sis_taxon_id);
+    if (l.role === "covered") { links.splice(i, 1); continue; }
+    Object.assign(l, { col_id: null, usage_id: null, verdict: "none", method: "unmatched", counted: false,
+      reason: "the only CoL match is in another phylum" });
+  }
+  return touched;
+}
+
+/**
+ * Rule: each usage counts for one assessed species at most. When two claim it,
+ * one wins: primary before covered, own before lumped, the matcher before a
+ * decision, the more direct name, then the lower SIS id. The loser counts
+ * nothing; a losing primary row becomes a duplicate.
+ */
+export function oneOwnerPerUsage(links: LinkRow[]): Set<number> {
+  const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
+    Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.sis_taxon_id];
+  const claimants = links.filter((l) => l.counted).sort((a, b) => {
+    const x = rank(a), y = rank(b);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return 0;
+  });
+  const owner = new Map<string, number>();
+  const touched = new Set<number>();
+  for (const l of claimants) {
+    const prev = owner.get(l.usage_id!);
+    if (prev === undefined) { owner.set(l.usage_id!, l.sis_taxon_id); continue; }
+    l.counted = false;
+    touched.add(l.sis_taxon_id);
+    if (l.role === "primary") { l.verdict = "duplicate"; l.reason = `its records belong to SIS ${prev}, matched first`; l.usage_id = null; }
+  }
+  return touched;
+}
