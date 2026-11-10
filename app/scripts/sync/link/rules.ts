@@ -12,7 +12,7 @@
 
 import { sameOrganism, isSeparatelyAssessed, type Verdict } from "./species-key";
 import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
-import { speciesNameParts, canonicalEpithet } from "./name-variants";
+import { speciesNameParts, canonicalEpithet, orthographicKey } from "./name-variants";
 
 export interface LinkRow {
   sis_taxon_id: number;
@@ -29,7 +29,7 @@ export interface LinkRow {
 
 /** Ownership order: the more direct the name, the stronger the claim. */
 const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
-  "iucn_synonym_covered", "same_name_twin", "duplicate_concept", "same_name_synonym", "undecided_candidate"] as const;
+  "iucn_synonym_covered", "same_name_twin", "respelled_twin", "duplicate_concept", "same_name_synonym", "undecided_candidate"] as const;
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 const genus = (n: string) => n.split(" ")[0].toLowerCase();
@@ -119,20 +119,37 @@ const twinKeys = (x: AcceptedSpecies) => [
  * Utricularia × ochroleuca) in one class or under one author citation, is one
  * organism, so both count (Andoa berthelotiana sits in two moss families, both
  * "(Mont.) Ochyra"). Class, not kingdom: Centropogon australis is a plant and a fish.
+ *
+ * So is the name spelt two ways the codes make one name (name-variants.ts), in
+ * one class, by authors that aren't clearly others: CoL holds the yellow-billed
+ * magpie as Pica nutallii and, outside its curated core, as Pica nuttalli with
+ * 121,763 records; and Witheringia stramoniifolia beside stramonifolia, both
+ * Kunth. A respelling the Red List assesses separately is left alone.
  */
 export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
   assessedNames: Set<string>): Set<number> {
   const byId = new Map(accepted.map((x) => [x.col_id, x]));
   const twins = new Map<string, string[]>();
   for (const x of accepted) for (const t of twinKeys(x)) twins.set(t, [...(twins.get(t) ?? []), x.col_id]);
+  const spellingKey = (x: AcceptedSpecies) => { const k = x.class_name ? orthographicKey(x.scientific_name) : null; return k ? `${x.class_name}|${k}` : null; };
+  const respellings = new Map<string, string[]>();
+  for (const x of accepted) { const k = spellingKey(x); if (k) respellings.set(k, [...(respellings.get(k) ?? []), x.col_id]); }
   const touched = new Set<number>();
   for (const l of ownTargets(links)) {
     const t = byId.get(l.col_id!);
     if (!t) continue;
-    for (const id of new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []))) {
+    const same = new Set(twinKeys(t).flatMap((k) => twins.get(k) ?? []));
+    for (const id of same) {
       if (coverAlongside(cover, l, t, byId.get(id)!, listedName.get(l.sis_taxon_id), assessedNames, "same_name_twin", `CoL holds ${t.scientific_name} twice`)) {
         touched.add(l.sis_taxon_id);
       }
+    }
+    const k = spellingKey(t);
+    for (const id of k ? respellings.get(k) ?? [] : []) {
+      const other = byId.get(id)!;
+      if (same.has(id) || compareAuthors(t.authorship, other.authorship) === "other") continue;
+      if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "respelled_twin",
+        `CoL holds ${t.scientific_name} twice, the second time spelt ${other.scientific_name}`)) touched.add(l.sis_taxon_id);
     }
   }
   return touched;

@@ -75,10 +75,10 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Pica nutalli",
-    why: "Spelling variant of nuttallii (same authorship, one edit). Update (2026-11, COL26.6 XR): CoL now spells the accepted name Pica nutallii and holds Pica nutalli as its own synonym, so the link goes through a CoL synonym rather than a respelling.",
+    why: "Spelling variant of nuttallii (same authorship, one edit). Update (2026-11, COL26.6 XR): CoL now spells the accepted name Pica nutallii and holds Pica nutalli as its own synonym, so the link goes through a CoL synonym rather than a respelling. Update (2026-11, COL26.6 XR): CoL also holds it, outside its curated core, as Pica nuttalli with no author and 121,763 records, which counted for nothing until the twin rule read respellings.",
     source: "species-key.ts sameOrganism",
     confirmed: NOVEMBER_2026,
-    expect: { hasRecords: true, neListed: { "Pica nuttallii": false } },
+    expect: { minRecords: 50_000, neListed: { "Pica nuttallii": false, "Pica nuttalli": false } },
   },
   {
     name: "Sminthopsis fuliginosa",
@@ -404,7 +404,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Domestic forms have a wild sibling counted separately; goat, sheep, yak, dromedary and guinea pig were once counted as Not Evaluated by one list and left out by another.",
     source: "seeds/ne-excluded.tsv; dbt/models/lists/species.sql described",
     confirmed: NOVEMBER_2026,
-    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false,
+    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false, "Bos domesticus": false,
       "Capra hircus": false, "Ovis aries": false, "Bos grunniens": false, "Camelus dromedarius": false, "Cavia porcellus": false } },
   },
   {
@@ -419,7 +419,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Assessed under an old genus; CoL's Witheringia stramoniifolia (stramonifolia in the release) is the same plant and must not reappear as Not Evaluated. Update (2026-11, COL26.6 XR): The release spelling is a separate XR usage, Witheringia stramonifolia Kunth, not a checklist name of the linked one, and it is on the Not Evaluated list (266 records): the fixture checks only the stramoniifolia spelling.",
     source: "sources/taxa.ts checklist_name",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false } },
+    expect: { linkedTo: "Witheringia stramoniifolia", neListed: { "Witheringia stramoniifolia": false, "Witheringia stramonifolia": false } },
   },
   {
     name: "Syllepte belialis",

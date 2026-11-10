@@ -66,6 +66,23 @@ describe("coverTwins", () => {
   });
 });
 
+describe("coverTwins: a name CoL spells two ways", () => {
+  it("counts the other spelling the codes make one name, in one class (Pica nutallii / nuttalli)", () => {
+    const links = [primary(1, "P1")];
+    const accepted = [sp("P1", "Pica nutallii", "(Audubon, 1837)", "Corvidae", "Aves"), sp("P2", "Pica nuttalli", null, "Corvidae", "Aves")];
+    expect(coverTwins(links, coverer(links), accepted, new Map([[1, "pica nutalli"]]), new Set()).size).toBe(1);
+    expect(covered(links)[0]).toMatchObject({ col_id: "P2", method: "respelled_twin", counted: true });
+  });
+  it("not by clearly other authors, nor one the Red List assesses separately", () => {
+    const accepted = [sp("W1", "Witheringia stramoniifolia", "Kunth", "Solanaceae", "Magnoliopsida"), sp("W2", "Witheringia stramonifolia", "Smith, 1990", "Solanaceae", "Magnoliopsida")];
+    const a = [primary(1, "W1")];
+    expect(coverTwins(a, coverer(a), accepted, new Map(), new Set()).size).toBe(0);
+    const kunth = [accepted[0], { ...accepted[1], authorship: "Kunth" }];
+    const b = [primary(1, "W1")];
+    expect(coverTwins(b, coverer(b), kunth, new Map(), new Set(["witheringia stramonifolia"])).size).toBe(0);
+  });
+});
+
 describe("coverDuplicateConcepts", () => {
   const accepted = [sp("C1", "Charadrius nivosus", "(Cassin, 1858)", "Charadriidae"), sp("A1", "Anarhynchus nivosus", "(Cassin, 1858)", "Charadriidae")];
   it("counts the same epithet and dated citation under another genus in one family", () => {
