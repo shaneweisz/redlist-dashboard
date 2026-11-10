@@ -5,7 +5,7 @@
  * differently only as the codes allow), as a species, with full confidence, it
  * leads to an accepted CoL species, and no other CoL name spelled the same way
  * leads to a different species, unless the author citation picks one.
- * Everything else waits for a decision (decisions.tsv).
+ * Everything else waits for a decision (match-overrides.tsv).
  *
  * A spelling variant counts as found when it is the same name under the codes'
  * rules for Latin endings and transliteration (name-variants.ts: Pseudechis

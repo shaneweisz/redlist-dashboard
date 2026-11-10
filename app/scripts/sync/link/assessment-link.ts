@@ -4,7 +4,7 @@
  * same organism. Its columns are the link's contract with the rest of the sync:
  * whatever builds it, the count stage and the lists read only these.
  *
- * Built from: taxa, assessments, matches, link/decisions.tsv.
+ * Built from: taxa, assessments, matches, seeds/match-overrides.tsv.
  *
  * Columns:
  *   sis_taxon_id
@@ -26,7 +26,7 @@
  * Decisions, in two steps kept apart so each can be explained on its own:
  *
  * 1. Name: which CoL usage the Red List name is.
- *      a decision in decisions.tsv, if there is one and it still resolves;
+ *      a decision in match-overrides.tsv, if there is one and it still resolves;
  *      else GBIF's matcher's answer (matches.ts), when accept-match.ts takes it
  *      without review;
  *      else nothing yet: the species is queued and counts no records until
@@ -57,7 +57,7 @@ import { coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, cover
   oneOwnerPerUsage, type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym, type Candidate as UndecidedCandidate } from "./rules";
 import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
 import { orthographicallySame } from "./name-variants";
-import { readDecisions, resolveDecision, type Candidate, type Decision } from "./decisions";
+import { readOverrides, resolveOverride, type Candidate, type MatchOverride } from "./match-overrides";
 import { output, parquet } from "../paths";
 import { lit, rows, writeTable, openDuckDB } from "../sql";
 
@@ -82,11 +82,11 @@ export interface QueueRow {
 }
 
 export async function buildLink(
-  inputs: { taxa: string; assessments: string; matches: string; decisions?: Map<number, Decision> },
+  inputs: { taxa: string; assessments: string; matches: string; decisions?: Map<number, MatchOverride> },
   out: { link: string; matchQueue: string },
 ): Promise<LinkSummary> {
   const conn = await openDuckDB();
-  const decisions = inputs.decisions ?? readDecisions();
+  const decisions = inputs.decisions ?? readOverrides();
 
   await conn.run(`CREATE OR REPLACE TEMP TABLE redlist_species AS
     SELECT sis_taxon_id::INTEGER AS sis, scientific_name AS name, ${NAME("scientific_name")} AS name_key, authority,
@@ -135,7 +135,7 @@ export async function buildLink(
     });
     const d = decisions.get(s.sis);
     if (d) {
-      const res = resolveDecision(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : []);
+      const res = resolveOverride(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : [], s.authority);
       if (res.kind !== "stale") {
         if (!d.reviewed) enqueue("proposed", acc.accepted ? "the matcher would take its answer" : acc.reason, d.by);
         if (res.kind === "usage") picks.push({ sis: s.sis, usage_id: res.colId, basis: "decision", by_: d.by });
@@ -306,7 +306,7 @@ export async function buildLink(
     SELECT count(*) FILTER (basis = 'matcher')::INT AS matcher, count(*) FILTER (basis = 'decision')::INT AS decision,
            count(*) FILTER (basis IS NULL)::INT AS unlinked
     FROM ${parquet(out.link)} WHERE role = 'primary'`);
-  console.log(`   ${basis.matcher.toLocaleString()} by the matcher, ${basis.decision.toLocaleString()} by decisions.tsv, ` +
+  console.log(`   ${basis.matcher.toLocaleString()} by the matcher, ${basis.decision.toLocaleString()} by match-overrides.tsv, ` +
     `${queue.length.toLocaleString()} queued for review (${out.matchQueue})`);
   return { byMatcher: basis.matcher, byDecision: basis.decision, unlinked: basis.unlinked, queue: summariseQueue(queue), rules: touchedBy };
 }

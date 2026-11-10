@@ -1,3 +1,0 @@
-sis_taxon_id	redlist_name	col_name	col_authorship	col_id	col_status	col_species	redlist_version	col_version	by	reviewed	date	note
-166265	Cipangopaludina chinensis	Cipangopaludina chinensis	(Gray, 1834)	VHXLS	provisionally accepted	Cipangopaludina chinensis	2026-1	COL26.6 XR	fixture	yes	2026-11-10	checks/fixtures/matching.ts: CoL provisionally accepts exactly this name; the matcher picks the ambiguous synonym of Margarya chinensis, which counted 448 records
-241134131	Centropogon australis	Centropogon australis	(White, 1790)	5XHD2	accepted	Centropogon australis	2026-1	COL26.6 XR	fixture	yes	2026-11-10	checks/fixtures/matching.ts: the waspfish; a plant shares the name, so the matcher is only 94% sure of its right answer

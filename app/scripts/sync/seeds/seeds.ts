@@ -3,9 +3,9 @@
  * one row per decision, each with its reason. Kept as data rather than code so
  * that "what did a person decide, and why" is a list you can read in one place.
  *
- *   decisions.tsv            which CoL name a Red List species is, where the
+ *   match-overrides.tsv            which CoL name a Red List species is, where the
  *                            matcher's answer isn't taken on its own, with the
- *                            releases it was decided against (link/decisions.ts)
+ *                            releases it was decided against (link/match-overrides.ts)
  *   ne-excluded.tsv          species never listed as Not Evaluated: domestic
  *                            forms, whose wild relatives are what IUCN assesses,
  *                            and humans (sources/taxa.ts). The domestic pigeon
