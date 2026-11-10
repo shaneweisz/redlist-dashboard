@@ -3,7 +3,7 @@
  *
  * Run monthly, locally, once a new GBIF snapshot is mirrored (docs/sync.md,
  * "Running it each month"). Nothing is uploaded: the build lands in
- * ~/.cache/redlist-dashboard/build/ (core/: working tables, data/: what the app
+ * .sync/ at the repo root (core/: working tables, data/: what the app
  * reads), and `npm run sync:publish` copies data/ into app/data/sync and
  * uploads it.
  *

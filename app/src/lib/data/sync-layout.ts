@@ -2,7 +2,7 @@
  * Where each of a sync's files lives: the one list of them.
  *
  * A sync is the same tree in three places: syncs/<timestamp>/ in R2, the
- * sync's build (~/.cache/redlist-dashboard/build/data/) and app/data/sync/.
+ * sync's build (.sync/data/ at the repo root) and app/data/sync/.
  * Its files are grouped by what they are for:
  *
  *   lists/      the species the dashboard lists: assessed, their assessment

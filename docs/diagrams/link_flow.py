@@ -122,7 +122,7 @@ def queue_line(reason, n, e, a, m, ma):
 
 out.append(f'  start [label={box("src", "A Red List species: its name and authority")}];')
 out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
-out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly, as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide)", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
+out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly, as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
 out.append(f'  queue [label={box("q", "Otherwise a person decides: the match queue", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
 out.append(f'  dec [label={box("own", "Decided: a row in decisions.tsv", ["all carried over from the old matching passes so far, none reviewed", eg("Acer divergens", name["decision"][1])], name["decision"][0])}];')
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')

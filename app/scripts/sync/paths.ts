@@ -1,9 +1,13 @@
 /**
  * Where the sync keeps things, and the name of every table it builds.
  *
- *   CACHE_ROOT  downloaded inputs and baselines, reused across runs (cachedDir)
- *   BUILD_DIR   what a run produces; copied into app/data only to publish, so
- *               app/data keeps matching the sync production serves meanwhile
+ *   CACHE_ROOT  downloaded inputs and baselines, reused across runs and shared
+ *               by every checkout (cachedDir): ~/.cache/redlist-dashboard/
+ *   BUILD_DIR   what a run produces: .sync/ at the repo root (gitignored), one
+ *               per checkout, so two worktrees' syncs can't overwrite each
+ *               other. Copied into app/data only to publish, so app/data keeps
+ *               matching the sync production serves meanwhile.
+ *               PIPELINE_BUILD_DIR builds somewhere else.
  *     core/     working tables: what the stages pass to each other, not published
  *     data/     what the app reads, laid out as src/lib/data/sync-layout.ts says
  */
@@ -14,7 +18,7 @@ import * as path from "path";
 import { syncPath } from "../../src/lib/data/sync-layout";
 
 export const CACHE_ROOT = path.join(os.homedir(), ".cache", "redlist-dashboard");
-export const BUILD_DIR = process.env.PIPELINE_BUILD_DIR ?? path.join(CACHE_ROOT, "build");
+export const BUILD_DIR = process.env.PIPELINE_BUILD_DIR ?? path.join(__dirname, "..", "..", "..", ".sync");
 /** Where the sync's DuckDB instances spill to disk (left to itself, DuckDB uses ./.tmp in the repo). */
 export const DUCKDB_TMP = path.join(CACHE_ROOT, "duckdb-tmp");
 export const CORE_DIR = path.join(BUILD_DIR, "core");
