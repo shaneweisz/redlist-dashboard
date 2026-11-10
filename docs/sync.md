@@ -66,8 +66,8 @@ A run builds into `.sync/` at the repo root, in three folders, by what you do wi
                and dbt/ (its sync.duckdb, compiled SQL and logs)
   publish/     exactly what sync:publish uploads and what the app reads: lists/ taxonomy/ search/ summaries/,
                sync.json, sync.log
-  review/      what you read before publishing: changes/ (report.md, the comparison with production)
-               and match-queue.tsv (species waiting for a decision)
+  review/      what you read before publishing: changes/ (report.md, the comparison with production),
+               match-queue.tsv (species waiting for a decision) and links.parquet (every link, readable)
 ```
 
 A full run empties all three first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
@@ -172,7 +172,7 @@ The rules after the concept step are named functions in `link/rules.ts`, applied
 
 Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
 
-To review links, `dbt/analyses/link_audit.sql` gives every link with the evidence for checking it: how it was made, and where IUCN and CoL differ. It is a dbt analysis, run against a build when needed and not built each sync: `uv run dbt show --profiles-dir . --select link_audit` from `app/scripts/sync/dbt`. `sample_rank` orders each kind of link randomly, so reviewing its first n measures that kind's error rate.
+To review links, each sync writes `.sync/review/links.parquet`: every `assessment_link` row with the names, written for a person. It has the Red List's side, CoL's side (the taxon and the species, with their authorships, ranks and statuses) and the matcher's, each with the release it comes from beside it. Then come the decision with both reasons and the records the row counts, and the evidence for checking it: where IUCN and CoL differ (genus, epithet, class, order, family, author year), whether IUCN lists CoL's name among its synonyms, and whether CoL's species is newer than the assessment. It's sorted by how the link was made (`stratum`), then `sample_rank`, a fixed random order, so the first rows of each stratum are its random sample, from which an error rate can be measured.
 
 ### Versions
 

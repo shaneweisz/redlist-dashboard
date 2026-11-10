@@ -6,8 +6,6 @@ version: "1.0.0"
 profile: redlist_sync
 model-paths: ["models"]
 macro-paths: ["macros"]
-# Queries compiled against a build on demand, not built each sync (link_audit).
-analysis-paths: ["analyses"]
 
 vars:
   # The day the sync counts "since the assessment" up to (sync.ts passes it).

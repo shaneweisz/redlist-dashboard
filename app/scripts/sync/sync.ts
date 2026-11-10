@@ -57,6 +57,7 @@ import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
 import { observe, mismatches, buildVersions, failureKind } from "./checks/check-fixtures";
 import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
+import { buildReviewLinks } from "./checks/review-links";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
 import { BUILD_DIR, PUBLISH_DIR, REVIEW_DIR, WORKING_DIR, tables, parquet } from "./paths";
@@ -163,6 +164,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
 
   done = step("6 checks");
   Object.assign(manifest, await describeBuild(T, matcher));
+  // Every link with its names, versions and evidence, for a person to review.
+  const reviewed = await buildReviewLinks(T, { redlist: REDLIST_DB.replace(/^redlist_/, "").replace(/_/g, "-"), colXr: col.xr.alias });
+  console.log(`   ${reviewed.toLocaleString()} links written for review (${T.reviewLinks})`);
   const conn = await openDuckDB();
   const obs = await observe(conn, PUBLISH_DIR, MATCHING_CASES, T.assessments);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
