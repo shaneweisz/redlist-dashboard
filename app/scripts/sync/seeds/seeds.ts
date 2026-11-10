@@ -11,8 +11,6 @@
  *                            and humans (sources/taxa.ts). The domestic pigeon
  *                            is deliberately absent: IUCN's "Columba domestica"
  *                            is a synonym of the assessed Rock Dove in CoL.
- *   forced-latest.tsv        assessments counted as a species' latest although
- *                            the database doesn't flag them so (sources/assessments.ts)
  *   tree-homonyms.tsv        which CoL taxon a taxonomy-tree name means where
  *                            several share it and the tree can't tell
  *                            (precomputed/col-taxon-ids.ts)

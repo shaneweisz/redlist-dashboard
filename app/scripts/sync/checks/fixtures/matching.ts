@@ -357,8 +357,8 @@ export const MATCHING_CASES: MatchCase[] = [
   },
   {
     name: "Mayaheros ericymba",
-    why: "Its latest assessment is an amendment flagged latest=false and has to be forced in. Update (2026-11, Red List 2026-1): In Red List 2026-1 the database itself flags the amendment 288151174 latest, so seeds/forced-latest.tsv no longer changes anything for it. Kept in case a later release brings it back.",
-    source: "seeds/forced-latest.tsv",
+    why: "Its latest assessment is an amendment flagged latest=false and has to be forced in. Update (2026-11, Red List 2026-1): In Red List 2026-1 the database itself flags the amendment 288151174 latest, so seeds/forced-latest.tsv no longer changes anything for it. The seed was removed; the case stays, so a later release that unflags it fails here instead of losing the species.",
+    source: "sources/assessments.ts (the database's latest flag)",
     confirmed: NOVEMBER_2026,
     expect: { assessed: true, linkedTo: "Mayaheros ericymba" },
   },

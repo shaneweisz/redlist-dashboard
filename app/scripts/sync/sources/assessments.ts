@@ -2,8 +2,7 @@
  * assessments: one row per global assessment of a species IUCN currently
  * recognises, every year, read from the Red List Postgres database.
  *
- * Built from: the Red List database named by DB_NAME, opened read-only;
- * seeds/forced-latest.tsv.
+ * Built from: the Red List database named by DB_NAME, opened read-only.
  *
  * Columns:
  *   sis_taxon_id        the species (IUCN's SIS taxon id)
@@ -26,8 +25,8 @@
  * Decisions:
  *   - Global assessments only, not suppressed, of the species' current taxon
  *     record (not a subspecies or subpopulation).
- *   - is_latest is the database's latest flag, plus seeds/forced-latest.tsv;
- *     one per species, the most recently dated.
+ *   - is_latest is the database's latest flag, one per species, the most
+ *     recently dated.
  *   - taxon_group is the Table 1a group from IUCN's own lineage
  *     (scripts/lib/taxa.ts), so Table 1a's totals stay exact.
  *   - Countries are native, extant and country-level. Lists stay lists.
@@ -43,10 +42,6 @@ import { type DuckDBConnection } from "@duckdb/node-api";
 import { TAXA_DEFINITIONS } from "../../lib/taxa";
 import { output } from "../paths";
 import { lit, openDuckDB } from "../sql";
-import { readSeed } from "../seeds/seeds";
-
-/** Assessments counted as latest although the database doesn't flag them so. */
-const FORCED_LATEST = readSeed("forced-latest.tsv").map((r) => Number(r.assessment_id));
 
 /** The Red List database a sync reads unless DB_NAME says otherwise. */
 export const REDLIST_DB = process.env.DB_NAME ?? "redlist_2026_1";
@@ -103,10 +98,10 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
   const credits = Object.entries(CREDIT_TYPES).map(([id, col]) =>
     `(SELECT c.supplementary_fields->>'full' FROM assessment_credits c WHERE c.assessment_id = a.id AND c.credit_type_id = ${id} ORDER BY c.id LIMIT 1) AS ${col}`);
 
-  // The database's latest flag, plus seeds/forced-latest.tsv; is_latest picks one per species below.
+  // The database's latest flag; is_latest picks one per species below.
   await conn.run(`CREATE OR REPLACE TEMP TABLE assessment AS SELECT * FROM ${pg(`
     SELECT t.sis_id AS sis_taxon_id, a.id AS assessment_id,
-           (a.latest OR a.id IN (${FORCED_LATEST.join(", ")})) AS flagged_latest,
+           a.latest AS flagged_latest,
            a.year_published, a.assessment_date::date AS assessment_date, rlc.code AS category, a.criteria,
            coalesce(a.possibly_extinct, false) AS possibly_extinct,
            coalesce(a.possibly_extinct_in_the_wild, false) AS possibly_extinct_in_the_wild,
