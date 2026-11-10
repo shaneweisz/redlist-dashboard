@@ -22,7 +22,7 @@
 SELECT sis_taxon_id, (row_number() OVER (PARTITION BY sis_taxon_id ORDER BY year_published DESC, is_latest DESC, assessment_date DESC NULLS LAST, assessment_id DESC) - 1)::INTEGER AS seq,
        assessment_id AS id, year_published AS "year", category, CAST(assessment_date AS VARCHAR) AS "date", criteria,
        assessors, reviewers, facilitators, contributors, institutions
-FROM {{ source('core', 'assessments') }}
+FROM {{ source('sources', 'assessments') }}
 WHERE year_published IS NOT NULL
-  AND sis_taxon_id IN (SELECT sis_taxon_id FROM {{ source('core', 'assessments') }} WHERE is_latest)
+  AND sis_taxon_id IN (SELECT sis_taxon_id FROM {{ source('sources', 'assessments') }} WHERE is_latest)
 QUALIFY row_number() OVER (PARTITION BY sis_taxon_id, year_published ORDER BY is_latest DESC, assessment_date DESC NULLS LAST, assessment_id DESC) = 1

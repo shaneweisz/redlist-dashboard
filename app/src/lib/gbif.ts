@@ -17,9 +17,6 @@
  * will converge eventually, and anything leaving `checklistKey` unset is relying
  * on which side of that convergence it happens to run on.
  *
- * See docs/archive/gbif-col-migration.md for how the pipeline moved onto CoL and why
- * GBIF, rather than a local copy of the checklist, is the authority for its keys.
- *
  * @see https://data-blog.gbif.org/post/catalogue-of-life-taxonomic-backbone/
  */
 

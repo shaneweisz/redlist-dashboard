@@ -8,7 +8,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { tables } from "../sync/paths";
+import { tables, output } from "../sync/paths";
 import { runDbt, exportDbtTables } from "../sync/dbt";
 
 type Link = { sis: number; usage: string; verdict: string; counted?: boolean };
@@ -16,9 +16,8 @@ type Link = { sis: number; usage: string; verdict: string; counted?: boolean };
 async function counts(links: Link[] = []) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "usage-owners-"));
   const T = tables(tmp);
-  fs.mkdirSync(path.dirname(T.taxa), { recursive: true });
   const c = await (await DuckDBInstance.create(":memory:")).connect();
-  const copy = (sql: string, file: string) => c.run(`COPY (${sql}) TO '${file}' (FORMAT parquet)`);
+  const copy = (sql: string, file: string) => c.run(`COPY (${sql}) TO '${output(file)}' (FORMAT parquet)`);
   // LEO with a synonym, a subspecies, a BIN and a synonym LUMP; OAK with a synonym; a genus G.
   await copy(`SELECT * FROM (VALUES
       ('LEO', 'LEO', 'G'), ('SYN', 'LEO', 'LEO'), ('SSP', 'LEO', 'LEO'), ('BIN', 'LEO', 'SSP'),

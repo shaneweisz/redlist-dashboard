@@ -56,12 +56,12 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        latest.contributors AS latest_contributors, latest.institutions AS latest_institutions,
        coalesce(history.n, 1)::BIGINT AS assessment_count,
        sg.group_id AS specialist_group
-FROM {{ source('core', 'assessments') }} latest
+FROM {{ source('sources', 'assessments') }} latest
 LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
-LEFT JOIN {{ source('core', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
+LEFT JOIN {{ source('link', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
   ON history.sis_taxon_id = latest.sis_taxon_id
-LEFT JOIN {{ source('core', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
+LEFT JOIN {{ source('sources', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
   AND inat.scientific_name = latest.scientific_name AND inat.kingdom = {{ inat_kingdom("latest.taxon_group") }}
 WHERE latest.is_latest

@@ -19,7 +19,7 @@ unit_tests:
       other.
     model: specialist_group_species
     given:
-      - input: source('core', 'specialist_group_remits')
+      - input: source('sources', 'specialist_group_remits')
         format: sql
         rows: |
           SELECT * FROM (VALUES
@@ -30,11 +30,11 @@ unit_tests:
             ('bovids', 'mammal-groups', ['mammals'], [], [], [], [], ['bovidae'], [], [], [], [], [], [], [], false, false)
           ) t(group_id, section_id, taxon_groups, class_in, class_out, order_in, order_out, family_in, family_out,
               genus_in, genus_out, name_in, name_out, extra_names, override_names, catch_all, claims)
-      - input: source('core', 'rank_aliases')
+      - input: source('sources', 'rank_aliases')
         format: sql
         rows: |
           SELECT * FROM (VALUES ('order', 'pinales', 'cupressales')) t(rank, name, alias)
-      - input: source('core', 'assessments')
+      - input: source('sources', 'assessments')
         format: sql
         rows: |
           SELECT *, true AS is_latest FROM (VALUES
@@ -43,7 +43,7 @@ unit_tests:
             (3, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'AILURIDAE', 'Ailurus fulgens'),
             (4, 'mammals', 'MAMMALIA', 'CETARTIODACTYLA', 'BOVIDAE', 'Bison bison')
           ) t(sis_taxon_id, taxon_group, class_name, order_name, family, scientific_name)
-      - input: source('core', 'taxa')
+      - input: source('sources', 'taxa')
         format: sql
         rows: |
           SELECT *, 'species' AS rank, 'accepted' AS status, false AS demoted FROM (VALUES

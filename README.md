@@ -139,7 +139,7 @@ The key innovation — linking assessment data to real-world observations:
 CoL supplies the described-species universe behind the new-assessments view — the species CoL knows about that haven't been assessed for the Red List yet — plus the synonym index that makes searching an outdated name work.
 
 ### Versions
-Every sync uses one release of each source, recorded in its `sync.json` and named in the app's footer: a Red List version, a GBIF occurrence snapshot, and the CoL release that snapshot is filed under (with the curated release that XR was built from). CoL's newer releases aren't mixed in, so counts, the Not Evaluated list and the CoL-differences card always describe one taxonomy; GBIF re-indexes against a newer CoL a few times a year, and the next sync follows. See "Versions" in [docs/sync.md](docs/sync.md#matching-which-col-species-an-assessed-species-is).
+Every sync uses one release of each source, recorded in its `sync.json` and named in the app's footer: a Red List version, a GBIF occurrence snapshot, and the CoL release that snapshot is filed under (with the curated release that XR was built from). CoL's newer releases aren't mixed in, so counts, the Not Evaluated list and the CoL-differences card always describe one taxonomy; GBIF re-indexes against a newer CoL a few times a year, and the next sync follows. See "Versions" in [docs/sync.md](docs/sync.md#versions).
 
 ## How data reaches the dashboard
 
@@ -156,7 +156,7 @@ A sync goes live only when its one-line `app/latest-sync.txt` change merges to `
 
 ### Running a sync
 
-The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally). It ingests the Catalogue of Life, the Red List and the GBIF snapshot, links each assessed species to its CoL species, counts each species' records by one rule, and builds everything the dashboard shows from those tables; [docs/sync.md](docs/sync.md) has the diagram and every table's columns.
+The sync runs **monthly, locally**, once GBIF publishes a new snapshot. It needs Docker (GBIF's matcher runs locally). It ingests the Catalogue of Life, the Red List and the GBIF snapshot, links each assessed species to its CoL species, counts each species' records by one rule, and builds everything the dashboard shows from those tables; [docs/sync.md](docs/sync.md) explains how.
 
 ```bash
 # 1. Mirror the new GBIF snapshot (~255 GiB, public, no account)
@@ -165,8 +165,8 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes from cached inputs)
 cd app && npm run sync
 
-# 3. Read build/compare/report.md (and build/match-queue.tsv, the species waiting on a decision), then publish
-npm run sync:publish        # copies the build into app/data/sync, uploads to R2, bumps app/latest-sync.txt
+# 3. Read .sync/review/changes/report.md (and .sync/review/match-queue.tsv, the species waiting on a decision), then publish
+npm run sync:publish        # copies .sync/published/ into app/data/sync, uploads to R2, bumps app/latest-sync.txt
 ```
 
 `npm run sync:publish` prints the `git add` line for the data PR. The inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).

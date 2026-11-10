@@ -6,16 +6,12 @@ version: "1.0.0"
 profile: redlist_sync
 model-paths: ["models"]
 macro-paths: ["macros"]
+# Queries compiled against a build on demand, not built each sync (link_audit).
+analysis-paths: ["analyses"]
 
 vars:
   # The day the sync counts "since the assessment" up to (sync.ts passes it).
   sync_date: "{{ env_var('SYNC_DATE') }}"
-  # The versions linked: the Red List release, the CoL extended release matched
-  # against (the one GBIF's snapshot is keyed to), and the curated release the
-  # checks use. sync.ts passes them; 'unknown' when dbt runs outside a sync.
-  redlist_release: "{{ env_var('SYNC_REDLIST_RELEASE', 'unknown') }}"
-  col_xr: "{{ env_var('SYNC_COL_XR', 'unknown') }}"
-  col_checklist: "{{ env_var('SYNC_COL_CHECKLIST', 'unknown') }}"
 
 models:
   redlist_sync:

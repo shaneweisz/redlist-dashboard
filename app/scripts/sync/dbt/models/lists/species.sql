@@ -22,8 +22,8 @@
  */
 
 WITH ex_ew_linked AS (
-  SELECT DISTINCT l.col_id FROM {{ source('core', 'assessment_link') }} l
-  JOIN {{ source('core', 'assessments') }} a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+  SELECT DISTINCT l.col_id FROM {{ source('link', 'assessment_link') }} l
+  JOIN {{ source('sources', 'assessments') }} a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   WHERE l.col_id IS NOT NULL AND a.category IN ('EX', 'EW')
 )
 SELECT col_id, scientific_name, authorship, described_year, kingdom, phylum, class_name, order_name, family, genus,
@@ -31,6 +31,6 @@ SELECT col_id, scientific_name, authorship, described_year, kingdom, phylum, cla
        in_base AND (extinct IS NOT TRUE OR col_id IN (SELECT col_id FROM ex_ew_linked)) AND ne_excluded IS NULL AS described,
        g.group_id AS specialist_group,
        taxon_group
-FROM {{ source('core', 'taxa') }} t
+FROM {{ source('sources', 'taxa') }} t
 LEFT JOIN {{ ref('specialist_group_species') }} g USING (col_id)
 WHERE {{ col_species() }}

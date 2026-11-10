@@ -32,22 +32,22 @@
  *     the second.
  */
 
-WITH aliases AS (SELECT * FROM {{ source('core', 'rank_aliases') }}),
+WITH aliases AS (SELECT * FROM {{ source('sources', 'rank_aliases') }}),
 -- Names only their own group holds.
-excluded AS (SELECT coalesce(flatten(list(override_names)), []) AS names FROM {{ source('core', 'specialist_group_remits') }}),
+excluded AS (SELECT coalesce(flatten(list(override_names)), []) AS names FROM {{ source('sources', 'specialist_group_remits') }}),
 -- Each remit, its class and order lists with the names they also match.
 remits AS (
   SELECT n.*,
     {%- for col, rank in [("class_in", "class"), ("class_out", "class"), ("order_in", "order"), ("order_out", "order")] %}
     list_concat(n.{{ col }}, coalesce((SELECT list(a.alias) FROM aliases a WHERE a.rank = '{{ rank }}' AND list_contains(n.{{ col }}, a.name)), [])) AS {{ col }}_x,
     {%- endfor %}
-  FROM {{ source('core', 'specialist_group_remits') }} n
+  FROM {{ source('sources', 'specialist_group_remits') }} n
 ),
 species_rows AS (
   -- The assessed species (lists/assessed's rows) and the CoL species (species/'s),
   -- from the sources, since both lists carry this table's answer.
-  {%- for rel, id, where in [(source('core', 'assessments'), "sis_taxon_id::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_id", "is_latest"),
-                             (source('core', 'taxa'), "NULL::BIGINT, col_id", col_species())] %}
+  {%- for rel, id, where in [(source('sources', 'assessments'), "sis_taxon_id::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_id", "is_latest"),
+                             (source('sources', 'taxa'), "NULL::BIGINT, col_id", col_species())] %}
   SELECT {{ id }}, taxon_group,
          coalesce(lower(class_name), '') AS cls, coalesce(lower(order_name), '') AS ord, coalesce(lower(family), '') AS fam,
          coalesce(lower(split_part(scientific_name, ' ', 1)), '') AS gen, coalesce(lower(scientific_name), '') AS name

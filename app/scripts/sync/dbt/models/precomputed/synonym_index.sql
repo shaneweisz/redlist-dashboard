@@ -21,7 +21,7 @@
  */
 WITH assessed_link AS (
   SELECT col_id, arg_min(sis_taxon_id, [CASE WHEN role = 'covered' THEN 1 ELSE 0 END, sis_taxon_id]) AS sis_id
-  FROM {{ source('core', 'assessment_link') }} WHERE col_id IS NOT NULL GROUP BY col_id
+  FROM {{ source('link', 'assessment_link') }} WHERE col_id IS NOT NULL GROUP BY col_id
 )
 SELECT syn.scientific_name AS synonym_name,
        lower(syn.scientific_name) AS synonym_name_lower,

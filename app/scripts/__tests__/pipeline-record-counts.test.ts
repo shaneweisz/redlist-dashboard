@@ -8,7 +8,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
-import { tables } from "../sync/paths";
+import { tables, output } from "../sync/paths";
 import { runDbt, exportDbtTables } from "../sync/dbt";
 import { buildSpecialistGroups } from "../sync/sources/specialist-groups";
 
@@ -20,10 +20,9 @@ const ne: Record<string, Record<string, unknown>> = {};
 beforeAll(async () => {
   // Fixture rows for every table count and lists read, then dbt over them.
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "read-models-gbif-"));
-  const core = path.join(tmp, "core");
-  fs.mkdirSync(core, { recursive: true });
+  const T = tables(tmp);
   conn = await (await DuckDBInstance.create(":memory:")).connect();
-  const copy = (sql: string, file: string) => conn.run(`COPY (${sql}) TO '${path.join(core, file)}' (FORMAT parquet)`);
+  const copy = (sql: string, file: string) => conn.run(`COPY (${sql}) TO '${output(file)}' (FORMAT parquet)`);
 
   // Two assessed birds and one Not Evaluated one.
   await copy(`SELECT col_id, NULL::VARCHAR AS parent_id, col_id AS species_id, 'animalia' AS kingdom, 'species' AS rank,
@@ -31,11 +30,11 @@ beforeAll(async () => {
       'birds' AS taxon_group, name AS scientific_name, NULL::VARCHAR AS authorship, NULL::INTEGER AS described_year,
       'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus,
       true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
-    FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, "taxa.parquet");
+    FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, T.taxa);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, usage_id, 'own' AS verdict, 'primary' AS role, true AS counted,
       usage_id AS col_id, CASE WHEN usage_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
       'matcher' AS basis, NULL::VARCHAR AS decided_by
-    FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, usage_id)`, "assessment_link.parquet");
+    FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, usage_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
       false AS possibly_extinct_in_the_wild, NULL::VARCHAR AS population_trend, ['CU']::VARCHAR[] AS countries,
@@ -46,7 +45,7 @@ beforeAll(async () => {
       'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'birds' AS taxon_group,
       []::STRUCT(name VARCHAR, status VARCHAR)[] AS synonyms
     FROM (VALUES (1, '2025-04-15', 'Accipiter one'), (2, '2026-12-02', 'Accipiter two'), (3, '2025-01-01', 'Accipiter four'))
-      t(sis, d, name)`, "assessments.parquet");
+      t(sis, d, name)`, T.assessments);
 
   // A1, assessed 15 April 2025:
   //   2024: 50 georeferenced                          → before
@@ -67,12 +66,11 @@ beforeAll(async () => {
     UNION ALL
     SELECT 'A1', 2025::SMALLINT, m::TINYINT, NULL::DATE, true, n::BIGINT FROM (VALUES (4, 5), (7, 7)) t(m, n)
     UNION ALL
-    SELECT 'A1', 2025::SMALLINT, NULL::TINYINT, NULL::DATE, true, 6::BIGINT`, "occurrences.parquet");
-  await copy(`SELECT * FROM (VALUES ('N1', 'MX', false, 5::BIGINT)) t(usage_key, countrycode, georef, n)`, "occurrence_countries.parquet");
+    SELECT 'A1', 2025::SMALLINT, NULL::TINYINT, NULL::DATE, true, 6::BIGINT`, T.occurrences);
+  await copy(`SELECT * FROM (VALUES ('N1', 'MX', false, 5::BIGINT)) t(usage_key, countrycode, georef, n)`, T.occurrenceCountries);
   await copy(`SELECT 'col' AS source, 'display' AS kind, 'N1' AS col_id, 'species' AS rank, 'Accipiter three' AS scientific_name,
-      NULL::VARCHAR AS kingdom, 'Some name' AS name`, "common_names.parquet");
+      NULL::VARCHAR AS kingdom, 'Some name' AS name`, T.commonNames);
 
-  const T = tables(tmp);
   const today = "2026-11-06";
   // The real Specialist Groups' remits; dbt's unit test (dbt/models/lists/_lists.yml)
   // checks specialist_group_species's rules on its own rows once the models are built.

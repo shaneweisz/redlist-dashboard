@@ -42,7 +42,7 @@ WITH species AS (
   LEFT JOIN (
     -- The primary link only: a covered row names another concept the species is
     -- kept out of the NE list under, not the species itself.
-    SELECT sis_taxon_id AS id, any_value(col_id) AS col_id FROM {{ source('core', 'assessment_link') }}
+    SELECT sis_taxon_id AS id, any_value(col_id) AS col_id FROM {{ source('link', 'assessment_link') }}
     WHERE col_id IS NOT NULL AND role = 'primary' GROUP BY 1
   ) ra ON ra.id = a.id
   UNION ALL
@@ -61,10 +61,10 @@ WITH species AS (
 -- when not (id alone is NULL on every NE row).
 alt_sources AS (
   SELECT s.*, v.name AS alt_name FROM species s
-  JOIN (SELECT col_id, name FROM {{ source('core', 'common_names') }} WHERE source = 'col' AND kind = 'name') v ON v.col_id = s.name_col_id
+  JOIN (SELECT col_id, name FROM {{ source('sources', 'common_names') }} WHERE source = 'col' AND kind = 'name') v ON v.col_id = s.name_col_id
   UNION ALL
   SELECT s.*, n.name FROM species s
-  JOIN (SELECT scientific_name, kingdom, name FROM {{ source('core', 'common_names') }} WHERE source = 'inat' AND kind = 'name') n
+  JOIN (SELECT scientific_name, kingdom, name FROM {{ source('sources', 'common_names') }} WHERE source = 'inat' AND kind = 'name') n
     ON n.scientific_name = s.scientific_name AND n.kingdom = {{ inat_kingdom("s.taxon_group") }}
 ),
 alt_names AS (

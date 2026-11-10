@@ -27,7 +27,7 @@ WITH ne_countries AS (
   SELECT o.col_id,
          string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) FILTER (c.georef) AS countries,
          string_agg(DISTINCT c.countrycode, ';' ORDER BY c.countrycode) AS all_records_countries
-  FROM {{ source('core', 'occurrence_countries') }} c JOIN {{ ref('usage_owner') }} o ON o.usage_key = c.usage_key
+  FROM {{ source('sources', 'occurrence_countries') }} c JOIN {{ ref('usage_owner') }} o ON o.usage_key = c.usage_key
   WHERE o.col_id IS NOT NULL GROUP BY 1
 )
 SELECT s.col_id AS id, s.col_id, s.scientific_name,
@@ -39,8 +39,8 @@ SELECT s.col_id AS id, s.col_id, s.scientific_name,
 FROM {{ ref('species') }} s
 JOIN {{ ref('record_counts') }} rc ON rc.col_id = s.col_id
 LEFT JOIN ne_countries c ON c.col_id = s.col_id
-LEFT JOIN {{ source('core', 'common_names') }} col ON col.source = 'col' AND col.kind = 'display' AND col.col_id = s.col_id
-LEFT JOIN {{ source('core', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
+LEFT JOIN {{ source('sources', 'common_names') }} col ON col.source = 'col' AND col.kind = 'display' AND col.col_id = s.col_id
+LEFT JOIN {{ source('sources', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
   AND inat.scientific_name = s.scientific_name AND inat.kingdom = {{ inat_kingdom("s.taxon_group") }}
 WHERE s.described
-  AND s.col_id NOT IN (SELECT col_id FROM {{ source('core', 'assessment_link') }} WHERE col_id IS NOT NULL)
+  AND s.col_id NOT IN (SELECT col_id FROM {{ source('link', 'assessment_link') }} WHERE col_id IS NOT NULL)

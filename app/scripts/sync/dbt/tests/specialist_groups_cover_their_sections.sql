@@ -5,7 +5,7 @@
 -- CoL species the counts are made of (fossil names CoL keeps aren't counted).
 -- Returns the species that break the rule.
 WITH covered AS (
-  SELECT DISTINCT unnest(taxon_groups) AS taxon_group FROM {{ source('core', 'specialist_group_remits') }}
+  SELECT DISTINCT unnest(taxon_groups) AS taxon_group FROM {{ source('sources', 'specialist_group_remits') }}
 )
 SELECT 'assessed' AS kind, CAST(id AS VARCHAR) AS id, scientific_name, taxon_group, class_name, order_name, family
 FROM {{ ref('assessed') }}

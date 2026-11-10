@@ -10,5 +10,5 @@
  * the pairs as a table; the export step writes them as one JSON object.
  */
 
-SELECT lower(scientific_name) AS key, name FROM {{ source('core', 'common_names') }}
+SELECT lower(scientific_name) AS key, name FROM {{ source('sources', 'common_names') }}
 WHERE source = 'col' AND kind = 'display' AND rank IN ('class', 'order', 'family', 'genus')
