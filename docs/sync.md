@@ -21,7 +21,7 @@ Only the two highlighted stages make judgements. If a number looks wrong, the ca
 
 Every table and what it reads, which shows how many moving parts there are behind those five boxes:
 
-![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/01-sync-overview-v2.png)
+![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/02-sync-overview.png)
 
 Generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`.
 
@@ -120,7 +120,7 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 `link/`: `matches.ts`, `accept-match.ts`, `decisions.ts` (with `seeds/decisions.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-627-col-snapshot-release/01-link-flow.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/01-link-flow.png)
 
 Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
 
@@ -174,7 +174,7 @@ To review links, `dbt/analyses/link_audit.sql` gives every link with the evidenc
 
 ### Versions
 
-![The versions a sync holds together](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/02-versions.png)
+![The versions a sync holds together](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/03-versions.png)
 
 Generated from a build and GBIF's live index: `python3 -I docs/diagrams/versions.py .sync <out.dot>`, then `dot -Tpng -Gdpi=110`. The orange arrows are the ones a person has to keep right.
 
