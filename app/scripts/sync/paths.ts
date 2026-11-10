@@ -42,12 +42,6 @@ export function tables(buildDir = BUILD_DIR) {
     matches: core("matches.parquet"),
     link: core("assessment_link.parquet"),
     matchQueue: path.join(buildDir, "match-queue.tsv"),
-    // The same link, on the XR GBIF's live index runs, when it is newer (link/live-keys.ts)
-    liveTaxa: core("live_taxa.parquet"),
-    liveMatches: core("live_matches.parquet"),
-    liveLink: core("live_assessment_link.parquet"),
-    liveMatchQueue: path.join(buildDir, "live-match-queue.tsv"),
-    liveKeys: core("live_keys.parquet"),
     // 3. Count
     usageOwner: core("usage_owner.parquet"),
     recordCounts: core("record_counts.parquet"),
@@ -65,7 +59,6 @@ export function tables(buildDir = BUILD_DIR) {
     synonymAssessed: data("col-synonym-assessed.parquet"),
     colToAssessed: data("col-to-assessed.parquet"),
     colRevisions: data("col-revisions.json"),
-    gbifLiveKeys: data("gbif-live-keys.json"),
     taxaSummary: data("taxa-summary.json"),
     table1aChildren: data("table1a-children-summaries.json"),
     sscChildren: data("ssc-group-children-summaries.json"),

@@ -27,7 +27,7 @@ export const SYNC_LAYOUT = {
   taxonomy: [
     "taxa.parquet", "assessment_link.parquet",
     "col-split-candidates.parquet", "col-synonym-assessed.parquet", "col-to-assessed.parquet",
-    "col-revisions.json", "vernacular-names.json", "gbif-live-keys.json",
+    "col-revisions.json", "vernacular-names.json",
   ],
   search: ["name-index.parquet", "rank-index.parquet", "synonym-index.parquet"],
   summaries: [

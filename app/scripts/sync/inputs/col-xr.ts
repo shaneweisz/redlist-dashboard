@@ -2,15 +2,15 @@
  * The Catalogue of Life eXtended Release (XR): every name usage the taxa table
  * is built from.
  *
- * One XR serves the whole sync: the one the GBIF snapshot is filed under
- * (inputs/snapshot-xr.ts finds it), so every count, link and list uses the ids
- * GBIF filed its records with. Not CoL's newest: GBIF re-indexes a few times a
- * year, CoL releases monthly, and CoL renumbers about 2% of usage ids per
- * release, so ids from one XR can't be read as another's.
+ * Not the newest XR, but the one GBIF's occurrence index runs on. GBIF adopts
+ * each release about three weeks after CoL publishes it, and CoL renumbers about
+ * 2% of usage ids per release, so the newest is normally one ahead and a slice
+ * of GBIF's keys would resolve to nothing (measured once: 504 assessed and 9,092
+ * unassessed keys against the newest, none against the indexed one).
  *
- * GBIF's live index can run a newer XR than the snapshot (it re-indexes between
- * snapshots). resolveLiveXr names it, for the app's live GBIF queries only
- * (link/live-keys.ts).
+ * The release is resolved in this order: COL_XR_DATASET, then the release GBIF
+ * reports, then the one the last sync used (src/config/col-release.json) when
+ * GBIF can't be reached, and only with nothing pinned the newest, which is a guess and says so.
  *
  * Three tables are taken from the ColDP export: NameUsage (the usages),
  * Reference (the publication year of botanical and fungal names, whose author
@@ -54,31 +54,23 @@ async function gbifIndexedRelease(): Promise<string | null> {
   return null;
 }
 
-/**
- * The XR GBIF's live occurrence index uses: the app's live GBIF queries (maps,
- * breakdowns, photos, gbif.org links) go to that index, so they need ids from
- * it. Null when GBIF can't be asked.
- */
-export async function resolveLiveXr(): Promise<XrDatasetInfo | null> {
-  const key = await gbifIndexedRelease();
-  return key ? datasetInfo(key) : null;
-}
-
-export async function datasetInfo(key: string): Promise<XrDatasetInfo> {
-  const res = await fetch(`https://api.checklistbank.org/dataset/${key}`);
-  if (!res.ok) throw new Error(`col-xr: ChecklistBank lookup failed for ${key}: ${res.status}`);
-  const ds = await res.json();
+/** @param pinned the XR the last sync used, to stand on if GBIF can't be asked */
+export async function resolveXrDataset(pinned: string | null): Promise<XrDatasetInfo> {
+  const indexed = process.env.COL_XR_DATASET ?? (await gbifIndexedRelease());
+  const key = indexed ?? pinned;
+  if (!indexed) {
+    console.warn(key
+      ? `   could not reach GBIF to confirm its indexed release; keeping the pinned ${key}`
+      : "   could not reach GBIF and nothing is pinned; using the newest XR, so some GBIF keys may not resolve");
+  }
+  const res = key
+    ? await fetch(`https://api.checklistbank.org/dataset/${key}`)
+    : await fetch("https://api.checklistbank.org/dataset?origin=xrelease&limit=1&sortBy=created");
+  if (!res.ok) throw new Error(`col-xr: ChecklistBank lookup failed: ${res.status}`);
+  const body = await res.json();
+  const ds = key ? body : body.result?.[0];
+  if (!ds) throw new Error("col-xr: no xrelease datasets returned");
   return { key: String(ds.key), alias: ds.alias, doi: ds.doi ?? null, issued: ds.issued ?? null };
-}
-
-/** CoL's XRs, newest first. */
-export async function xreleases(limit = 12): Promise<XrDatasetInfo[]> {
-  const res = await fetch(`https://api.checklistbank.org/dataset?releasedFrom=3&origin=xrelease&limit=${limit}&sortBy=created`);
-  if (!res.ok) throw new Error(`col-xr: XR listing failed: ${res.status}`);
-  const body = (await res.json()) as { result?: { key: number | string; alias: string; doi?: string; issued?: string }[] };
-  return (body.result ?? [])
-    .map((d) => ({ key: String(d.key), alias: d.alias, doi: d.doi ?? null, issued: d.issued ?? null }))
-    .sort((a, b) => (b.issued ?? "").localeCompare(a.issued ?? ""));
 }
 
 /** Download `xr`'s ColDP export into `destDir` and keep the three tables. */

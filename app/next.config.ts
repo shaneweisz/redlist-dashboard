@@ -238,16 +238,6 @@ const nextConfig: NextConfig = {
     // parquets are 170 MB between them — bundling either would put the function
     // straight past Vercel's cap, and flip USE_R2 off into the bargain.
     "/api/narrative-search": ["**/data/**"],
-    // The routes that ask GBIF's live API about a species or group read the
-    // live-key map (lib/gbif-live-keys.ts) from R2 when data/ isn't on disk, so
-    // none of them needs the sync bundled; naming its path would otherwise let
-    // the tracer pull the whole sync in.
-    "/api/species/*/breakdown": ["**/data/**"],
-    "/api/species/*/inat-photos": ["**/data/**"],
-    "/api/occurrences": ["**/data/**"],
-    "/api/nearby-species/points": ["**/data/**"],
-    "/api/country/stats": ["**/data/**"],
-    "/api/gbif-link": ["**/data/**"],
     "/api/narrative-search/[assessmentId]": ["**/data/**"],
     // Same shape as /api/redlist/species/history: one DuckDB query answered
     // entirely from R2 (httpfs), so nothing under data/ belongs in the bundle.

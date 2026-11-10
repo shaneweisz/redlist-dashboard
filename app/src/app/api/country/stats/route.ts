@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { liveGbifKey } from "@/lib/gbif-live-keys";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifOccurrenceParams, gbifTaxonKeysForGroup } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
@@ -52,9 +51,7 @@ export async function GET(request: NextRequest) {
     // The keys come from the generated config, derived from the Red List group
     // definitions — a hand-kept list of backbone integers once went stale when the
     // pipeline moved to Catalogue of Life, and GBIF quietly returned nothing.
-    // Each as GBIF's live index keys it, which can be a newer CoL release than
-    // the config was derived from (gbif-live-keys.ts).
-    const keys = new Set(await Promise.all(taxonIds.flatMap((t) => gbifTaxonKeysForGroup(t)).map(liveGbifKey)));
+    const keys = new Set(taxonIds.flatMap((t) => gbifTaxonKeysForGroup(t)));
     const params = gbifOccurrenceParams({ facet: "country", facetLimit: "300", limit: "0" }, { mode });
     for (const key of keys) params.append("taxonKey", key);
 

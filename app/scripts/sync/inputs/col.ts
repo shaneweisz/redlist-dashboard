@@ -1,10 +1,8 @@
 /**
- * The Catalogue of Life inputs for one XR, cached by dataset key:
- *   - the XR (col-xr.ts): the usages the taxa table is built from. The sync's
- *     is the one the GBIF snapshot is filed under (snapshot-xr.ts); GBIF's live
- *     index's, when newer, is fetched the same way for live ids
+ * The Catalogue of Life inputs, cached by dataset key:
+ *   - the XR GBIF indexes (col-xr.ts): the usages the taxa table is built from
  *   - the curated release that XR was built from (col-checklist.ts): which
- *     species are curated, and which usages it holds
+ *     species are curated, and which usages catalogueoflife.org shows
  *   - the checklist's Base sources: tell curated species from the XR's tail of
  *     single fossil papers
  *
@@ -21,7 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, cachedDir } from "../paths";
-import { fetchXr, resolveLiveXr, type XrDatasetInfo } from "./col-xr";
+import { resolveXrDataset, fetchXr, type XrDatasetInfo } from "./col-xr";
 import { resolveChecklistDataset, fetchChecklist, type ChecklistInfo } from "./col-checklist";
 
 export interface ColInputs {
@@ -48,13 +46,8 @@ async function baseSources(checklist: ChecklistInfo): Promise<string[]> {
   return JSON.parse(fs.readFileSync(path.join(dir, "sources.json"), "utf-8")) as string[];
 }
 
-/** The XR's own tables only (no curated release): enough to test a snapshot's keys against. */
-export async function ensureXr(xr: XrDatasetInfo): Promise<string> {
-  const dir = await cachedDir(path.join(COL_CACHE, `xr-${xr.key}`), (d) => fetchXr(xr, d));
-  return path.join(dir, "NameUsage.tsv");
-}
-
-export async function ensureColInputs(xr: XrDatasetInfo): Promise<ColInputs> {
+export async function ensureColInputs(): Promise<ColInputs> {
+  const xr = await resolveXrDataset(pinnedXrKey());
   const checklist = await resolveChecklistDataset(xr);
   const xrDir = await cachedDir(path.join(COL_CACHE, `xr-${xr.key}`), (d) => fetchXr(xr, d));
   const clDir = await cachedDir(path.join(COL_CACHE, `checklist-${checklist.key}`), (d) => fetchChecklist(checklist, d));
@@ -75,11 +68,10 @@ export function writeColReleasePin(xr: XrDatasetInfo, checklist: ChecklistInfo, 
   console.log(`   wrote ${path.relative(process.cwd(), file)} (${xr.alias}; checklist ${checklist.alias})`);
 }
 
-/** The XR the last sync was built from, if any: the first to test a snapshot against. */
-export function lastXr(): XrDatasetInfo | null {
+/** The XR the last sync was built from, if any. */
+function pinnedXrKey(): string | null {
   try {
-    const pin = JSON.parse(fs.readFileSync(PIN, "utf-8")) as XrDatasetInfo;
-    return pin.key ? { key: pin.key, alias: pin.alias, doi: pin.doi, issued: pin.issued } : null;
+    return (JSON.parse(fs.readFileSync(PIN, "utf-8")) as { key?: string }).key ?? null;
   } catch {
     return null;
   }
@@ -88,8 +80,7 @@ export function lastXr(): XrDatasetInfo | null {
 const isDirectRun = process.argv[1]?.endsWith("inputs/col.ts");
 if (isDirectRun) {
   loadEnvFiles();
-  resolveLiveXr()
-    .then((xr) => { if (!xr) throw new Error("col: GBIF's live XR could not be resolved"); return ensureColInputs(xr); })
+  ensureColInputs()
     .then((c) => console.log(JSON.stringify({ ...c, baseSourceIds: c.baseSourceIds.length }, null, 2)))
     .catch((e) => { console.error(e); process.exit(1); });
 }

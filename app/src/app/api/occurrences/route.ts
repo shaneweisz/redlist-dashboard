@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { liveGbifKey } from "@/lib/gbif-live-keys";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_USER_AGENT } from "@/lib/gbif-fetch";
 import { getQualityFlags } from "@/lib/mapping/coordinate-cleaning";
@@ -492,8 +491,7 @@ export async function GET(request: NextRequest) {
     // Shared across all three record sets; each bucket adds its own
     // hasCoordinate/hasGeospatialIssue pair on top.
     const baseParams = new URLSearchParams({
-      // The live index's key where it runs a newer CoL release (gbif-live-keys.ts)
-      speciesKey: await liveGbifKey(speciesKey),
+      speciesKey,
       checklistKey: GBIF_CHECKLIST_KEY,
     });
 
