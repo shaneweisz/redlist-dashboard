@@ -49,7 +49,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 Stages meet at a single table: `assessment_link` out of link, `usage_owner` out of count. Their columns are each stage's contract with the rest, so the inside of a stage can be rewritten without touching the others.
 
-- **`seeds/`** holds every decision a person made, one file per kind and one row per decision with its reason: `match-overrides.tsv` (which CoL name a species is, where the matcher's answer isn't taken), `ne-excluded.tsv` (domestic forms and humans), and the taxonomy tree's CoL homonyms and equivalents.
+- **`seeds/`** holds every decision a person made, one file per kind and one row per decision with its reason: `match-overrides.tsv` (which CoL name a species is, where the matcher's answer isn't taken), `domesticated-and-humans.tsv` (domestic forms and humans), and the taxonomy tree's CoL homonyms and equivalents.
 - **Count, lists and the precomputed SQL are dbt models** (`dbt/`, dbt-oss with DuckDB, installed by uv on first use). A model's `ref()`s are what it reads; its `.yml` holds its tests. `npm run sync:lineage` serves dbt's docs for the build: every model's SQL, columns, tests and lineage graph. By hand, from `app/scripts/sync/dbt`:
 
 ```bash
@@ -184,7 +184,7 @@ It trails CoL's newest by up to a few months: GBIF re-indexes a few times a year
 
 ## The Not Evaluated list
 
-`ne.parquet`, built by `dbt/models/lists/ne.sql`, keyed by `col_id` (also its GBIF key). A CoL species is on it when it is *described* (`species/`'s `described`: accepted, curated, not extinct, not domesticated or human per `seeds/ne-excluded.tsv`), no assessed species links to it by any row, and GBIF has records for it under the counting rule.
+`ne.parquet`, built by `dbt/models/lists/ne.sql`, keyed by `col_id` (also its GBIF key). A CoL species is on it when it is *described* (`species/`'s `described`: accepted, curated, not extinct, not domesticated or human per `seeds/domesticated-and-humans.tsv`), no assessed species links to it by any row, and GBIF has records for it under the counting rule.
 
 ## What the app reads
 

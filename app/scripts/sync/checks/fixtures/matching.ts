@@ -388,23 +388,23 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Columba livia",
     why: "Provisionally accepted twin of the assessed Rock Dove.",
-    source: "link/assessment-link.ts twinKeys; seeds/ne-excluded.tsv",
+    source: "link/assessment-link.ts twinKeys; seeds/domesticated-and-humans.tsv",
     confirmed: NOVEMBER_2026,
     expect: { minRecords: 1_000_000, neListed: { "Columba livia": false } },
   },
   {
     name: "Homo sapiens",
     why: "IUCN leaves humans out of the Red List; CoL has them.",
-    source: "seeds/ne-excluded.tsv",
+    source: "seeds/domesticated-and-humans.tsv",
     confirmed: NOVEMBER_2026,
     expect: { assessed: false, neListed: { "Homo sapiens": false } },
   },
   {
     name: "Canis familiaris",
     why: "Domestic forms have a wild sibling counted separately; goat, sheep, yak, dromedary and guinea pig were once counted as Not Evaluated by one list and left out by another.",
-    source: "seeds/ne-excluded.tsv; dbt/models/lists/species.sql described",
+    source: "seeds/domesticated-and-humans.tsv; dbt/models/lists/species.sql described",
     confirmed: NOVEMBER_2026,
-    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false, "Bos domesticus": false,
+    expect: { assessed: false, neListed: { "Canis familiaris": false, "Felis catus": false, "Bos taurus": false, "Bos domesticus": false, "Bombyx mori": false,
       "Capra hircus": false, "Ovis aries": false, "Bos grunniens": false, "Camelus dromedarius": false, "Cavia porcellus": false } },
   },
   {

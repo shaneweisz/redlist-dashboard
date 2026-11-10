@@ -4,7 +4,7 @@
  *
  * Built from: the CoL XR (NameUsage.tsv, Reference.tsv), the NameUsage.tsv and
  * Base source ids of the curated release that XR was built from,
- * seeds/ne-excluded.tsv.
+ * seeds/domesticated-and-humans.tsv.
  *
  * Columns:
  *   col_id, parent_id, status, rank, scientific_name, authorship   from the XR
@@ -38,7 +38,7 @@
  *   - A usage takes its species' group, so a synonym can't land in another group
  *     than the species it counts towards.
  *
- * Checks: every name in seeds/ne-excluded.tsv is still an accepted species (if
+ * Checks: every name in seeds/domesticated-and-humans.tsv is still an accepted species (if
  * CoL lumped a domestic form into its wild sibling, the wild species would
  * absorb its records).
  */
@@ -68,7 +68,7 @@ export interface TaxaInputs {
   reference?: string;
   checklistNameUsage?: string;
   baseSourceIds: string[];
-  /** name → kind; defaults to seeds/ne-excluded.tsv, tests pass their own. */
+  /** name → kind; defaults to seeds/domesticated-and-humans.tsv, tests pass their own. */
   neExcluded?: Record<string, string>;
 }
 
@@ -141,7 +141,7 @@ export async function buildTaxa(inputs: TaxaInputs, taxaFile: string): Promise<v
     LEFT JOIN nu p1 ON p1.col_id = a.parent_id
     LEFT JOIN nu p2 ON p2.col_id = p1.parent_id`);
 
-  const excluded = Object.entries(inputs.neExcluded ?? Object.fromEntries(readSeed("ne-excluded.tsv").map((r) => [r.name, r.kind]))).map(([n, why]) => `(${lit(n)}, ${lit(why)})`).join(", ");
+  const excluded = Object.entries(inputs.neExcluded ?? Object.fromEntries(readSeed("domesticated-and-humans.tsv").map((r) => [r.name, r.kind]))).map(([n, why]) => `(${lit(n)}, ${lit(why)})`).join(", ");
   await conn.run(`CREATE OR REPLACE TEMP TABLE ne_excluded(name VARCHAR, why VARCHAR); INSERT INTO ne_excluded VALUES ${excluded}`);
 
   await conn.run(`COPY (
@@ -191,7 +191,7 @@ export async function buildTaxa(inputs: TaxaInputs, taxaFile: string): Promise<v
     ORDER BY 1`)).getRowObjects().map((r) => String(r.name));
   if (missing.length > 0) {
     throw new Error(`taxa: excluded names not accepted species in this release: ${missing.join(", ")}. ` +
-      "Check whether CoL lumped them into their wild siblings before changing seeds/ne-excluded.tsv.");
+      "Check whether CoL lumped them into their wild siblings before changing seeds/domesticated-and-humans.tsv.");
   }
   await report(conn, out);
 }
