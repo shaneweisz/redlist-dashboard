@@ -411,7 +411,7 @@ Decisions, in two steps kept apart so each can be explained on its own:
      - Every usage counts for one assessed species at most.
 ```
 
-`core/assessment_link.parquet` · 187,355 rows · 3 MB
+`core/assessment_link.parquet` · 187,433 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -435,9 +435,8 @@ under, where that differs from the snapshot's. The app's live GBIF queries
 snapshot, so they need its ids.
 
 The two differ for the weeks between GBIF re-indexing against a newer XR and
-the first snapshot keyed to it (COL26.6 XR → COL26.10 XR in November 2026:
-1,130 assessed species' ids gone, 4,494 turned synonyms). Every other month
-the releases are the same and this table is empty.
+the first snapshot filed under it; CoL renumbers about 2% of ids per release.
+Every other month the releases are the same and this table is empty.
 
 Built from: the snapshot's taxa, and the same link stage run on GBIF's live
 XR (its taxa, matcher answers and link), see sync.ts.
@@ -458,7 +457,7 @@ Decisions:
   - Never used for counts or taxonomy: those come from the snapshot's release.
 ```
 
-`core/live_keys.parquet` · 222,692 rows · 2 MB
+`core/live_keys.parquet` · 222,598 rows · 2 MB
 
 | column | type | |
 |---|---|---|
@@ -497,7 +496,7 @@ Checks: each usage has at most one owner. A violation means a number
 somewhere is inflated, so the sync stops.
 ```
 
-`core/usage_owner.parquet` · 6,209,472 rows · 33 MB
+`core/usage_owner.parquet` · 6,209,302 rows · 33 MB
 
 | column | type | |
 |---|---|---|
@@ -531,7 +530,7 @@ Decisions:
     date: nothing can postdate it yet.
 ```
 
-`core/record_counts.parquet` · 1,741,666 rows · 9 MB
+`core/record_counts.parquet` · 1,741,605 rows · 9 MB
 
 | column | type | |
 |---|---|---|
@@ -552,7 +551,7 @@ lists/assessed: one row per assessed species: its latest assessment, its GBIF
 key and counts, its latest credits.
 
 Built from: assessments (latest), record_counts, lists/assessments (how many
-years it was assessed in), common_names.
+years it was assessed in), common_names, assessment_link.
 
 Decisions:
   - Common name: IUCN's, else iNaturalist's.
@@ -578,6 +577,7 @@ Decisions:
 | `countries` | text | lists, ';'-joined (the app's filter SQL reads them so) |
 | `gbif_species_key` | text | see record_counts |
 | `gbif_live_key` | text | the id GBIF's live index uses for it, where that differs (live_keys); the app's live GBIF queries ask it first. NULL most months |
+| `count_note` | text | 'unlinked' when it is linked to no CoL species (waiting in the match queue), so no records are counted; else NULL |
 | `gbif_georeferenced_records_count` | integer |  |
 | `gbif_all_records_count` | integer |  |
 | `gbif_georeferenced_records_since_assessment` | integer |  |
@@ -684,7 +684,7 @@ Decisions:
   - Common name: iNaturalist's, else CoL's.
 ```
 
-`lists/ne.parquet` · 1,327,388 rows · 36 MB
+`lists/ne.parquet` · 1,327,389 rows · 36 MB
 
 | column | type | |
 |---|---|---|
@@ -735,7 +735,7 @@ taxonomy/assessment_link: assessment_link as built (see link/assessment-link.ts)
 | `checklist_parent_id` | text |  |
 | `checklist_name` | text |  |
 
-`taxonomy/assessment_link.parquet` · 187,355 rows · 3 MB
+`taxonomy/assessment_link.parquet` · 187,433 rows · 3 MB
 
 | column | type | |
 |---|---|---|
@@ -889,7 +889,7 @@ Decisions: primary links only; where two share a col_id, an accepted-name
 match before others, then the lowest SIS id.
 ```
 
-`taxonomy/col-to-assessed.parquet` · 172,718 rows · 2 MB
+`taxonomy/col-to-assessed.parquet` · 172,665 rows · 2 MB
 
 | column | type | |
 |---|---|---|
@@ -920,7 +920,7 @@ Decisions:
     so a prefix query reads about a megabyte, fast even on a cold container.
 ```
 
-`search/name-index.parquet` · 3,822,428 rows · 169 MB
+`search/name-index.parquet` · 3,822,340 rows · 169 MB
 
 | column | type | |
 |---|---|---|
