@@ -10,9 +10,10 @@
  *
  * Columns, in groups, the ones a review reads first at the front:
  *   at a glance    redlist_name, redlist_authority, col_taxon_name,
- *                  col_taxon_authorship, name_reason (why this name), reason
- *                  (what it makes the species), to_review (why a person needs to
- *                  look, when one does: the queue is WHERE to_review IS NOT NULL)
+ *                  col_taxon_authorship, match_reason (how the link was made:
+ *                  how the CoL name was found, then what CoL makes of it, as
+ *                  fixed labels), to_review (why a person needs to look, when
+ *                  one does: the queue is WHERE to_review IS NOT NULL)
  *   the Red List   sis_taxon_id, redlist_release, category, taxon_group, class,
  *                  order, family, assessment_date
  *   CoL            role (primary | covered), col_xr, col_taxon_id, col_taxon_name,
@@ -20,22 +21,17 @@
  *                  (the taxon it is), col_species_id, col_species_name,
  *                  col_species_authorship (the species that taxon is in),
  *                  col_described_year
- *   the decision   verdict, method, basis, decided_by, name_reason (why this
- *                  name), reason (what it makes the species), counted, records,
- *                  georeferenced_records (what this row counts)
+ *   the decision   verdict, counted, records, georeferenced_records (what this
+ *                  row counts), method, basis, decided_by
  *   the matcher    matcher_version, matcher_name, matcher_authorship,
  *                  matcher_status, match_type, confidence, matcher_score (its
  *                  answer for the name, primary rows; JSON points),
  *                  matcher_alternatives (the other candidates, each with its
  *                  points, JSON)
- *   the evidence   primary rows only. link_kind: how the link was made, the unit
- *                  an error rate is measured per ('accepted name': the Red List
- *                  name is an accepted CoL species; 'synonym': a CoL synonym, linked
- *                  to the species it points to; 'override': match-overrides.tsv;
- *                  'waiting': no link yet). differences: how many of the checks
- *                  below find the Red List and CoL disagreeing, 0 when they agree on
- *                  all (a synonym link always differs in name, so compare within a
- *                  kind): genus_differs, epithet_differs (the Red List name against
+ *   the evidence   primary rows only. differences: how many of the checks below
+ *                  find the Red List and CoL disagreeing, 0 when they agree on all
+ *                  (a renamed link always differs in name, so compare within a
+ *                  match_reason): genus_differs, epithet_differs (the Red List name against
  *                  the CoL species', as written, so spelling variants count),
  *                  class_differs, order_differs (through rank_aliases: a known
  *                  renaming is no difference), family_differs, author_year_differs
@@ -44,15 +40,14 @@
  *                  iucn_lists_col_name (IUCN's own synonyms include CoL's name: it
  *                  knows the name and treats it as this species) and
  *                  described_after_assessment (CoL's species is newer than the
- *                  assessment: a likely lag). sample_rank: a fixed random order
- *                  within the kind, so reviewing ranks 1..n is a random sample of n
+ *                  assessment: a likely lag)
  *
  * Decisions:
  *   - Evidence, not verdicts: a difference is a reason to look. The comparisons
  *     are raw, looser than the CoL-differences card's: for finding links to
  *     check, a false alarm costs a look, a missed one a wrong link.
- *   - Sorted by link_kind and sample_rank, so the first rows of each kind are its
- *     random sample.
+ *   - Sorted primary rows first, those to review first among them, then by
+ *     match_reason.
  */
 import { lit, openDuckDB } from "../sql";
 import { output, parquet, type Tables } from "../paths";
@@ -85,7 +80,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
              l.role, ${lit(releases.colXr)} AS col_xr,
              l.col_taxon_id, tx.scientific_name AS col_taxon_name, tx.authorship AS col_taxon_authorship, tx.rank AS col_taxon_rank, tx.status AS col_taxon_status,
              l.col_species_id, sp.scientific_name AS col_species_name, sp.authorship AS col_species_authorship, sp.described_year AS col_described_year,
-             l.verdict, l.method, l.basis, l.decided_by, l.name_reason, l.to_review, l.reason, l.counted,
+             l.verdict, l.method, l.basis, l.decided_by, l.match_reason, l.to_review, l.counted,
              CASE WHEN l.counted THEN c.records END AS records, CASE WHEN l.counted THEN c.georeferenced_records END AS georeferenced_records,
              CASE WHEN l.role = 'primary' THEN m.matcher_version END AS matcher_version,
              CASE WHEN l.role = 'primary' THEN m.matcher_name END AS matcher_name,
@@ -110,9 +105,6 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     ),
     evidence AS (
       SELECT *,
-        CASE WHEN role = 'primary' THEN
-          CASE WHEN col_species_id IS NULL THEN 'waiting' WHEN basis = 'decision' THEN 'override'
-               WHEN method = 'accepted' THEN 'accepted name' ELSE method END END AS link_kind,
         role = 'primary' AND col_species_id IS NOT NULL AS judged,
         coalesce(CASE WHEN col_taxon_id <> col_species_id THEN col_taxon_authorship END, col_species_authorship) AS col_authorship
       FROM rows
@@ -134,7 +126,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     )
     SELECT
            -- 1. at a glance: what each side calls it, and why the link is what it is
-           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, name_reason, reason, to_review,
+           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, match_reason, to_review,
            -- 2. the Red List
            sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date,
            -- 3. CoL
@@ -144,14 +136,12 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
            -- 5. the matcher
            matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score, matcher_alternatives,
            -- 6. the evidence
-           link_kind,
            CASE WHEN judged THEN genus_differs::INT + epithet_differs::INT + class_differs::INT + order_differs::INT + family_differs::INT
              + author_year_differs::INT + (lumped_with > 0)::INT END AS differences,
            genus_differs, epithet_differs, class_differs, order_differs, family_differs, author_year_differs,
-           iucn_lists_col_name, described_after_assessment, lumped_with,
-           CASE WHEN role = 'primary' THEN row_number() OVER (PARTITION BY link_kind, role = 'primary' ORDER BY hash(sis_taxon_id, 'link-audit-v1')) END AS sample_rank
+           iucn_lists_col_name, described_after_assessment, lumped_with
     FROM checks
-    ORDER BY role DESC, link_kind, sample_rank, sis_taxon_id, col_species_id
+    ORDER BY role DESC, to_review NULLS LAST, match_reason, sis_taxon_id, col_species_id
   ) TO ${lit(output(T.reviewLinks))} (FORMAT parquet, COMPRESSION zstd)`);
   const [r] = (await conn.runAndReadAll(`SELECT count(*) AS n FROM ${parquet(T.reviewLinks)}`)).getRowObjects();
   return Number(r.n);

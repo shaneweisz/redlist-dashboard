@@ -75,22 +75,21 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
 
   // ── 2. The concept
   say(); say("2. The concept");
-  const links = await rows<{ role: string; verdict: string; method: string; basis: string | null; name_reason: string | null; reason: string; counted: boolean;
+  const links = await rows<{ role: string; verdict: string; method: string; basis: string | null; match_reason: string | null; counted: boolean;
     taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null;
     to_review: string | null }>(conn, `
-    SELECT l.role, l.verdict, l.method, l.basis, l.name_reason, l.to_review, l.reason, l.counted, l.col_taxon_id, l.col_species_id,
+    SELECT l.role, l.verdict, l.method, l.basis, l.match_reason, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
            t.scientific_name || coalesce(' ' || t.authorship, '') AS taxon, t.rank AS taxon_rank, t.status AS taxon_status,
            c.scientific_name || coalesce(' ' || c.authorship, '') AS species
     FROM ${pq(T.link)} l LEFT JOIN ${pq(T.taxa)} t ON t.col_id = l.col_taxon_id LEFT JOIN ${pq(T.taxa)} c ON c.col_id = l.col_species_id
     WHERE l.sis_taxon_id = ${s.sis} ORDER BY l.role DESC, l.counted DESC, l.col_species_id`);
   for (const l of links) {
-    if (l.role === "primary" && l.name_reason) say(`  Why this name: ${l.name_reason}`);
     if (l.role === "primary" && l.to_review) say(`  To review: ${l.to_review}`);
     const where = !l.col_species_id ? "no CoL species"
       : l.col_taxon_id && l.col_taxon_id !== l.col_species_id ? `CoL taxon ${l.taxon} [${l.col_taxon_id}, ${l.taxon_status} ${l.taxon_rank}], in species ${l.species} [${l.col_species_id}]`
       : `CoL species ${l.species} [${l.col_species_id}]`;
     say(`  ${l.role.padEnd(8)} ${where}`);
-    say(`           ${l.verdict}, ${l.method}${l.basis ? `, by ${l.basis}` : ""}, ${l.counted ? "counted" : "not counted"}: ${l.reason}`);
+    say(`           ${l.verdict}, ${l.method}${l.basis ? `, by ${l.basis}` : ""}, ${l.counted ? "counted" : "not counted"}: ${l.match_reason ?? "–"}`);
   }
 
   // ── 3. The count

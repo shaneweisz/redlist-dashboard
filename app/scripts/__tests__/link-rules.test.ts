@@ -10,7 +10,7 @@ import {
 
 const primary = (sis: number, col_species_id: string | null, over: Partial<LinkRow> = {}): LinkRow => ({
   sis_taxon_id: sis, role: "primary", col_species_id, col_taxon_id: col_species_id, verdict: "own", method: "accepted", basis: "matcher",
-  decided_by: null, name_reason: null, to_review: null, reason: "", counted: true, ...over,
+  decided_by: null, to_review: null, match_reason: "", counted: true, ...over,
 });
 const sp = (col_id: string, scientific_name: string, authorship: string | null, family = "F", class_name = "C"): AcceptedSpecies =>
   ({ col_id, scientific_name, authorship, family, class_name });
@@ -20,7 +20,7 @@ describe("coverer", () => {
   it("adds a covered row once, and none for the species' own target", () => {
     const links = [primary(1, "A")];
     const cover = coverer(links);
-    const row = { sis_taxon_id: 1, col_species_id: "B", col_taxon_id: "B", verdict: "own" as const, method: "m", reason: "", counted: true };
+    const row = { sis_taxon_id: 1, col_species_id: "B", col_taxon_id: "B", verdict: "own" as const, method: "m", match_reason: "", counted: true };
     expect(cover(row)).toBe(true);
     expect(cover(row)).toBe(false);
     expect(cover({ ...row, col_species_id: "A", col_taxon_id: "A" })).toBe(false);

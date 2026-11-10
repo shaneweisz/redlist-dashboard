@@ -32,7 +32,7 @@ LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
   WHERE l.role = 'primary')"""
 # The queue: the links that need a person (assessment_link.to_review), with the Red List's name and the matcher's answer.
 QUEUE = f"""(SELECT a.scientific_name AS name, a.authority, m.matcher_name, m.matcher_authorship,
-  regexp_replace(l.to_review, '^no decision yet: ', '') AS reason
+  l.to_review AS reason
   FROM read_parquet('{CORE}/link/assessment_link.parquet') l
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/link/matches.parquet') m ON m.sis_taxon_id = l.sis_taxon_id

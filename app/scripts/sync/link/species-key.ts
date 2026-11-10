@@ -173,8 +173,10 @@ export type Verdict =
 export interface KeyDecision {
   key: string | null;
   verdict: Verdict;
-  /** Human-readable, stored, so "why does this species show nothing?" is answerable. */
+  /** Human-readable, so "why does this species show nothing?" is answerable (sync:trace). */
   reason: string;
+  /** The same, as a fixed label for the link table: accepted | renamed | lumped | lumped into an assessed species. */
+  label: "accepted" | "renamed" | "lumped" | "lumped into an assessed species";
   /** The taxon CoL wanted to fold this species into, when it did. */
   lumpedInto?: string;
 }
@@ -209,11 +211,13 @@ export function decideKey(input: {
         key: null,
         verdict: "refused",
         reason: `CoL holds it as ${target.scientificName}, which the Red List assesses separately; counts nothing`,
+        label: "lumped into an assessed species",
         lumpedInto: target.scientificName,
       };
     }
-    return { key: target.key, verdict: "own",
-      reason: acceptedUsage && acceptedUsage.key !== usage.key ? `renamed: CoL accepts it as ${target.scientificName}` : "the species itself" };
+    const renamed = !!acceptedUsage && acceptedUsage.key !== usage.key;
+    return { key: target.key, verdict: "own", label: renamed ? "renamed" : "accepted",
+      reason: renamed ? `renamed: CoL accepts it as ${target.scientificName}` : "the species itself" };
   }
 
   // A lump. Its own usage is still worth keeping — but only if we got here by
@@ -223,6 +227,7 @@ export function decideKey(input: {
       key: usage.key,
       verdict: "lumped",
       reason: `CoL folds it into ${target.scientificName}; only the records under its own name count`,
+      label: "lumped",
       lumpedInto: target.scientificName,
     };
   }
@@ -230,6 +235,7 @@ export function decideKey(input: {
     key: null,
     verdict: "refused",
     reason: `CoL folds it into ${target.scientificName}, reached only through a synonym; counts nothing`,
+    label: "lumped into an assessed species",
     lumpedInto: target.scientificName,
   };
 }
