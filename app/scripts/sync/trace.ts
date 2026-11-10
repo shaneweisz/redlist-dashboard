@@ -51,14 +51,15 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   // ── 1. The name
   say(); say("1. The name");
   const [m] = await rows<{ matcher_col_id: string | null; matcher_name: string | null; matcher_authorship: string | null; matcher_rank: string | null;
-    matcher_status: string | null; match_type: string | null; confidence: number | null; matcher_score: Score; alts: string | null }>(conn, `
-    SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence, matcher_score,
+    matcher_status: string | null; match_type: string | null; confidence: number | null; score: string | null; alts: string | null }>(conn, `
+    SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence, to_json(matcher_score)::VARCHAR AS score,
            to_json(alternatives)::VARCHAR AS alts FROM ${pq(T.matches)} WHERE sis_taxon_id = ${s.sis}`);
   if (!m || !m.matcher_col_id) {
     say(`  The matcher found no CoL record (${m?.match_type ?? "not asked"}).`);
   } else {
     say(`  The matcher answered: ${m.matcher_name} ${m.matcher_authorship ?? ""} [${m.matcher_col_id}, ${m.matcher_status?.toLowerCase()} ${m.matcher_rank?.toLowerCase()}], ${m.match_type}, ${m.confidence}% sure`);
-    say(`    points: ${points(m.matcher_score)}`);
+    const score = (m.score ? JSON.parse(m.score) : null) as Score;
+    say(`    points: ${score ? points(score) : m.match_type === "HIGHERRANK" ? "none: a fallback to a higher rank, which the matcher doesn't score" : "none recorded"}`);
     const alts = (m.alts ? JSON.parse(m.alts) : []) as { col_id: string; name: string; authorship: string | null; status: string | null; rank: string | null; score: Score }[];
     if (alts.length) {
       say(`  Other candidates it weighed:`);

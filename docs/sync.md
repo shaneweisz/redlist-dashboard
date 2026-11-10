@@ -245,27 +245,26 @@ DB_NAME=<new> npm run sync -- --baseline ../.sync2/data           # + Red List, 
 
 ### Tracing a species
 
-The core tables are plain parquet; DuckDB reads them directly.
+`npm run sync:trace -- "<Red List name or SIS id>"` prints why a species is linked as it is, from the build, in the order the sync decides it:
 
-```sql
--- in duckdb, from .sync/working
-SET VARIABLE sp = 'Zosterops simplex';
+1. **The name:** GBIF's matcher's answer, and the points it gave it and every other candidate (name, authorship, classification, rank, status); why the sync took that answer (the acceptance rule's clause), took an override's instead (with the releases it was decided against), or left the species waiting.
+2. **The concept:** each link row: the CoL taxon and species it names, its verdict, and the reason.
+3. **The count:** every CoL record whose GBIF records count for it, and the totals the app shows.
 
--- its link rows: what it is in CoL, and why
-SELECT l.role, l.verdict, l.method, u.scientific_name AS col_taxon, u.rank, c.scientific_name AS col_species, l.counted, l.reason
-FROM 'link/assessment_link.parquet' l
-JOIN 'sources/assessments.parquet' a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-LEFT JOIN 'sources/taxa.parquet' c ON c.col_id = l.col_species_id
-LEFT JOIN 'sources/taxa.parquet' u ON u.col_id = l.col_taxon_id
-WHERE a.scientific_name = getvariable('sp');
-
--- what its count is made of: each CoL record it owns, and its records
-SELECT w.link_usage_id, u.scientific_name AS col_record, u.rank, u.status, sum(o.n) FILTER (o.georef) AS georef, sum(o.n) AS all_records
-FROM 'count/usage_owner.parquet' w JOIN 'sources/taxa.parquet' u ON u.col_id = w.usage_key
-LEFT JOIN 'sources/occurrences.parquet' o ON o.usage_key = w.usage_key
-WHERE w.sis_taxon_id = (SELECT sis_taxon_id FROM 'sources/assessments.parquet' WHERE is_latest AND scientific_name = getvariable('sp'))
-GROUP BY ALL ORDER BY georef DESC NULLS LAST;
 ```
+$ npm run sync:trace -- "Cipangopaludina chinensis"
+1. The name
+  The matcher answered: Cipangopaludina chinensis (J. E. Gray, 1833) [VFND, ambiguous_synonym species], EXACT, 100% sure
+    points: name 110, authorship 0, classification 50, rank 6, status -1 = 165
+  Other candidates it weighed:
+    Cipangopaludina chinensis (Gray, 1834) [VHXLS, provisionally_accepted species]: name 110, ..., status -5 = 161
+2. The concept
+  Why this name: override by fixture, decided against COL26.6 XR
+  primary  CoL species Cipangopaludina chinensis (Gray, 1834) [VHXLS]
+  ...
+```
+
+Everything it prints is in the build's tables, so anything it shows can be checked with DuckDB directly: `matches.parquet` holds the matcher's answers and points (`matcher_score`, and `score` on each alternative), and `assessment_link.parquet` the link rows, with `name_reason` for the name step and `reason` for the concept step.
 
 ## Decisions and known limits
 
