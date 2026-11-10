@@ -28,7 +28,7 @@ def duck(sql):
 LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
   FROM read_parquet('{CORE}/link/assessment_link.parquet') l
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-  LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_id
+  LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_species_id
   WHERE l.role = 'primary')"""
 QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
 
@@ -36,7 +36,7 @@ QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, q
 NAME_BRANCHES = {
     "decision": ("basis = 'decision'", "Cipangopaludina chinensis"),
     "matcher": ("basis = 'matcher'", "Panthera leo"),
-    "unlinked": ("col_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
+    "unlinked": ("col_species_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
 }
 CONCEPT_BRANCHES = {
     "accepted": ("verdict = 'own' AND method = 'accepted'", "Panthera leo"),

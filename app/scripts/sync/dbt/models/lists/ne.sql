@@ -43,4 +43,4 @@ LEFT JOIN {{ source('sources', 'common_names') }} col ON col.source = 'col' AND 
 LEFT JOIN {{ source('sources', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
   AND inat.scientific_name = s.scientific_name AND inat.kingdom = {{ inat_kingdom("s.taxon_group") }}
 WHERE s.described
-  AND s.col_id NOT IN (SELECT col_id FROM {{ source('link', 'assessment_link') }} WHERE col_id IS NOT NULL)
+  AND s.col_id NOT IN (SELECT col_species_id FROM {{ source('link', 'assessment_link') }} WHERE col_species_id IS NOT NULL)

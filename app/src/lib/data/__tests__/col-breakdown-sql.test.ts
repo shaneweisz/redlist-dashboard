@@ -93,7 +93,7 @@ beforeAll(async () => {
       (8::BIGINT, 'primary', 'ANS', 'accepted'),
       (9::BIGINT, 'primary', 'AMBX', 'accepted'),
       (10::BIGINT, 'primary', 'XR1', 'accepted')
-    ) v(sis_taxon_id, role, col_id, method)`, "assessment_link.parquet");
+    ) v(sis_taxon_id, role, col_species_id, method)`, "assessment_link.parquet");
 
   // The same temp tables the real caller loads before running the diagnostic:
   // col_to_assessed as the sync builds it from the links above
@@ -104,8 +104,8 @@ beforeAll(async () => {
       ('LUMP', 5::BIGINT, 'Lump winner'), ('ANS', 8::BIGINT, 'Anselli test'), ('AMBX', 9::BIGINT, 'Ambiguous target')
     ) t(col_id, assessed_id, assessed_name)`);
   await conn.run(`CREATE TEMP TABLE assessed_cids AS
-    SELECT DISTINCT col_id FROM read_parquet('${path.join(tmp, "assessment_link.parquet")}')
-    WHERE col_id IS NOT NULL`);
+    SELECT DISTINCT col_species_id AS col_id FROM read_parquet('${path.join(tmp, "assessment_link.parquet")}')
+    WHERE col_species_id IS NOT NULL`);
 
   ctx = {
     conn,

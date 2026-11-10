@@ -147,7 +147,9 @@ Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each ove
 
 ### 2. The concept: what does that CoL name make the species?
 
-`assessment_link.method` says what kind of usage it is; the verdict comes from `decideKey` in `link/species-key.ts`.
+Each link names two CoL records. `col_taxon_id` is the CoL taxon the assessed species *is*, and `col_species_id` the CoL species that taxon belongs to. For most species they're one and the same (*Panthera leo*). They differ where CoL draws the line differently: the Red List's *Fringilla polatzeki* is CoL's subspecies *F. teydea polatzeki*, in CoL's species *F. teydea*. A species' records are counted from its taxon down, when `counted`; the species id is what the Not Evaluated list and the CoL-differences card compare. (`matches.matcher_col_id` is a third: the CoL record the matcher answered with, before any rule.)
+
+`assessment_link.method` says what kind of CoL record the name is; the verdict comes from `decideKey` in `link/species-key.ts`.
 
 - **An accepted species is the species.**
 - **A synonym is the species renamed (*own*), or a lump (*lumped*)**: CoL folds it into another species, so only its own usage, and anything under it, is its records. If CoL folds it into a species the Red List assesses separately, it is **refused** and counts nothing.
@@ -250,15 +252,15 @@ The core tables are plain parquet; DuckDB reads them directly.
 SET VARIABLE sp = 'Zosterops simplex';
 
 -- its link rows: what it is in CoL, and why
-SELECT l.role, l.verdict, l.method, c.scientific_name AS col_species, u.scientific_name AS records_start_at, l.counted, l.reason
+SELECT l.role, l.verdict, l.method, u.scientific_name AS col_taxon, u.rank, c.scientific_name AS col_species, l.counted, l.reason
 FROM 'link/assessment_link.parquet' l
 JOIN 'sources/assessments.parquet' a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-LEFT JOIN 'sources/taxa.parquet' c ON c.col_id = l.col_id
-LEFT JOIN 'sources/taxa.parquet' u ON u.col_id = l.usage_id
+LEFT JOIN 'sources/taxa.parquet' c ON c.col_id = l.col_species_id
+LEFT JOIN 'sources/taxa.parquet' u ON u.col_id = l.col_taxon_id
 WHERE a.scientific_name = getvariable('sp');
 
--- what its count is made of: each usage it owns, and its records
-SELECT w.link_usage_id, u.scientific_name AS usage, u.rank, u.status, sum(o.n) FILTER (o.georef) AS georef, sum(o.n) AS all_records
+-- what its count is made of: each CoL record it owns, and its records
+SELECT w.link_usage_id, u.scientific_name AS col_record, u.rank, u.status, sum(o.n) FILTER (o.georef) AS georef, sum(o.n) AS all_records
 FROM 'count/usage_owner.parquet' w JOIN 'sources/taxa.parquet' u ON u.col_id = w.usage_key
 LEFT JOIN 'sources/occurrences.parquet' o ON o.usage_key = w.usage_key
 WHERE w.sis_taxon_id = (SELECT sis_taxon_id FROM 'sources/assessments.parquet' WHERE is_latest AND scientific_name = getvariable('sp'))

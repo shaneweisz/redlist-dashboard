@@ -31,8 +31,8 @@ async function counts(links: Link[] = []) {
       t(usage_key, year, georef, n)`.replace("SELECT * FROM", "SELECT usage_key, year, NULL::TINYINT AS month, NULL::DATE AS event_date, georef, n FROM"), T.occurrences);
   const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${l.verdict}', ${l.counted ?? true}, '${l.usage}')`);
   await copy(links.length
-    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, usage_id, verdict, counted, col_id)`
-    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS usage_id, NULL::VARCHAR AS verdict, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_id WHERE false`, T.link);
+    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, col_taxon_id, verdict, counted, col_species_id)`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_taxon_id, NULL::VARCHAR AS verdict, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_species_id WHERE false`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, true AS is_latest, DATE '2015-01-01' AS assessment_date
     FROM (VALUES (1), (2)) t(sis)`, T.assessments);
 

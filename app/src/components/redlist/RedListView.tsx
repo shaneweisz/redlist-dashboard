@@ -2112,7 +2112,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // longer carries the full history array; it's fetched when a detail row opens.
   const [assessmentHistory, setAssessmentHistory] = useState<Record<number, Species["previous_assessments"]>>({});
   // Catalogue of Life synonyms for the open species (detail panel's CoL tab), fetched lazily.
-  type SynInfo = { col_id: string | null; accepted_name: string | null; accepted_authorship: string | null; synonyms: { name: string; authorship: string | null; status: string }[] };
+  type SynInfo = { col_id: string | null; accepted_name: string | null; accepted_authorship: string | null; synonyms: { name: string; authorship: string | null; status: string }[];
+    held_as?: { rank: string; status: string; species_name: string } | null };
   const [synonymsBySpecies, setSynonymsBySpecies] = useState<Record<string, SynInfo>>({});
 
   // Row expansion state (initialized from URL params if present)
@@ -6804,9 +6805,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               ) : (
                                 <div className="p-4 text-sm space-y-3">
                                   <div>
-                                    <div className="text-xs uppercase tracking-wider text-zinc-400 mb-1">Accepted name (CoL)</div>
+                                    <div className="text-xs uppercase tracking-wider text-zinc-400 mb-1">{syn.held_as ? "In Catalogue of Life" : "Accepted name (CoL)"}</div>
                                     <span className="italic text-zinc-900 dark:text-zinc-100">{syn.accepted_name ?? s.scientific_name}</span>
                                     {syn.accepted_authorship && <span className="text-zinc-500 dark:text-zinc-400"> {syn.accepted_authorship}</span>}
+                                    {syn.held_as && (
+                                      <div className="text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                        {syn.held_as.status.includes("synonym") ? "a synonym CoL folds into " : `a ${syn.held_as.rank} of `}
+                                        <span className="italic">{syn.held_as.species_name}</span>
+                                      </div>
+                                    )}
                                   </div>
                                   <div>
                                     <div className="text-xs uppercase tracking-wider text-zinc-400 mb-1">Synonyms ({syn.synonyms.length})</div>

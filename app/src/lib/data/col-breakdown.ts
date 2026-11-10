@@ -314,9 +314,9 @@ export async function computeNoMatchDetails(
       -- second CoL name, not a real "this species also equals a second col_id"
       -- claim). Without this, an id with both a primary and a covered link would
       -- win TWO col_id partitions and inflate the apparent match count.
-      SELECT ma.id AS id, ma.scientific_name AS name, l.col_id AS col_id, l.method AS match_method
+      SELECT ma.id AS id, ma.scientific_name AS name, l.col_species_id AS col_id, l.method AS match_method
       FROM matched_assessed ma
-      JOIN read_parquet('${linkPath}') l ON l.sis_taxon_id = ma.id AND l.col_id IS NOT NULL AND l.role = 'primary'
+      JOIN read_parquet('${linkPath}') l ON l.sis_taxon_id = ma.id AND l.col_species_id IS NOT NULL AND l.role = 'primary'
     ),
     candidate_links AS (
       SELECT id, name, col_id,

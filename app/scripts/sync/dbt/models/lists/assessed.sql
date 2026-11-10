@@ -40,7 +40,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CAST(latest.assessment_date AS VARCHAR) AS assessment_date, latest.year_published,
        {{ semicolon_list("latest.countries") }} AS countries,
        gbif.gbif_species_key,
-       CASE WHEN link.col_id IS NULL THEN 'unlinked' END AS count_note,
+       CASE WHEN link.col_species_id IS NULL THEN 'unlinked' END AS count_note,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,
        CASE WHEN gbif.sis_taxon_id IS NOT NULL THEN gbif.georef_since

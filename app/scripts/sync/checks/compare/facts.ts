@@ -121,16 +121,21 @@ async function loadSummaryFacts(conn: DuckDBConnection, schema: string, dir: str
 export async function loadFacts(conn: DuckDBConnection, schema: string, dir: string): Promise<void> {
   const f = (name: string) => q(inSync(dir, name));
   await conn.run(`CREATE SCHEMA ${schema}`);
+  // The link's species column: col_species_id since November 2026, col_id before,
+  // so a sync compares with one built before the rename.
+  const linkColumns = (await conn.runAndReadAll(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(${f("assessment_link.parquet")}))`))
+    .getRowObjects().map((r) => String(r.column_name));
+  const species = linkColumns.includes("col_species_id") ? "col_species_id" : "col_id";
   await conn.run(`CREATE TABLE ${schema}.assessed AS
     SELECT CAST(a.id AS VARCHAR) AS key, a.* EXCLUDE (id), l.col_id AS link_col_id, l.method AS link_method
     FROM read_parquet(${f("assessed.parquet")}) a
-    LEFT JOIN (SELECT sis_taxon_id, col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
+    LEFT JOIN (SELECT sis_taxon_id, ${species} AS col_id, method FROM read_parquet(${f("assessment_link.parquet")}) WHERE role = 'primary') l
       ON l.sis_taxon_id = a.id`);
   // The NE list as the app builds it: the described species no assessed species
   // is linked to, with ne.parquet's counts.
   await conn.run(`CREATE TABLE ${schema}.ne AS
     WITH assessed_cols AS (
-      SELECT DISTINCT col_id FROM read_parquet(${f("assessment_link.parquet")}) WHERE col_id IS NOT NULL)
+      SELECT DISTINCT ${species} AS col_id FROM read_parquet(${f("assessment_link.parquet")}) WHERE ${species} IS NOT NULL)
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
            g.gbif_all_records_countries, g.countries, g.common_name
