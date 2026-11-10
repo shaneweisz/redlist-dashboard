@@ -8,7 +8,7 @@ Render: dot -Tpng -Gdpi=110 <out.dot> -o <out.png>
 import html, json, os, sys, urllib.request
 
 BUILD, OUT = sys.argv[1], sys.argv[2]
-m = json.load(open(os.path.join(BUILD, "published", "sync.json")))
+m = json.load(open(os.path.join(BUILD, "publish", "sync.json")))
 xr, checklist = m["col"]["xr"], m["col"]["checklist"]
 with urllib.request.urlopen("https://api.gbif.org/v2/species/match/metadata?checklistKey=xcol", timeout=30) as r:
     live = json.load(r).get("mainIndex", {})

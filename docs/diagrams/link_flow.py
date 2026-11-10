@@ -75,7 +75,7 @@ for reason, example in QUEUE_REASONS:
 [queued] = duck(f"SELECT count(*) AS n FROM {QUEUE}")
 
 # The versions matched: one Red List release against one CoL release, as this build's sync.json records them.
-manifest = json.load(open(os.path.join(BUILD, "published", "sync.json")))
+manifest = json.load(open(os.path.join(BUILD, "publish", "sync.json")))
 RL = manifest["redlist"]["database"].replace("redlist_", "Red List ").replace("_", "-")
 XR = manifest["col"]["xr"]
 CK = manifest["col"]["checklist"]

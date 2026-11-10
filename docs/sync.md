@@ -12,7 +12,7 @@ flowchart LR
   assessments --> link
   link["<b>link</b><br/>assessment_link<br/>which CoL species each<br/>assessed species is"] --> count
   occurrences --> count
-  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>published</b><br/>what the app reads: lists/,<br/>taxonomy/, search/, summaries/"]
+  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>publish</b><br/>what the app reads: lists/,<br/>taxonomy/, search/, summaries/"]
   style link fill:#fde68a
   style count fill:#fde68a
 ```
@@ -64,7 +64,7 @@ A run builds into `.sync/` at the repo root, in three folders, by what you do wi
 .sync/
   working/     what the stages pass to each other, never published: sources/ link/ count/ lists/,
                and dbt/ (its sync.duckdb, compiled SQL and logs)
-  published/   exactly what is uploaded and what the app reads: lists/ taxonomy/ search/ summaries/,
+  publish/     exactly what sync:publish uploads and what the app reads: lists/ taxonomy/ search/ summaries/,
                sync.json, sync.log
   review/      what you read before publishing: changes/ (report.md, the comparison with production)
                and match-queue.tsv (species waiting for a decision)
@@ -188,7 +188,7 @@ It trails CoL's newest by up to a few months: GBIF re-indexes a few times a year
 
 ## What the app reads
 
-`.sync/published/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
+`.sync/publish/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
 
 | Folder | What |
 |---|---|
@@ -220,7 +220,7 @@ cd app && npm run sync
 
 # 3. Read .sync/review/changes/report.md, and .sync/review/match-queue.tsv for species waiting on a decision
 
-# 4. Publish: copies .sync/published/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
+# 4. Publish: copies .sync/publish/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
 
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.

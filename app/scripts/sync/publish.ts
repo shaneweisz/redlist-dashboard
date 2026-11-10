@@ -14,23 +14,23 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { DATA_DIR, loadEnvFiles } from "../lib/utils";
-import { PUBLISHED_DIR } from "./paths";
+import { PUBLISH_DIR } from "./paths";
 import { uploadSync } from "./upload-data-to-r2";
 import { syncPath } from "../../src/lib/data/sync-layout";
 
 export async function publish(opts: { upload?: boolean } = {}): Promise<void> {
-  if (!fs.existsSync(path.join(PUBLISHED_DIR, syncPath("sync.json")))) {
-    throw new Error(`publish: no finished build at ${PUBLISHED_DIR} (run npm run sync first)`);
+  if (!fs.existsSync(path.join(PUBLISH_DIR, syncPath("sync.json")))) {
+    throw new Error(`publish: no finished build at ${PUBLISH_DIR} (run npm run sync first)`);
   }
-  const manifest = JSON.parse(fs.readFileSync(path.join(PUBLISHED_DIR, syncPath("sync.json")), "utf-8"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(PUBLISH_DIR, syncPath("sync.json")), "utf-8"));
   if (manifest.fixtures?.failed?.length) throw new Error(`publish: the build's fixtures failed: ${manifest.fixtures.failed.join(", ")}`);
   if (manifest.data_tests?.passed !== true) throw new Error("publish: the build's data tests didn't pass (see npm run sync's checks)");
 
   const appData = path.join(__dirname, "..", "..", "data", "sync");
   if (path.resolve(DATA_DIR) !== path.resolve(appData)) throw new Error("publish: unset PIPELINE_DATA_DIR; publish writes app/data/sync");
   fs.mkdirSync(appData, { recursive: true });
-  execFileSync("rsync", ["-a", "--delete", `${PUBLISHED_DIR}/`, `${appData}/`], { stdio: "inherit" });
-  console.log(`Copied ${PUBLISHED_DIR} → ${appData}`);
+  execFileSync("rsync", ["-a", "--delete", `${PUBLISH_DIR}/`, `${appData}/`], { stdio: "inherit" });
+  console.log(`Copied ${PUBLISH_DIR} → ${appData}`);
   if (opts.upload !== false) await uploadSync();
   // The sync's data lives in R2 only; git holds the pointer, and the CoL
   // release and taxon-id configs the sync writes into src/config/.
