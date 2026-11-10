@@ -187,7 +187,7 @@ export interface KeyDecision {
  * species' name — including when GBIF labels the match VARIANT, which is just
  * its way of saying "same name, spelled differently". Searching one of the Red
  * List's SYNONYMS can instead land on another species' accepted usage:
- * Catapodium borgesii, a VU Azores endemic, came back holding Catapodium
+ * Catapodium borgesii, a VU grass, came back holding Catapodium
  * marinum's key and 19,901 records of a widespread European grass.
  */
 export function decideKey(input: {

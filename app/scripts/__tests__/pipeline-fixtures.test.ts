@@ -30,6 +30,10 @@ describe("failureKind", () => {
 });
 
 describe("the cases", () => {
+  it("a case whose why no longer fully holds says what the data shows now", () => {
+    for (const m of MATCHING_CASES) if (m.situation) expect(m.situation.now.length, m.name).toBeGreaterThan(20);
+  });
+
   it("every case says which releases it last passed on", () => {
     for (const m of MATCHING_CASES) expect(m.confirmed, m.name).toMatchObject({ redlist: expect.any(String), col: expect.any(String), snapshot: expect.any(String) });
   });
