@@ -134,11 +134,16 @@ The authority is deliberately not sent: most records carry none, and asked with 
 
 The answer is taken without review (`accept-match.ts`) when:
 
-> the name is found exactly, as a species, with full confidence, it leads to an accepted CoL species, and no other CoL name spelled the same way leads to a different species, unless the author citation picks one.
+> the name is found exactly, or spelt differently only as the codes allow, as a species, with full confidence, it leads to an accepted CoL species, and no other CoL name spelled the same way leads to a different species, unless the author citation picks one.
+
+Three details make that sentence work on real names:
+- **A spelling the codes allow is the same name**: Latin endings and transliteration (`link/name-variants.ts`: *Pseudechis pailsi* / *pailsei*), as long as the authors aren't clearly others. The matcher finds the candidate; the spelling rules only confirm it.
+- **Two citations written alike are the same author**, even a bare "L.": that is what lets *Quercus robur* L. be told from its homonyms.
+- **CoL's provisional copy of a name isn't a rival**: CoL often holds a species twice, accepted and provisionally, the second with the Red List's own citation (*Cygnus buccinator* Richardson, 1831 and 1832).
 
 A person decides instead when the Red List marks the name as unsettled (aff., cf., sp., ined., sensu…), when the match is a synonym by other authors than the Red List's (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775, and what's left is Schilsky's, a synonym of another beetle), and in every other case the rule doesn't settle. Author citations are compared in one place, `app/src/lib/authors.ts`.
 
-Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases; a decision is asked again when its names stop resolving or the Red List renames the species. A decision always beats the matcher. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0.
+Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be (their own name's, and the matcher's guess) stay off the Not Evaluated list.
 
 ### 2. The concept: what does that CoL name make the species?
 
@@ -149,16 +154,17 @@ Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL
 - **An ambiguous synonym** only counts records filed under that name.
 - **No link crosses a phylum**: old genus names are homonyms across kingdoms (*Hepatus* was a fish and is a crab).
 - **Covered rows**: where one organism sits under more than one accepted CoL species (*Hylatomus* / *Dryocopus pileatus*), each extra one is a *covered* row, which keeps it off the Not Evaluated list and, where the evidence is direct, counts its records too.
-- **One owner per usage**: if two assessed species claim the same usage, one wins (primary before covered, *own* before *lumped*, matcher before decision, then lower SIS id) and the other becomes `duplicate`, counting nothing.
+- **One owner per usage**: if two assessed species claim the same usage, one wins (primary before covered, *own* before *lumped*, matcher before decision, the more direct name, the name CoL spells exactly before a variant of it, then lower SIS id) and the other becomes `duplicate`, counting nothing.
 
 The rules after the concept step are named functions in `link/rules.ts`, applied in order, each with a unit test (`__tests__/link-rules.test.ts`). Every sync logs how many species each one touched, and records it in `sync.json` (`link_rules`), so a rule that touches almost nothing shows up as a candidate to drop or turn into a decision. In the 10 November build:
 
 | Rule | Species |
 |---|---:|
-| covered: another accepted species IUCN's synonyms or CoL's name it | 5,463 |
-| covered: CoL holds the name twice | 3,116 |
-| covered: one organism under two genera | 535 |
-| covered: a lumped species' other same-name synonyms | 1,218 |
+| covered: another accepted species IUCN's synonyms or CoL's name it | 5,660 |
+| covered: CoL holds the name twice | 3,056 |
+| covered: one organism under two genera | 528 |
+| covered: a lumped species' other same-name synonyms | 1,037 |
+| covered: what a species waiting for a decision might be, kept off the NE list | 629 |
 | no link across a phylum | 3 |
 | one owner per usage | 68 |
 
@@ -271,7 +277,7 @@ Choices made on purpose:
 
 Known limits (sync of 10 November 2026):
 
-- 2,368 species are in the match queue: 753 spelling variants, 621 homonyms the authors don't decide, 322 with no species match, 172 informal names. 2,016 have a decision, all carried over from the old matching passes and none reviewed; 352 are undecided and count nothing.
+- 1,178 species wait for a decision and count nothing: 322 with no species match, 219 provisional names, 172 informal names, 150 homonyms the authors don't decide, 148 at lower confidence, 97 synonyms by other authors, and a few others. Two have a decision.
 - Ownership walks three levels below a lumped species' root; a deeper case would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so differ a little from gbif.org's live counts.
