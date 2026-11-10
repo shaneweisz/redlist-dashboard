@@ -16,7 +16,7 @@ Tests for all of them are in [`__tests__/`](__tests__).
 
 ## sync/
 
-The monthly data release. `sync.ts` is the whole sync, read top to bottom: one section per stage, each builder given the tables it reads. Every builder's file starts with its table's description (what a row is, what it is built from, its columns, its decisions); [docs/sync.md](../../docs/sync.md#the-tables) collects them. `npm run sync -- --from <stage>` reruns from a stage on.
+The monthly data release. `sync.ts` is the whole sync, read top to bottom: one section per stage, each builder given the tables it reads. Every builder's file starts with its table's description (what a row is, what it is built from, its columns, its decisions) ([docs/sync.md](../../docs/sync.md) explains the design). `npm run sync -- --from <stage>` reruns from a stage on.
 
 | | |
 |---|---|

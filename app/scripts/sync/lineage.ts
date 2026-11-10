@@ -5,7 +5,7 @@
  * than kept in the repo: it is derived from the code, so a copy would go stale
  * with the next model change.
  *
- * The TypeScript stages around dbt are in docs/sync.md's overview diagram.
+ * The TypeScript stages around dbt are in docs/sync.md's stages table.
  *
  * Usage:  npm run sync:lineage [-- --no-open]   (after a sync, so the build has
  *         dbt's tables; Ctrl-C stops the server)

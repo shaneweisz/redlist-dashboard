@@ -2,10 +2,6 @@
 
 How the running dashboard reads its data: the API routes, what each reads, and what calls it. The sync that produces the data is [sync.md](sync.md); the deploy build that packages it is [build.md](build.md). This is a map of what is there and why, kept alongside the simplifications it points to.
 
-![The API routes](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-622-system-diagrams/02-api-routes.png)
-
-The diagram's source is [`diagrams/api-routes.excalidraw`](diagrams/api-routes.excalidraw) (open it at excalidraw.com; `python3 -I diagrams/gen.py routes <out>` regenerates it).
-
 ## Four ways a view gets data
 
 1. **Prebuilt files from the CDN.** The species lists, the search dropdown's first answers and the taxonomy tree's expands are static files under `public/prebuilt/<sync>/`, fetched straight by the browser (`src/lib/species-lists`, `search-shards`, `tree-children`). No function runs. See [build.md](build.md).
