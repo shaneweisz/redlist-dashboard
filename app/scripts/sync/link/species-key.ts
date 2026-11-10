@@ -208,11 +208,12 @@ export function decideKey(input: {
       return {
         key: null,
         verdict: "refused",
-        reason: `${target.scientificName} is assessed separately by the Red List`,
+        reason: `CoL holds it as ${target.scientificName}, which the Red List assesses separately; counts nothing`,
         lumpedInto: target.scientificName,
       };
     }
-    return { key: target.key, verdict: "own", reason: `matched ${target.scientificName}` };
+    return { key: target.key, verdict: "own",
+      reason: acceptedUsage && acceptedUsage.key !== usage.key ? `renamed: CoL accepts it as ${target.scientificName}` : "the species itself" };
   }
 
   // A lump. Its own usage is still worth keeping — but only if we got here by
@@ -221,14 +222,14 @@ export function decideKey(input: {
     return {
       key: usage.key,
       verdict: "lumped",
-      reason: `CoL folds this into ${target.scientificName}; keeping its own usage`,
+      reason: `CoL folds it into ${target.scientificName}; only the records under its own name count`,
       lumpedInto: target.scientificName,
     };
   }
   return {
     key: null,
     verdict: "refused",
-    reason: `reached via a synonym that resolves to ${target.scientificName}`,
+    reason: `CoL folds it into ${target.scientificName}, reached only through a synonym; counts nothing`,
     lumpedInto: target.scientificName,
   };
 }

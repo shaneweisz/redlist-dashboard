@@ -133,13 +133,11 @@ export async function buildLink(
       toReview.set(s.sis, `override no longer holds: ${res.why}`);
       nameReason.set(s.sis, acc.accepted ? `${taken(acc)}; its override is stale: ${res.why}` : `waiting: its override is stale: ${res.why}`);
       if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
-      else unlinkedReason.set(s.sis, `waiting for a decision: ${res.why}`);
       continue;
     }
     if (acc.accepted) { nameReason.set(s.sis, taken(acc)); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
     nameReason.set(s.sis, `waiting: ${acc.reason}`);
     toReview.set(s.sis, `no decision yet: ${acc.reason}`);
-    unlinkedReason.set(s.sis, `waiting for a decision: ${acc.reason}`);
   }
   const rlSis = new Set(species.map((s) => s.sis));
   const orphaned = [...decisions.keys()].filter((k) => !rlSis.has(k));
@@ -204,7 +202,7 @@ export async function buildLink(
       && (ownNameSynonyms.get(`${p.sis}|${p.target_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
       && !isSeparatelyAssessed(p.target_name, p.name, assessedNames);
     const d = p.method === "ambiguous_synonym"
-      ? { verdict: "lumped" as const, reason: `CoL lists ${p.picked_name} as an ambiguous synonym of ${p.target_name}; counting only records under this name` }
+      ? { verdict: "lumped" as const, reason: `CoL lists ${p.picked_name} as an ambiguous synonym of ${p.target_name}; only the records under this name count` }
       : respelled
       ? { verdict: "own" as const, reason: `CoL spells it ${p.target_name} (${p.picked_name} is its orthographic variant, same citation)` }
       : (() => {
@@ -233,7 +231,7 @@ export async function buildLink(
   for (const s of species) {
     if (!linked.has(s.sis)) links.push({ sis_taxon_id: s.sis, role: "primary", col_species_id: null, col_taxon_id: null, verdict: "none", method: "unmatched",
       basis: null, decided_by: null, name_reason: nameReason.get(s.sis) ?? null, to_review: toReview.get(s.sis) ?? null,
-      reason: unlinkedReason.get(s.sis) ?? "no CoL name", counted: false });
+      reason: unlinkedReason.get(s.sis) ?? null, counted: false });
   }
 
   // ── 3. The rules after it, in order (rules.ts): the covered rows, then the

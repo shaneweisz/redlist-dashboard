@@ -36,7 +36,8 @@ export interface LinkRow {
   name_reason: string | null;
   /** Why a person needs to look at this link: no decision yet, an override that no longer holds or isn't reviewed. Empty when nothing needs a person. */
   to_review: string | null;
-  reason: string;
+  /** What the CoL record makes the species, in a sentence; empty for a species waiting for a decision (to_review says why). */
+  reason: string | null;
   counted: boolean;
 }
 
@@ -98,7 +99,7 @@ export function coverSynonymSpecies(cover: Cover, candidates: SynonymCandidate[]
       && !isSeparatelyAssessed(c.target_name, c.name, assessedNames);
     const added = cover({
       sis_taxon_id: c.sis, col_species_id: c.target_id, col_taxon_id: c.target_id, verdict: same ? "own" : "refused",
-      method: "iucn_synonym_covered", reason: same ? `${c.target_name} is the same organism under another accepted name` : `${c.target_name} is named as a synonym; kept out of the Not Evaluated list only`,
+      method: "iucn_synonym_covered", reason: same ? `CoL holds it a second time, as ${c.target_name}; both count` : `the Red List lists ${c.target_name} among its synonyms; kept off the Not Evaluated list, not counted`,
       counted: same,
     });
     if (added) touched.add(c.sis);
