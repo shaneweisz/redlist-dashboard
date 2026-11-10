@@ -12,7 +12,7 @@ flowchart LR
   assessments --> link
   link["<b>link</b><br/>assessment_link<br/>which CoL species each<br/>assessed species is"] --> count
   occurrences --> count
-  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>what the app reads</b><br/>data/lists/, taxonomy/,<br/>search/, summaries/"]
+  count["<b>count</b><br/>usage_owner<br/>whose records each<br/>GBIF usage's are"] --> app["<b>published</b><br/>what the app reads: lists/,<br/>taxonomy/, search/, summaries/"]
   style link fill:#fde68a
   style count fill:#fde68a
 ```
@@ -21,7 +21,7 @@ Only the two highlighted stages make judgements. If a number looks wrong, the ca
 
 Every table and what it reads, which shows how many moving parts there are behind those five boxes:
 
-![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/01-sync-overview.png)
+![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-628-docs-trim/01-sync-overview-v2.png)
 
 Generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`.
 
@@ -58,7 +58,19 @@ uv run dbt build --profiles-dir . --select record_counts+    # a model and every
 uv run dbt show --profiles-dir . --inline "select * from {{ ref('assessed') }} where id = 15951"
 ```
 
-A run builds into `.sync/` at the repo root: `core/` holds the working tables, one folder per stage (`core/sources/`, `core/link/`, `core/count/`, `core/lists/`), and `data/` the published sync. A full run empties both first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
+A run builds into `.sync/` at the repo root, in three folders, by what you do with them:
+
+```
+.sync/
+  working/     what the stages pass to each other, never published: sources/ link/ count/ lists/,
+               and dbt/ (its sync.duckdb, compiled SQL and logs)
+  published/   exactly what is uploaded and what the app reads: lists/ taxonomy/ search/ summaries/,
+               sync.json, sync.log
+  review/      what you read before publishing: changes/ (report.md, the comparison with production)
+               and match-queue.tsv (species waiting for a decision)
+```
+
+A full run empties all three first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
 
 ## Inputs
 
@@ -126,7 +138,7 @@ The answer is taken without review (`accept-match.ts`) when:
 
 A person decides instead when the Red List marks the name as unsettled (aff., cf., sp., ined., sensu…), when the match is a synonym by other authors than the Red List's (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775, and what's left is Schilsky's, a synonym of another beetle), and in every other case the rule doesn't settle. Author citations are compared in one place, `app/src/lib/authors.ts`.
 
-Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases; a decision is asked again when its names stop resolving or the Red List renames the species. A decision always beats the matcher. The queue of species waiting is written each sync to `.sync/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0.
+Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL name (and authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. It is keyed by SIS id and names, not CoL ids, which move between releases; a decision is asked again when its names stop resolving or the Red List renames the species. A decision always beats the matcher. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0.
 
 ### 2. The concept: what does that CoL name make the species?
 
@@ -166,7 +178,7 @@ It trails CoL's newest by up to a few months: GBIF re-indexes a few times a year
 
 ## What the app reads
 
-`.sync/data/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
+`.sync/published/` is exactly what is uploaded to `syncs/<timestamp>/` and what `app/data/sync/` holds after a fetch. [`src/lib/data/sync-layout.ts`](../app/src/lib/data/sync-layout.ts) is the one list of its files; what reads each is in [app.md](app.md).
 
 | Folder | What |
 |---|---|
@@ -196,9 +208,9 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes once inputs are cached)
 cd app && npm run sync
 
-# 3. Read .sync/compare/report.md, and .sync/match-queue.tsv for species waiting on a decision
+# 3. Read .sync/review/changes/report.md, and .sync/review/match-queue.tsv for species waiting on a decision
 
-# 4. Publish: copies the build into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
+# 4. Publish: copies .sync/published/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
 
 # 5. Open the data PR with the git add line it prints. Merging it is what goes live.
@@ -224,7 +236,7 @@ DB_NAME=<new> npm run sync -- --baseline ../.sync2/data           # + Red List, 
 The core tables are plain parquet; DuckDB reads them directly.
 
 ```sql
--- in duckdb, from .sync/core
+-- in duckdb, from .sync/working
 SET VARIABLE sp = 'Zosterops simplex';
 
 -- its link rows: what it is in CoL, and why

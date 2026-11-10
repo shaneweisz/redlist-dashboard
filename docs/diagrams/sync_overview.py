@@ -42,7 +42,7 @@ NODES = [
     ("remits", "sources", 3.55, "core", "specialist_group_remits", "+ rank_aliases; written every run"),
     ("matches", "link", 1.5, "core", "matches", "matching-ws's answer per species"),
     ("link", "link", 0.75, "core", "assessment_link", "assessed species → CoL species it is"),
-    ("queue", "link", 2.25, "else", "match-queue.tsv", "species waiting for a person"),
+    ("queue", "link", 2.25, "else", "match-queue.tsv", "review/: species waiting for a person"),
     ("owner", "count", 1.0, "core", "usage_owner", "dbt · one row per usage: whose records"),
     ("counts", "count", 2.0, "core", "record_counts", "dbt · one row per species with records"),
     ("species", "lists", 0.0, "data", "species/", "dbt · lists/: the universe, described"),
@@ -56,7 +56,7 @@ NODES = [
     ("colrev", "precomputed", 0.75, "data", "col-revisions.json", "taxonomy/: app code, the revision flags"),
     ("summaries", "precomputed", 1.6, "data", "summaries", "summaries/: app code, 4 JSON files"),
     ("search", "precomputed", 2.5, "data", "search", "dbt · search/: name, rank, synonym indexes"),
-    ("checks", "checks", 1.25, "else", "dbt tests · fixtures · data tests · comparison", "data/sync.json, data/sync.log, compare/"),
+    ("checks", "checks", 1.25, "else", "dbt tests · fixtures · data tests · comparison", "published/sync.json, sync.log; review/changes/"),
 ]
 EDGES = [
     ("in_col", "taxa"), ("in_seeds", "taxa"), ("in_col", "names"), ("in_inat", "names"), ("taxa", "names"),
@@ -96,7 +96,7 @@ out = ['digraph overview {',
        '  graph [splines=true, overlap=true, bgcolor="white", pad=0.5, fontname="Helvetica",',
        '         label=<<FONT POINT-SIZE="30"><B>The sync</B></FONT><BR ALIGN="LEFT"/><FONT POINT-SIZE="15" COLOR="#495057">'
        'Every table it builds, by stage and by source, and what each is built from. Only link and count make judgements.<BR ALIGN="LEFT"/>'
-       'Grey: input. Yellow: decisions people made. Green: working table (.sync/core/&lt;stage&gt;/). Orange: published, in the .sync/data/ folder its subtitle names. White: elsewhere.<BR ALIGN="LEFT"/>'
+       'Grey: input. Yellow: decisions people made. Green: working table (.sync/working/&lt;stage&gt;/). Orange: published, in the .sync/published/ folder its subtitle names. White: elsewhere.<BR ALIGN="LEFT"/>'
        'Purple tag: a dbt model (app/scripts/sync/dbt/; npm run sync:lineage draws its graph). Everything else is TypeScript.<BR ALIGN="LEFT"/>'
        'Each table\'s columns are in the header of the file that builds it.<BR ALIGN="LEFT"/></FONT>>, labelloc=t, labeljust=l];',
        '  node [shape=plaintext, fontname="Helvetica", fontcolor="#1e1e1e"];',

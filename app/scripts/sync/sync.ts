@@ -3,9 +3,9 @@
  *
  * Run monthly, locally, once a new GBIF snapshot is mirrored (docs/sync.md,
  * "Running it each month"). Nothing is uploaded: the build lands in
- * .sync/ at the repo root (core/: working tables, data/: what the app
- * reads), and `npm run sync:publish` copies data/ into app/data/sync and
- * uploads it.
+ * .sync/ at the repo root (working/: what the stages pass on, published/: what
+ * the app reads, review/: what to read before publishing), and `npm run
+ * sync:publish` copies published/ into app/data/sync and uploads it.
  *
  * The sync answers four questions. What species exist (the Catalogue of Life),
  * what IUCN has assessed (the Red List), which CoL species each assessed species
@@ -59,7 +59,7 @@ import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
-import { BUILD_DIR, CORE_DIR, OUT_DIR, tables, parquet } from "./paths";
+import { BUILD_DIR, PUBLISHED_DIR, REVIEW_DIR, WORKING_DIR, tables, parquet } from "./paths";
 import { openDuckDB, rows } from "./sql";
 
 const APP = path.join(__dirname, "..", "..");
@@ -76,11 +76,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   if (from < 0) throw new Error(`sync: --from takes one of ${STAGES.join(", ")}`);
   const runs = (stage: Stage) => STAGES.indexOf(stage) >= from;
 
-  // A full run starts the build empty. data/ is exactly what gets uploaded, so a
-  // file only an older version wrote would otherwise be published with every sync
-  // after it; and a stale working table in core/ looks like a real one to anyone
-  // tracing a species. Downloads and the matcher's answers live in ~/.cache.
-  if (from === 0) for (const dir of [OUT_DIR, CORE_DIR]) fs.rmSync(dir, { recursive: true, force: true });
+  // A full run starts the build empty. published/ is exactly what gets uploaded,
+  // so a file only an older version wrote would otherwise be published with every
+  // sync after it; a stale table in working/ looks like a real one to anyone
+  // tracing a species; and a stale report in review/ would be read as this run's.
+  // Downloads and the matcher's answers live in ~/.cache.
+  if (from === 0) for (const dir of [WORKING_DIR, PUBLISHED_DIR, REVIEW_DIR]) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(T.syncLog), { recursive: true });
   teeOutput(T.syncLog);
   const manifest: Record<string, unknown> = { built_at: new Date().toISOString(), commit: git("rev-parse", "HEAD"),
@@ -163,7 +164,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   done = step("6 checks");
   Object.assign(manifest, await describeBuild(T, matcher));
   const conn = await openDuckDB();
-  const obs = await observe(conn, OUT_DIR, MATCHING_CASES);
+  const obs = await observe(conn, PUBLISHED_DIR, MATCHING_CASES);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
   manifest.fixtures = { cases: MATCHING_CASES.length, failed: failed.map((c) => c.name) };
   if (failed.length > 0) {
@@ -186,7 +187,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   }
   // Piped rather than inherited, so the tests' output reaches sync.log too.
   const tests = spawnSync("npx", ["vitest", "run", ...DATA_TESTS], {
-    cwd: APP, encoding: "utf-8", env: { ...process.env, PIPELINE_DATA_DIR: OUT_DIR, FORCE_COLOR: "0" } });
+    cwd: APP, encoding: "utf-8", env: { ...process.env, PIPELINE_DATA_DIR: PUBLISHED_DIR, FORCE_COLOR: "0" } });
   process.stdout.write(tests.stdout ?? "");
   process.stderr.write(tests.stderr ?? "");
   manifest.data_tests = { files: DATA_TESTS, passed: tests.status === 0 };
@@ -196,7 +197,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   }
   if (!opts.skipCompare) {
     const baseline = opts.baseline ? path.resolve(opts.baseline) : await ensureBaseline(prodSync());
-    const summary = await compare({ baseline, candidate: OUT_DIR, out: T.compare, candidateSnapshot: snapshot.snapshot });
+    const summary = await compare({ baseline, candidate: PUBLISHED_DIR, out: T.compare, candidateSnapshot: snapshot.snapshot });
     manifest.compare = { baseline: path.basename(baseline), report: path.join(T.compare, "report.md"), ...summary };
     console.log(`   ${summary.total.toLocaleString()} differences against ${path.basename(baseline)}, ` +
       `${summary.unexplained.toLocaleString()} unexplained — ${path.join(T.compare, "report.md")}`);
@@ -204,7 +205,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   done();
 
   writeManifest(T.syncJson, manifest);
-  console.log(`\nBuilt ${OUT_DIR}. Review the report, then: npm run sync:publish`);
+  console.log(`\nBuilt ${PUBLISHED_DIR}. Review the report, then: npm run sync:publish`);
 }
 
 /** What sync.json records about the Red List and the link, read from the built tables. */

@@ -165,8 +165,8 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes from cached inputs)
 cd app && npm run sync
 
-# 3. Read .sync/compare/report.md (and .sync/match-queue.tsv, the species waiting on a decision), then publish
-npm run sync:publish        # copies the build into app/data/sync, uploads to R2, bumps app/latest-sync.txt
+# 3. Read .sync/review/changes/report.md (and .sync/review/match-queue.tsv, the species waiting on a decision), then publish
+npm run sync:publish        # copies .sync/published/ into app/data/sync, uploads to R2, bumps app/latest-sync.txt
 ```
 
 `npm run sync:publish` prints the `git add` line for the data PR. The inputs, the four core tables, the counting rule, matching, the checks, and what to look for each month are in [`docs/sync.md`](docs/sync.md).

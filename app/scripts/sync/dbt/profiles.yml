@@ -4,7 +4,7 @@ redlist_sync:
   outputs:
     build:
       type: duckdb
-      path: "{{ env_var('SYNC_BUILD_DIR') }}/core/sync.duckdb"
+      path: "{{ env_var('SYNC_BUILD_DIR') }}/working/dbt/sync.duckdb"
       threads: 8
       settings:
         memory_limit: "64GB"

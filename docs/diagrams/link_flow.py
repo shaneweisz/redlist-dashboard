@@ -12,7 +12,7 @@ diagram never shows an example its own data contradicts. Pick a new one then.
 import html, json, os, subprocess, sys
 
 BUILD, OUT = os.path.expanduser(sys.argv[1]), sys.argv[2]
-CORE = os.path.join(BUILD, "core")
+CORE = os.path.join(BUILD, "working")
 
 
 def q(s):
@@ -30,7 +30,7 @@ LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_id
   WHERE l.role = 'primary')"""
-QUEUE = f"read_csv('{BUILD}/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
+QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
 
 # Each branch: how to count it, and a species that takes it (checked below).
 NAME_BRANCHES = {
@@ -76,7 +76,7 @@ for reason, example in QUEUE_REASONS:
 [queued] = duck(f"SELECT count(*) AS n FROM {QUEUE}")
 
 # The versions matched: one Red List release against one CoL release, as this build's sync.json records them.
-manifest = json.load(open(os.path.join(BUILD, "data", "sync.json")))
+manifest = json.load(open(os.path.join(BUILD, "published", "sync.json")))
 RL = manifest["redlist"]["database"].replace("redlist_", "Red List ").replace("_", "-")
 XR = manifest["col"]["xr"]
 CK = manifest["col"]["checklist"]

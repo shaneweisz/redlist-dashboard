@@ -8,10 +8,15 @@
  *               other. Copied into app/data only to publish, so app/data keeps
  *               matching the sync production serves meanwhile.
  *               PIPELINE_BUILD_DIR builds somewhere else.
- *     core/     working tables: what the stages pass to each other, not published,
- *               one folder per stage (sources/, link/, count/, lists/), and dbt's
- *               sync.duckdb. A full run starts it empty, like data/.
- *     data/     what the app reads, laid out as src/lib/data/sync-layout.ts says
+ *     working/    what the stages pass to each other, never published: one
+ *                 folder per stage (sources/, link/, count/, lists/), and dbt/
+ *                 (its sync.duckdb, compiled SQL and logs)
+ *     published/  exactly what is uploaded and what the app reads, laid out as
+ *                 src/lib/data/sync-layout.ts says
+ *     review/     what a person reads before publishing: changes/ (the
+ *                 comparison with production) and match-queue.tsv (the species
+ *                 waiting for a decision)
+ *   A full run starts all three empty, so nothing an older version wrote survives.
  */
 
 import * as fs from "fs";
@@ -23,32 +28,35 @@ export const CACHE_ROOT = path.join(os.homedir(), ".cache", "redlist-dashboard")
 export const BUILD_DIR = process.env.PIPELINE_BUILD_DIR ?? path.join(__dirname, "..", "..", "..", ".sync");
 /** Where the sync's DuckDB instances spill to disk (left to itself, DuckDB uses ./.tmp in the repo). */
 export const DUCKDB_TMP = path.join(CACHE_ROOT, "duckdb-tmp");
-export const CORE_DIR = path.join(BUILD_DIR, "core");
-export const OUT_DIR = path.join(BUILD_DIR, "data");
+export const WORKING_DIR = path.join(BUILD_DIR, "working");
+export const PUBLISHED_DIR = path.join(BUILD_DIR, "published");
+export const REVIEW_DIR = path.join(BUILD_DIR, "review");
+/** dbt's own files for a build: its database (every model's table), compiled SQL and logs. */
+export const dbtDir = (buildDir = BUILD_DIR) => path.join(buildDir, "working", "dbt");
 
 /** Every file a sync builds, by stage, under `buildDir`. sync.ts passes these between the builders. */
 export function tables(buildDir = BUILD_DIR) {
-  const core = (stage: "sources" | "link" | "count" | "lists", f: string) => path.join(buildDir, "core", stage, f);
-  const data = (f: string) => path.join(buildDir, "data", syncPath(f));
+  const working = (stage: "sources" | "link" | "count" | "lists", f: string) => path.join(buildDir, "working", stage, f);
+  const data = (f: string) => path.join(buildDir, "published", syncPath(f));
   return {
     // 1. Sources
-    sourcesReleases: core("sources", "sources-releases.json"),
-    taxa: core("sources", "taxa.parquet"),
-    assessments: core("sources", "assessments.parquet"),
-    occurrences: core("sources", "occurrences.parquet"),
-    occurrenceCountries: core("sources", "occurrence_countries.parquet"),
-    commonNames: core("sources", "common_names.parquet"),
-    specialistGroupRemits: core("sources", "specialist_group_remits.parquet"),
-    rankAliases: core("sources", "rank_aliases.parquet"),
+    sourcesReleases: working("sources", "sources-releases.json"),
+    taxa: working("sources", "taxa.parquet"),
+    assessments: working("sources", "assessments.parquet"),
+    occurrences: working("sources", "occurrences.parquet"),
+    occurrenceCountries: working("sources", "occurrence_countries.parquet"),
+    commonNames: working("sources", "common_names.parquet"),
+    specialistGroupRemits: working("sources", "specialist_group_remits.parquet"),
+    rankAliases: working("sources", "rank_aliases.parquet"),
     // 2. Link
-    matches: core("link", "matches.parquet"),
-    link: core("link", "assessment_link.parquet"),
-    matchQueue: path.join(buildDir, "match-queue.tsv"),
+    matches: working("link", "matches.parquet"),
+    link: working("link", "assessment_link.parquet"),
+    matchQueue: path.join(buildDir, "review", "match-queue.tsv"),
     // 3. Count
-    usageOwner: core("count", "usage_owner.parquet"),
-    recordCounts: core("count", "record_counts.parquet"),
+    usageOwner: working("count", "usage_owner.parquet"),
+    recordCounts: working("count", "record_counts.parquet"),
     // 4. Lists
-    specialistGroupSpecies: core("lists", "specialist_group_species.parquet"),
+    specialistGroupSpecies: working("lists", "specialist_group_species.parquet"),
     assessed: data("assessed.parquet"),
     assessmentHistory: data("assessments.parquet"),
     species: data("species"),
@@ -71,7 +79,7 @@ export function tables(buildDir = BUILD_DIR) {
     // 6. Checks
     syncJson: data("sync.json"),
     syncLog: data("sync.log"),
-    compare: path.join(buildDir, "compare"),
+    compare: path.join(buildDir, "review", "changes"),
   };
 }
 export type Tables = ReturnType<typeof tables>;

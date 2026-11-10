@@ -4,7 +4,7 @@
  * after them.
  *
  * dbt reads the tables the sources and link stages wrote (dbt/models/sources.yml)
- * and builds its models as tables in one DuckDB file, core/sync.duckdb. The
+ * and builds its models as tables in one DuckDB file, working/dbt/sync.duckdb. The
  * export below then writes the files everything after it reads: the app's
  * lists, and the count tables for the precomputed stage and the docs. Where a
  * file is sorted or partitioned is decided here, not in the models, so a model
@@ -16,7 +16,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
-import { DUCKDB_TMP, output, type Tables } from "./paths";
+import { DUCKDB_TMP, dbtDir, output, type Tables } from "./paths";
 import { lit, openDuckDB } from "./sql";
 
 export const DBT_DIR = path.join(__dirname, "dbt");
@@ -32,7 +32,7 @@ export const DBT_DIR = path.join(__dirname, "dbt");
  * fresh build doesn't have yet.
  */
 export function runDbt(opts: { buildDir: string; today: string; select?: string; quiet?: boolean }): void {
-  fs.mkdirSync(path.join(opts.buildDir, "core"), { recursive: true });
+  fs.mkdirSync(dbtDir(opts.buildDir), { recursive: true });
   fs.mkdirSync(DUCKDB_TMP, { recursive: true });
   const units = opts.select ? opts.select.split(/\s+/).map((s) => `test_type:unit,${s}`) : ["test_type:unit"];
   dbt(opts, ["build", "--exclude", "test_type:unit", ...(opts.select ? ["--select", ...opts.select.split(/\s+/)] : [])]);
@@ -43,8 +43,8 @@ export function runDbt(opts: { buildDir: string; today: string; select?: string;
 export function dbtInvocation(buildDir: string, today: string, command: string[]): { args: string[]; env: NodeJS.ProcessEnv } {
   return {
     args: ["run", "--project", DBT_DIR, "--quiet", "dbt", ...command, "--project-dir", DBT_DIR, "--profiles-dir", DBT_DIR,
-      "--target-path", path.join(buildDir, "dbt-target")],
-    env: { ...process.env, SYNC_BUILD_DIR: buildDir, SYNC_DATE: today, SYNC_DUCKDB_TMP: DUCKDB_TMP, DBT_LOG_PATH: path.join(buildDir, "dbt-logs") },
+      "--target-path", path.join(dbtDir(buildDir), "target")],
+    env: { ...process.env, SYNC_BUILD_DIR: buildDir, SYNC_DATE: today, SYNC_DUCKDB_TMP: DUCKDB_TMP, DBT_LOG_PATH: path.join(dbtDir(buildDir), "logs") },
   };
 }
 
@@ -62,7 +62,7 @@ export function compileDbtModel(model: string, buildDir: string): string {
     }
     return null;
   };
-  const file = find(path.join(buildDir, "dbt-target", "compiled"));
+  const file = find(path.join(dbtDir(buildDir), "target", "compiled"));
   if (!file) throw new Error(`dbt: compiling ${model} wrote no SQL`);
   return fs.readFileSync(file, "utf-8");
 }
@@ -110,7 +110,7 @@ function exports(T: Tables) {
  */
 export async function exportDbtTables(T: Tables, buildDir: string, only?: string[]): Promise<void> {
   const conn = await openDuckDB();
-  await conn.run(`ATTACH ${lit(path.join(buildDir, "core", "sync.duckdb"))} AS dbt (READ_ONLY)`);
+  await conn.run(`ATTACH ${lit(path.join(dbtDir(buildDir), "sync.duckdb"))} AS dbt (READ_ONLY)`);
   for (const e of exports(T).filter((x) => !only || only.includes(x.model))) {
     // A partitioned file is a folder, rewritten whole.
     const partitioned = e.options?.includes("PARTITION_BY");
