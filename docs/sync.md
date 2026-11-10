@@ -19,6 +19,12 @@ flowchart LR
 
 Only the two highlighted stages make judgements. If a number looks wrong, the cause is in `link/`, in `dbt/models/count/`, or in a seed.
 
+Every table and what it reads, which shows how many moving parts there are behind those five boxes:
+
+![Every table in the sync](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-622-system-diagrams/01-sync-overview.png)
+
+Generated: `python3 -I docs/diagrams/sync_overview.py <out.dot>`, then `neato -n2 -Tpng -Gdpi=110`.
+
 ## What a sync is
 
 A sync is one immutable set of data files, named by the time it was uploaded (`syncs/2026-11-04T16-18-27Z/` in the `dashboard-data` R2 bucket). Production reads whichever sync `app/latest-sync.txt` names on `main`. Building and uploading a sync changes nothing anyone sees; merging the one-line `latest-sync.txt` change is what goes live, and reverting it goes back.
