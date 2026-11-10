@@ -175,8 +175,8 @@ export interface KeyDecision {
   verdict: Verdict;
   /** Human-readable, so "why does this species show nothing?" is answerable (sync:trace). */
   reason: string;
-  /** The same, as a fixed label for the link table: accepted | renamed | lumped | lumped into an assessed species. */
-  label: "accepted" | "renamed" | "lumped" | "lumped into an assessed species";
+  /** What CoL makes of the name, as assessment_link's col_treatment. */
+  treatment: "accepted" | "synonym, other name" | "lumped, unassessed" | "lumped, assessed";
   /** The taxon CoL wanted to fold this species into, when it did. */
   lumpedInto?: string;
 }
@@ -211,12 +211,12 @@ export function decideKey(input: {
         key: null,
         verdict: "refused",
         reason: `CoL holds it as ${target.scientificName}, which the Red List assesses separately; counts nothing`,
-        label: "lumped into an assessed species",
+        treatment: "lumped, assessed",
         lumpedInto: target.scientificName,
       };
     }
     const renamed = !!acceptedUsage && acceptedUsage.key !== usage.key;
-    return { key: target.key, verdict: "own", label: renamed ? "renamed" : "accepted",
+    return { key: target.key, verdict: "own", treatment: renamed ? "synonym, other name" : "accepted",
       reason: renamed ? `renamed: CoL accepts it as ${target.scientificName}` : "the species itself" };
   }
 
@@ -227,7 +227,7 @@ export function decideKey(input: {
       key: usage.key,
       verdict: "lumped",
       reason: `CoL folds it into ${target.scientificName}; only the records under its own name count`,
-      label: "lumped",
+      treatment: "lumped, unassessed",
       lumpedInto: target.scientificName,
     };
   }
@@ -235,7 +235,7 @@ export function decideKey(input: {
     key: null,
     verdict: "refused",
     reason: `CoL folds it into ${target.scientificName}, reached only through a synonym; counts nothing`,
-    label: "lumped into an assessed species",
+    treatment: "lumped, assessed",
     lumpedInto: target.scientificName,
   };
 }

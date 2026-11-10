@@ -7,7 +7,7 @@
  *      override's instead, or left the species waiting (match-overrides.tsv,
  *      to_review)
  *   2. the concept: each link row, the CoL taxon and species it names, its
- *      verdict and the reason for it
+ *      match_reason, col_treatment, what it counts, and its description
  *   3. the count: every CoL record whose GBIF records count for it, and the
  *      totals the app shows
  *
@@ -52,8 +52,9 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   say(); say("1. The name");
   const [m] = await rows<{ matcher_col_id: string | null; matcher_name: string | null; matcher_authorship: string | null; matcher_rank: string | null;
     matcher_status: string | null; match_type: string | null; confidence: number | null; score: string | null; alts: string | null;
-    matcher_version: string | null; matcher_xr: string | null }>(conn, `
+    matcher_version: string | null; matcher_xr: string | null; acc_name: string | null; acc_authorship: string | null; acc_id: string | null; lineage: string | null }>(conn, `
     SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
+           matcher_accepted_name AS acc_name, matcher_accepted_authorship AS acc_authorship, matcher_accepted_col_id AS acc_id, matcher_lineage AS lineage,
            matcher_score AS score,
            alternatives AS alts, matcher_version, matcher_xr FROM ${pq(T.matches)} WHERE sis_taxon_id = ${s.sis}`);
   if (!m || !m.matcher_col_id) {
@@ -61,12 +62,19 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   } else {
     say(`  Asked matching-ws ${m.matcher_version ?? "?"}, indexed from XR ${m.matcher_xr ?? "?"}.`);
     say(`  The matcher answered: ${m.matcher_name} ${m.matcher_authorship ?? ""} [${m.matcher_col_id}, ${m.matcher_status?.toLowerCase()} ${m.matcher_rank?.toLowerCase()}], ${m.match_type}, ${m.confidence}% sure`);
+    if (m.acc_name) say(`    a synonym of ${m.acc_name} ${m.acc_authorship ?? ""} [${m.acc_id}]`);
+    if (m.lineage) say(`    in ${m.lineage}`);
     const score = (m.score ? JSON.parse(m.score) : null) as Score;
     say(`    points: ${score ? points(score) : m.match_type === "HIGHERRANK" ? "none: a fallback to a higher rank, which the matcher doesn't score" : "none recorded"}`);
-    const alts = (m.alts ? JSON.parse(m.alts) : []) as { col_id: string; name: string; authorship: string | null; status: string | null; rank: string | null; score: Score }[];
+    const alts = (m.alts ? JSON.parse(m.alts) : []) as { col_id: string; name: string; authorship: string | null; status: string | null; rank: string | null; score: Score;
+      accepted_name: string | null; accepted_authorship: string | null; lineage: string | null }[];
     if (alts.length) {
       say(`  Other candidates it weighed:`);
-      for (const a of alts.slice(0, 8)) say(`    ${a.name} ${a.authorship ?? ""} [${a.col_id}, ${a.status?.toLowerCase()} ${a.rank?.toLowerCase()}]: ${points(a.score)}`);
+      for (const a of alts.slice(0, 8)) {
+        say(`    ${a.name} ${a.authorship ?? ""} [${a.col_id}, ${a.status?.toLowerCase()} ${a.rank?.toLowerCase()}]: ${points(a.score)}`);
+        if (a.accepted_name) say(`      a synonym of ${a.accepted_name} ${a.accepted_authorship ?? ""}`);
+        if (a.lineage) say(`      in ${a.lineage}`);
+      }
       if (alts.length > 8) say(`    … and ${alts.length - 8} more`);
     }
   }
@@ -75,10 +83,11 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
 
   // ── 2. The concept
   say(); say("2. The concept");
-  const links = await rows<{ role: string; verdict: string; method: string; basis: string | null; match_reason: string | null; counted: boolean;
+  const links = await rows<{ role: string; counts: string; method: string; basis: string | null; match_reason: string | null;
+    col_treatment: string | null; match_description: string | null; counted: boolean;
     taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null;
     to_review: string | null }>(conn, `
-    SELECT l.role, l.verdict, l.method, l.basis, l.match_reason, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
+    SELECT l.role, l.counts, l.method, l.basis, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
            t.scientific_name || coalesce(' ' || t.authorship, '') AS taxon, t.rank AS taxon_rank, t.status AS taxon_status,
            c.scientific_name || coalesce(' ' || c.authorship, '') AS species
     FROM ${pq(T.link)} l LEFT JOIN ${pq(T.taxa)} t ON t.col_id = l.col_taxon_id LEFT JOIN ${pq(T.taxa)} c ON c.col_id = l.col_species_id
@@ -89,7 +98,8 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
       : l.col_taxon_id && l.col_taxon_id !== l.col_species_id ? `CoL taxon ${l.taxon} [${l.col_taxon_id}, ${l.taxon_status} ${l.taxon_rank}], in species ${l.species} [${l.col_species_id}]`
       : `CoL species ${l.species} [${l.col_species_id}]`;
     say(`  ${l.role.padEnd(8)} ${where}`);
-    say(`           ${l.verdict}, ${l.method}${l.basis ? `, by ${l.basis}` : ""}, ${l.counted ? "counted" : "not counted"}: ${l.match_reason ?? "–"}`);
+    say(`           ${l.match_reason ?? "–"} · ${l.col_treatment ?? "–"} · counts ${l.counts} (${l.method}${l.basis ? `, by ${l.basis}` : ""})`);
+    if (l.match_description) say(`           ${l.match_description}`);
   }
 
   // ── 3. The count

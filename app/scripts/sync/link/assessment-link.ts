@@ -14,17 +14,21 @@
  *   col_taxon_id    the CoL taxon it is: the species itself, or the subspecies
  *                   or synonym CoL folds it in as; its records are counted from
  *                   there down when `counted`. Empty only when there's no link.
- *   verdict      own | lumped | refused | none | duplicate
+ *   counts       what the row counts: the whole CoL species | only records under
+ *                its own name | nothing
  *   method       what kind of usage the name is (accepted, synonym,
  *                provisional, ambiguous_synonym, or the covered row's rule)
  *   basis        matcher | decision | rule
  *   decided_by   who made the decision, for basis = decision
- *   match_reason how the link was made, as fixed labels: how the CoL name was
- *                found (unique name, authors pick it, CoL holds it twice,
- *                spelling variant, override), then what CoL makes of it
- *                (accepted, renamed, lumped, respelled, lumped into an assessed
- *                species); a covered row's says which rule added it. Empty for
- *                a species waiting for a decision (to_review says why)
+ *   match_reason how the Red List name found its CoL record: exact, unique |
+ *                exact, homonym, author decides | exact, duplicate in CoL |
+ *                spelling variant | override | waiting; a covered row's names
+ *                the rule that added it
+ *   col_treatment  what CoL makes of that record: accepted | synonym, other
+ *                name | synonym, other spelling | lumped, unassessed | lumped,
+ *                assessed; a covered row's, the record's CoL status
+ *   match_description  all of it in a sentence, with the names, authors and ids
+ *   to_review    why a person needs to look, or empty
  *   counted      whether the row's records count
  *
  * to_review says which links need a person, and why (the queue).
@@ -119,7 +123,10 @@ export async function buildLink(
   // How each species' CoL name was found (match_reason's first part), and why a person needs to look.
   const nameReason = new Map<number, string>();
   const toReview = new Map<number, string>();
-  const taken = (a: { why: string; variant?: true }) => !a.variant ? a.why : a.why === "unique name" ? "spelling variant" : `${a.why}, spelling variant`;
+  const WHY = { "unique name": "exact, unique", "authors pick it": "exact, homonym, author decides", "CoL holds it twice": "exact, duplicate in CoL" } as const;
+  const taken = (a: { why: keyof typeof WHY; variant?: true }) => !a.variant ? WHY[a.why] : a.why === "unique name" ? "spelling variant" : `spelling variant, ${WHY[a.why].slice("exact, ".length)}`;
+  // What the description needs from the name step.
+  const nameCtx = new Map<number, { why?: keyof typeof WHY; variant?: true; override?: MatchOverride }>();
   for (const s of species) {
     const m = answers.get(s.sis);
     const acc = m ? acceptMatch(s, m, (id) => speciesOf.get(id) ?? null) : { accepted: false as const, reason: "no species match" as QueueReason };
@@ -130,17 +137,18 @@ export async function buildLink(
       if (res.kind !== "stale") {
         if (!d.reviewed) toReview.set(s.sis, `override not yet reviewed (${d.by}; ${acc.accepted ? "the matcher would take its own answer" : `the matcher's: ${acc.reason}`})`);
         nameReason.set(s.sis, "override");
+        nameCtx.set(s.sis, { override: d });
         if (res.kind === "usage") picks.push({ sis: s.sis, col_id: res.colId, basis: "decision", by_: d.by });
         else unlinkedReason.set(s.sis, "override, not in CoL");
         continue;
       }
       // A decision that no longer resolves is asked again; meanwhile the matcher's answer stands if it is certain.
       toReview.set(s.sis, `override no longer holds: ${res.why}`);
-      if (acc.accepted) nameReason.set(s.sis, taken(acc));
+      if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); }
       if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
       continue;
     }
-    if (acc.accepted) { nameReason.set(s.sis, taken(acc)); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
+    if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
     toReview.set(s.sis, acc.reason);
   }
   const rlSis = new Set(species.map((s) => s.sis));
@@ -190,7 +198,7 @@ export async function buildLink(
 
   const links: LinkRow[] = [];
   for (const p of primary) {
-    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, `${nameReason.get(p.sis)}, leads to no accepted species`); continue; }
+    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, nameReason.get(p.sis) ?? "waiting"); continue; }
     // A decision says the Red List name IS this CoL name, however spelled, and so
     // does a spelling the codes' rules make the same name (name-variants.ts:
     // Sminthopsis fuliginosa / fuliginosus), so decideKey may be asked about
@@ -206,9 +214,9 @@ export async function buildLink(
       && (ownNameSynonyms.get(`${p.sis}|${p.target_id}`) ?? []).some((u) => isCoLRespelling({ scientificName: u.name, authorship: u.authorship ?? undefined }, target))
       && !isSeparatelyAssessed(p.target_name, p.name, assessedNames);
     const d = p.method === "ambiguous_synonym"
-      ? { verdict: "lumped" as const, label: "lumped" }
+      ? { verdict: "lumped" as const, treatment: "lumped, unassessed" }
       : respelled
-      ? { verdict: "own" as const, label: "respelled" }
+      ? { verdict: "own" as const, treatment: "synonym, other spelling" }
       : (() => {
           const ask = (sp: typeof asListed) => decideKey({ species: sp, reachedBy: "canonical", usage, acceptedUsage: p.target_id !== p.picked_id ? target : undefined, assessedNames });
           const listed = ask(asListed);
@@ -227,14 +235,15 @@ export async function buildLink(
       sis_taxon_id: p.sis, role: "primary", col_species_id: p.target_id,
       col_taxon_id: d.verdict === "own" ? p.target_id : lumpRoot,
       verdict: d.verdict, method: p.method, basis: p.basis, decided_by: p.by_,
-      match_reason: `${nameReason.get(p.sis)}, ${d.label}`, to_review: toReview.get(p.sis) ?? null,
+      match_reason: nameReason.get(p.sis) ?? null, col_treatment: d.treatment, match_description: null, to_review: toReview.get(p.sis) ?? null,
       counted: d.verdict === "own" || d.verdict === "lumped",
     });
   }
   const linked = new Set(links.map((l) => l.sis_taxon_id));
   for (const s of species) {
     if (!linked.has(s.sis)) links.push({ sis_taxon_id: s.sis, role: "primary", col_species_id: null, col_taxon_id: null, verdict: "none", method: "unmatched",
-      basis: null, decided_by: null, match_reason: unlinkedReason.get(s.sis) ?? null, to_review: toReview.get(s.sis) ?? null, counted: false });
+      basis: null, decided_by: null, match_reason: unlinkedReason.get(s.sis) ?? "waiting", col_treatment: null, match_description: null,
+      to_review: toReview.get(s.sis) ?? null, counted: false });
   }
 
   // ── 3. The rules after it, in order (rules.ts): the covered rows, then the
@@ -291,8 +300,23 @@ export async function buildLink(
   for (const [name, apply] of rules) touchedBy[name] = (await apply()).size;
   for (const [name, n] of Object.entries(touchedBy)) console.log(`   ${name}: ${n.toLocaleString()} species`);
 
-  await writeTable<LinkRow>(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
-    verdict: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", match_reason: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN" }, links);
+  // ── 4. Each row in words, now that every rule has run.
+  const ids = new Set<string>();
+  for (const l of links) for (const id of [l.col_taxon_id, l.col_species_id]) if (id) ids.add(id);
+  for (const p of primary) ids.add(p.picked_id);
+  await writeTable(conn, "described_ids", { col_id: "VARCHAR" }, [...ids].map((col_id) => ({ col_id })));
+  const usages = new Map((await rows<Usage>(conn, `
+    SELECT u.col_id, u.scientific_name AS name, u.authorship, u.status FROM described_ids JOIN col_usages u USING (col_id)`)).map((u) => [u.col_id, u]));
+  const sisByName = new Map(species.map((s) => [norm(s.name), s.sis]));
+  describeLinks(links, { usages, sisByName, species: new Map(species.map((s) => [s.sis, s])), answers, nameCtx,
+    primary: new Map(primary.map((p) => [p.sis, p])), toReview });
+
+  // counts, not the rules' verdict: what the row counts is what a reader needs.
+  const counts = (l: LinkRow) => !l.counted ? "nothing" : l.verdict === "own" ? "the whole CoL species" : "only records under its own name";
+  await writeTable(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
+    counts: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", match_reason: "VARCHAR", col_treatment: "VARCHAR",
+    match_description: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN" },
+    links.map(({ verdict: _, ...l }) => ({ ...l, counts: counts({ verdict: _, ...l }) })));
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
 
   const [basis] = await rows<{ matcher: number; decision: number; unlinked: number }>(conn, `
@@ -316,4 +340,109 @@ export interface LinkSummary {
   queue: Record<string, number>;
   /** How many species each rule after the concept step added or changed rows for (rules.ts). */
   rules: Record<string, number>;
+}
+
+interface Usage { col_id: string; name: string; authorship: string | null; status: string }
+
+const fmt = (u: { name: string; authorship: string | null; col_id: string } | undefined) =>
+  u ? `${u.name}${u.authorship ? ` ${u.authorship}` : ""} [${u.col_id}]` : "?";
+const status = (s: string | null) => (s ?? "").toLowerCase().replace(/_/g, " ");
+const binomialOf = (n: string) => n.replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
+
+/**
+ * match_description: each row in a sentence a person can check against CoL,
+ * with the names, authors and ids it rests on. The sentence follows the
+ * columns: how the name found its record (match_reason), what CoL makes of it
+ * (col_treatment), and what counts.
+ */
+function describeLinks(links: LinkRow[], ctx: {
+  usages: Map<string, Usage>; sisByName: Map<string, number>; species: Map<number, { sis: number; name: string; authority: string | null }>;
+  answers: Map<number, MatchAnswer>; nameCtx: Map<number, { why?: string; variant?: true; override?: MatchOverride }>;
+  primary: Map<number, { picked_id: string; method: string; name: string }>; toReview: Map<number, string>;
+}): void {
+  const u = (id: string | null) => (id ? ctx.usages.get(id) : undefined);
+  // Who owns a CoL record a row lost to another assessed species.
+  const ownerOf = new Map<string, number>();
+  for (const l of links) if (l.counted && l.col_taxon_id) ownerOf.set(l.col_taxon_id, l.sis_taxon_id);
+  const owner = (l: LinkRow) => {
+    const o = l.col_taxon_id ? ownerOf.get(l.col_taxon_id) : undefined;
+    return o === undefined ? "another assessed species" : `${ctx.species.get(o)?.name ?? "?"} (SIS ${o})`;
+  };
+
+  for (const l of links) {
+    const sp = ctx.species.get(l.sis_taxon_id);
+    const taxon = u(l.col_taxon_id), target = u(l.col_species_id);
+    if (l.role === "covered") {
+      const lead: Record<string, string> = {
+        "CoL duplicate": `CoL also holds it as ${fmt(taxon)}, ${status(taxon?.status ?? null)}`,
+        "CoL duplicate, respelled": `CoL also holds it spelt ${fmt(taxon)}`,
+        "CoL duplicate, other genus": `CoL also holds it as ${fmt(taxon)}, with the same epithet and citation`,
+        "CoL duplicate, Red List synonym": `CoL also holds it as ${fmt(taxon)}, a name the Red List lists as a synonym`,
+        "name under another species": `CoL also files ${fmt(taxon)} under ${fmt(target)}`,
+        "Red List synonym": `The Red List lists ${fmt(taxon)} as a synonym; kept off the Not Evaluated list`,
+        "candidate while waiting": `${fmt(target)} may be it; kept off the Not Evaluated list until someone decides`,
+      };
+      const counts = l.counted ? "; its records count too." : l.verdict === "refused" ? ", not counted." : `; not counted: ${owner(l)} owns its records.`;
+      l.col_treatment = taxon ? status(taxon.status) : null;
+      l.match_description = `${lead[l.match_reason ?? ""] ?? `${l.match_reason}: ${fmt(taxon)}`}${counts}`;
+      continue;
+    }
+
+    const m = ctx.answers.get(l.sis_taxon_id);
+    const n = ctx.nameCtx.get(l.sis_taxon_id) ?? {};
+    const p = ctx.primary.get(l.sis_taxon_id);
+    const picked = p ? u(p.picked_id) : undefined;
+    // CoL's other records with the picked name, for a homonym or a duplicate.
+    const others = picked && m ? m.alternatives.filter((a) => a.col_id !== picked.col_id && a.status !== "MISAPPLIED"
+      && binomialOf(a.name) === binomialOf(picked.name)) : [];
+    const copies = () => [picked!, ...others.map((a) => ({ ...a, status: a.status ?? "" }))]
+      .map((a) => `${a.authorship ?? "no author"} [${a.col_id}], ${status(a.status)}`).join("; ");
+
+    // How the name found its record.
+    let found: string;
+    if (n.override) found = `${n.override.by} decided it is ${fmt(picked)}${n.override.colVersion ? `, against ${n.override.colVersion}` : ""}`;
+    else if (!picked) found = "";
+    else {
+      const many = n.why === "authors pick it"
+        ? `CoL has ${others.length + 1} records named ${picked.name}: ${copies()}. The Red List's authority, ${sp?.authority ?? "none"}, matches ${picked.authorship ?? "no author"} [${picked.col_id}]`
+        : n.why === "CoL holds it twice"
+        ? `CoL has ${others.length + 1} records named ${picked.name}, all one species: ${copies()}. This link takes ${picked.authorship ?? "no author"} [${picked.col_id}]`
+        : null;
+      found = n.variant
+        ? `CoL has no record spelt ${sp?.name}; the matcher found ${fmt(picked)}, a spelling the codes treat as the same name${many ? `. ${many}` : ""}`
+        : many ?? `CoL has one record named ${fmt(picked)}`;
+    }
+
+    if (!l.col_species_id) {
+      const why = ctx.toReview.get(l.sis_taxon_id);
+      if (n.override && !picked) l.match_description = `${n.override.by} decided it is not in CoL.`;
+      else if (l.match_reason === "only match in another phylum") l.match_description = `${found}, in another phylum; not linked.`;
+      else if (picked && !why) l.match_description = `${found}, which leads to no accepted species.`;
+      else {
+        const answer = !m?.matcher_col_id ? "The matcher found no CoL record"
+          : m.match_type === "HIGHERRANK" || m.match_type === "NONE" ? `The matcher found no species, only ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], a ${status(m.matcher_rank)}`
+          : `The matcher answered ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], ${status(m.matcher_status)}, ${status(m.match_type)}, ${m.confidence}% sure`;
+        const alts = (m?.alternatives ?? []).slice(0, 3).map((a) => `${a.name}${a.authorship ? ` ${a.authorship}` : ""} [${a.col_id}], ${status(a.status)}`);
+        const more = (m?.alternatives.length ?? 0) > 3 ? `, and ${m!.alternatives.length - 3} more` : "";
+        l.match_description = `${answer}${alts.length ? `; it also weighed ${alts.join("; ")}${more}` : ""}. Waiting: ${why ?? "no decision yet"}.`;
+      }
+      continue;
+    }
+
+    // What CoL makes of it.
+    const assessed = target ? ctx.sisByName.get(norm(target.name)) : undefined;
+    const made: Record<string, string> = {
+      "accepted": ", CoL's accepted name.",
+      "synonym, other name": `, a synonym; CoL accepts the species as ${fmt(target)}.`,
+      "synonym, other spelling": `, which CoL lists as a variant spelling; it accepts the species as ${fmt(target)}.`,
+      "lumped, unassessed": p?.method === "ambiguous_synonym"
+        ? `, an ambiguous synonym CoL places under ${fmt(target)}, which the Red List doesn't assess.`
+        : `, a synonym CoL folds into ${fmt(target)}, which the Red List doesn't assess.`,
+      "lumped, assessed": `, a synonym of ${fmt(target)}, which the Red List assesses separately${assessed ? ` (SIS ${assessed})` : ""}.`,
+    };
+    const counts = !l.counted
+      ? l.verdict === "duplicate" ? ` Counts nothing: ${owner(l)} claims the same record and owns its records.` : " Counts nothing."
+      : l.verdict === "own" ? ` Counts every record of ${target?.name}.` : ` Counts only the records under ${fmt(taxon)}.`;
+    l.match_description = `${found}${made[l.col_treatment ?? ""] ?? "."}${counts}`;
+  }
 }

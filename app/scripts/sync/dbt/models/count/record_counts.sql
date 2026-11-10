@@ -2,7 +2,7 @@
  * record_counts: one row per species with GBIF records, assessed or not, with
  * its counts in both record modes.
  *
- * Built from: usage_owner, occurrences, assessment_link (each row's verdict),
+ * Built from: usage_owner, occurrences, assessment_link (what each row counts),
  * assessments (the latest assessment's date).
  *
  * Columns:
@@ -39,7 +39,7 @@ occ AS (SELECT * FROM {{ source('sources', 'occurrences') }}),
 
 -- Per assessed species and link row: its usages' records, in total and since the assessment.
 link_rows AS (
-  SELECT o.sis_taxon_id AS sis, o.link_usage_id AS usage_id, any_value(l.verdict) AS verdict,
+  SELECT o.sis_taxon_id AS sis, o.link_usage_id AS usage_id, any_value(l.counts) AS counts,
          CAST(any_value(a.assessment_date) AS DATE) AS assessed_on
   FROM owner o
   JOIN {{ source('link', 'assessment_link') }} l ON l.sis_taxon_id = o.sis_taxon_id AND l.col_taxon_id = o.link_usage_id AND l.counted
@@ -47,7 +47,7 @@ link_rows AS (
   WHERE o.sis_taxon_id IS NOT NULL GROUP BY 1, 2
 ),
 row_counts AS (
-  SELECT r.sis, r.usage_id, any_value(r.verdict) AS verdict, any_value(r.assessed_on) AS assessed_on,
+  SELECT r.sis, r.usage_id, any_value(r.counts) AS counts, any_value(r.assessed_on) AS assessed_on,
          coalesce(sum(c.n) FILTER (c.georef), 0)::BIGINT AS georef,
          coalesce(sum(c.n), 0)::BIGINT AS all_records,
          coalesce(sum(c.n) FILTER (c.georef AND ({{ since_assessment("c", "r.assessed_on", today) }})), 0)::BIGINT AS georef_since,
@@ -60,7 +60,7 @@ row_counts AS (
 
 SELECT sis AS sis_taxon_id, NULL::VARCHAR AS col_id,
        -- usage_id last: two usages with the same counts would otherwise swap between runs.
-       arg_min(usage_id, (CASE verdict WHEN 'own' THEN 0 ELSE 1 END, -georef, -all_records, usage_id)) AS gbif_species_key,
+       arg_min(usage_id, (CASE counts WHEN 'the whole CoL species' THEN 0 ELSE 1 END, -georef, -all_records, usage_id)) AS gbif_species_key,
        sum(georef)::BIGINT AS georef, sum(all_records)::BIGINT AS all_records,
        CASE WHEN any_value(assessed_on) IS NULL OR any_value(assessed_on) >= {{ today }} THEN NULL ELSE sum(georef_since)::BIGINT END AS georef_since,
        CASE WHEN any_value(assessed_on) IS NULL OR any_value(assessed_on) >= {{ today }} THEN NULL ELSE sum(all_since)::BIGINT END AS all_since

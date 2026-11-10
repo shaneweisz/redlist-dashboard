@@ -31,7 +31,7 @@ beforeAll(async () => {
       'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus,
       true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
     FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, T.taxa);
-  await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'own' AS verdict, 'primary' AS role, true AS counted,
+  await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'the whole CoL species' AS counts, 'primary' AS role, true AS counted,
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
       'matcher' AS basis, NULL::VARCHAR AS decided_by
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);

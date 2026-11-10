@@ -45,11 +45,11 @@ NAME_BRANCHES = {
     "unlinked": ("col_species_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
 }
 CONCEPT_BRANCHES = {
-    "accepted": ("verdict = 'own' AND method = 'accepted'", "Panthera leo"),
-    "renamed": ("verdict = 'own' AND method IN ('synonym', 'provisional')", "Glossopsitta porphyrocephala"),
-    "lumped": ("verdict = 'lumped' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
-    "refused": ("verdict = 'refused'", "Turcichondrostoma fahirae"),
-    "duplicate": ("verdict = 'duplicate'", "Agapanthia probsti"),
+    "accepted": ("col_treatment = 'accepted' AND counts = 'the whole CoL species'", "Panthera leo"),
+    "renamed": ("col_treatment LIKE 'synonym, %' AND counts = 'the whole CoL species'", "Glossopsitta porphyrocephala"),
+    "lumped": ("col_treatment = 'lumped, unassessed' AND counts <> 'nothing' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
+    "refused": ("col_treatment = 'lumped, assessed'", "Turcichondrostoma fahirae"),
+    "duplicate": ("counts = 'nothing' AND col_species_id IS NOT NULL AND col_treatment <> 'lumped, assessed'", "Agapanthia probsti"),
 }
 QUEUE_REASONS = [  # reason, example: the commonest reasons the matcher's answer waits for a person
     ("no species match", "Breviceps batrachophiliorum"),

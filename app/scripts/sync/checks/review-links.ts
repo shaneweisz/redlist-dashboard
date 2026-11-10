@@ -10,24 +10,30 @@
  *
  * Columns, in groups, the ones a review reads first at the front:
  *   at a glance    redlist_name, redlist_authority, col_taxon_name,
- *                  col_taxon_authorship, match_reason (how the link was made:
- *                  how the CoL name was found, then what CoL makes of it, as
- *                  fixed labels), to_review (why a person needs to look, when
- *                  one does: the queue is WHERE to_review IS NOT NULL)
+ *                  col_taxon_authorship, match_reason (how the Red List name
+ *                  found its CoL record), col_treatment (what CoL makes of it),
+ *                  counts (what the row counts), match_description (all of it
+ *                  in a sentence, with the names, authors and ids), to_review
+ *                  (why a person needs to look, when one does: the queue is
+ *                  WHERE to_review IS NOT NULL)
  *   the Red List   sis_taxon_id, redlist_release, category, taxon_group, class,
- *                  order, family, assessment_date
+ *                  order, family, assessment_date, redlist_synonyms (the names
+ *                  the assessment lists as its synonyms, JSON)
  *   CoL            role (primary | covered), col_xr, col_taxon_id, col_taxon_name,
  *                  col_taxon_authorship, col_taxon_rank, col_taxon_status
  *                  (the taxon it is), col_species_id, col_species_name,
  *                  col_species_authorship (the species that taxon is in),
  *                  col_described_year
- *   the decision   verdict, counted, records, georeferenced_records (what this
- *                  row counts), method, basis, decided_by
- *   the matcher    matcher_version, matcher_name, matcher_authorship,
- *                  matcher_status, match_type, confidence, matcher_score (its
- *                  answer for the name, primary rows; JSON points),
- *                  matcher_alternatives (the other candidates, each with its
- *                  points, JSON)
+ *   the decision   records, georeferenced_records (what this row counts),
+ *                  method, basis, decided_by
+ *   the matcher    primary rows only: matcher_version, matcher_col_id,
+ *                  matcher_name, matcher_authorship, matcher_status,
+ *                  matcher_accepted_col_id, matcher_accepted_name,
+ *                  matcher_accepted_authorship (the species a synonym answer
+ *                  leads to), matcher_lineage, match_type, confidence,
+ *                  matcher_score (JSON points), matcher_alternatives (the other
+ *                  candidates, each with its points, accepted species and
+ *                  lineage, JSON): enough to judge a waiting link from the row
  *   the evidence   primary rows only. differences: how many of the checks below
  *                  find the Red List and CoL disagreeing, 0 when they agree on all
  *                  (a renamed link always differs in name, so compare within a
@@ -77,15 +83,21 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     rows AS (
       SELECT a.sis_taxon_id, ${lit(releases.redlist)} AS redlist_release, a.scientific_name AS redlist_name, a.authority AS redlist_authority,
              a.category, a.taxon_group, a.class_name AS class, a.order_name AS "order", a.family, a.assessment_date,
+             CASE WHEN len(a.synonyms) > 0 THEN to_json(list_transform(a.synonyms, lambda x: trim(regexp_replace(x.name, '\\s+', ' ', 'g'))))::VARCHAR END AS redlist_synonyms,
              l.role, ${lit(releases.colXr)} AS col_xr,
              l.col_taxon_id, tx.scientific_name AS col_taxon_name, tx.authorship AS col_taxon_authorship, tx.rank AS col_taxon_rank, tx.status AS col_taxon_status,
              l.col_species_id, sp.scientific_name AS col_species_name, sp.authorship AS col_species_authorship, sp.described_year AS col_described_year,
-             l.verdict, l.method, l.basis, l.decided_by, l.match_reason, l.to_review, l.counted,
+             l.counts, l.method, l.basis, l.decided_by, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted,
              CASE WHEN l.counted THEN c.records END AS records, CASE WHEN l.counted THEN c.georeferenced_records END AS georeferenced_records,
              CASE WHEN l.role = 'primary' THEN m.matcher_version END AS matcher_version,
+             CASE WHEN l.role = 'primary' THEN m.matcher_col_id END AS matcher_col_id,
              CASE WHEN l.role = 'primary' THEN m.matcher_name END AS matcher_name,
              CASE WHEN l.role = 'primary' THEN m.matcher_authorship END AS matcher_authorship,
              CASE WHEN l.role = 'primary' THEN m.matcher_status END AS matcher_status,
+             CASE WHEN l.role = 'primary' THEN m.matcher_accepted_col_id END AS matcher_accepted_col_id,
+             CASE WHEN l.role = 'primary' THEN m.matcher_accepted_name END AS matcher_accepted_name,
+             CASE WHEN l.role = 'primary' THEN m.matcher_accepted_authorship END AS matcher_accepted_authorship,
+             CASE WHEN l.role = 'primary' THEN m.matcher_lineage END AS matcher_lineage,
              CASE WHEN l.role = 'primary' THEN m.match_type END AS match_type,
              CASE WHEN l.role = 'primary' THEN m.confidence END AS confidence,
              CASE WHEN l.role = 'primary' THEN m.matcher_score END AS matcher_score,
@@ -126,15 +138,17 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     )
     SELECT
            -- 1. at a glance: what each side calls it, and why the link is what it is
-           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, match_reason, to_review,
+           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, match_reason, col_treatment, counts, match_description, to_review,
            -- 2. the Red List
-           sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date,
+           sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date, redlist_synonyms,
            -- 3. CoL
            role, col_xr, col_taxon_id, col_taxon_rank, col_taxon_status, col_species_id, col_species_name, col_species_authorship, col_described_year,
            -- 4. the decision
-           verdict, counted, records, georeferenced_records, method, basis, decided_by,
+           records, georeferenced_records, method, basis, decided_by,
            -- 5. the matcher
-           matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score, matcher_alternatives,
+           matcher_version, matcher_col_id, matcher_name, matcher_authorship, matcher_status,
+           matcher_accepted_col_id, matcher_accepted_name, matcher_accepted_authorship, matcher_lineage,
+           match_type, confidence, matcher_score, matcher_alternatives,
            -- 6. the evidence
            CASE WHEN judged THEN genus_differs::INT + epithet_differs::INT + class_differs::INT + order_differs::INT + family_differs::INT
              + author_year_differs::INT + (lumped_with > 0)::INT END AS differences,
