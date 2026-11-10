@@ -54,8 +54,7 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
     matcher_status: string | null; match_type: string | null; confidence: number | null; score: string | null; alts: string | null;
     matcher_version: string | null; matcher_xr: string | null }>(conn, `
     SELECT matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
-           CASE WHEN score_total IS NOT NULL THEN to_json({'name': score_name, 'authorship': score_authorship, 'classification': score_classification,
-             'rank': score_rank, 'status': score_status, 'total': score_total})::VARCHAR END AS score,
+           matcher_score AS score,
            alternatives AS alts, matcher_version, matcher_xr FROM ${pq(T.matches)} WHERE sis_taxon_id = ${s.sis}`);
   if (!m || !m.matcher_col_id) {
     say(`  The matcher found no CoL record (${m?.match_type ?? "not asked"}).`);

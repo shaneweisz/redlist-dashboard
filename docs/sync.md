@@ -264,7 +264,7 @@ $ npm run sync:trace -- "Cipangopaludina chinensis"
   ...
 ```
 
-Everything it prints is in the build's tables, so anything it shows can be checked with DuckDB directly: `matches.parquet` holds the matcher's answers and points (`score_name` … `score_total`; the candidates in `alternatives`, JSON text with each one's `score`), and the matching-ws release and XR that answered (`matcher_version`, `matcher_xr`), and `assessment_link.parquet` the link rows, with `name_reason` for the name step and `reason` for the concept step.
+Everything it prints is in the build's tables, so anything it shows can be checked with DuckDB directly: `matches.parquet` holds the matcher's answers and points (`matcher_score`, and the candidates in `alternatives`, each with its `score`: both JSON text), and the matching-ws release and XR that answered (`matcher_version`, `matcher_xr`), and `assessment_link.parquet` the link rows, with `name_reason` for the name step and `reason` for the concept step.
 
 ## Decisions and known limits
 
