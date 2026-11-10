@@ -45,7 +45,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 | 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
 | 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, assessment history, `species/`, `ne`, the app's `taxa`, `specialist_group_species` |
 | 5 precomputed | `dbt/models/precomputed/`, `precomputed/` | the app's own queries run ahead of time: the CoL-differences tables and search indexes (SQL), then the summaries and CoL revision flags with the app's own code, so a precomputed number is the one its live view computes |
-| 6 checks | `checks/`, `dbt/models/audit/` | fixtures and data tests (either stops the sync), the link audit, the comparison with production |
+| 6 checks | `checks/` | fixtures and data tests (either stops the sync), the comparison with production |
 
 Stages meet at a single table: `assessment_link` out of link, `usage_owner` out of count. Their columns are each stage's contract with the rest, so the inside of a stage can be rewritten without touching the others.
 
@@ -141,6 +141,8 @@ Those cases go to **`seeds/decisions.tsv`**: one row per species, naming the CoL
 
 Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
 
+To review links, `dbt/analyses/link_audit.sql` gives every link with the evidence for checking it: how it was made, and where IUCN and CoL differ. It is a dbt analysis, run against a build when needed and not built each sync: `uv run dbt show --profiles-dir . --select link_audit` from `app/scripts/sync/dbt`. `sample_rank` orders each kind of link randomly, so reviewing its first n measures that kind's error rate.
+
 ### Versions
 
 A link is between one Red List release and one CoL release, both recorded in `sync.json` and named in the footer. The CoL release is the XR the GBIF snapshot is filed under: every occurrence carries that XR's ids, so it is the only release the records can be counted in without guessing. Everything CoL-related uses it, including the CoL-differences card, so a page describes one taxonomy.
@@ -170,7 +172,6 @@ Two files go into the repo instead, because client code imports them at build ti
 - **Invariants stop the build**: the Red List session is read-only, the snapshot complete, each GBIF usage counts towards at most one species, every domesticated-species name is an accepted CoL species, Specialist Group membership covers its sections, and the occurrence table holds exactly the snapshot's records.
 - **Matching fixtures stop the build**: `checks/fixtures/matching.ts` holds 50 named cases, each a species that once showed the wrong number, with what must stay true of it. Expectations are by name, since CoL renumbers about 2% of ids each release. Reading it next to `link/assessment-link.ts` is the quickest way to see what each rule is for.
 - **Data tests stop publishing**: assessed totals per group against IUCN's Table 1a, the tree's summaries against its config, and so on (`DATA_TESTS` in `sync.ts`). When the Red List publishes, `validate-table1a.test.ts` fails until updated: that is its job.
-- **The link audit stops nothing**: `link_audit` gives every link with the evidence for checking it (how it was made, and where IUCN and CoL differ). `sample_rank` orders each kind of link randomly, so reviewing its first n measures that kind's error rate.
 - **The comparison is for review**: `checks/compare.ts` diffs the new sync against production's, field by field, and gives each difference a reason from `compare/reasons.ts` or marks it unexplained. A reason must be bounded by what the change predicts, or it can hide a bug. Read the unexplained list by size, **falls first**: a number dropping is where a matching regression shows.
 
 ## Running it each month
