@@ -25,26 +25,30 @@
  *   the matcher    matcher_version, matcher_name, matcher_authorship,
  *                  matcher_status, match_type, confidence, matcher_score (its
  *                  answer for the name, primary rows; JSON points)
- *   the evidence   primary rows only. stratum: how the link was made, the unit an
- *                  error rate is measured per ('exact', 'synonym', 'decision',
- *                  'unmatched'). genus_differs, epithet_differs (the Red List
- *                  name against the CoL species', as written, so spelling variants
- *                  count), class_differs, order_differs (through rank_aliases: a
- *                  known renaming is no difference), family_differs,
- *                  author_year_differs (both give a year and they differ),
- *                  iucn_lists_col_name (IUCN's own synonyms include CoL's name:
- *                  it knows the name and treats it as this species),
+ *   the evidence   primary rows only. link_kind: how the link was made, the unit
+ *                  an error rate is measured per ('accepted name': the Red List
+ *                  name is an accepted CoL species; 'synonym': a CoL synonym, linked
+ *                  to the species it points to; 'override': match-overrides.tsv;
+ *                  'waiting': no link yet). differences: how many of the checks
+ *                  below find the Red List and CoL disagreeing, 0 when they agree on
+ *                  all (a synonym link always differs in name, so compare within a
+ *                  kind): genus_differs, epithet_differs (the Red List name against
+ *                  the CoL species', as written, so spelling variants count),
+ *                  class_differs, order_differs (through rank_aliases: a known
+ *                  renaming is no difference), family_differs, author_year_differs
+ *                  (both give a year and they differ), and lumped_with (how many
+ *                  other assessed species link to the same CoL species). Also
+ *                  iucn_lists_col_name (IUCN's own synonyms include CoL's name: it
+ *                  knows the name and treats it as this species) and
  *                  described_after_assessment (CoL's species is newer than the
- *                  assessment: a likely lag), lumped_with (how many other assessed
- *                  species link to the same CoL species), signals (how many of
- *                  those hold), sample_rank (a fixed random order within the
- *                  stratum: reviewing ranks 1..n is a random sample of n)
+ *                  assessment: a likely lag). sample_rank: a fixed random order
+ *                  within the kind, so reviewing ranks 1..n is a random sample of n
  *
  * Decisions:
  *   - Evidence, not verdicts: a difference is a reason to look. The comparisons
  *     are raw, looser than the CoL-differences card's: for finding links to
  *     check, a false alarm costs a look, a missed one a wrong link.
- *   - Sorted by stratum and sample_rank, so the first rows of each stratum are its
+ *   - Sorted by link_kind and sample_rank, so the first rows of each kind are its
  *     random sample.
  */
 import { lit, openDuckDB } from "../sql";
@@ -103,13 +107,13 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     evidence AS (
       SELECT *,
         CASE WHEN role = 'primary' THEN
-          CASE WHEN col_species_id IS NULL THEN 'unmatched' WHEN basis = 'decision' THEN 'decision'
-               WHEN method = 'accepted' THEN 'exact' ELSE method END END AS stratum,
+          CASE WHEN col_species_id IS NULL THEN 'waiting' WHEN basis = 'decision' THEN 'override'
+               WHEN method = 'accepted' THEN 'accepted name' ELSE method END END AS link_kind,
         role = 'primary' AND col_species_id IS NOT NULL AS judged,
         coalesce(CASE WHEN col_taxon_id <> col_species_id THEN col_taxon_authorship END, col_species_authorship) AS col_authorship
       FROM rows
     ),
-    signals AS (
+    checks AS (
       SELECT *,
         CASE WHEN judged THEN split_part(iname, ' ', 1) <> split_part(cname, ' ', 1) END AS genus_differs,
         CASE WHEN judged THEN split_part(iname, ' ', 2) <> split_part(cname, ' ', 2) END AS epithet_differs,
@@ -136,14 +140,14 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
            -- 5. the matcher
            matcher_version, matcher_name, matcher_authorship, matcher_status, match_type, confidence, matcher_score,
            -- 6. the evidence
-           stratum,
+           link_kind,
            CASE WHEN judged THEN genus_differs::INT + epithet_differs::INT + class_differs::INT + order_differs::INT + family_differs::INT
-             + author_year_differs::INT + (lumped_with > 0)::INT END AS signals,
+             + author_year_differs::INT + (lumped_with > 0)::INT END AS differences,
            genus_differs, epithet_differs, class_differs, order_differs, family_differs, author_year_differs,
            iucn_lists_col_name, described_after_assessment, lumped_with,
-           CASE WHEN role = 'primary' THEN row_number() OVER (PARTITION BY stratum, role = 'primary' ORDER BY hash(sis_taxon_id, 'link-audit-v1')) END AS sample_rank
-    FROM signals
-    ORDER BY role DESC, stratum, sample_rank, sis_taxon_id, col_species_id
+           CASE WHEN role = 'primary' THEN row_number() OVER (PARTITION BY link_kind, role = 'primary' ORDER BY hash(sis_taxon_id, 'link-audit-v1')) END AS sample_rank
+    FROM checks
+    ORDER BY role DESC, link_kind, sample_rank, sis_taxon_id, col_species_id
   ) TO ${lit(output(T.reviewLinks))} (FORMAT parquet, COMPRESSION zstd)`);
   const [r] = (await conn.runAndReadAll(`SELECT count(*) AS n FROM ${parquet(T.reviewLinks)}`)).getRowObjects();
   return Number(r.n);
