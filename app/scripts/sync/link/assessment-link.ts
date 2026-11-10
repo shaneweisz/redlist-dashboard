@@ -127,6 +127,9 @@ export async function buildLink(
   const picks: { sis: number; col_id: string; basis: "matcher" | "decision"; by_: string | null }[] = [];
   const queue: QueueRow[] = [];
   const unlinkedReason = new Map<number, string>();
+  // Why each species has the CoL name it has, or none (the link's name_reason).
+  const nameReason = new Map<number, string>();
+  const taken = (a: { why: string; variant?: true }) => `matcher: ${a.why}${a.variant ? ", a spelling the codes allow" : ""}`;
   for (const s of species) {
     const m = answers.get(s.sis);
     const acc = m ? acceptMatch(s, m, (id) => speciesOf.get(id) ?? null) : { accepted: false as const, reason: "no species match" as QueueReason };
@@ -140,17 +143,20 @@ export async function buildLink(
       const res = resolveOverride(d, s.name, d.colName ? candidates.get(norm(d.colName)) ?? [] : [], s.authority);
       if (res.kind !== "stale") {
         if (!d.reviewed) enqueue("proposed", acc.accepted ? "the matcher would take its answer" : acc.reason, d.by);
+        nameReason.set(s.sis, `override by ${d.by}${d.colVersion ? `, decided against ${d.colVersion}` : ""}${res.kind === "usage" ? "" : ": not in CoL"}`);
         if (res.kind === "usage") picks.push({ sis: s.sis, col_id: res.colId, basis: "decision", by_: d.by });
         else unlinkedReason.set(s.sis, `not in CoL (decided by ${d.by})`);
         continue;
       }
       // A decision that no longer resolves is asked again; meanwhile the matcher's answer stands if it is certain.
       enqueue("stale", res.why, d.by);
+      nameReason.set(s.sis, acc.accepted ? `${taken(acc)}; its override is stale: ${res.why}` : `waiting: its override is stale: ${res.why}`);
       if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
       else unlinkedReason.set(s.sis, `waiting for a decision: ${res.why}`);
       continue;
     }
-    if (acc.accepted) { picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
+    if (acc.accepted) { nameReason.set(s.sis, taken(acc)); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
+    nameReason.set(s.sis, `waiting: ${acc.reason}`);
     enqueue("undecided", acc.reason);
     unlinkedReason.set(s.sis, `waiting for a decision: ${acc.reason}`);
   }
@@ -237,13 +243,14 @@ export async function buildLink(
       // The taxon it is, whether or not its records count: a refused one is still that taxon.
       sis_taxon_id: p.sis, role: "primary", col_species_id: p.target_id,
       col_taxon_id: d.verdict === "own" ? p.target_id : lumpRoot,
-      verdict: d.verdict, method: p.method, basis: p.basis, decided_by: p.by_, reason: d.reason, counted: d.verdict === "own" || d.verdict === "lumped",
+      verdict: d.verdict, method: p.method, basis: p.basis, decided_by: p.by_, name_reason: nameReason.get(p.sis) ?? null, reason: d.reason,
+      counted: d.verdict === "own" || d.verdict === "lumped",
     });
   }
   const linked = new Set(links.map((l) => l.sis_taxon_id));
   for (const s of species) {
     if (!linked.has(s.sis)) links.push({ sis_taxon_id: s.sis, role: "primary", col_species_id: null, col_taxon_id: null, verdict: "none", method: "unmatched",
-      basis: null, decided_by: null, reason: unlinkedReason.get(s.sis) ?? "no CoL name", counted: false });
+      basis: null, decided_by: null, name_reason: nameReason.get(s.sis) ?? null, reason: unlinkedReason.get(s.sis) ?? "no CoL name", counted: false });
   }
 
   // ── 3. The rules after it, in order (rules.ts): the covered rows, then the
@@ -301,7 +308,7 @@ export async function buildLink(
   for (const [name, n] of Object.entries(touchedBy)) console.log(`   ${name}: ${n.toLocaleString()} species`);
 
   await writeTable<LinkRow>(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
-    verdict: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", reason: "VARCHAR", counted: "BOOLEAN" }, links);
+    verdict: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", name_reason: "VARCHAR", reason: "VARCHAR", counted: "BOOLEAN" }, links);
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
   writeQueue(queue, output(out.matchQueue));
 

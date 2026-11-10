@@ -61,7 +61,7 @@ export type QueueReason =
   | "synonym by other authors";
 
 export type Acceptance =
-  | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice" }
+  | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice"; variant?: true }
   | { accepted: false; reason: QueueReason };
 
 /** Names the Red List itself marks as unsettled: aff., cf., sp., "[...]" in the name; ined., auct., non, sensu in the authority. */
@@ -96,17 +96,19 @@ export function acceptMatch(
 
   const rivals = m.alternatives.filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === binomial(m.matcher_name)
     && speciesOf(a.col_id) !== mine);
-  if (rivals.length === 0) return { accepted: true, why: "unique name" };
+  const yes = (why: "unique name" | "authors pick it" | "CoL holds it twice"): Acceptance =>
+    (variant ? { accepted: true, why, variant: true } : { accepted: true, why });
+  if (rivals.length === 0) return yes("unique name");
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
   const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
     && compareAuthors(m.matcher_authorship, a.authorship) !== "other";
   const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
     if (m.matcher_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
-    return { accepted: true, why: "CoL holds it twice" };
+    return yes("CoL holds it twice");
   }
   if (same(species.authority, m.matcher_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
-    return { accepted: true, why: "authors pick it" };
+    return yes("authors pick it");
   }
   return no("homonym the authors don't decide");
 }

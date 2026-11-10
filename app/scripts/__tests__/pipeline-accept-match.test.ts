@@ -37,7 +37,7 @@ describe("acceptMatch", () => {
 
   it("takes a spelling variant the codes' rules make the same name, whatever its confidence (Pseudechis pailsi / pailsei)", () => {
     const m = answer({ match_type: "VARIANT", confidence: 92, matcher_name: "Pseudechis pailsei", matcher_authorship: "(Hoser, 1998)" });
-    expect(acceptMatch({ name: "Pseudechis pailsi", authority: "(Hoser, 1998)" }, m, speciesOf({})).accepted).toBe(true);
+    expect(acceptMatch({ name: "Pseudechis pailsi", authority: "(Hoser, 1998)" }, m, speciesOf({}))).toEqual({ accepted: true, why: "unique name", variant: true });
   });
 
   it("queues a spelling variant by other authors, or one the rules don't make the same name", () => {

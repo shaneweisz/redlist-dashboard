@@ -15,8 +15,12 @@
  *                  before any rule
  *   match_type     exact, variant, fuzzy, higher rank, none
  *   confidence     0-100
- *   alternatives   the other CoL records the matcher weighed:
- *                  [{col_id, name, authorship, rank, status, confidence, match_type}]
+ *   matcher_score  why the matcher ranked its answer first: the points it gave
+ *                  {name, authorship, classification, rank, status, total}, as
+ *                  matching-ws reports them (MatchingService at the pinned
+ *                  release; authorship is 0, since none is sent)
+ *   alternatives   the other CoL records the matcher weighed, each with its score:
+ *                  [{col_id, name, authorship, rank, status, confidence, match_type, score}]
  *
  * Decisions:
  *   - Each name is asked as GBIF sees most records: the name, with IUCN's
@@ -47,11 +51,22 @@ import { lit, writeTable, openDuckDB } from "../sql";
 const THREADS = 16;
 
 export interface Usage { usage_id: string; name: string; authorship: string | null; rank: string | null; status: string | null }
+/** The points matching-ws gives a candidate, from its verbose note ("name=110; authorship=0; ...; score=165"). */
+export interface Score { name: number | null; authorship: number | null; classification: number | null; rank: number | null; status: number | null; total: number | null }
 export interface Answer {
   usage: Usage | null;
   match_type: string | null;
   confidence: number | null;
-  alternatives: (Usage & { confidence: number | null; match_type: string | null })[];
+  score: Score | null;
+  alternatives: (Usage & { confidence: number | null; match_type: string | null; score: Score | null })[];
+}
+
+/** The verbose note's points, or null where the matcher gave none. */
+export function parseScore(note: string | undefined | null): Score | null {
+  if (!note) return null;
+  const num = (k: string) => { const m = note.match(new RegExp(`\\b${k}=(-?\\d+)`)); return m ? Number(m[1]) : null; };
+  const s = { name: num("name"), authorship: num("authorship"), classification: num("classification"), rank: num("rank"), status: num("status"), total: num("score") };
+  return Object.values(s).every((v) => v === null) ? null : s;
 }
 
 // No authority, on purpose (see Decisions). matching-ws reads it only as
@@ -80,14 +95,14 @@ async function ask(m: Matcher, q: Query): Promise<Answer> {
     try {
       const res = await fetch(`${m.url}/v2/species/match?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = (await res.json()) as { usage?: Record<string, unknown>; diagnostics?: { matchType?: string; confidence?: number;
-        alternatives?: { usage?: Record<string, unknown>; diagnostics?: { matchType?: string; confidence?: number } }[] } };
+      const d = (await res.json()) as { usage?: Record<string, unknown>; diagnostics?: { matchType?: string; confidence?: number; note?: string;
+        alternatives?: { usage?: Record<string, unknown>; diagnostics?: { matchType?: string; confidence?: number; note?: string } }[] } };
       const dg = d.diagnostics ?? {};
       return {
-        usage: slim(d.usage), match_type: dg.matchType ?? null, confidence: dg.confidence ?? null,
+        usage: slim(d.usage), match_type: dg.matchType ?? null, confidence: dg.confidence ?? null, score: parseScore(dg.note),
         alternatives: (dg.alternatives ?? []).flatMap((a) => {
           const u = slim(a.usage);
-          return u ? [{ ...u, confidence: a.diagnostics?.confidence ?? null, match_type: a.diagnostics?.matchType ?? null }] : [];
+          return u ? [{ ...u, confidence: a.diagnostics?.confidence ?? null, match_type: a.diagnostics?.matchType ?? null, score: parseScore(a.diagnostics?.note) }] : [];
         }),
       };
     } catch (e) {
@@ -109,7 +124,8 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
 
   const cacheDir = path.join(CACHE_ROOT, "matching", `${matcher.datasetKey}-${matcher.version}`);
   fs.mkdirSync(cacheDir, { recursive: true });
-  const cacheFile = path.join(cacheDir, "answers.jsonl");
+  // answers-scored.jsonl: answers with the matcher's points (answers.jsonl, before November 2026, had none).
+  const cacheFile = path.join(cacheDir, "answers-scored.jsonl");
   const cache = new Map<string, Answer>();
   if (fs.existsSync(cacheFile)) {
     for (const line of fs.readFileSync(cacheFile, "utf-8").split("\n")) {
@@ -142,15 +158,17 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
   await writeTable(conn, "match_rows", { sis_taxon_id: "INTEGER", answer: "JSON" },
     jobs.map((j) => ({ sis_taxon_id: j.sis, answer: JSON.stringify(cache.get(j.hash)) })));
   // The cache keeps the matcher's own field names; the table uses the sync's.
-  const ALT = `STRUCT(usage_id VARCHAR, name VARCHAR, authorship VARCHAR, rank VARCHAR, status VARCHAR, confidence INTEGER, match_type VARCHAR)`;
+  const SCORE = `STRUCT(name INTEGER, authorship INTEGER, classification INTEGER, rank INTEGER, status INTEGER, total INTEGER)`;
+  const ALT = `STRUCT(usage_id VARCHAR, name VARCHAR, authorship VARCHAR, rank VARCHAR, status VARCHAR, confidence INTEGER, match_type VARCHAR, score ${SCORE})`;
   await conn.run(`COPY (
     SELECT sis_taxon_id,
            answer->>'$.usage.usage_id' AS matcher_col_id, answer->>'$.usage.name' AS matcher_name,
            answer->>'$.usage.authorship' AS matcher_authorship, answer->>'$.usage.rank' AS matcher_rank,
            answer->>'$.usage.status' AS matcher_status, answer->>'$.match_type' AS match_type,
            (answer->>'$.confidence')::INTEGER AS confidence,
+           CAST(answer->'$.score' AS ${SCORE}) AS matcher_score,
            list_transform(CAST(answer->'$.alternatives' AS ${ALT}[]), lambda a: {'col_id': a.usage_id, 'name': a.name, 'authorship': a.authorship,
-             'rank': a.rank, 'status': a.status, 'confidence': a.confidence, 'match_type': a.match_type}) AS alternatives
+             'rank': a.rank, 'status': a.status, 'confidence': a.confidence, 'match_type': a.match_type, 'score': a.score}) AS alternatives
     FROM match_rows ORDER BY sis_taxon_id
   ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
   return { asked: missing.length, cached: jobs.length - missing.length };
