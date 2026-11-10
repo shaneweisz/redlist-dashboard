@@ -5288,6 +5288,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
+                ) : isSingleSpecies && singleSpecies?.count_note === 'unlinked' ? (
+                  // Linked to no CoL species: nothing was counted, so no number (as in the table).
+                  <HoverTooltip text={countNoteText(singleSpecies.count_note, DATA_VERSIONS)}>
+                    <span className="text-4xl font-bold text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                  </HoverTooltip>
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
@@ -5368,6 +5373,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
                   <Spinner />
+                ) : isSingleSpecies && singleSpecies?.count_note === 'unlinked' ? (
+                  // Linked to no CoL species: nothing was counted, so no number (as in the table).
+                  <HoverTooltip text={countNoteText(singleSpecies.count_note, DATA_VERSIONS)}>
+                    <span className="text-4xl font-bold text-zinc-400 cursor-help" aria-label="Not counted">—</span>
+                  </HoverTooltip>
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
