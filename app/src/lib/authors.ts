@@ -67,10 +67,16 @@ export function oneTypo(x: string, y: string): boolean {
  * "1780") and its names misspelled ("Milen-Edwards"), which is unclear, not other.
  *
  * Unclear: everything between, and a citation missing or with nothing beyond an
- * initial ("L.").
+ * initial ("L.") against a different one.
+ *
+ * Two citations written alike, once brackets, punctuation and spacing are set
+ * aside, are the same author whatever they hold: "L." and "L." are both
+ * Linnaeus. Without this, no Linnaean name could ever be told from a homonym
+ * (Quercus robur L., which CoL also holds as a provisional copy).
  */
 export function compareAuthors(a: string | null | undefined, b: string | null | undefined): AuthorVerdict {
   if (!a || !b) return "unclear";
+  if (normaliseAuthorship(a) !== "" && normaliseAuthorship(a) === normaliseAuthorship(b)) return "same";
   const wa = words(a), wb = words(b);
   if (wa.length === 0 || wb.length === 0) return "unclear";
   const ya = year(a), yb = year(b);
