@@ -661,7 +661,18 @@ function showImagePreview(anchor: DOMRect, src: string, preferBelow = false) {
   const box = document.getElementById("image-preview");
   const img = box?.querySelector("img");
   if (!box || !img) return;
-  img.src = src;
+  // One <img> is reused for every hover, and changing its src keeps painting
+  // the old bitmap until the new one decodes — so the previous species
+  // flashed up first. Hide it until the new src has loaded (an empty box beats
+  // the wrong species); the guard drops a late load from an earlier hover.
+  if (img.getAttribute("src") !== src) {
+    img.style.visibility = "hidden";
+    img.onload = () => {
+      if (img.getAttribute("src") === src) img.style.visibility = "visible";
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) img.style.visibility = "visible";
+  }
   box.style.display = "block";
   box.style.left = `${anchor.left}px`;
   const h = box.offsetHeight;
