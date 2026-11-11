@@ -21,6 +21,7 @@ The monthly data release. `sync.ts` is the whole sync, read top to bottom: one s
 | | |
 |---|---|
 | `sync.ts` | the recipe: inputs, then the six stages, then `sync.json` |
+| `trace.ts` | `npm run sync:trace -- "<name or SIS id>"`: why one species is linked as it is, and what its count is made of, from a build |
 | `paths.ts` | where the cache and the build live (`~/.cache/redlist-dashboard/`), and the name of every file a sync builds |
 | `sql.ts` | `openDuckDB` and small SQL helpers |
 | `publish.ts`, `upload-data-to-r2.ts` | copy a finished build into `app/data/sync/` and upload it as a new sync |

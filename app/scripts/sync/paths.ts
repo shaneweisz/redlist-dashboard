@@ -14,8 +14,9 @@
  *     publish/    exactly what `npm run sync:publish` uploads and what the app reads, laid out as
  *                 src/lib/data/sync-layout.ts says
  *     review/     what a person reads before publishing: changes/ (the
- *                 comparison with production) and match-queue.tsv (the species
- *                 waiting for a decision)
+ *                 comparison with production) and links.parquet (every link,
+ *                 with the names, versions and evidence to check it; to_review
+ *                 marks the ones that need a person)
  *   A full run starts all three empty, so nothing an older version wrote survives.
  */
 
@@ -51,7 +52,7 @@ export function tables(buildDir = BUILD_DIR) {
     // 2. Link
     matches: working("link", "matches.parquet"),
     link: working("link", "assessment_link.parquet"),
-    matchQueue: path.join(buildDir, "review", "match-queue.tsv"),
+    reviewLinks: path.join(buildDir, "review", "links.parquet"),
     // 3. Count
     usageOwner: working("count", "usage_owner.parquet"),
     recordCounts: working("count", "record_counts.parquet"),

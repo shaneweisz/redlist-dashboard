@@ -173,8 +173,10 @@ export type Verdict =
 export interface KeyDecision {
   key: string | null;
   verdict: Verdict;
-  /** Human-readable, stored, so "why does this species show nothing?" is answerable. */
+  /** Human-readable, so "why does this species show nothing?" is answerable (sync:trace). */
   reason: string;
+  /** What CoL makes of the name, as assessment_link's col_treatment. */
+  treatment: "accepted" | "synonym, other name" | "lumped, unassessed" | "lumped, assessed";
   /** The taxon CoL wanted to fold this species into, when it did. */
   lumpedInto?: string;
 }
@@ -208,11 +210,14 @@ export function decideKey(input: {
       return {
         key: null,
         verdict: "refused",
-        reason: `${target.scientificName} is assessed separately by the Red List`,
+        reason: `CoL holds it as ${target.scientificName}, which the Red List assesses separately; counts nothing`,
+        treatment: "lumped, assessed",
         lumpedInto: target.scientificName,
       };
     }
-    return { key: target.key, verdict: "own", reason: `matched ${target.scientificName}` };
+    const renamed = !!acceptedUsage && acceptedUsage.key !== usage.key;
+    return { key: target.key, verdict: "own", treatment: renamed ? "synonym, other name" : "accepted",
+      reason: renamed ? `renamed: CoL accepts it as ${target.scientificName}` : "the species itself" };
   }
 
   // A lump. Its own usage is still worth keeping — but only if we got here by
@@ -221,14 +226,16 @@ export function decideKey(input: {
     return {
       key: usage.key,
       verdict: "lumped",
-      reason: `CoL folds this into ${target.scientificName}; keeping its own usage`,
+      reason: `CoL folds it into ${target.scientificName}; only the records under its own name count`,
+      treatment: "lumped, unassessed",
       lumpedInto: target.scientificName,
     };
   }
   return {
     key: null,
     verdict: "refused",
-    reason: `reached via a synonym that resolves to ${target.scientificName}`,
+    reason: `CoL folds it into ${target.scientificName}, reached only through a synonym; counts nothing`,
+    treatment: "lumped, assessed",
     lumpedInto: target.scientificName,
   };
 }

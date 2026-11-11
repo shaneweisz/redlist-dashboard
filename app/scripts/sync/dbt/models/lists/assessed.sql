@@ -14,7 +14,7 @@
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
  *   count_note               'unlinked' when it is linked to no CoL species
- *                            (waiting in the match queue), so no records are
+ *                            (waiting for a decision: to_review), so no records are
  *                            counted; else NULL
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment

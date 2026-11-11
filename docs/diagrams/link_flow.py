@@ -30,7 +30,13 @@ LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_species_id
   WHERE l.role = 'primary')"""
-QUEUE = f"read_csv('{BUILD}/review/match-queue.tsv', delim='\\t', header=true, quote='', all_varchar=true)"
+# The queue: the links that need a person (assessment_link.to_review), with the Red List's name and the matcher's answer.
+QUEUE = f"""(SELECT a.scientific_name AS name, a.authority, m.matcher_name, m.matcher_authorship,
+  l.to_review AS reason
+  FROM read_parquet('{CORE}/link/assessment_link.parquet') l
+  JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+  LEFT JOIN read_parquet('{CORE}/link/matches.parquet') m ON m.sis_taxon_id = l.sis_taxon_id
+  WHERE l.role = 'primary' AND l.to_review IS NOT NULL)"""
 
 # Each branch: how to count it, and a species that takes it (checked below).
 NAME_BRANCHES = {
@@ -39,11 +45,11 @@ NAME_BRANCHES = {
     "unlinked": ("col_species_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
 }
 CONCEPT_BRANCHES = {
-    "accepted": ("verdict = 'own' AND method = 'accepted'", "Panthera leo"),
-    "renamed": ("verdict = 'own' AND method IN ('synonym', 'provisional')", "Glossopsitta porphyrocephala"),
-    "lumped": ("verdict = 'lumped' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
-    "refused": ("verdict = 'refused'", "Turcichondrostoma fahirae"),
-    "duplicate": ("verdict = 'duplicate'", "Agapanthia probsti"),
+    "accepted": ("col_treatment = 'accepted' AND counts = 'the whole CoL species'", "Panthera leo"),
+    "renamed": ("col_treatment LIKE 'synonym, %' AND counts = 'the whole CoL species'", "Glossopsitta porphyrocephala"),
+    "lumped": ("col_treatment = 'lumped, unassessed' AND counts <> 'nothing' AND method <> 'ambiguous_synonym'", "Tetraodon biocellatus"),
+    "refused": ("col_treatment = 'lumped, assessed'", "Turcichondrostoma fahirae"),
+    "duplicate": ("counts = 'nothing' AND col_species_id IS NOT NULL AND col_treatment <> 'lumped, assessed'", "Agapanthia probsti"),
 }
 QUEUE_REASONS = [  # reason, example: the commonest reasons the matcher's answer waits for a person
     ("no species match", "Breviceps batrachophiliorum"),
@@ -122,15 +128,15 @@ def queue_line(reason, n, e, a, m, ma):
 out.append(f'  start [label={box("src", "A Red List species: its name and authority")}];')
 out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
 out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly (or spelt only as the codes allow), as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide;", "CoL's provisional copy of the name is not a rival);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
-out.append(f'  queue [label={box("q", "Otherwise a person decides: the match queue", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
+out.append(f'  queue [label={box("q", "Otherwise a person decides: to_review", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
 out.append(f'  dec [label={box("own", "Decided: a row in match-overrides.tsv", ["for the releases it names, while what it rested on still holds", eg("Cipangopaludina chinensis", name["decision"][1])], name["decision"][0])}];')
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides;", "what it might be stays off the Not Evaluated list", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
-out.append(f'  acc [label={box("own", "An accepted species: the species itself", [eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
-out.append(f'  ren [label={box("own", "A synonym: the species, renamed", [eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
-out.append(f'  lum [label={box("part", "A synonym CoL folds into another species: lumped", ["counts only the records filed under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
-out.append(f'  ref [label={box("none", "Folded into a species IUCN assesses too: refused", ["counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
-out.append(f'  dup [label={box("none", "Its CoL name is already another assessment\'s: duplicate", ["each CoL name counts for one assessed species, so this counts nothing", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
+out.append(f'  acc [label={box("own", "accepted", ["CoL accepts the Red List name; counts the whole CoL species", eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
+out.append(f'  ren [label={box("own", "synonym, other name / other spelling", ["CoL accepts the species under another name; counts the whole CoL species", eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
+out.append(f'  lum [label={box("part", "lumped, unassessed", ["CoL folds it into a species the Red List doesn't assess;", "counts only the records under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
+out.append(f'  ref [label={box("none", "lumped, assessed", ["CoL folds it into a species the Red List assesses too;", "counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
+out.append(f'  dup [label={box("none", "counts nothing: another assessment owns that CoL species", ["each CoL species counts for one assessed species", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
 
 out += ['  start -> q1; q1 -> mat [label="  certain"]; q1 -> queue [label="  not certain"];',
         '  queue -> dec; queue -> und;',

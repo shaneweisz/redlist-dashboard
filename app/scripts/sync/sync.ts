@@ -49,7 +49,7 @@ import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
 import { buildSpecialistGroups } from "./sources/specialist-groups";
 import { askMatcher } from "./link/matches";
-import { buildLink, summariseQueue } from "./link/assessment-link";
+import { buildLink } from "./link/assessment-link";
 import { runDbt, exportDbtTables } from "./dbt";
 import { buildColRevisions } from "./precomputed/col-revisions";
 import { buildSummaries } from "./precomputed/summaries";
@@ -57,6 +57,7 @@ import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
 import { observe, mismatches, buildVersions, failureKind } from "./checks/check-fixtures";
 import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
+import { buildReviewLinks } from "./checks/review-links";
 import { compare } from "./checks/compare";
 import { ensureBaseline, prodSync } from "./checks/baseline";
 import { BUILD_DIR, PUBLISH_DIR, REVIEW_DIR, WORKING_DIR, tables, parquet } from "./paths";
@@ -130,7 +131,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done = step("2 link");
     const asked = await askMatcher({ assessments: T.assessments, matcher }, T.matches);
     console.log(`   ${asked.asked.toLocaleString()} names asked, ${asked.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
-    const link = await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link, matchQueue: T.matchQueue });
+    const link = await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link });
     manifest.link_rules = link.rules;
     done();
   }
@@ -163,6 +164,9 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
 
   done = step("6 checks");
   Object.assign(manifest, await describeBuild(T, matcher));
+  // Every link with its names, versions and evidence, for a person to review.
+  const reviewed = await buildReviewLinks(T, { redlist: REDLIST_DB.replace(/^redlist_/, "").replace(/_/g, "-"), colXr: col.xr.alias });
+  console.log(`   ${reviewed.toLocaleString()} links written for review (${T.reviewLinks})`);
   const conn = await openDuckDB();
   const obs = await observe(conn, PUBLISH_DIR, MATCHING_CASES, T.assessments);
   const failed = MATCHING_CASES.filter((c) => mismatches(c, obs.get(c.name)!).length > 0);
@@ -218,14 +222,14 @@ async function describeBuild(T: ReturnType<typeof tables>, matcher: { version: s
   const [link] = await rows<{ matcher: number; decision: number; unlinked: number }>(conn, `
     SELECT count(*) FILTER (basis = 'matcher')::INT AS matcher, count(*) FILTER (basis = 'decision')::INT AS decision,
            count(*) FILTER (basis IS NULL)::INT AS unlinked FROM ${parquet(T.link)} WHERE role = 'primary'`);
-  const queue = fs.readFileSync(T.matchQueue, "utf-8").trim().split("\n").slice(1).map((line) => {
-    const [, , , status, reason] = line.split("\t");
-    return { status, reason } as { status: "undecided"; reason: string };
-  });
+  // The queue: the links that need a person, by kind and reason.
+  const queue = Object.fromEntries((await rows<{ k: string; n: number }>(conn, `
+    SELECT regexp_replace(to_review, ' \\(.*\\)$', '') AS k, count(*)::INT AS n FROM ${parquet(T.link)}
+    WHERE role = 'primary' AND to_review IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1`)).map((r) => [r.k, r.n]));
   return {
     redlist: { database: REDLIST_DB, assessed_species: rl.species, newest_published: rl.newest },
     matching: { matcher: matcher.version, xr: matcher.datasetKey, by_matcher: link.matcher, by_decision: link.decision,
-      unlinked: link.unlinked, queue: summariseQueue(queue as Parameters<typeof summariseQueue>[0]) },
+      unlinked: link.unlinked, queue },
   };
 }
 

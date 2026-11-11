@@ -66,8 +66,8 @@ A run builds into `.sync/` at the repo root, in three folders, by what you do wi
                and dbt/ (its sync.duckdb, compiled SQL and logs)
   publish/     exactly what sync:publish uploads and what the app reads: lists/ taxonomy/ search/ summaries/,
                sync.json, sync.log
-  review/      what you read before publishing: changes/ (report.md, the comparison with production)
-               and match-queue.tsv (species waiting for a decision)
+  review/      what you read before publishing: changes/ (report.md, the comparison with production),
+               and links.parquet (every link, readable; to_review marks the ones waiting for a person)
 ```
 
 A full run empties all three first, so nothing an older version wrote survives. Downloaded inputs stay in `~/.cache/redlist-dashboard/`, shared by every checkout.
@@ -120,7 +120,7 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 `link/`: `matches.ts`, `accept-match.ts`, `match-overrides.ts` (with `seeds/match-overrides.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-629-retire-matching-passes/01-link-flow-v2.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-631-link-explains-itself/01-link-flow-v2.png)
 
 Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
 
@@ -143,13 +143,13 @@ Three details make that sentence work on real names:
 
 A person decides instead when the Red List marks the name as unsettled (aff., cf., sp., ined., sensu…), when the match is a synonym by other authors than the Red List's (COL26.10 dropped *Tritoma bipustulata* Fabricius, 1775, and what's left is Schilsky's, a synonym of another beetle), and in every other case the rule doesn't settle. Author citations are compared in one place, `app/src/lib/authors.ts`.
 
-Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each overriding the matcher for it, naming the Red List name and authority it was decided for, the CoL name it is (and its authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species or now cites clearly other authors for it, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. The queue of species waiting is written each sync to `.sync/review/match-queue.tsv` with the reason and the matcher's suggestion. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be stay off the Not Evaluated list: any CoL species their own name leads to, as an accepted name or as a synonym filed under it, and the matcher's guess. That is broad on purpose until the decision is made (it also keeps off the small heath, *Coenonympha pamphilus*, under which CoL files the assessed *C. gardetta*'s name).
+Those cases go to **`seeds/match-overrides.tsv`**: one row per species, each overriding the matcher for it, naming the Red List name and authority it was decided for, the CoL name it is (and its authorship, to tell homonyms apart), who decided, whether a person has reviewed it, and the evidence. A decision holds for the releases it names (`redlist_version`, `col_version`) and records what it rested on (`col_status`, `col_species`: what CoL said that name was, and the species it led to). It is keyed by SIS id and names, not CoL ids, which move between releases, and is carried to a newer release while what it rested on still holds; when the Red List renames the species or now cites clearly other authors for it, or CoL drops the name, changes its status or files it under another species, it is stale and asked again. A decision always beats the matcher. Until November 2026 the file also held 2,016 answers of the hand-written passes the matcher replaced (#593); they were dropped, since nothing could re-derive them, once the rules above took back 1,171 of them on the same species. Every link a person needs to look at says why in `assessment_link.to_review`: no decision yet (with the rule's reason), an override that no longer holds, or one not yet reviewed. That's the queue, read in `.sync/review/links.parquet` with the matcher's answer and candidates beside it. Undecided species link to nothing; the app shows a dash in their GBIF columns, not 0, and the CoL species they might be stay off the Not Evaluated list: any CoL species their own name leads to, as an accepted name or as a synonym filed under it, and the matcher's guess. That is broad on purpose until the decision is made (it also keeps off the small heath, *Coenonympha pamphilus*, under which CoL files the assessed *C. gardetta*'s name).
 
 ### 2. The concept: what does that CoL name make the species?
 
 Each link names two CoL records. `col_taxon_id` is the CoL taxon the assessed species *is*, and `col_species_id` the CoL species that taxon belongs to. For most species they're one and the same (*Panthera leo*). They differ where CoL draws the line differently: the Red List's *Fringilla polatzeki* is CoL's subspecies *F. teydea polatzeki*, in CoL's species *F. teydea*. A species' records are counted from its taxon down, when `counted`; the species id is what the Not Evaluated list and the CoL-differences card compare. (`matches.matcher_col_id` is a third: the CoL record the matcher answered with, before any rule.)
 
-`assessment_link.method` says what kind of CoL record the name is; the verdict comes from `decideKey` in `link/species-key.ts`.
+`assessment_link.method` says what kind of CoL record the name is; `col_treatment` and `counts` come from `decideKey` in `link/species-key.ts`.
 
 - **An accepted species is the species.**
 - **A synonym is the species renamed (*own*), or a lump (*lumped*)**: CoL folds it into another species, so only its own usage, and anything under it, is its records. If CoL folds it into a species the Red List assesses separately, it is **refused** and counts nothing.
@@ -170,9 +170,18 @@ The rules after the concept step are named functions in `link/rules.ts`, applied
 | no link across a phylum | 3 |
 | one owner per usage | 70 |
 
-Every `assessment_link` row carries its verdict, method, basis and a sentence of reason, so any species' link can be explained from the table alone.
+Every `assessment_link` row carries how it was made (`match_reason`, `col_treatment`), what it counts (`counts`), its method and basis, and a sentence with the names and ids it rests on (`match_description`), so any species' link can be explained from the table alone.
 
-To review links, `dbt/analyses/link_audit.sql` gives every link with the evidence for checking it: how it was made, and where IUCN and CoL differ. It is a dbt analysis, run against a build when needed and not built each sync: `uv run dbt show --profiles-dir . --select link_audit` from `app/scripts/sync/dbt`. `sample_rank` orders each kind of link randomly, so reviewing its first n measures that kind's error rate.
+To review links, each sync writes `.sync/review/links.parquet`: every `assessment_link` row with the names, written for a person. Its first columns are the ones a review reads first: the Red List's name and authority, the CoL taxon's name and authorship, then four that say what the link is:
+
+| Column | Answers | Values |
+|---|---|---|
+| `match_reason` | how the Red List name found its CoL record | `exact, unique` (the only CoL record with that name), `exact, homonym, author decides` (several, for different species; the Red List's authority matches one), `exact, duplicate in CoL` (several, all one species; all count), `spelling variant` (no record with the Red List's spelling; the matcher found one the codes treat as the same name), `override`, `waiting`. A covered row's names the rule that added it: `CoL duplicate` (and `, respelled`, `, other genus`, `, Red List synonym`), `name under another species`, `Red List synonym`, `candidate while waiting` |
+| `col_treatment` | what CoL makes of that record | `accepted`, `synonym, other name` (CoL accepts the species under another name), `synonym, other spelling` (CoL accepts the same name spelt differently), `lumped, unassessed` (a synonym of a broader species the Red List doesn't assess), `lumped, assessed` (a synonym of a species the Red List assesses separately); a covered row's, the record's CoL status |
+| `counts` | what the row counts | `the whole CoL species`, `only records under its own name`, `nothing` |
+| `match_description` | all of it in one sentence, with the names, authors and CoL ids it rests on | "CoL has one record named *Rhus thouarsii* (Engl.) H.Perrier [4SNCF], a synonym; CoL accepts the species as *Baronia thouarsii* Engl. [KS5X]. Counts every record of *Baronia thouarsii*." |
+
+`to_review` says why a person needs to look, and is empty otherwise. After those come the details, in groups. It has the Red List's side, CoL's side (the taxon and the species, with their authorships, ranks and statuses) and the matcher's, each with the release it comes from beside it. Then come the decision and the records the row counts, and the evidence for checking it: where IUCN and CoL differ (genus, epithet, class, order, family, author year), whether IUCN lists CoL's name among its synonyms, and whether CoL's species is newer than the assessment. `differences` counts the checks on which the Red List and CoL disagree (0 when they agree on all; a renamed link always differs in name, so compare within a `match_reason`). The links to review come first. Each row carries what a reviewer, person or agent, needs to judge it without asking anything again: the Red List's name, authority, lineage and listed synonyms (`redlist_synonyms`), and the matcher's answer (`matcher_col_id`) and every candidate it weighed, each with its points, the accepted species a synonym leads to, and its lineage.
 
 ### Versions
 
@@ -220,7 +229,7 @@ uvx --from awscli aws s3 sync s3://gbif-open-data-eu-central-1/occurrence/<date>
 # 2. Build and check (about five minutes once inputs are cached)
 cd app && npm run sync
 
-# 3. Read .sync/review/changes/report.md, and .sync/review/match-queue.tsv for species waiting on a decision
+# 3. Read .sync/review/changes/report.md, and the links waiting for a person: .sync/review/links.parquet WHERE to_review IS NOT NULL
 
 # 4. Publish: copies .sync/publish/ into app/data/sync, uploads it to a new syncs/<timestamp>/, bumps latest-sync.txt
 npm run sync:publish
@@ -245,27 +254,26 @@ DB_NAME=<new> npm run sync -- --baseline ../.sync2/data           # + Red List, 
 
 ### Tracing a species
 
-The core tables are plain parquet; DuckDB reads them directly.
+`npm run sync:trace -- "<Red List name or SIS id>"` prints why a species is linked as it is, from the build, in the order the sync decides it:
 
-```sql
--- in duckdb, from .sync/working
-SET VARIABLE sp = 'Zosterops simplex';
+1. **The name:** GBIF's matcher's answer, and the points it gave it and every other candidate (name, authorship, classification, rank, status); why the sync took that answer (the acceptance rule's clause), took an override's instead (with the releases it was decided against), or left the species waiting.
+2. **The concept:** each link row: the CoL taxon and species it names, its `match_reason`, `col_treatment` and `counts`, and its description.
+3. **The count:** every CoL record whose GBIF records count for it, and the totals the app shows.
 
--- its link rows: what it is in CoL, and why
-SELECT l.role, l.verdict, l.method, u.scientific_name AS col_taxon, u.rank, c.scientific_name AS col_species, l.counted, l.reason
-FROM 'link/assessment_link.parquet' l
-JOIN 'sources/assessments.parquet' a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-LEFT JOIN 'sources/taxa.parquet' c ON c.col_id = l.col_species_id
-LEFT JOIN 'sources/taxa.parquet' u ON u.col_id = l.col_taxon_id
-WHERE a.scientific_name = getvariable('sp');
-
--- what its count is made of: each CoL record it owns, and its records
-SELECT w.link_usage_id, u.scientific_name AS col_record, u.rank, u.status, sum(o.n) FILTER (o.georef) AS georef, sum(o.n) AS all_records
-FROM 'count/usage_owner.parquet' w JOIN 'sources/taxa.parquet' u ON u.col_id = w.usage_key
-LEFT JOIN 'sources/occurrences.parquet' o ON o.usage_key = w.usage_key
-WHERE w.sis_taxon_id = (SELECT sis_taxon_id FROM 'sources/assessments.parquet' WHERE is_latest AND scientific_name = getvariable('sp'))
-GROUP BY ALL ORDER BY georef DESC NULLS LAST;
 ```
+$ npm run sync:trace -- "Cipangopaludina chinensis"
+1. The name
+  The matcher answered: Cipangopaludina chinensis (J. E. Gray, 1833) [VFND, ambiguous_synonym species], EXACT, 100% sure
+    points: name 110, authorship 0, classification 50, rank 6, status -1 = 165
+  Other candidates it weighed:
+    Cipangopaludina chinensis (Gray, 1834) [VHXLS, provisionally_accepted species]: name 110, ..., status -5 = 161
+2. The concept
+  Why this name: override by fixture, decided against COL26.6 XR
+  primary  CoL species Cipangopaludina chinensis (Gray, 1834) [VHXLS]
+  ...
+```
+
+Everything it prints is in the build's tables, so anything it shows can be checked with DuckDB directly: `matches.parquet` holds the matcher's answers and points (`matcher_score`, and the candidates in `alternatives`, each with its `score`: both JSON text), the accepted species each synonym leads to and each candidate's lineage (kingdom to family), and the matching-ws release and XR that answered (`matcher_version`, `matcher_xr`), and `assessment_link.parquet` the link rows, with `match_reason`, `col_treatment`, `counts`, `match_description` and `to_review`.
 
 ## Decisions and known limits
 

@@ -24,7 +24,7 @@
  *      "own" link row is that species, for the assessed species.
  *   3. Otherwise, if no link row names that species at all, for the species
  *      itself, unassessed. A species linked only by rows that don't count
- *      (refused, duplicate) counts for no one.
+ *      (counts nothing) counts for no one.
  *
  * Checks: each usage has at most one owner. A violation means a number
  * somewhere is inflated, so the sync stops.
@@ -32,7 +32,7 @@
 
 -- 1. What each lumped species owns.
 WITH RECURSIVE down(sis, root, usage_key, depth) AS (
-  SELECT sis_taxon_id, col_taxon_id, col_taxon_id, 0 FROM {{ source('link', 'assessment_link') }} WHERE verdict = 'lumped' AND counted
+  SELECT sis_taxon_id, col_taxon_id, col_taxon_id, 0 FROM {{ source('link', 'assessment_link') }} WHERE counts = 'only records under its own name'
   UNION ALL
   SELECT d.sis, d.root, t.col_id, d.depth + 1 FROM down d JOIN {{ source('sources', 'taxa') }} t ON t.parent_id = d.usage_key WHERE d.depth < 3
 ),
@@ -48,7 +48,7 @@ SELECT usage_key, sis AS sis_taxon_id, root AS link_usage_id, NULL::VARCHAR AS c
 UNION ALL
 -- 2. A species' usages, for the assessed species whose own row it is.
 SELECT t.col_id, l.sis_taxon_id, l.col_taxon_id, NULL
-FROM taxa t JOIN link l ON l.col_taxon_id = t.species_id AND l.verdict = 'own' AND l.counted
+FROM taxa t JOIN link l ON l.col_taxon_id = t.species_id AND l.counts = 'the whole CoL species'
 WHERE t.col_id NOT IN (SELECT usage_key FROM lumped)
 UNION ALL
 -- 3. A species no link row names: its own.

@@ -29,10 +29,12 @@ async function counts(links: Link[] = []) {
       ('LEO', 2020::SMALLINT, true, 9::BIGINT), ('OAKSYN', 1900::SMALLINT, true, 30::BIGINT), ('OAK', 2024::SMALLINT, true, 1::BIGINT),
       ('G', 2020::SMALLINT, true, 500::BIGINT))
       t(usage_key, year, georef, n)`.replace("SELECT * FROM", "SELECT usage_key, year, NULL::TINYINT AS month, NULL::DATE AS event_date, georef, n FROM"), T.occurrences);
-  const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${l.verdict}', ${l.counted ?? true}, '${l.usage}')`);
+  // What assessment-link.ts writes for each verdict: counts, from the verdict and whether the row counts.
+  const countsOf = (l: Link) => !(l.counted ?? true) ? "nothing" : l.verdict === "own" ? "the whole CoL species" : "only records under its own name";
+  const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${countsOf(l)}', ${l.counted ?? true}, '${l.usage}')`);
   await copy(links.length
-    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, col_taxon_id, verdict, counted, col_species_id)`
-    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_taxon_id, NULL::VARCHAR AS verdict, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_species_id WHERE false`, T.link);
+    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, col_taxon_id, counts, counted, col_species_id)`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_taxon_id, NULL::VARCHAR AS counts, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_species_id WHERE false`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, true AS is_latest, DATE '2015-01-01' AS assessment_date
     FROM (VALUES (1), (2)) t(sis)`, T.assessments);
 

@@ -14,6 +14,7 @@
     "sync": "npx tsx scripts/sync/sync.ts",
     "sync:publish": "npx tsx scripts/sync/publish.ts",
     "sync:lineage": "npx tsx scripts/sync/lineage.ts",
+    "sync:trace": "npx tsx scripts/sync/trace.ts",
     "sync:compare": "npx tsx scripts/sync/checks/compare.ts",
     "upload-data-to-r2": "npx tsx scripts/sync/upload-data-to-r2.ts",
     "fetch-data-from-r2": "npx tsx scripts/build/fetch-data-from-r2.ts",
