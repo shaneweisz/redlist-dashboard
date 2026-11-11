@@ -67,8 +67,8 @@ export const INCLUDED_BASIS_OF_RECORD = [
  * herbarium sheets. That reads as "almost nothing is known about this species"
  * when what is known simply sits in a different record type.
  *
- * The map's basis-of-record checkboxes default preserved specimens ON for
- * plants and fungi for that reason.
+ * (The map's basis-of-record checkboxes open with every type on, for every
+ * taxon; which ones count as evidence is left to the assessor.)
  */
 export const INCLUDED_BASIS_OF_RECORD_WITH_SPECIMENS = [
   ...INCLUDED_BASIS_OF_RECORD,
