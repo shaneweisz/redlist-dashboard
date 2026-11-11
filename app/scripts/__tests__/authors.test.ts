@@ -22,7 +22,18 @@ describe("compareAuthors", () => {
     ["L.", "L."],
     ["L.", "L. "],
     ["(L.) Hill", "(L.)  Hill"],
+    // The original author agrees, whoever combined it; brackets left out; a typo in them.
+    ["(Linnaeus) Roth", "(Linnaeus) Hoffm."],
+    ["Druce", "(Hill) Druce"],
+    ["(Pall.) Regel", "(Parl.) Regel"],
+    ["(Weihler) L.E.Skog & L.P.Kvist", "(Wiehler) L.E.Skog & L.P.Kvist"],
   ])("same: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("same"));
+
+  it.each([
+    // Malaxis brachystachys: Reichenbach combined Lindley's name in one, named the other.
+    ["(Lindl.) Rchb.fil.", "(Rchb.f.) Kuntze"],
+    ["(Willd.) Standl.", "(Vahl) Standl."],
+  ])("not same, one author in two roles: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("unclear"));
 
   it.each([
     // Tritoma bipustulata: the beetle CoL dropped, and the synonym it left.

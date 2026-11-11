@@ -56,8 +56,9 @@ export function oneTypo(x: string, y: string): boolean {
 }
 
 /**
- * Same author: a word in common (abbreviations of three letters or more), and
- * the same year where both give one.
+ * Same author: a word in common (abbreviations of three letters or more), the
+ * same year where both give one, and, when both cite one in brackets, the
+ * same original author.
  *
  * Other authors: no word in common, even abbreviations as short as "Bl." for
  * Blume or a word one typo off ("Tamaka" / "Tanaka"), no year in common, and
@@ -74,13 +75,28 @@ export function oneTypo(x: string, y: string): boolean {
  * Linnaeus. Without this, no Linnaean name could ever be told from a homonym
  * (Quercus robur L., which CoL also holds as a provisional copy).
  */
+/**
+ * Whoever named the species first, where both citations say (the author in
+ * brackets): "(Lindl.) Rchb.fil." and "(Rchb.f.) Kuntze" share Reichenbach,
+ * but he combined Lindley's name in one and named the other: two types, two
+ * orchids (Malaxis brachystachys). A citation without brackets often just
+ * leaves them out ("Druce" / "(Hill) Druce"), so it is taken as agreeing, as
+ * is a bracketed author one typo off ("(Pall.)" / "(Parl.)").
+ */
+function sameOriginal(a: string, b: string): boolean {
+  const ba = a.match(/\(([^)]*)\)/)?.[1], bb = b.match(/\(([^)]*)\)/)?.[1];
+  if (!ba || !bb) return true;
+  const oa = words(ba), ob = words(bb);
+  return oa.length === 0 || ob.length === 0 || shareWord(oa, ob, 2) || oa.some((x) => ob.some((y) => oneTypo(x, y)));
+}
+
 export function compareAuthors(a: string | null | undefined, b: string | null | undefined): AuthorVerdict {
   if (!a || !b) return "unclear";
   if (normaliseAuthorship(a) !== "" && normaliseAuthorship(a) === normaliseAuthorship(b)) return "same";
   const wa = words(a), wb = words(b);
   if (wa.length === 0 || wb.length === 0) return "unclear";
   const ya = year(a), yb = year(b);
-  if (shareWord(wa, wb, 3)) return ya && yb && ya !== yb ? "unclear" : "same";
+  if (shareWord(wa, wb, 3)) return ya && yb && ya !== yb ? "unclear" : sameOriginal(a, b) ? "same" : "unclear";
   if (shareWord(wa, wb, 2) || wa.some((x) => wb.some((y) => oneTypo(x, y))) || (ya && ya === yb)) return "unclear";
   const basionym = (s: string) => s.match(/\(([^)]*)\)/)?.[1];
   const ba = basionym(a), bb = basionym(b);

@@ -23,6 +23,9 @@
  *     the accepted Richardson, 1831)
  *   - a misapplied name: CoL saying that name was used wrongly, not that it
  *     is another species
+ * But the twins don't settle it when the Red List cites, exactly, the authors
+ * of a rival and not the match's: it means the rival (Sambucus nigra Lour.,
+ * matched to Linnaeus's elder).
  *
  * And a synonym match by other authors than the Red List's (authors.ts) waits
  * too: when CoL drops a species, the only name left spelled like it can be
@@ -32,7 +35,7 @@
  *
  * Author citations are compared in authors.ts.
  */
-import { compareAuthors } from "../../../src/lib/authors";
+import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
 import { orthographicallySame } from "./name-variants";
 
 export interface MatchAnswer {
@@ -62,7 +65,8 @@ export type QueueReason =
   | "synonym of no species"
   | "homonym the authors don't decide"
   | "accepted and a synonym in CoL"
-  | "synonym by other authors";
+  | "synonym by other authors"
+  | "authors point to another record";
 
 export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice"; variant?: true }
@@ -109,6 +113,11 @@ export function acceptMatch(
   const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
     if (m.matcher_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
+    // The Red List cites a rival's authors, and not the answer's: it means the rival.
+    const cited = normaliseAuthorship(species.authority ?? "");
+    if (cited && normaliseAuthorship(m.matcher_authorship ?? "") !== cited && rivals.some((a) => !twins.includes(a) && normaliseAuthorship(a.authorship ?? "") === cited)) {
+      return no("authors point to another record");
+    }
     return yes("CoL holds it twice");
   }
   if (same(species.authority, m.matcher_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {

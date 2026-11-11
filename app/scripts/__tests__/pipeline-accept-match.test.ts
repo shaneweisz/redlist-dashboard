@@ -104,6 +104,22 @@ describe("acceptMatch", () => {
         .toEqual({ accepted: false, reason: "accepted and a synonym in CoL" });
     });
 
+    it("is queued when the Red List cites a rival's authors exactly, not the twins' (Sambucus nigra Lour.)", () => {
+      const m = answer({ matcher_name: "Sambucus nigra", matcher_authorship: "L.", alternatives: [
+        { col_id: "R1", name: "Sambucus nigra", authorship: "L.", rank: "SPECIES", status: "SYNONYM" },
+        { col_id: "R2", name: "Sambucus nigra", authorship: "Lour.", rank: "SPECIES", status: "SYNONYM" }] });
+      expect(acceptMatch({ name: "Sambucus nigra", authority: "Lour." }, m, speciesOf({ R1: "S1", R2: "ebulus" })))
+        .toEqual({ accepted: false, reason: "authors point to another record" });
+    });
+
+    it("doesn't take one author in two roles as twins (Malaxis brachystachys)", () => {
+      const m = answer({ matcher_status: "SYNONYM", matcher_name: "Malaxis brachystachys", matcher_authorship: "(Lindl.) Rchb.fil.", alternatives: [
+        { col_id: "R1", name: "Malaxis brachystachys", authorship: "(Rchb.f.) Kuntze", rank: "SPECIES", status: "SYNONYM" },
+        { col_id: "R2", name: "Malaxis brachystachys", authorship: "(Rchb.f.) Kuntze", rank: "SPECIES", status: "SYNONYM" }] });
+      expect(acceptMatch({ name: "Malaxis brachystachys", authority: "(Rchb.f.) Kuntze" }, m, speciesOf({ U1: "Oberonia", R1: "realdelmontensis", R2: "realdelmontensis" })))
+        .toEqual({ accepted: false, reason: "homonym the authors don't decide" });
+    });
+
     it("takes an accepted match beside CoL's provisional copy of it (Cygnus buccinator)", () => {
       const m = answer({ matcher_name: "Cygnus buccinator", matcher_authorship: "Richardson, 1831",
         alternatives: [{ col_id: "VN748", name: "Cygnus buccinator", authorship: "Richardson, 1832", rank: "SPECIES", status: "PROVISIONALLY_ACCEPTED" }] });
