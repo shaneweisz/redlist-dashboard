@@ -1,10 +1,19 @@
 /**
- * agent-match-review: AI agents review the name matches the sync left waiting.
- * Independent Claude reviewers judge each waiting Red List -> CoL match, and a
- * match is decided only when every reviewer agrees.
+ * agent-match-review: AI agents review Red List -> CoL name matches. Independent
+ * Claude reviewers judge each match, and a verdict counts only when every
+ * reviewer agrees. Two uses:
+ *
+ *   waiting (default)  the matches the sync left waiting: the record under review
+ *                      is the matcher's answer, and an agreed verdict becomes a
+ *                      proposed decision in seeds/agent-match-overrides.tsv
+ *   --audit            the links the sync made: the record under review is the
+ *                      one the species is linked to, and the verdicts go to
+ *                      agent-match-review/audit.tsv, to measure how often each
+ *                      kind of link (match_reason · col_treatment) is wrong
  *
  *   npm run sync:agent-match-review -- --sis 194894,19620213     the links named
- *   npm run sync:agent-match-review -- --sample 5                 N waiting links, spread across to_review reasons
+ *   npm run sync:agent-match-review -- --sample 10                N links, round-robin across strata
+ *   npm run sync:agent-match-review -- --audit --per-stratum 20  N links from each stratum
  *   --dry-run picks the links and prints them, without starting a reviewer
  *   options: --votes 2 (reviewers per link) --concurrency 6 --model haiku --upload (transcripts to B2)
  *
@@ -20,13 +29,28 @@
  *       schema hashes, CLI version, model, options), rows.json, and per
  *       reviewer <sis>-<n>.jsonl (the full stream-json transcript) and
  *       <sis>-<n>.md (the same, readable)
- *   seeds/agent-match-overrides.tsv    one row per reviewed link, replacing an
- *       earlier review of it: the decision, the CoL record it chose, each
- *       reviewer's verdict, reasoning, sources and transcript, and blank
- *       reviewed / reviewer_note columns for a person
+ *   seeds/agent-match-overrides.tsv (waiting) or agent-match-review/audit.tsv
+ *       (--audit)   one row per reviewed link, replacing an earlier review of
+ *       it: the stratum, the record under review, the decision, the CoL record
+ *       the reviewers chose, each reviewer's verdict, reasoning, sources and
+ *       transcript, and blank reviewed / reviewer_note columns for a person
  *
  * Decisions:
- *   - A decision ("link" or "not in CoL") needs every reviewer to give the same
+ *   - Reviewers see the same evidence in both uses (the Red List side, where it
+ *     lives, the record under review, the matcher's answer and alternatives) and
+ *     none of the sync's own labels (to_review, match_reason, the description),
+ *     so they are not nudged toward "wrong" for a waiting match or "right" for
+ *     a made one.
+ *   - Strata: waiting matches by to_review; links by match_reason ·
+ *     col_treatment, the kinds under 500 links pooled as "rarer kinds".
+ *     Within a stratum, links are drawn in a fixed pseudo-random order
+ *     (hash of the SIS id), so a run can be repeated and extended.
+ *   - Audit decisions: "confirmed" (all agree the linked record is right),
+ *     "record right, CoL's lumping disputed" (they agree on the linked record
+ *     but call the species CoL files it under another organism),
+ *     "wrong, right record found", "wrong, no record", "wrong, not in CoL", or
+ *     "no agreement".
+ *   - A waiting decision ("link" or "not in CoL") needs every reviewer to give the same
  *     verdict and record, none unsure and none at low confidence. "lumped"
  *     counts as agreeing with "same species": both take the matcher's record.
  *     A link must name a record that leads to a CoL species and isn't marked
@@ -53,10 +77,11 @@ import { syncPath } from "../../../src/lib/data/sync-layout";
 const HERE = __dirname;
 const PROMPT_FILE = path.join(HERE, "reviewer-prompt.md");
 const SCHEMA_FILE = path.join(HERE, "verdict-schema.json");
-const TSV = path.join(SEEDS_DIR, "agent-match-overrides.tsv");
+const OVERRIDES_TSV = path.join(SEEDS_DIR, "agent-match-overrides.tsv");
+const AUDIT_TSV = path.join(HERE, "audit.tsv");
 
 type Verdict = { verdict: string; col_id: string | null; confidence: string; reasoning: string; sources: string[] };
-type Row = Record<string, unknown> & { sis_taxon_id: number; to_review: string };
+type Row = Record<string, unknown> & { sis_taxon_id: number; stratum: string; under_review: { col_id: string; name: string; authorship: string | null } };
 
 function opts() {
   const a = process.argv.slice(2);
@@ -68,40 +93,66 @@ function opts() {
     concurrency: Number(get("concurrency") ?? 6),
     model: get("model") ?? "haiku",
     upload: a.includes("--upload"),
+    audit: a.includes("--audit"),
+    perStratum: get("per-stratum") ? Number(get("per-stratum")) : undefined,
     dryRun: a.includes("--dry-run"),
   };
 }
 
-async function waitingRows(o: ReturnType<typeof opts>): Promise<Row[]> {
+/** What a reviewer sees: the evidence, without the sync's own labels. */
+const SHOWN = ["sis_taxon_id", "redlist_name", "redlist_authority", "common_name", "category", "taxon_group", "class", "order", "family", "countries", "systems",
+  "redlist_synonyms", "under_review", "matcher_col_id", "matcher_name", "matcher_authorship", "matcher_status", "matcher_accepted_col_id", "matcher_accepted_name",
+  "matcher_accepted_authorship", "matcher_lineage", "match_type", "confidence", "matcher_alternatives"];
+const shown = (r: Row) => Object.fromEntries(SHOWN.map((k) => [k, r[k]]));
+
+const SITUATION = {
+  waiting: "The sync's rules could not decide this match on their own, so the species is waiting, linked to nothing; the record under review is the matcher's answer.",
+  audit: "This is a check on a match the sync made: the record under review is the one the Red List species is linked to now. We are measuring how often such links are right, so judge it on the evidence alone.",
+};
+
+async function selectRows(o: ReturnType<typeof opts>): Promise<Row[]> {
   const T = tables(BUILD_DIR);
   const conn = await openDuckDB();
+  const review = o.audit
+    ? `struct_pack(col_id := l.col_taxon_id, name := l.col_taxon_name, authorship := l.col_taxon_authorship, status := l.col_taxon_status,
+         species_col_id := l.col_species_id, species_name := l.col_species_name, species_authorship := l.col_species_authorship)`
+    : `struct_pack(col_id := l.matcher_col_id, name := l.matcher_name, authorship := l.matcher_authorship, status := lower(replace(l.matcher_status, '_', ' ')),
+         species_col_id := coalesce(l.matcher_accepted_col_id, l.matcher_col_id), species_name := coalesce(l.matcher_accepted_name, l.matcher_name),
+         species_authorship := coalesce(l.matcher_accepted_authorship, l.matcher_authorship))`;
+  const where = o.audit ? `l.role = 'primary' AND l.col_species_id IS NOT NULL`
+    : `l.role = 'primary' AND l.to_review IS NOT NULL AND l.matcher_col_id IS NOT NULL AND l.match_type NOT IN ('HIGHERRANK', 'NONE')`;
+  const stratum = o.audit
+    ? `CASE WHEN count(*) OVER (PARTITION BY l.match_reason, l.col_treatment) >= 500 THEN l.match_reason || ' · ' || l.col_treatment ELSE 'rarer kinds' END`
+    : `l.to_review`;
   const all = await query<Row>(conn, `
-    SELECT l.sis_taxon_id::BIGINT AS sis_taxon_id, l.redlist_name, l.redlist_authority, a.common_name, l.category, l.taxon_group, l.class, l."order", l.family,
-           a.countries, a.systems, l.redlist_synonyms, l.to_review, l.match_description,
-           l.matcher_col_id, l.matcher_name, l.matcher_authorship, l.matcher_status, l.matcher_accepted_col_id, l.matcher_accepted_name,
-           l.matcher_accepted_authorship, l.matcher_lineage, l.match_type, l.confidence, l.matcher_alternatives,
-           row_number() OVER (PARTITION BY l.to_review ORDER BY hash(l.sis_taxon_id)) AS k
-    FROM read_parquet('${T.reviewLinks}') l
-    JOIN read_parquet('${T.assessments}') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
-    WHERE l.role = 'primary' AND l.to_review IS NOT NULL
-      AND l.matcher_col_id IS NOT NULL AND l.match_type NOT IN ('HIGHERRANK', 'NONE')`);
+    WITH x AS (
+      SELECT l.sis_taxon_id::BIGINT AS sis_taxon_id, l.redlist_name, l.redlist_authority, a.common_name, l.category, l.taxon_group, l.class, l."order", l.family,
+             a.countries, a.systems, l.redlist_synonyms, ${review} AS under_review,
+             l.matcher_col_id, l.matcher_name, l.matcher_authorship, l.matcher_status, l.matcher_accepted_col_id, l.matcher_accepted_name,
+             l.matcher_accepted_authorship, l.matcher_lineage, l.match_type, l.confidence, l.matcher_alternatives,
+             l.to_review, l.match_reason, l.col_treatment, l.counts, ${stratum} AS stratum
+      FROM read_parquet('${T.reviewLinks}') l
+      JOIN read_parquet('${T.assessments}') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
+      WHERE ${where})
+    SELECT *, row_number() OVER (PARTITION BY stratum ORDER BY hash(sis_taxon_id)) AS k FROM x`);
   const tidy = (r: Row): Row => {
-    const { k: _k, ...rest } = r;
     const list = (v: unknown) => (v as { items?: unknown[] } | null)?.items ?? v ?? [];
-    return { ...rest, sis_taxon_id: Number(r.sis_taxon_id), countries: list(r.countries), systems: list(r.systems),
+    const struct = (v: unknown) => (v as { entries?: unknown } | null)?.entries ?? v;
+    return { ...r, sis_taxon_id: Number(r.sis_taxon_id), k: Number(r.k), countries: list(r.countries), systems: list(r.systems), under_review: struct(r.under_review) as Row["under_review"],
       redlist_synonyms: r.redlist_synonyms ? JSON.parse(String(r.redlist_synonyms)) : [],
       matcher_alternatives: r.matcher_alternatives ? JSON.parse(String(r.matcher_alternatives)) : [] };
   };
   if (o.sis) return all.filter((r) => o.sis!.includes(Number(r.sis_taxon_id))).map(tidy);
-  // Spread a sample across the reasons: the first of each reason, then the second, ...
-  const n = o.sample ?? 5;
-  return [...all].sort((x, y) => Number(x.k) - Number(y.k) || String(x.to_review).localeCompare(String(y.to_review))).slice(0, n).map(tidy);
+  if (o.perStratum) return all.filter((r) => Number(r.k) <= o.perStratum!).map(tidy)
+    .sort((x, y) => String(x.stratum).localeCompare(String(y.stratum)) || Number(x.k) - Number(y.k));
+  // Round-robin across the strata: the first of each, then the second, ...
+  return [...all].sort((x, y) => Number(x.k) - Number(y.k) || String(x.stratum).localeCompare(String(y.stratum))).slice(0, o.sample ?? 5).map(tidy);
 }
 
 /** One reviewer: a fresh claude -p, its stream-json transcript kept whole. */
-function review(row: Row, prompt: string, schema: string, model: string): Promise<{ lines: string[]; verdict: Verdict | null }> {
+function review(row: Row, prompt: string, schema: string, model: string, situation: string): Promise<{ lines: string[]; verdict: Verdict | null }> {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-match-review-"));
-  const args = ["-p", prompt.replace("{{row}}", JSON.stringify(row, null, 1)), "--model", model,
+  const args = ["-p", prompt.replace("{{situation}}", situation).replace("{{row}}", JSON.stringify(shown(row), null, 1)), "--model", model,
     "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--setting-sources", "",
     "--tools", "Bash,WebFetch,WebSearch", "--allowedTools", "Bash(curl:*)", "WebFetch", "WebSearch",
     "--permission-mode", "dontAsk", "--json-schema", schema];
@@ -206,22 +257,25 @@ async function main() {
   const sync = JSON.parse(fs.readFileSync(path.join(BUILD_DIR, "publish", syncPath("sync.json")), "utf-8"));
   const releases = { redlist: sync.redlist?.database ?? "", col: sync.col?.xr?.alias ?? "", col_dataset: sync.col?.xr?.key ?? "" };
 
-  const links = await waitingRows(o);
+  const mode = o.audit ? "audit" : "waiting";
+  const TSV = o.audit ? AUDIT_TSV : OVERRIDES_TSV;
+  const links = await selectRows(o);
   if (o.dryRun) {
-    for (const l of links) console.log(`${l.sis_taxon_id}\t${l.to_review}\t${l.redlist_name} ${l.redlist_authority ?? ""} -> ${l.matcher_name} ${l.matcher_authorship ?? ""}\t${JSON.stringify(l.countries)}`);
+    for (const l of links) console.log(`${l.sis_taxon_id}\t${l.stratum}\t${l.redlist_name} ${l.redlist_authority ?? ""} -> ${l.under_review.name} ${l.under_review.authorship ?? ""} [${l.under_review.col_id}]\t${JSON.stringify(l.countries)}`);
+    console.log(`${links.length} links`);
     fs.rmSync(dir, { recursive: true, force: true });
     return;
   }
   const cli = execSync("claude --version").toString().trim();
   const manifest = { run, commit, prompt_changed_since_commit: dirty, prompt_sha: sha(prompt), schema_sha: sha(schema), claude_code: cli,
-    model: o.model, votes: o.votes, links: links.length, releases };
+    mode, model: o.model, votes: o.votes, links: links.length, releases };
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 1));
   fs.writeFileSync(path.join(dir, "rows.json"), JSON.stringify(links, null, 1));
-  console.log(`agent-match-review ${run}: ${links.length} links × ${o.votes} reviewers (${o.model}), prompt ${manifest.prompt_sha}${dirty ? " (uncommitted)" : ""}`);
+  console.log(`agent-match-review ${run} (${mode}): ${links.length} links × ${o.votes} reviewers (${o.model}), prompt ${manifest.prompt_sha}${dirty ? " (uncommitted)" : ""}`);
 
   const jobs = links.flatMap((row) => Array.from({ length: o.votes }, (_, n) => ({ row, n: n + 1 })));
   const done = await pool(jobs, o.concurrency, async ({ row, n }) => {
-    const r = await review(row, prompt, schema, o.model);
+    const r = await review(row, prompt, schema, o.model, SITUATION[mode]);
     const clean = sanitise(r.lines);
     fs.writeFileSync(path.join(dir, `${row.sis_taxon_id}-${n}.jsonl`), clean.join("\n") + "\n");
     fs.writeFileSync(path.join(dir, `${row.sis_taxon_id}-${n}.md`), readable(clean, `${row.redlist_name} (SIS ${row.sis_taxon_id}), reviewer ${n} of ${o.votes}`,
@@ -241,17 +295,28 @@ async function main() {
     const agreedId = agreed ? votes[0]!.col_id : null;
     const [t] = agreedId ? await query<Record<string, string>>(conn, `SELECT t.scientific_name AS name, t.authorship, t.status, s.scientific_name AS species
       FROM read_parquet('${T.taxa}') t LEFT JOIN read_parquet('${T.taxa}') s ON s.col_id = t.species_id WHERE t.col_id = '${agreedId.replace(/'/g, "")}'`) : [];
+    const v0 = votes[0]?.verdict;
+    const right = v0 === "same species" || v0 === "lumped";
     // A link has to name a record that leads to a CoL species and isn't a misapplication.
-    const decision = !agreed ? "no agreement"
-      : votes[0]!.verdict === "not in CoL" ? "not in CoL"
-      : !agreedId ? "matcher wrong, no record"
-      : !t?.species || t.status === "misapplied" ? "no usable record"
-      : "link";
-    const colId = decision === "link" ? agreedId : null;
+    const decision = o.audit
+      ? (!agreed ? "no agreement"
+        : right ? (agreedId === row.under_review.col_id ? "confirmed" : "no agreement")
+        : v0 === "not in CoL" ? "wrong, not in CoL"
+        : !agreedId ? "wrong, no record"
+        // Its own name is right; they dispute the broader species CoL files it under.
+        : agreedId === row.under_review.col_id ? "record right, CoL's lumping disputed"
+        : "wrong, right record found")
+      : (!agreed ? "no agreement"
+        : v0 === "not in CoL" ? "not in CoL"
+        : !agreedId ? "matcher wrong, no record"
+        : !t?.species || t.status === "misapplied" ? "no usable record"
+        : "link");
+    const u = row.under_review as Record<string, unknown>;
     const rec: Record<string, unknown> = {
-      sis_taxon_id: row.sis_taxon_id, redlist_name: row.redlist_name, redlist_authority: row.redlist_authority, to_review: row.to_review,
-      matcher_col_id: row.matcher_col_id, matcher_name: row.matcher_name, matcher_authorship: row.matcher_authorship, matcher_status: row.matcher_status,
-      decision, col_id: colId ?? agreedId, col_name: t?.name, col_authorship: t?.authorship, col_status: t?.status, col_species: t?.species,
+      sis_taxon_id: row.sis_taxon_id, redlist_name: row.redlist_name, redlist_authority: row.redlist_authority, category: row.category, taxon_group: row.taxon_group,
+      stratum: row.stratum, match_reason: row.match_reason, col_treatment: row.col_treatment, counts: row.counts, to_review: row.to_review,
+      reviewed_col_id: u.col_id, reviewed_name: u.name, reviewed_authorship: u.authorship, reviewed_status: u.status, reviewed_species: u.species_name,
+      decision, col_id: agreedId, col_name: t?.name, col_authorship: t?.authorship, col_status: t?.status, col_species: t?.species,
     };
     votes.forEach((v, i) => Object.assign(rec, {
       [`vote${i + 1}_verdict`]: v?.verdict ?? "no verdict", [`vote${i + 1}_col_id`]: v?.col_id, [`vote${i + 1}_confidence`]: v?.confidence,
