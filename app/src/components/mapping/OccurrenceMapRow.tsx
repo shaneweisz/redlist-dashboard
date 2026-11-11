@@ -18,7 +18,6 @@ import {
   type EditsBackup,
 } from "@/lib/mapping/edits-backup";
 import { duplicatesByPrimary as groupDuplicates, keepRecord as keepRecordIn } from "@/lib/mapping/duplicates";
-import { taxonGroupCountsPreservedSpecimens } from "@/lib/gbif";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import {
   CHART_INPUT_CLASS,
@@ -512,9 +511,8 @@ interface OccurrenceMapRowProps {
   /** This species' current assessment's Red List criteria (e.g. "A2bd") — shown
    * in the current-assessment marker's tooltip alongside its category. */
   criteria?: string | null;
-  /** CSV taxon group (e.g. "flowering_plants", "mushrooms") — used to default
-   * preserved specimens ON for plants & fungi, where herbarium/fungarium
-   * records are a core data source. */
+  /** CSV taxon group (e.g. "flowering_plants", "mushrooms") — picks the
+   * sampling-effort layer and gates the AOH and POWO native-range sources. */
   taxonGroup?: string;
   /** This species' scientific name — used to look up its POWO/WCVP native range. */
   scientificName?: string;
@@ -546,31 +544,20 @@ interface OccurrenceMapRowProps {
 /**
  * Which record types are selected when the viewer opens.
  *
- * Every record type but three: a literature citation or a bare "occurrence"
- * record is evidence of where the species was, and a default that quietly
- * drops record types hides the very evidence an assessment gets written from.
- *
- * Two of the three say where an individual *ended up* rather than where the
- * species lives, whatever the kingdom: a living specimen is a zoo or botanic
- * garden animal or plant, and a fossil specimen is a range from a different
- * epoch. Both are off until asked for.
- *
- * The third, preserved specimens, follows the taxon — on for plants and fungi
- * (and the brown algae filed with them), off for animals. The dashboard's
- * counts are simpler (every kingdom counts preserved specimens; see
- * gbif-records.ts): the map applies its own defaults, because a plant is known mostly from
- * collected, preserved material, an animal mostly from observation, and a
- * mammal's herbarium-equivalent museum skins are a small tail of records whose
- * localities are the oldest and vaguest in the set.
+ * Every record type, for every taxon. Which records count as evidence of where
+ * a species lives — a zoo animal, a fossil, a century-old museum skin — is the
+ * assessor's call, not the viewer's: a default that quietly drops record types
+ * hides evidence before anyone has looked at it. Each type can be unchecked
+ * from the record-type filter.
  */
-export function defaultCheckedTypes(taxonGroup?: string) {
+export function defaultCheckedTypes() {
   return {
     humanObservation: true,
     machineObservation: true,
     observation: true,
-    preservedSpecimen: taxonGroupCountsPreservedSpecimens(taxonGroup),
-    fossilSpecimen: false,
-    livingSpecimen: false,
+    preservedSpecimen: true,
+    fossilSpecimen: true,
+    livingSpecimen: true,
     materialSample: true,
     materialCitation: true,
     occurrence: true,
@@ -650,7 +637,7 @@ export default function OccurrenceMapRow({
   const [loadingOccurrences, setLoadingOccurrences] = useState(true);
   const [loadingBreakdown, setLoadingBreakdown] = useState(true);
 
-  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes(taxonGroup));
+  const [checkedTypes, setCheckedTypes] = useState(() => defaultCheckedTypes());
 
   // Advanced filter state
   const [maxUncertainty, setMaxUncertainty] = useState<number | null>(null);
@@ -1678,15 +1665,12 @@ export default function OccurrenceMapRow({
   // belong with the rest and are hidden (or not) by a coordinate-cleaning check
   // like any other suspect point, rather than by a separate opt-in.
   //
-  // On by default, unlike the other cleaning checks. Those are this project's
-  // own plausibility heuristics with real false-positive rates, so they stay
-  // opt-in; this one is GBIF's verdict on its own record — a zero coordinate, a
-  // country that doesn't match the point, a swapped latitude — and a map an
-  // assessor reads a range off shouldn't open on positions the aggregator that
-  // published them won't vouch for. Unchecking it puts them back on the map in
-  // amber, and they are in the list either way: greyed, and counted in the
-  // footer's "N removed by your filters".
-  const [hideGbifFlagged, setHideGbifFlagged] = useState(true);
+  // Off by default, like every other cleaning check: GBIF's flag is its own
+  // verdict on a record (a zero coordinate, a country that doesn't match the
+  // point, a swapped latitude), but whether a flagged point is wrong is the
+  // assessor's call, so the map opens on everything. Checking it hides them;
+  // unchecked they show in amber, and they are in the list either way.
+  const [hideGbifFlagged, setHideGbifFlagged] = useState(false);
   const [recordSetTotals, setRecordSetTotals] = useState<{ mapped: number; issue: number; missing: number } | null>(null);
 
   /**
