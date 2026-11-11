@@ -132,11 +132,11 @@ out.append(f'  queue [label={box("q", "Otherwise a person decides: to_review", [
 out.append(f'  dec [label={box("own", "Decided: a row in match-overrides.tsv", ["for the releases it names, while what it rested on still holds", eg("Cipangopaludina chinensis", name["decision"][1])], name["decision"][0])}];')
 out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides;", "what it might be stays off the Not Evaluated list", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
-out.append(f'  acc [label={box("own", "An accepted species: the species itself", [eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
-out.append(f'  ren [label={box("own", "A synonym: the species, renamed", [eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
-out.append(f'  lum [label={box("part", "A synonym CoL folds into another species: lumped", ["counts only the records filed under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
-out.append(f'  ref [label={box("none", "Folded into a species IUCN assesses too: refused", ["counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
-out.append(f'  dup [label={box("none", "Its CoL name is already another assessment\'s: duplicate", ["each CoL name counts for one assessed species, so this counts nothing", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
+out.append(f'  acc [label={box("own", "accepted", ["CoL accepts the Red List name; counts the whole CoL species", eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
+out.append(f'  ren [label={box("own", "synonym, other name / other spelling", ["CoL accepts the species under another name; counts the whole CoL species", eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
+out.append(f'  lum [label={box("part", "lumped, unassessed", ["CoL folds it into a species the Red List doesn't assess;", "counts only the records under its own name", eg("Tetraodon biocellatus", concept["lumped"][1])], concept["lumped"][0])}];')
+out.append(f'  ref [label={box("none", "lumped, assessed", ["CoL folds it into a species the Red List assesses too;", "counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
+out.append(f'  dup [label={box("none", "counts nothing: another assessment owns that CoL species", ["each CoL species counts for one assessed species", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
 
 out += ['  start -> q1; q1 -> mat [label="  certain"]; q1 -> queue [label="  not certain"];',
         '  queue -> dec; queue -> und;',

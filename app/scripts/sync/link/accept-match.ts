@@ -43,7 +43,11 @@ export interface MatchAnswer {
   matcher_status: string | null;
   match_type: string | null;
   confidence: number | null;
-  alternatives: { col_id: string; name: string; authorship: string | null; rank: string | null; status: string | null }[];
+  /** The species a synonym answer leads to; read only for describing the link. */
+  matcher_accepted_name?: string | null;
+  matcher_accepted_authorship?: string | null;
+  alternatives: { col_id: string; name: string; authorship: string | null; rank: string | null; status: string | null;
+    accepted_name?: string | null; accepted_authorship?: string | null }[];
 }
 
 export type QueueReason =

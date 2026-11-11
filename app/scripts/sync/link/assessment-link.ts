@@ -99,7 +99,7 @@ export async function buildLink(
   // ── 1. Name ────────────────────────────────────────────────────────────────
   const answers = new Map((await rows<Omit<MatchAnswer, "alternatives"> & { sis_taxon_id: number; alts: string | null }>(conn, `
     SELECT sis_taxon_id, matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, confidence,
-           alternatives AS alts
+           matcher_accepted_name, matcher_accepted_authorship, alternatives AS alts
     FROM ${parquet(inputs.matches)}`)).map((m) => [m.sis_taxon_id, { ...m, alternatives: (m.alts ? JSON.parse(m.alts) : null) ?? [] } as MatchAnswer]));
   const speciesOf = new Map((await rows<{ col_id: string; species_id: string | null }>(conn, `
     WITH ids AS (SELECT matcher_col_id AS id FROM ${parquet(inputs.matches)} UNION
@@ -419,10 +419,11 @@ function describeLinks(links: LinkRow[], ctx: {
       else if (l.match_reason === "only match in another phylum") l.match_description = `${found}, in another phylum; not linked.`;
       else if (picked && !why) l.match_description = `${found}, which leads to no accepted species.`;
       else {
+        const leads = (name?: string | null, auth?: string | null) => name ? `, a synonym of ${name}${auth ? ` ${auth}` : ""}` : "";
         const answer = !m?.matcher_col_id ? "The matcher found no CoL record"
           : m.match_type === "HIGHERRANK" || m.match_type === "NONE" ? `The matcher found no species, only ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], a ${status(m.matcher_rank)}`
-          : `The matcher answered ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], ${status(m.matcher_status)}, ${status(m.match_type)}, ${m.confidence}% sure`;
-        const alts = (m?.alternatives ?? []).slice(0, 3).map((a) => `${a.name}${a.authorship ? ` ${a.authorship}` : ""} [${a.col_id}], ${status(a.status)}`);
+          : `The matcher answered ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], ${status(m.matcher_status)}${leads(m.matcher_accepted_name, m.matcher_accepted_authorship)}, ${status(m.match_type)}, ${m.confidence}% sure`;
+        const alts = (m?.alternatives ?? []).slice(0, 3).map((a) => `${a.name}${a.authorship ? ` ${a.authorship}` : ""} [${a.col_id}], ${status(a.status)}${leads(a.accepted_name, a.accepted_authorship)}`);
         const more = (m?.alternatives.length ?? 0) > 3 ? `, and ${m!.alternatives.length - 3} more` : "";
         l.match_description = `${answer}${alts.length ? `; it also weighed ${alts.join("; ")}${more}` : ""}. Waiting: ${why ?? "no decision yet"}.`;
       }

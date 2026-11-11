@@ -120,7 +120,7 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 `link/`: `matches.ts`, `accept-match.ts`, `match-overrides.ts` (with `seeds/match-overrides.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-631-link-explains-itself/01-link-flow.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-631-link-explains-itself/01-link-flow-v2.png)
 
 Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
 
