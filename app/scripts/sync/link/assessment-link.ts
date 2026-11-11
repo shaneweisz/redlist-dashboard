@@ -425,7 +425,7 @@ function describeLinks(links: LinkRow[], ctx: {
           : `The matcher answered ${m.matcher_name}${m.matcher_authorship ? ` ${m.matcher_authorship}` : ""} [${m.matcher_col_id}], ${status(m.matcher_status)}${leads(m.matcher_accepted_name, m.matcher_accepted_authorship)}, ${status(m.match_type)}, ${m.confidence}% sure`;
         const alts = (m?.alternatives ?? []).slice(0, 3).map((a) => `${a.name}${a.authorship ? ` ${a.authorship}` : ""} [${a.col_id}], ${status(a.status)}${leads(a.accepted_name, a.accepted_authorship)}`);
         const more = (m?.alternatives.length ?? 0) > 3 ? `, and ${m!.alternatives.length - 3} more` : "";
-        l.match_description = `${answer}${alts.length ? `; it also weighed ${alts.join("; ")}${more}` : ""}. Waiting: ${why ?? "no decision yet"}.`;
+        l.match_description = `${`${answer}${alts.length ? `; it also weighed ${alts.join("; ")}${more}` : ""}`.replace(/\.$/, "")}. Waiting: ${why ?? "no decision yet"}.`;
       }
       continue;
     }
