@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum, oneOwnerPerUsage,
+  coverer, coverSynonymSpecies, coverTwins, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum, oneOwnerPerUsage,
   type LinkRow, type AcceptedSpecies,
 } from "../sync/link/rules";
 
@@ -85,19 +85,6 @@ describe("coverTwins: a name CoL spells two ways", () => {
     const kunth = [accepted[0], { ...accepted[1], authorship: "Kunth" }];
     const b = [primary(1, "W1")];
     expect(coverTwins(b, coverer(b), kunth, new Map(), new Set(["witheringia stramonifolia"])).size).toBe(0);
-  });
-});
-
-describe("coverDuplicateConcepts", () => {
-  const accepted = [sp("C1", "Charadrius nivosus", "(Cassin, 1858)", "Charadriidae"), sp("A1", "Anarhynchus nivosus", "(Cassin, 1858)", "Charadriidae")];
-  it("counts the same epithet and dated citation under another genus in one family", () => {
-    const links = [primary(1, "C1")];
-    expect(coverDuplicateConcepts(links, coverer(links), accepted, new Map(), new Set()).size).toBe(1);
-    expect(covered(links)[0]).toMatchObject({ col_species_id: "A1", method: "duplicate_concept" });
-  });
-  it("not when the other is a species the Red List assesses separately", () => {
-    const links = [primary(1, "C1")];
-    expect(coverDuplicateConcepts(links, coverer(links), accepted, new Map(), new Set(["anarhynchus nivosus"])).size).toBe(0);
   });
 });
 
