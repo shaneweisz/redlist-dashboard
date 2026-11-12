@@ -43,6 +43,15 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
+  /**
+   * Literature works mentioning it (the sync's paper_counts), from OpenAlex and
+   * the Biodiversity Heritage Library. The since-assessment counts are works
+   * published after the assessment date (assessed species only).
+   */
+  openalex_works?: number | null;
+  openalex_works_since_assessment?: number | null;
+  bhl_works?: number | null;
+  bhl_works_since_assessment?: number | null;
   /** Why it has no count (src/lib/count-note.ts): linked to no CoL species yet. */
   count_note?: CountNote | null;
   /**
@@ -52,6 +61,9 @@ export interface RedListSpecies {
    */
   gbif_records?: number | null;
   gbif_records_since_assessment?: number | null;
+  /** The literature counts the view shows, for its source (lit=), set alongside gbif_records. */
+  literature_works?: number | null;
+  literature_works_since_assessment?: number | null;
   // Latest assessment's credits, inline in the species list (drives the credit
   // filters). The full history array is fetched lazily into previous_assessments
   // when a detail panel opens — empty in the list response.

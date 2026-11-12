@@ -333,6 +333,11 @@ interface LiteratureTimelineProps {
   assessmentId?: string | null;
   /** Fallback when only the year is known. Null/0 means no assessment to mark. */
   assessmentYear?: number | null;
+  /**
+   * The species table's Literature counts (the monthly sync's, whole-source),
+   * shown beside this live list so the two numbers explain each other.
+   */
+  syncedCounts?: { openalex: number | null; bhl: number | null } | null;
   className?: string;
 }
 
@@ -341,6 +346,7 @@ export default function LiteratureTimeline({
   assessmentDate = null,
   assessmentId = null,
   assessmentYear = null,
+  syncedCounts = null,
   className = "",
 }: LiteratureTimelineProps) {
   const [page, setPage] = useState(1);
@@ -426,6 +432,15 @@ export default function LiteratureTimeline({
         )}
         <span className="text-[10px] text-zinc-400">Searching: {searchDisplay}</span>
       </div>
+      {syncedCounts && (syncedCounts.openalex != null || syncedCounts.bhl != null) && (
+        <p className="mb-2 text-xs text-zinc-500">
+          The table counts {syncedCounts.openalex != null && <>{syncedCounts.openalex.toLocaleString()} in OpenAlex</>}
+          {syncedCounts.openalex != null && syncedCounts.bhl != null && " and "}
+          {syncedCounts.bhl != null && <>{syncedCounts.bhl.toLocaleString()} in BHL</>}: every work in those sources naming the
+          species or a CoL synonym, as of the monthly sync. This list searches several sources live, merges duplicates and
+          takes the most recent from each, so its total differs.
+        </p>
+      )}
 
       {loading && !data && (
         <div className="flex items-center gap-2 py-4 text-sm text-zinc-400">

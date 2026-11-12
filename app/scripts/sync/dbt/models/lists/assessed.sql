@@ -2,7 +2,7 @@
  * lists/assessed: one row per assessed species: its latest assessment, its GBIF
  * key and counts, its latest credits.
  *
- * Built from: assessments (latest), record_counts, lists/assessments (how many
+ * Built from: assessments (latest), record_counts, paper_counts, lists/assessments (how many
  * years it was assessed in), common_names, assessment_link.
  *
  * Columns:
@@ -18,6 +18,8 @@
  *                            counted; else NULL
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment
+ *   openalex_works, openalex_works_since_assessment, bhl_works, bhl_works_since_assessment
+ *                            literature works mentioning it (paper_counts)
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,
  *   latest_institutions
  *   assessment_count         years with a published assessment
@@ -27,7 +29,7 @@
  * Decisions:
  *   - Common name: IUCN's, else iNaturalist's.
  *   - A species with no GBIF records counts 0, and still has a since-assessment
- *     window (0) unless its assessment has none.
+ *     window (0) unless its assessment has none. Likewise for works.
  */
 
 {%- set today = "DATE '" ~ var('sync_date') ~ "'" %}
@@ -49,6 +51,12 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CASE WHEN gbif.sis_taxon_id IS NOT NULL THEN gbif.all_since
             WHEN latest.assessment_date IS NOT NULL AND CAST(latest.assessment_date AS DATE) < {{ today }} THEN 0 END
          AS gbif_all_records_since_assessment,
+       {%- for src in ['openalex', 'bhl'] %}
+       coalesce({{ src }}.works, 0)::BIGINT AS {{ src }}_works,
+       CASE WHEN {{ src }}.sis_taxon_id IS NOT NULL THEN {{ src }}.works_since_assessment
+            WHEN latest.assessment_date IS NOT NULL AND CAST(latest.assessment_date AS DATE) < {{ today }} THEN 0 END
+         AS {{ src }}_works_since_assessment,
+       {%- endfor %}
        latest.population_trend, {{ semicolon_list("latest.systems") }} AS systems, {{ semicolon_list("latest.growth_forms") }} AS growth_forms,
        latest.movement_pattern, latest.possibly_extinct, latest.possibly_extinct_in_the_wild, latest.criteria,
        {{ semicolon_list("latest.threat_codes") }} AS threat_codes, {{ semicolon_list("latest.habitat_codes") }} AS habitat_codes,
@@ -59,6 +67,9 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
 FROM {{ source('sources', 'assessments') }} latest
 LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
+{%- for src in ['openalex', 'bhl'] %}
+LEFT JOIN {{ ref('paper_counts') }} {{ src }} ON {{ src }}.source = '{{ src }}' AND {{ src }}.sis_taxon_id = latest.sis_taxon_id
+{%- endfor %}
 LEFT JOIN {{ source('link', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
   ON history.sis_taxon_id = latest.sis_taxon_id

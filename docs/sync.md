@@ -39,10 +39,10 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 | Stage | Folder | What it does |
 |---|---|---|
-| inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher |
-| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, the Specialist Groups' remits |
+| inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher, BHL's names |
+| 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, `literature_mentions`, the Specialist Groups' remits |
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
-| 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts` |
+| 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts`, and its literature works in `paper_counts` (credited by the same rule) |
 | 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, assessment history, `species/`, `ne`, the app's `taxa`, `specialist_group_species` |
 | 5 precomputed | `dbt/models/precomputed/`, `precomputed/` | the app's own queries run ahead of time: the CoL-differences tables and search indexes (SQL), then the summaries and CoL revision flags with the app's own code, so a precomputed number is the one its live view computes |
 | 6 checks | `checks/` | fixtures and data tests (either stops the sync), the comparison with production |
@@ -84,7 +84,10 @@ Each is cached under `~/.cache/redlist-dashboard/` and fetched again only when i
 | **GBIF monthly snapshot** | every occurrence record, keyed by CoL id | newest mirrored date under `~/Data/gbif/` | `inputs/gbif-snapshot.ts` |
 | iNaturalist taxonomy | one English common name per species | the calendar month | `inputs/inat-names.ts` |
 | GBIF's name matcher | matching-ws, run locally in Docker | pinned (v1.0.12), indexed once per XR | `inputs/matcher.ts` |
+| OpenAlex works | papers whose title or abstract names a CoL binomial | the newest release read in full; reading one takes days, so a sync never starts it (`npm run sync:openalex`) | `inputs/openalex-snapshot.ts` |
+| Biodiversity Heritage Library | the binomials BHL's name-finding confirmed on each scanned page | its monthly TSV export (2.5 GB, under `~/Data/bhl/`) | `inputs/bhl.ts` |
 
+- **OpenAlex is kept as text, not mirrored.** The works snapshot is ~700 GiB, refreshed quarterly; each file is downloaded, reduced to the works that name a CoL binomial or sit in a biology or environment field (~15 GiB in all, `~/.cache/redlist-dashboard/openalex/<release>/works/`), and deleted. A changed name rule re-reads that, not the snapshot.
 - **The Red List database is a colleague's.** It is opened read-only, and the build asks Postgres to confirm that before reading anything.
 - **A snapshot is only exact if it is complete.** GBIF's mirrors silently lacked one file in twenty from 2025-07 to 2026-10 ([gbif/occurrence#609](https://github.com/gbif/occurrence/issues/609)), so the build refuses a snapshot with gaps in its file numbering, or whose row count doesn't match the GBIF download it came from.
 

@@ -12,6 +12,7 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
+import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE, type LiteratureSource } from "@/lib/literature";
 import { countNoteText } from "@/lib/count-note";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
@@ -138,11 +139,14 @@ type Species = RedListSpecies;
  * species' Red List range). The cached rows are left as they arrived, so
  * switching mode re-derives from them.
  */
-function inGbifMode(s: Species, mode: GbifRecordMode): Species {
+function inGbifMode(s: Species, mode: GbifRecordMode, literature: LiteratureSource = DEFAULT_LITERATURE_SOURCE): Species {
   return {
     ...s,
     gbif_records: gbifRecordCount(s, mode),
     gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
+    // The Literature columns' source (lit=), derived here for the same reason.
+    literature_works: literatureWorks(s, literature),
+    literature_works_since_assessment: literatureWorksSinceAssessment(s, literature),
     countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
   };
 }
@@ -393,6 +397,10 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     }
     case "describedYear":
       return (a.described_year ?? -1) - (b.described_year ?? -1);
+    case "totalWorks":
+      return (a.literature_works ?? -1) - (b.literature_works ?? -1);
+    case "newWorks":
+      return (a.literature_works_since_assessment ?? -1) - (b.literature_works_since_assessment ?? -1);
   }
 }
 
@@ -1197,6 +1205,38 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
   );
 }
 
+/** A literature count, linked to the source's own search for the name when there is one (and something to find). */
+function LiteratureCount({ n, href, title }: { n: number | null | undefined; href: string | null; title: string }) {
+  if (n == null) return <>—</>;
+  if (!href || n === 0) return <>{n.toLocaleString()}</>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={TABLE_NUMBER_LINK} title={title}
+      onClick={(e) => e.stopPropagation()}>
+      {n.toLocaleString()}
+    </a>
+  );
+}
+
+function LiteratureSourceToggle({ source, onChange }: { source: LiteratureSource; onChange: (source: LiteratureSource) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Which literature source to count" className={CHART_SEGMENTED_CLASS}>
+      {LITERATURE_SOURCES.map((src) => (
+        <button
+          key={src}
+          type="button"
+          role="radio"
+          aria-checked={source === src}
+          onClick={() => onChange(src)}
+          className={chartSegmentClass(source === src)}
+          title={LITERATURE_SOURCE_HINT[src]}
+        >
+          {LITERATURE_SOURCE_LABEL[src]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
   // The view switch, shown as the full-width Species Assessed / Awaiting 1st
@@ -1281,6 +1321,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedCountries, setSelectedCountries,
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
+    literatureSource = DEFAULT_LITERATURE_SOURCE, setLiteratureSource,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
     selectedPopulationTrends, setSelectedPopulationTrends,
@@ -1775,7 +1816,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
   // Every memo below reads the GBIF counts of the record mode in force.
-  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
+  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode, literatureSource)), [assessedSpecies, gbifRecordMode, literatureSource]);
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
@@ -2291,7 +2332,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
       return taxaFilteredSpeciesNoPreview;
     }
-    return [inGbifMode(singleSpeciesPreview, gbifRecordMode), ...taxaFilteredSpeciesNoPreview];
+    return [inGbifMode(singleSpeciesPreview, gbifRecordMode, literatureSource), ...taxaFilteredSpeciesNoPreview];
   }, [taxaFilteredSpeciesNoPreview, singleSpeciesPreview, gbifRecordMode]);
 
   const [mounted, setMounted] = useState(false);
@@ -6304,36 +6345,53 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 {!isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
-                  onClick={(e) => handleSort("newGbif", e)}
-                >
+                <th className={`${SPECIES_TH} text-right min-w-[60px]`}>
+                  {/* Two sorts in one header: New sorts by the count, % by its share
+                      of Total (the grey figure beside each count). */}
                   <span className="flex items-center justify-end gap-1">
-                    <span className={SPECIES_TH_NOWRAP}>New</span>
-                    <HoverTooltip text="Records dated after the assessment date.">
+                    <button type="button" className={`flex items-center gap-1 ${SPECIES_TH_SORTABLE}`}
+                      onClick={(e) => handleSort("newGbif", e)} aria-label="Sort by new records">
+                      <span className={SPECIES_TH_NOWRAP}>New</span>
+                      <SortIndicator field="newGbif" />
+                    </button>
+                    <span className="text-zinc-300 dark:text-zinc-600" aria-hidden>·</span>
+                    <button type="button" className={`flex items-center gap-1 ${SPECIES_TH_SORTABLE}`}
+                      onClick={(e) => handleSort("pctNewGbif", e)} aria-label="Sort by new records as a share of Total">
+                      <span className={SPECIES_TH_NOWRAP}>%</span>
+                      <SortIndicator field="pctNewGbif" />
+                    </button>
+                    <HoverTooltip text="Records dated after the assessment date, and in grey their share of Total. Click New or % to sort by either.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
                       </svg>
                     </HoverTooltip>
-                    <SortIndicator field="newGbif" />
                   </span>
                 </th>
                 )}
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} border-l border-zinc-200 dark:border-zinc-700`}
+                  onClick={(e) => handleSort("totalWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>Total</span>
+                    <SortIndicator field="totalWorks" />
+                  </span>
+                </th>
                 {!isNewAssessments && (
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
-                  onClick={(e) => handleSort("pctNewGbif", e)}
+                  onClick={(e) => handleSort("newWorks", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={SPECIES_TH_NOWRAP}>% New</span>
-                    <HoverTooltip text="New records as a share of Total.">
+                    <span className={SPECIES_TH_NOWRAP}>New</span>
+                    <HoverTooltip text="Published after the assessment date.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
                       </svg>
                     </HoverTooltip>
-                    <SortIndicator field="pctNewGbif" />
+                    <SortIndicator field="newWorks" />
                   </span>
                 </th>
                 )}
@@ -6347,7 +6405,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                   </svg>
                 </th>
-                <th rowSpan={gbifHeadRows} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left text-sm font-bold text-zinc-600 dark:text-zinc-300">
+                <th rowSpan={gbifHeadRows} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left md:min-w-[200px] text-sm font-bold text-zinc-600 dark:text-zinc-300">
                   Species
                 </th>
                 {!isNewAssessments && (
@@ -6385,10 +6443,24 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 )}
                 {/* One heading over the GBIF columns, with the record-mode toggle:
                     the mode is said once here, not under every column. */}
-                <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
+                <th colSpan={isNewAssessments ? 1 : 2} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
                     <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records</span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
+                  </span>
+                </th>
+                <th colSpan={isNewAssessments ? 1 : 2} className="px-2 md:px-4 pt-2 pb-1 border-b border-l border-zinc-200 dark:border-zinc-700">
+                  <span className="flex items-center justify-end gap-2">
+                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                      Literature
+                      <HoverTooltip text={LITERATURE_SOURCE_HINT[literatureSource]}>
+                        <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                      </HoverTooltip>
+                    </span>
+                    {setLiteratureSource && <LiteratureSourceToggle source={literatureSource} onChange={setLiteratureSource} />}
                   </span>
                 </th>
               </tr>
@@ -6656,40 +6728,52 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         // so does the search it links to. A null count already
                         // means there is no window (an assessment dated today or later).
                         const since = sinceAssessmentStart(s.assessment_date);
+                        // Their share of Total, quietly beside them (it was a column of its own).
+                        const total = s.gbif_records;
+                        const pct = total ? (newObs / total) * 100 : null;
+                        const share = pct == null ? null : (
+                          <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-500" title="Share of Total">
+                            {pct > 0 && pct < 1 ? "<1" : Math.round(pct)}%
+                          </span>
+                        );
                         if (key && since) {
                           return (
-                            <a
-                              href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={TABLE_NUMBER_LINK}
-                              title="Open the new records on GBIF"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {newObs.toLocaleString()}
-                            </a>
+                            <>
+                              <a
+                                href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={TABLE_NUMBER_LINK}
+                                title="Open the new records on GBIF"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {newObs.toLocaleString()}
+                              </a>
+                              {share}
+                            </>
                           );
                         }
-                        return newObs.toLocaleString();
+                        return <>{newObs.toLocaleString()}{share}</>;
                       })()}
                     </td>
                     )}
-                    {/* % New GBIF */}
+                    {/* Literature, in the source the heading's toggle chose */}
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap border-l border-zinc-200 dark:border-zinc-800">
+                      <LiteratureCount n={s.literature_works} title={LITERATURE_LINK_NOTE[literatureSource]}
+                        href={literatureSource === "openalex" ? literatureLinkHref(s) : literatureSearchUrl("bhl", s.scientific_name)} />
+                    </td>
                     {!isNewAssessments && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
-                        const total = s.gbif_records;
-                        const newObs = s.gbif_records_since_assessment;
-                        if (total == null || total === 0 || newObs == null) return "—";
-                        const pct = (newObs / total) * 100;
-                        return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;
-                      })()}
+                      {isNE(s) ? <span className="text-zinc-400">N/A</span> : (
+                        <LiteratureCount n={s.literature_works_since_assessment} title={LITERATURE_LINK_NOTE[literatureSource]}
+                          href={literatureSource === "openalex" && sinceAssessmentStart(s.assessment_date) ? literatureLinkHref(s, sinceAssessmentStart(s.assessment_date)) : null} />
+                      )}
                     </td>
                     )}
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 4 : 8} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 5 : 8} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -6797,6 +6881,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 assessmentDate={s.assessment_date ?? null}
                                 assessmentId={s.assessment_id ? String(s.assessment_id) : null}
                                 assessmentYear={assessmentYear}
+                                syncedCounts={{ openalex: s.openalex_works ?? null, bhl: s.bhl_works ?? null }}
                               />
                             </div>
                           )}
@@ -6896,7 +6981,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 4 : 8} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 5 : 8} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>

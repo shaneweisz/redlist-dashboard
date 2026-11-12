@@ -20,6 +20,10 @@ const CSV_COLUMNS: { header: string; getValue: (s: RedListSpecies) => string }[]
   { header: "GBIF Georeferenced Records Since Assessment", getValue: (s) => s.gbif_georeferenced_records_since_assessment?.toString() ?? "" },
   { header: "GBIF All Records", getValue: (s) => s.gbif_all_records_count?.toString() ?? "" },
   { header: "GBIF All Records Since Assessment", getValue: (s) => s.gbif_all_records_since_assessment?.toString() ?? "" },
+  { header: "OpenAlex Works", getValue: (s) => s.openalex_works?.toString() ?? "" },
+  { header: "OpenAlex Works Since Assessment", getValue: (s) => s.openalex_works_since_assessment?.toString() ?? "" },
+  { header: "BHL Works", getValue: (s) => s.bhl_works?.toString() ?? "" },
+  { header: "BHL Works Since Assessment", getValue: (s) => s.bhl_works_since_assessment?.toString() ?? "" },
   // Why it has no count (src/lib/count-note.ts): linked to no CoL species yet.
   { header: "GBIF Count Note", getValue: (s) => (s.count_note ? countNoteText(s.count_note, DATA_VERSIONS) : "") },
   { header: "SIS Taxon ID", getValue: (s) => s.sis_taxon_id?.toString() ?? "" },
