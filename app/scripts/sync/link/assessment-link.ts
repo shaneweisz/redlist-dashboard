@@ -574,6 +574,15 @@ function matchNotes(links: LinkRow[], ctx: {
       sentences.push(`CoL holds ${pick.name} ${all.length === 2 ? "twice" : `${all.length} times`} (${all.map((r) => `${r.authorship ?? "no author"}, ${r.status}`).join("; ")}), all one species, so records under each count.`);
       records = all;
     }
+    // Found under a synonym: GBIF files the records under CoL's accepted name (Sorbus greenii → Aria greenii).
+    if (sentences.length === 0 && l.verdict === "own" && pick.status !== "accepted") {
+      const target = ctx.usages.get(l.col_species_id);
+      const accepted = target ? nameAuth(target.name, target.authorship) : pick.species ?? "its accepted name";
+      sentences.push(l.col_treatment === "synonym, other spelling"
+        ? `CoL lists ${pick.name} as a variant spelling of ${accepted}, so the records count under that name.`
+        : `CoL holds ${pick.name} as a synonym of ${accepted}, so GBIF counts its records under ${target?.name ?? "that name"}.`);
+      records = [pick, ...(target ? [{ id: target.col_id, name: target.name, authorship: target.authorship, status: status(target.status), species: null, role: "also" as const }] : [])];
+    }
     if (n.variant) {
       sentences.unshift(`CoL spells it ${pick.name}, not ${sp.name}: the naming codes treat the two as one name (a Latin ending or transliteration).`);
       if (records.length === 0) records = [pick];

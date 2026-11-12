@@ -727,15 +727,18 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 }
 
 
-// Beside a GBIF count: ⚑ when its match to CoL is flagged (or an NE species may
-// be an assessed one), a faint ⁺ when it isn't one exact name but a rule
-// resolved it; either opens the same short explanation, with the CoL records
-// involved, each linked so a reader can check it. Nothing for an exact match.
-function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null } }) {
+// Beside every GBIF count: ⚑ (amber) when its match to CoL is flagged, else a
+// faint ⓘ that darkens on row hover. Either opens how the count was matched: the
+// Red List name and the CoL record counted, a short explanation, the CoL records
+// involved (each linked to the release the sync used), and GBIF's records.
+function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string } }) {
   const link = "underline decoration-dotted hover:text-white";
   const flagged = isMatchFlagged(s);
+  const cbl = (id: string, label: React.ReactNode) =>
+    <a className={link} href={checklistBankUrl(COL_RELEASE.key, id)} target="_blank" rel="noopener noreferrer">{label}</a>;
+  let content: React.ReactNode;
   if (s.may_be_assessed?.length) {
-    const content = (
+    content = (
       <div className="text-left space-y-1">
         <div className="font-semibold">⚑ May be an assessed species</div>
         <div>
@@ -743,38 +746,51 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
             <span key={n}>{i > 0 ? " or " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
           ))}, whose name leads to this CoL species, but whose own match is flagged or unresolved. This may be the same species.
         </div>
-        {s.col_id && <a className={link} href={checklistBankUrl(COL_RELEASE.key, s.col_id)} target="_blank" rel="noopener noreferrer">This species in CoL ({COL_RELEASE.alias}) ↗</a>}
+        {s.col_id && cbl(s.col_id, `This species in CoL (${COL_RELEASE.alias}) ↗`)}
       </div>
     );
-    return <SelectableHoverTooltip content={content}><span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span></SelectableHoverTooltip>;
+  } else if (s.match === "plain" && !s.match_note) {
+    // Exact: one name, the same in both.
+    content = (
+      <div className="text-left space-y-1">
+        <div className="font-semibold">Exact match</div>
+        <div><i>{s.scientific_name}</i> appears once in Catalogue of Life, accepted under the same name. GBIF counts its records there.</div>
+        {s.gbif_species_key && <div>{cbl(s.gbif_species_key, `In CoL (${COL_RELEASE.alias}) ↗`)}</div>}
+        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
+      </div>
+    );
+  } else {
+    const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
+    const counted = s.match_records?.find(r => r.role === "counted");
+    content = (
+      <div className="text-left space-y-1">
+        <div className="font-semibold">{flagged ? "⚑ Flagged: " : ""}{kinds.map(barLabel).join(" · ") || "How this count was matched"}</div>
+        {/* Both sides first: the name as the Red List cites it, and the CoL record counted. */}
+        <div className="text-zinc-300">
+          <div>Red List: <i>{s.scientific_name}</i>{s.redlist_authority ? ` ${s.redlist_authority}` : ""}</div>
+          {counted && <div>CoL: {cbl(counted.id, <><i>{counted.name}</i>{counted.authorship ? ` ${counted.authorship}` : ""}</>)}{counted.status !== "accepted" && counted.species && counted.species !== counted.name ? <> → <i>{counted.species}</i></> : null}</div>}
+        </div>
+        <div>{s.match_note ?? countsText(s)}</div>
+        {(s.match_records?.length ?? 0) > 1 && (
+          <ul className="space-y-0.5">
+            {s.match_records!.map(r => (
+              <li key={r.id}>
+                {cbl(r.id, <><i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}</>)}
+                <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
+                {r.role !== "not" && <span className="ml-1 text-amber-400">← {r.role === "counted" ? "counted" : "also counted"}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
+      </div>
+    );
   }
-  const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
-  if (!s.match_note && kinds.length === 0) return null;
-  const content = (
-    <div className="text-left space-y-1">
-      <div className="font-semibold">{flagged ? "⚑ Flagged: " : ""}{kinds.map(barLabel).join(" · ")}</div>
-      <div>{s.match_note ?? countsText(s)}</div>
-      {!!s.match_records?.length && (
-        <ul className="space-y-0.5">
-          {s.match_records.map(r => (
-            <li key={r.id}>
-              <a className={link} href={checklistBankUrl(COL_RELEASE.key, r.id)} target="_blank" rel="noopener noreferrer">
-                <i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}
-              </a>
-              <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
-              {r.role !== "not" && <span className="ml-1 text-amber-400">← {r.role === "counted" ? "counted" : "also counted"}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
-    </div>
-  );
   return (
     <SelectableHoverTooltip content={content}>
       {flagged
         ? <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span>
-        : <span className="ml-0.5 text-zinc-400 dark:text-zinc-500 cursor-help align-super text-[10px]" aria-label="How this count is made">⁺</span>}
+        : <span className="ml-1 text-[10px] text-zinc-300 group-hover:text-zinc-500 dark:text-zinc-600 dark:group-hover:text-zinc-400 cursor-help" aria-label="How this count is made">ⓘ</span>}
     </SelectableHoverTooltip>
   );
 }
@@ -6612,7 +6628,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 return (
                   <React.Fragment key={speciesKey}>
                   <tr
-                    className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer ${selectedSpeciesKey === speciesKey ? "bg-zinc-100 dark:bg-zinc-800" : ""} ${isDragging ? "opacity-50" : ""} ${isDragOver ? "border-t-2 border-amber-500" : ""}`}
+                    className={`group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer ${selectedSpeciesKey === speciesKey ? "bg-zinc-100 dark:bg-zinc-800" : ""} ${isDragging ? "opacity-50" : ""} ${isDragOver ? "border-t-2 border-amber-500" : ""}`}
                     data-species-row={speciesKey}
                     onClick={() => { setSelectedSpeciesKey(selectedSpeciesKey === speciesKey ? null : speciesKey); }}
                     draggable={isPinned && showOnlyStarred}

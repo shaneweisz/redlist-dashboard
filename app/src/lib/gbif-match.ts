@@ -4,7 +4,7 @@
  * assessment_link, via assessed.parquet's match_* columns).
  *
  * Three groups, by one simple rule each:
- *   - Exact: the Red List name appears once in CoL. Nothing to say.
+ *   - Exact: the Red List name appears once in CoL, accepted under that name.
  *   - Resolved (grey): not a plain one-name match, but a rule settles it
  *     reliably (an author citation picks a homonym, CoL holds one species twice…).
  *   - Flagged (orange): the count follows GBIF's matcher, but something about the
@@ -13,7 +13,7 @@
  */
 
 export type MatchKey =
-  | "plain" | "author" | "duplicate" | "variant" | "decided"
+  | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided"
   | "f_homonym" | "f_confidence" | "f_provisional" | "f_other_authors" | "f_ambiguous" | "f_synonyms_only" | "agent"
   | "none" | "ne_candidate";
 
@@ -35,6 +35,7 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "f_synonyms_only", label: "Only its synonyms matched", group: "flagged" },
   { key: "agent", label: "Proposed by AI, not yet checked", group: "flagged" },
   { key: "ne_candidate", label: "Not Evaluated, may be assessed", group: "flagged" },
+  { key: "renamed", label: "Renamed in CoL", group: "resolved" },
   { key: "author", label: "Homonym settled by author", group: "resolved" },
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
@@ -64,7 +65,7 @@ const FLAGGED: Record<string, MatchKey> = {
 };
 
 /** One species' key, from assessed.parquet's match columns. */
-export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown; count_note?: unknown }): MatchKey {
+export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown; count_note?: unknown; match_treatment?: unknown }): MatchKey {
   const reason = typeof r.match_reason === "string" ? r.match_reason : "";
   if (reason.startsWith("flagged: ")) return FLAGGED[reason.slice("flagged: ".length)] ?? "f_ambiguous";
   if (reason === "override") return String(r.match_decided_by ?? "").startsWith("agent:") ? "agent" : "decided";
@@ -73,6 +74,8 @@ export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown
   if (reason.includes("homonym, author decides")) return "author";
   if (reason.includes("duplicate in CoL")) return "duplicate";
   if (reason.startsWith("spelling variant")) return "variant";
+  // Found once, but CoL accepts the species under another name (Sorbus greenii → Aria greenii).
+  if (typeof r.match_treatment === "string" && r.match_treatment.startsWith("synonym")) return "renamed";
   return "plain";
 }
 
@@ -93,6 +96,8 @@ export interface SpeciesMatch {
   match?: MatchKey | null;
   match_counts_keys?: CountsKey[];
   match_other_names?: number | null;
+  /** The Red List's authority, where there is a match note. */
+  redlist_authority?: string | null;
   /** NE rows: the assessed species it may be. */
   may_be_assessed?: string[];
   /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */

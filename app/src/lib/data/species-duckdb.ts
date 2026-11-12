@@ -147,7 +147,7 @@ const ASSESSED_SELECT = `
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
-  match_reason, match_decided_by, match_counts, match_other_names, match_note, match_records,
+  match_reason, match_decided_by, match_counts, match_other_names, match_note, match_records, match_treatment, redlist_authority,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -204,7 +204,8 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     match_counts_keys: countsKeys(r),
     match_other_names: num(r.match_other_names),
     // Only where there is something to say, to keep the list slim.
-    ...(r.match_note ? { match_note: String(r.match_note), match_records: r.match_records ? JSON.parse(String(r.match_records)) : [] } : {}),
+    ...(r.match_note ? { match_note: String(r.match_note), match_records: r.match_records ? JSON.parse(String(r.match_records)) : [],
+      redlist_authority: str(r.redlist_authority) } : {}),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,

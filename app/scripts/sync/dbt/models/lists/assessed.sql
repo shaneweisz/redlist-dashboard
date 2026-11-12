@@ -28,6 +28,10 @@
  *                            it is in doubt, in sentences, and the CoL
  *                            records it is about (JSON: id, name, authorship, status,
  *                            species, role), from assessment_link
+ *   redlist_authority        the Red List's authority, where there is a match note
+ *   match_treatment          what CoL makes of the record it is linked through, when
+ *                            not 'accepted': synonym, other name (renamed) | synonym,
+ *                            other spelling | lumped, …
  *   match_other_names        how many other CoL names' records count for it too
  *                            (covered rows that count), 0 when none
  *   gbif_georeferenced_records_count, gbif_all_records_count
@@ -59,6 +63,9 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
             WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'flagged: %' THEN 'flagged' END AS count_note,
        link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
        link.match_note, link.match_records,
+       -- Shown beside a match note (the panel's Red List line); not needed otherwise.
+       CASE WHEN link.match_note IS NOT NULL THEN latest.authority END AS redlist_authority,
+       CASE WHEN link.col_treatment <> 'accepted' THEN link.col_treatment END AS match_treatment,
        coalesce(other.n, 0)::INTEGER AS match_other_names,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,
