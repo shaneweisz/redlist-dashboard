@@ -33,7 +33,8 @@ beforeAll(async () => {
     FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, T.taxa);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'the whole CoL species' AS counts, 'primary' AS role, true AS counted,
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
-      'matcher' AS basis, NULL::VARCHAR AS decided_by
+      'matcher' AS basis, NULL::VARCHAR AS decided_by,
+      CASE WHEN col_taxon_id IS NULL THEN 'waiting' WHEN sis = 2 THEN 'unconfirmed: lower confidence' ELSE 'exact, unique' END AS match_reason
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
@@ -101,6 +102,11 @@ describe("GBIF counts in the lists", () => {
     expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
   });
 
+  it("flags a count that rests on an unconfirmed match", () => {
+    expect(rows["2"].count_note).toBe("unconfirmed");
+    expect(rows["1"].count_note).toBeNull();
+    expect(rows["2"].match_reason).toBe("unconfirmed: lower confidence");
+  });
   it("says when a species is linked to no CoL species, so nothing is counted", () => {
     expect(rows["3"].count_note).toBe("unlinked");
     expect(Number(rows["3"].gbif_all_records_count)).toBe(0);

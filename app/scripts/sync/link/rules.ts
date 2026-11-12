@@ -204,24 +204,24 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
 /** A CoL species a species waiting for a decision might be: its name leads there, or the matcher guessed it. */
 export interface Candidate { sis: number; target_id: string; target_name: string }
 
+/** A primary row the matcher's answer made though the rule doubts it (assessment-link.ts). */
+export const isUnconfirmed = (l: Pick<LinkRow, "match_reason">) => !!l.match_reason?.startsWith("unconfirmed: ");
+
 /**
- * Rule: while a species waits for a decision, every CoL species its own name
- * leads to (as an accepted name, or as a synonym CoL files under it), and the
- * matcher's guess, stay off the Not Evaluated list, counting nothing. Not knowing
- * which CoL species it is mustn't list as unassessed the species it is, under
- * CoL's name: Agama armata and ~150 others would otherwise appear there while
- * their links wait. Broad on purpose, as the retired passes' lumps were: CoL
- * files the assessed Coenonympha gardetta's name as a synonym under the small
- * heath, C. pamphilus, which the Red List hasn't assessed, and that stays off
- * the list too until gardetta is decided.
+ * Rule: for a species whose link is unconfirmed or still waiting, every CoL
+ * species its own name leads to (as an accepted name, or as a synonym CoL files
+ * under it), and the matcher's guess, is a candidate: a row counting nothing,
+ * which the Not Evaluated list shows flagged ("may be the assessed X") rather
+ * than as plainly unassessed (Agama armata; Coenonympha gardetta's name, which
+ * CoL files under the small heath, C. pamphilus). Its records count for it there.
  */
 export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
-  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_species_id).map((l) => l.sis_taxon_id));
+  const waiting = new Set(links.filter((l) => l.role === "primary" && (!l.col_species_id || isUnconfirmed(l))).map((l) => l.sis_taxon_id));
   const touched = new Set<number>();
   for (const c of candidates) {
     if (!waiting.has(c.sis)) continue;
     if (cover({ sis_taxon_id: c.sis, col_species_id: c.target_id, col_taxon_id: c.target_id, verdict: "refused", method: "undecided_candidate",
-      match_reason: "candidate while waiting", counted: false })) touched.add(c.sis);
+      match_reason: "candidate", counted: false })) touched.add(c.sis);
   }
   return touched;
 }
@@ -248,7 +248,8 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
 
 /**
  * Rule: each usage counts for one assessed species at most. When two claim it,
- * one wins: primary before covered, own before lumped, the matcher before a
+ * one wins: confirmed before unconfirmed (an unconfirmed link never takes a
+ * confirmed species' records; it loses, flagged), then primary before covered, own before lumped, the matcher before a
  * decision, the more direct name, the name CoL spells exactly before a spelling
  * variant of it, then the lower SIS id. The loser counts nothing; a losing
  * primary row becomes a duplicate. The spelling matters where the Red List
@@ -258,7 +259,8 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
  * `exactName`: the species whose primary row's CoL name is their Red List name, as written.
  */
 export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new Set()): Set<number> {
-  const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
+  const unconfirmed = new Set(links.filter((l) => l.role === "primary" && isUnconfirmed(l)).map((l) => l.sis_taxon_id));
+  const rank = (l: LinkRow) => [unconfirmed.has(l.sis_taxon_id) ? 1 : 0, l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
     Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.role === "primary" && exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted).sort((a, b) => {
     const x = rank(a), y = rank(b);

@@ -187,7 +187,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490).",
     source: "accept-match.ts; name-variants.ts",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: null, gbifKeyName: null, rules: ["candidate while waiting", "waiting: spelling variant"] },
+    expect: { linkedTo: null, gbifKeyName: null, rules: ["candidate", "waiting: spelling variant"] },
   },
 
   // ── Lumped: a synonym in CoL keeps its own records ─────────────────────────
@@ -523,26 +523,26 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Sipyloidea brevicerci",
     authority: "Hasenpusch & Brock, 2007",
-    why: "CoL holds the name as an accepted species and as a synonym of a Brazilian stick insect: it says both that it is a species and that it is another one.",
+    why: "CoL holds the name as an accepted species and as a synonym of a Brazilian stick insect: it says both that it is a species and that it is another one. The matcher's answer is the link now, unconfirmed: flagged, and queued for review. The agent pilot found the answer wrong (the accepted record, 4XQT5, is the species): a decision should correct it.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: accepted and a synonym in CoL"] },
+    expect: { assessed: true, rules: ["unconfirmed: accepted and a synonym in CoL"] },
   },
   {
     name: "Cantharellus ochraceus",
     authority: "Gillet",
-    why: "CoL marks the name an ambiguous synonym: it doesn't say which species it is.",
+    why: "CoL marks the name an ambiguous synonym: it doesn't say which species it is. The matcher's answer is the link now, unconfirmed: flagged, and queued for review.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: ambiguous synonym"] },
+    expect: { assessed: true, rules: ["unconfirmed: ambiguous synonym"] },
   },
   {
     name: "Galium palustre",
     authority: "L.",
-    why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means.",
+    why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means. The matcher's answer is the link now, unconfirmed: flagged, and queued for review. The agent pilot found the answer wrong (3F682, under Hydrogalium palustre, is the species): a decision should correct it.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: homonym the authors don't decide"] },
+    expect: { assessed: true, rules: ["unconfirmed: homonym the authors don't decide"] },
   },
   {
     name: "Vepris onanae",
@@ -555,10 +555,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Kuhlia rubens",
     authority: "(Spinola, 1807)",
-    why: "The matcher is less than fully sure of its answer, a synonym of Apogon imberbis.",
+    why: "The matcher is less than fully sure of its answer, a synonym of Apogon imberbis. The matcher's answer is the link now, unconfirmed: flagged, and queued for review. The agent pilot agreed with it.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: lower confidence"] },
+    expect: { linkedTo: "Apogon imberbis", rules: ["unconfirmed: lower confidence"] },
   },
   {
     name: "Ampedus karpathicus",
@@ -579,18 +579,18 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Allanaspides helonomus",
     authority: "Swain, Wilson, Hickman & Ong, 1970",
-    why: "The matcher answers CoL's provisional copy; CoL also holds the name as accepted by the same authors.",
+    why: "The matcher answers CoL's provisional copy; CoL also holds the name as accepted by the same authors. The matcher's answer is the link now, unconfirmed: flagged, and queued for review.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: provisional name"] },
+    expect: { linkedTo: "Allanaspides helonomus", rules: ["unconfirmed: provisional name"] },
   },
   {
     name: "Bulimulus eschariferus",
     authority: "(Ancey, 1887)",
-    why: "The only CoL name spelt like it is Sowerby's (1838), a synonym of Naesiotus eschariferus: another author, so perhaps another snail.",
+    why: "The only CoL name spelt like it is Sowerby's (1838), a synonym of Naesiotus eschariferus: another author, so perhaps another snail. The matcher's answer is the link now, unconfirmed: flagged, and queued for review.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: null, rules: ["waiting: synonym by other authors"] },
+    expect: { linkedTo: "Naesiotus eschariferus", rules: ["unconfirmed: synonym by other authors"] },
   },
   {
     name: "Vestia roschitzi",

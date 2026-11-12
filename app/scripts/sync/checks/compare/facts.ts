@@ -135,7 +135,9 @@ export async function loadFacts(conn: DuckDBConnection, schema: string, dir: str
   // is linked to, with ne.parquet's counts.
   await conn.run(`CREATE TABLE ${schema}.ne AS
     WITH assessed_cols AS (
-      SELECT DISTINCT ${species} AS col_id FROM read_parquet(${f("assessment_link.parquet")}) WHERE ${species} IS NOT NULL)
+      SELECT DISTINCT ${species} AS col_id FROM read_parquet(${f("assessment_link.parquet")}) WHERE ${species} IS NOT NULL
+        -- A candidate (what an unconfirmed or waiting species may be) doesn't hide a species from the list, since November 2026.
+        AND method IS DISTINCT FROM 'undecided_candidate')
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
            g.gbif_all_records_countries, g.countries, g.common_name

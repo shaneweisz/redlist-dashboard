@@ -70,6 +70,9 @@ import { readOverrides, resolveOverride, type Candidate, type MatchOverride } fr
 import { output, parquet } from "../paths";
 import { lit, rows, writeTable, openDuckDB } from "../sql";
 
+/** Doubts with no answer to show: no species found, a name the Red List marks unsettled, a spelling the codes don't make the same name. */
+const NO_GUESS = new Set<QueueReason>(["no species match", "informal or qualified name", "spelling variant", "matched another rank"]);
+
 const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', 'g'))`;
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
@@ -127,6 +130,15 @@ export async function buildLink(
   const taken = (a: { why: keyof typeof WHY; variant?: true }) => !a.variant ? WHY[a.why] : a.why === "unique name" ? "spelling variant" : `spelling variant, ${WHY[a.why].slice("exact, ".length)}`;
   // What the description needs from the name step.
   const nameCtx = new Map<number, { why?: keyof typeof WHY; variant?: true; override?: MatchOverride }>();
+  // The matcher's answer is the link even when the rule doubts it, as GBIF files a
+  // record with that bare name there: unconfirmed, labelled with the doubt, and
+  // queued for review. Not when there's no species answer, the Red List marks the
+  // name unsettled, or the spelling is one the codes don't make the same name.
+  const guess = (m: MatchAnswer | undefined, reason: QueueReason) => !!m?.matcher_col_id && !NO_GUESS.has(reason);
+  const takeGuess = (sis: number, m: MatchAnswer, reason: QueueReason) => {
+    nameReason.set(sis, `unconfirmed: ${reason}`);
+    picks.push({ sis, col_id: m.matcher_col_id!, basis: "matcher", by_: null });
+  };
   for (const s of species) {
     const m = answers.get(s.sis);
     const acc = m ? acceptMatch(s, m, (id) => speciesOf.get(id) ?? null) : { accepted: false as const, reason: "no species match" as QueueReason };
@@ -146,10 +158,12 @@ export async function buildLink(
       toReview.set(s.sis, `override no longer holds: ${res.why}`);
       if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); }
       if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
+      else if (guess(m, acc.reason)) takeGuess(s.sis, m!, acc.reason);
       continue;
     }
     if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
     toReview.set(s.sis, acc.reason);
+    if (guess(m, acc.reason)) takeGuess(s.sis, m!, acc.reason);
   }
   const rlSis = new Set(species.map((s) => s.sis));
   const orphaned = [...decisions.keys()].filter((k) => !rlSis.has(k));
@@ -198,7 +212,11 @@ export async function buildLink(
 
   const links: LinkRow[] = [];
   for (const p of primary) {
-    if (!p.target_id || !p.target_name) { unlinkedReason.set(p.sis, nameReason.get(p.sis) ?? "waiting"); continue; }
+    if (!p.target_id || !p.target_name) {
+      const r = nameReason.get(p.sis);
+      unlinkedReason.set(p.sis, r?.startsWith("unconfirmed: ") ? "waiting" : r ?? "waiting");
+      continue;
+    }
     // A decision says the Red List name IS this CoL name, however spelled, and so
     // does a spelling the codes' rules make the same name (name-variants.ts:
     // Sminthopsis fuliginosa / fuliginosus), so decideKey may be asked about
@@ -291,7 +309,7 @@ export async function buildLink(
     ["covered: another accepted species IUCN's synonyms or CoL's name it", () => coverSynonymSpecies(cover, synonymCandidates, assessedNames)],
     ["covered: CoL holds the name twice", () => coverTwins(links, cover, accepted, listedName, assessedNames)],
     ["covered: a lumped species' other same-name synonyms", () => coverSameNameSynonyms(links, cover, sameNameSynonyms)],
-    ["covered: what a species waiting for a decision might be, kept off the NE list", () => coverUndecidedCandidates(links, cover, undecidedCandidates)],
+    ["covered: what an unconfirmed or waiting species might be, flagged on the NE list", () => coverUndecidedCandidates(links, cover, undecidedCandidates)],
     ["no link across a phylum", async () => dropCrossPhylum(links, await crossing())],
     ["one owner per usage", () => oneOwnerPerUsage(links, exactName)],
   ];
@@ -378,7 +396,7 @@ function describeLinks(links: LinkRow[], ctx: {
         "CoL duplicate, Red List synonym": `CoL also holds it as ${fmt(taxon)}, a name the Red List lists as a synonym`,
         "name under another species": `CoL also files ${fmt(taxon)} under ${fmt(target)}`,
         "Red List synonym": `The Red List lists ${fmt(taxon)} as a synonym; kept off the Not Evaluated list`,
-        "candidate while waiting": `${fmt(target)} may be it; kept off the Not Evaluated list until someone decides`,
+        "candidate": `${fmt(target)} may be it; shown on the Not Evaluated list flagged as possibly this species until someone decides`,
       };
       const counts = l.counted ? "; its records count too." : l.verdict === "refused" ? ", not counted." : `; not counted: ${owner(l)} owns its records.`;
       l.col_treatment = taxon ? status(taxon.status) : null;
@@ -400,6 +418,10 @@ function describeLinks(links: LinkRow[], ctx: {
     let found: string;
     if (n.override) found = `${n.override.by} decided it is ${fmt(picked)}${n.override.colVersion ? `, against ${n.override.colVersion}` : ""}`;
     else if (!picked) found = "";
+    else if (l.match_reason?.startsWith("unconfirmed: ")) {
+      const alts = (m?.alternatives ?? []).filter((a) => a.col_id !== picked.col_id).slice(0, 3).map((a) => fmt({ name: a.name, authorship: a.authorship, col_id: a.col_id }));
+      found = `Unconfirmed (${l.match_reason.slice("unconfirmed: ".length)}): the matcher answered ${fmt(picked)}, ${m?.confidence ?? "?"}% sure, where GBIF files records with that bare name${alts.length ? `; it also weighed ${alts.join("; ")}` : ""}`;
+    }
     else {
       const many = n.why === "authors pick it"
         ? `CoL has ${others.length + 1} records named ${picked.name}: ${copies()}. The Red List's authority, ${sp?.authority ?? "none"}, matches ${picked.authorship ?? "no author"} [${picked.col_id}]`

@@ -128,6 +128,23 @@ describe("dropCrossPhylum", () => {
   });
 });
 
+describe("unconfirmed links", () => {
+  it("lose a shared usage to a confirmed species, even its covered row", () => {
+    const links = [
+      primary(1, "U", { match_reason: "unconfirmed: lower confidence" }),
+      { ...primary(2, "U"), role: "covered" as const, method: "same_name_twin", basis: "rule" as const },
+    ];
+    oneOwnerPerUsage(links);
+    expect(links.find((l) => l.sis_taxon_id === 2)!.counted).toBe(true);
+    expect(links.find((l) => l.sis_taxon_id === 1)!).toMatchObject({ counted: false, verdict: "duplicate" });
+  });
+  it("keep their candidates, as a waiting species does", () => {
+    const links = [primary(1, "G", { match_reason: "unconfirmed: homonym the authors don't decide" })];
+    coverUndecidedCandidates(links, coverer(links), [{ sis: 1, target_id: "OTHER", target_name: "Other" }, { sis: 1, target_id: "G", target_name: "Guess" }]);
+    expect(covered(links).map((l) => [l.col_species_id, l.match_reason, l.counted])).toEqual([["OTHER", "candidate", false]]);
+  });
+});
+
 describe("oneOwnerPerUsage", () => {
   it("gives a usage two spellings claim to the one CoL writes exactly (Peltophorum dasyrhachis / dasyrachis)", () => {
     const links = [primary(62522, "U"), primary(226500158, "U")];

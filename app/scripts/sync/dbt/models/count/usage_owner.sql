@@ -22,8 +22,9 @@
  *   2. Otherwise a usage counts for its species (taxa.species_id): its own name,
  *      its synonyms, its subspecies, their BINs. If an assessed species' counted
  *      "own" link row is that species, for the assessed species.
- *   3. Otherwise, if no link row names that species at all, for the species
- *      itself, unassessed. A species linked only by rows that don't count
+ *   3. Otherwise, if no link row names that species at all (a candidate row,
+ *      what an unconfirmed or waiting species might be, doesn't count), for the
+ *      species itself, unassessed. A species linked only by rows that don't count
  *      (counts nothing) counts for no one.
  *
  * Checks: each usage has at most one owner. A violation means a number
@@ -56,4 +57,4 @@ SELECT t.col_id, NULL, NULL, t.species_id
 FROM taxa t
 WHERE t.species_id IS NOT NULL
   AND t.col_id NOT IN (SELECT usage_key FROM lumped)
-  AND t.species_id NOT IN (SELECT col_species_id FROM link WHERE col_species_id IS NOT NULL)
+  AND t.species_id NOT IN (SELECT col_species_id FROM link WHERE col_species_id IS NOT NULL AND method <> 'undecided_candidate')

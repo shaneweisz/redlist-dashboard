@@ -30,7 +30,7 @@
  * "Vallonia costata var. montana Sterki, 1893" among its synonyms.
  */
 WITH taxa AS (SELECT * FROM {{ ref('app_taxa') }}),
-assessed_cids AS (SELECT DISTINCT col_species_id AS col_id FROM {{ source('link', 'assessment_link') }} WHERE col_species_id IS NOT NULL),
+assessed_cids AS (SELECT DISTINCT col_species_id AS col_id FROM {{ source('link', 'assessment_link') }} WHERE col_species_id IS NOT NULL AND method <> 'undecided_candidate'),
 synonym_rows AS (
   SELECT b.parent_id AS direct_parent_id,
          split_part(b.scientific_name, ' ', 1) || ' ' || split_part(b.scientific_name, ' ', 2) AS parent_binomial
