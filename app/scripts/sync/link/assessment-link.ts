@@ -589,8 +589,13 @@ function matchNotes(links: LinkRow[], ctx: {
     }
 
     // What the count includes beyond the record it is linked through.
-    // Records already named above (CoL's copies of a duplicate) aren't repeated.
-    const also = (alsoRows.get(l.sis_taxon_id) ?? []).filter((o) => !records.some((r) => r.id === o.col_taxon_id));
+    // Records already named above (CoL's copies of a duplicate, a homonym's other
+    // records) aren't repeated; they are marked as counted too.
+    const allAlso = alsoRows.get(l.sis_taxon_id) ?? [];
+    records = records.map((r) => (r.role === "not" && allAlso.some((o) => o.col_taxon_id === r.id) ? { ...r, role: "also" as const } : r));
+    const named = records.filter((r) => r.role === "also" && allAlso.some((o) => o.col_taxon_id === r.id));
+    if (named.length > 0 && !n.why) sentences.push(`Records under ${named.map((r) => nameAuth(r.name, r.authorship)).join(" and ")} count too, as its own name filed elsewhere in CoL.`);
+    const also = allAlso.filter((o) => !records.some((r) => r.id === o.col_taxon_id));
     if (also.length > 0) {
       const alsoRecs = also.map((o) => ({ ...fromUsage(o.col_taxon_id, "also" as const), species: null }));
       sentences.push(`Also counts records under ${also.map((o, i) => `${nameAuth(alsoRecs[i].name, alsoRecs[i].authorship)} (${ALSO[o.match_reason ?? ""] ?? "another CoL name"})`).join("; ")}.`);
