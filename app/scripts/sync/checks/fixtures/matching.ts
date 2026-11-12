@@ -30,6 +30,9 @@ export interface Versions {
  */
 const NOVEMBER_2026: Versions = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
 
+/** Cases added on 12 November 2026, one per link rule no case showed yet; same releases. */
+const NOVEMBER_12: Versions = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
+
 export interface MatchCase {
   name: string;
   /** The Red List's authority for it: with the name, which species the case is about. */
@@ -58,6 +61,12 @@ export interface MatchCase {
     maxRecords?: number;
     /** CoL species name → whether the NE list shows it. */
     neListed?: Record<string, boolean>;
+    /**
+     * The link rules it shows, each one a label its link rows carry (see ruleLabel in
+     * check-fixtures.ts): "exact, unique", "CoL duplicate", "waiting: homonym the
+     * authors don't decide". Every label a build gives any species needs a case.
+     */
+    rules?: string[];
   };
 }
 
@@ -69,7 +78,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "IUCN's genus for the Pileated Woodpecker; GBIF files its 5.4M records under Dryocopus pileatus. Ranking keys by match order showed 156.",
     source: "species-key.ts sameOrganism; dbt/models/count/record_counts.sql (the GBIF key)",
     confirmed: NOVEMBER_2026,
-    expect: { gbifKeyName: "Dryocopus pileatus", minRecords: 1_000_000, neListed: { "Dryocopus pileatus": false } },
+    expect: { gbifKeyName: "Dryocopus pileatus", minRecords: 1_000_000, neListed: { "Dryocopus pileatus": false }, rules: ["CoL duplicate, Red List synonym"] },
   },
   {
     name: "Drepanis coccinea",
@@ -77,7 +86,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Same bird as CoL's Vestiaria coccinea: a genus move with the epithet unchanged.",
     source: "species-key.ts sameOrganism",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Vestiaria coccinea", linkedAuthorship: "(G. Forster, 1780)", gbifKeyName: "Vestiaria coccinea", hasRecords: true },
+    expect: { linkedTo: "Vestiaria coccinea", linkedAuthorship: "(G. Forster, 1780)", gbifKeyName: "Vestiaria coccinea", hasRecords: true, rules: ["exact, unique"] },
   },
   {
     name: "Pica nutalli",
@@ -85,7 +94,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Spelling variant of nuttallii (same authorship, one edit). Update (2026-11, COL26.6 XR): CoL now spells the accepted name Pica nutallii and holds Pica nutalli as its own synonym, so the link goes through a CoL synonym rather than a respelling. Update (2026-11, COL26.6 XR): CoL also holds it, outside its curated core, as Pica nuttalli with no author and 121,763 records, which counted for nothing until the twin rule read respellings.",
     source: "species-key.ts sameOrganism",
     confirmed: NOVEMBER_2026,
-    expect: { minRecords: 50_000, neListed: { "Pica nuttallii": false, "Pica nuttalli": false } },
+    expect: { minRecords: 50_000, neListed: { "Pica nuttallii": false, "Pica nuttalli": false }, rules: ["CoL duplicate, respelled"] },
   },
   {
     name: "Sminthopsis fuliginosa",
@@ -101,7 +110,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Patronymic -ii vs CoL's -i.",
     source: "name-variants.ts; accept-match.ts (a spelling variant the codes allow)",
     confirmed: NOVEMBER_2026,
-    expect: { hasRecords: true },
+    expect: { hasRecords: true, rules: ["spelling variant"] },
   },
   {
     name: "Solanum vallis-mexici",
@@ -125,7 +134,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Without classification context GBIF's matcher backed off to the genus and the bird lost its 20M records. Update (2026-11, COL26.6 XR): The homonym that drew the matcher off is still in CoL (a synonym in the mite genus Syringophilopsis), but the matcher is now asked with classification hints, so whether it would still back off without them can't be checked from a build.",
     source: "link/matches.ts (the classification hints)",
     confirmed: NOVEMBER_2026,
-    expect: { gbifKeyName: "Agelaius phoeniceus", minRecords: 1_000_000 },
+    expect: { gbifKeyName: "Agelaius phoeniceus", minRecords: 1_000_000, rules: ["exact, duplicate in CoL"] },
   },
   {
     name: "Verreauxia africana",
@@ -154,7 +163,7 @@ export const MATCHING_CASES: MatchCase[] = [
     // abundus, so procax stays off the NE list once the space is normalised.
     // Its records still don't count for abundus.
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Pseudophilautus abundus", linkedAuthorship: "(Manamendra-Arachchi & Pethiyagoda, 2005)", gbifKeyName: "Pseudophilautus abundus", maxRecords: 100, neListed: { "Pseudophilautus procax": false } },
+    expect: { linkedTo: "Pseudophilautus abundus", linkedAuthorship: "(Manamendra-Arachchi & Pethiyagoda, 2005)", gbifKeyName: "Pseudophilautus abundus", maxRecords: 100, neListed: { "Pseudophilautus procax": false }, rules: ["Red List synonym"] },
   },
   {
     name: "Acacia koaia",
@@ -178,7 +187,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490).",
     source: "accept-match.ts; name-variants.ts",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: null, gbifKeyName: null },
+    expect: { linkedTo: null, gbifKeyName: null, rules: ["candidate while waiting", "waiting: spelling variant"] },
   },
 
   // ── Lumped: a synonym in CoL keeps its own records ─────────────────────────
@@ -223,7 +232,7 @@ export const MATCHING_CASES: MatchCase[] = [
     // synonym's records twice (it showed 1,430 when the synonym sat under both
     // of its roots).
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Fringilla teydea", linkedAuthorship: "Webb, Berthelot & Moquin-Tandon, 1836", hasRecords: true, maxRecords: 1_000 },
+    expect: { linkedTo: "Fringilla teydea", linkedAuthorship: "Webb, Berthelot & Moquin-Tandon, 1836", hasRecords: true, maxRecords: 1_000, rules: ["name under another species"] },
   },
   {
     name: "Meandrina danae",
@@ -255,7 +264,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "Its IUCN synonym Vicia kitaibeliana is a CoL ambiguous synonym also filed under V. cracca. Ambiguous says nothing about V. cracca, which prod kept off the NE list (871k records).",
     source: "link/assessment-link.ts covered rows (kinds 0-2 only)",
     confirmed: NOVEMBER_2026,
-    expect: { neListed: { "Vicia cracca": true } },
+    expect: { neListed: { "Vicia cracca": true }, rules: ["exact, homonym, author decides"] },
   },
   {
     name: "Centropogon australis",
@@ -263,7 +272,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "A waspfish, and also a plant. IUCN's class (Actinopterygii) isn't CoL's (Teleostei), so the homonym tiebreak fell through to id order and linked the plant (8 records).",
     source: "link/assessment-link.ts tiebreak (phylum, kingdom)",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)", gbifKeyName: "Centropogon australis", minRecords: 1_500 },
+    expect: { linkedTo: "Centropogon australis", linkedAuthorship: "(White, 1790)", gbifKeyName: "Centropogon australis", minRecords: 1_500, rules: ["override"] },
   },
   {
     name: "Acanthurus lineatus",
@@ -279,7 +288,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "CoL holds it twice, once with the hybrid sign (Utricularia × ochroleuca, 7,000 records) and once without (none). Twins are matched with the hybrid sign set aside.",
     source: "link/assessment-link.ts twinKeys",
     confirmed: NOVEMBER_2026,
-    expect: { minRecords: 5_000 },
+    expect: { minRecords: 5_000, rules: ["CoL duplicate"] },
   },
   {
     name: "Frullania azorica",
@@ -477,5 +486,118 @@ export const MATCHING_CASES: MatchCase[] = [
     source: "sources/taxa.ts BELOW_SPECIES",
     confirmed: NOVEMBER_2026,
     expect: { assessed: false, neListed: { "Syllepte belialis": true } },
+  },
+  // ── One case per link rule: each rule a build applies needs one (check-fixtures.ts uncoveredRules) ──
+  {
+    name: "Charadrius nivosus",
+    authority: "(Cassin, 1858)",
+    why: "CoL holds the snowy plover twice, as Charadrius and Anarhynchus nivosus, both Cassin, 1858: the second holds 196,733 of its records.",
+    source: "link/rules.ts coverDuplicateConcepts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Charadrius nivosus", minRecords: 100_000, neListed: { "Anarhynchus nivosus": false }, rules: ["CoL duplicate, other genus"] },
+  },
+  {
+    name: "Turraeanthus africana",
+    authority: "(Welw.) Pellegr.",
+    why: "CoL spells it africanus, a Latin ending the codes treat as the same name, and holds that name twice (accepted and provisional), so both count.",
+    source: "link/accept-match.ts; name-variants.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Turraeanthus africanus", hasRecords: true, rules: ["spelling variant, duplicate in CoL"] },
+  },
+  {
+    name: "Elaphoglossum urbanii",
+    authority: "(Sodiro) C.Chr.",
+    why: "CoL spells it urbani, and holds that spelling twice by two authors; the Red List's (Sodiro) C.Chr. picks the accepted one, not Brause's ambiguous synonym.",
+    source: "link/accept-match.ts (authors pick it); name-variants.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Elaphoglossum urbani", linkedAuthorship: "(Sodiro) C.Chr.", rules: ["spelling variant, homonym, author decides"] },
+  },
+  {
+    name: "Malaxis brachystachys",
+    authority: "(Rchb.f.) Kuntze",
+    why: "Two orchids share the name. Asked without the authority the matcher scored Lindley's (a synonym of Oberonia brachystachys) 166 against Kuntze's 165, and the twin rule took it, counting another orchid's records. Found by the agent audit; decided in match-overrides.tsv.",
+    source: "seeds/match-overrides.tsv",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Malaxis realdelmontensis", rules: ["override"] },
+  },
+  {
+    name: "Sipyloidea brevicerci",
+    authority: "Hasenpusch & Brock, 2007",
+    why: "CoL holds the name as an accepted species and as a synonym of a Brazilian stick insect: it says both that it is a species and that it is another one.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: accepted and a synonym in CoL"] },
+  },
+  {
+    name: "Cantharellus ochraceus",
+    authority: "Gillet",
+    why: "CoL marks the name an ambiguous synonym: it doesn't say which species it is.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: ambiguous synonym"] },
+  },
+  {
+    name: "Galium palustre",
+    authority: "L.",
+    why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: homonym the authors don't decide"] },
+  },
+  {
+    name: "Vepris onanae",
+    authority: "Cheek ined.",
+    why: "An unpublished name (ined.): the Red List itself marks it unsettled.",
+    source: "link/accept-match.ts INFORMAL_NAME, DISOWNED_AUTHORITY",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: informal or qualified name"] },
+  },
+  {
+    name: "Kuhlia rubens",
+    authority: "(Spinola, 1807)",
+    why: "The matcher is less than fully sure of its answer, a synonym of Apogon imberbis.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: lower confidence"] },
+  },
+  {
+    name: "Ampedus karpathicus",
+    authority: "(Buysson, 1885)",
+    why: "The matcher's answer is a name CoL says was misapplied, not a species.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: misapplied name"] },
+  },
+  {
+    name: "Rubus fruticosus",
+    authority: "L.",
+    why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. Until 2026-11 the link owned all three, counting Loureiro's Vietnamese Rubus with it.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: no species match"] },
+  },
+  {
+    name: "Allanaspides helonomus",
+    authority: "Swain, Wilson, Hickman & Ong, 1970",
+    why: "The matcher answers CoL's provisional copy; CoL also holds the name as accepted by the same authors.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: provisional name"] },
+  },
+  {
+    name: "Bulimulus eschariferus",
+    authority: "(Ancey, 1887)",
+    why: "The only CoL name spelt like it is Sowerby's (1838), a synonym of Naesiotus eschariferus: another author, so perhaps another snail.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: synonym by other authors"] },
+  },
+  {
+    name: "Vestia roschitzi",
+    authority: "(Brancsik, 1890)",
+    why: "CoL holds the name only as a synonym that leads to no species.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: null, rules: ["waiting: synonym of no species"] },
   },
 ];

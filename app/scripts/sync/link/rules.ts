@@ -214,12 +214,13 @@ export function coverDuplicateConcepts(links: LinkRow[], cover: Cover, accepted:
 }
 
 /** A CoL synonym usage carrying an assessed species' exact name, and the species CoL files it under. */
-export interface SameNameSynonym { sis: number; usage: string; target: string }
+export interface SameNameSynonym { sis: number; usage: string; target: string; authority?: string | null; authorship?: string | null }
 
 /**
  * Rule: a lumped species owns every synonym usage carrying its exact name, not
- * just the one matched: Rubus fruticosus is filed under three species, and its
- * records under each are its own.
+ * just the one matched, when its authors aren't clearly others: the same name by
+ * another author is another organism (Ilex wallichii Hook.f. is not Steudel's,
+ * filed under I. malayana), as for a synonym match (accept-match.ts).
  */
 export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: SameNameSynonym[]): Set<number> {
   const lumped = new Map(links.filter((l) => l.role === "primary" && l.verdict === "lumped" && ["synonym", "ambiguous_synonym"].includes(l.method))
@@ -227,7 +228,7 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
   const touched = new Set<number>();
   for (const x of synonyms) {
     const l = lumped.get(x.sis);
-    if (!l || x.usage === l.col_taxon_id) continue;
+    if (!l || x.usage === l.col_taxon_id || compareAuthors(x.authority, x.authorship) === "other") continue;
     if (cover({ sis_taxon_id: x.sis, col_species_id: x.target, col_taxon_id: x.usage, verdict: "lumped", method: "same_name_synonym",
       match_reason: "name under another species", counted: true })) touched.add(x.sis);
   }

@@ -4,15 +4,29 @@
  * case list itself stays well-formed.
  */
 import { describe, it, expect } from "vitest";
-import { mismatches, failureKind, buildVersions, type Observed } from "../sync/checks/check-fixtures";
+import { mismatches, failureKind, buildVersions, uncoveredRules, ruleLabel, type Observed } from "../sync/checks/check-fixtures";
 import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
   assessed: true, category: "VU", linkedTo: "Malus domestica", linkedAuthorship: "Borkh.", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
-  records: 8_413, neListed: { "Malus domestica": false },
+  records: 8_413, neListed: { "Malus domestica": false }, rules: ["exact, unique"],
 };
 const confirmed = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
 const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", confirmed, expect });
+
+describe("rules", () => {
+  it("labels a waiting row by why it waits", () => {
+    expect(ruleLabel("waiting", "provisional name")).toBe("waiting: provisional name");
+    expect(ruleLabel("CoL duplicate", null)).toBe("CoL duplicate");
+  });
+  it("fails a case whose rows don't show its rule", () => {
+    expect(mismatches(c({ rules: ["exact, unique"] }), seen)).toEqual([]);
+    expect(mismatches(c({ rules: ["CoL duplicate"] }), seen)).toEqual(['rule: expected "CoL duplicate", its rows show ["exact, unique"]']);
+  });
+  it("names every rule a build applies that no case shows", () => {
+    expect(uncoveredRules([c({ rules: ["exact, unique"] })], ["exact, unique", "waiting: lower confidence"])).toEqual(["waiting: lower confidence"]);
+  });
+});
 
 describe("failureKind", () => {
   it("calls a failure on the releases a case last passed on a regression", () => {
