@@ -35,7 +35,7 @@ beforeAll(async () => {
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
       'matcher' AS basis, NULL::VARCHAR AS decided_by,
       CASE WHEN col_taxon_id IS NULL THEN 'waiting' WHEN sis = 2 THEN 'flagged: lower confidence' ELSE 'exact, unique' END AS match_reason,
-      CASE WHEN sis = 2 THEN 'GBIF''s matcher is only 94% sure.' END AS flag_note, NULL::VARCHAR AS flag_records
+      CASE WHEN sis = 2 THEN 'GBIF''s matcher is only 94% sure.' END AS match_note, NULL::VARCHAR AS match_records
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
@@ -107,7 +107,7 @@ describe("GBIF counts in the lists", () => {
     expect(rows["2"].count_note).toBe("flagged");
     expect(rows["1"].count_note).toBeNull();
     expect(rows["2"].match_reason).toBe("flagged: lower confidence");
-    expect(rows["2"].flag_note).toBe("GBIF's matcher is only 94% sure.");
+    expect(rows["2"].match_note).toBe("GBIF's matcher is only 94% sure.");
   });
   it("says when a species is linked to no CoL species, so nothing is counted", () => {
     expect(rows["3"].count_note).toBe("unlinked");

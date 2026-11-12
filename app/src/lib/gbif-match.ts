@@ -1,7 +1,7 @@
 /**
  * GBIF matching reconciliation: how each species' Red List name was matched to
  * Catalogue of Life, the taxonomy GBIF counts records by (the sync's
- * assessment_link, via assessed.parquet's match_* and flag_* columns).
+ * assessment_link, via assessed.parquet's match_* columns).
  *
  * Three groups, by one simple rule each:
  *   - Exact: the Red List name appears once in CoL. Nothing to say.
@@ -20,7 +20,8 @@ export type MatchKey =
 /** What else a count includes, beside how it was matched (overlaps the keys above). */
 export type CountsKey = "other_names" | "own_name";
 
-export type MatchGroup = "flagged" | "resolved" | "none";
+/** The card's sections: how the name was matched (flagged or resolved), what the count includes, and no match. */
+export type MatchGroup = "flagged" | "resolved" | "includes" | "none";
 
 export interface MatchBar { key: MatchKey | CountsKey; label: string; group: MatchGroup }
 
@@ -38,12 +39,20 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
   { key: "decided", label: "Decided by a person", group: "resolved" },
-  { key: "other_names", label: "Also counts other CoL names", group: "resolved" },
-  { key: "own_name", label: "Counts only its own name", group: "resolved" },
+  { key: "other_names", label: "Also counts other CoL names", group: "includes" },
+  { key: "own_name", label: "Only its own name counts", group: "includes" },
   { key: "none", label: "No match, no count", group: "none" },
 ];
 
-export const GROUP_COLOR: Record<MatchGroup, string> = { flagged: "#d97706", resolved: "#a1a1aa", none: "#e4e4e7" };
+export const GROUP_COLOR: Record<MatchGroup, string> = { flagged: "#d97706", resolved: "#a1a1aa", includes: "#a1a1aa", none: "#d4d4d8" };
+
+/** Each section's heading and one-line meaning. */
+export const GROUP_TITLE: Record<MatchGroup, { title: string; sub: string }> = {
+  flagged: { title: "⚑ Flagged", sub: "the count may include another species' records" },
+  resolved: { title: "Resolved by a rule", sub: "not one exact name, but reliable" },
+  includes: { title: "What the count includes", sub: "beyond the matched name" },
+  none: { title: "No match", sub: "no count shown" },
+};
 
 const FLAGGED: Record<string, MatchKey> = {
   "homonym the authors don't decide": "f_homonym",
@@ -76,8 +85,8 @@ export function countsKeys(r: { match_counts?: unknown; match_other_names?: unkn
 
 const GROUP = new Map<string, MatchGroup>(MATCH_BARS.map((b) => [b.key, b.group]));
 
-/** A CoL record a flag is about (the sync's flag_records). */
-export interface FlagRecord { id: string; name: string; authorship: string | null; status: string; species: string | null; counted: boolean }
+/** A CoL record a match note names (the sync's match_records): counted through, also counted, or named only. */
+export interface NoteRecord { id: string; name: string; authorship: string | null; status: string; species: string | null; role: "counted" | "also" | "not" }
 
 /** The species' match facts as the list carries them. */
 export interface SpeciesMatch {
@@ -86,9 +95,9 @@ export interface SpeciesMatch {
   match_other_names?: number | null;
   /** NE rows: the assessed species it may be. */
   may_be_assessed?: string[];
-  /** Flagged rows: why, in a sentence, and the CoL records it is about. */
-  flag_note?: string | null;
-  flag_records?: FlagRecord[];
+  /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */
+  match_note?: string | null;
+  match_records?: NoteRecord[];
 }
 
 export const isFlagged = (s: SpeciesMatch) => GROUP.get(s.match ?? "plain") === "flagged" || !!s.may_be_assessed?.length;

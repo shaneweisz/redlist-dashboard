@@ -13,7 +13,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, barLabel, countsText, checklistBankUrl, type SpeciesMatch } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, barLabel, countsText, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -728,54 +728,55 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 
 
 // Beside a GBIF count: ⚑ when its match to CoL is flagged (or an NE species may
-// be an assessed one), opening a short, specific explanation with the CoL
-// records involved, each linked so a reader can check it; a faint ⁺ when a
-// count includes other CoL names or only its own; nothing for an exact match.
-function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; scientific_name?: string; col_id?: string | null } }) {
+// be an assessed one), a faint ⁺ when it isn't one exact name but a rule
+// resolved it; either opens the same short explanation, with the CoL records
+// involved, each linked so a reader can check it. Nothing for an exact match.
+function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null } }) {
   const link = "underline decoration-dotted hover:text-white";
-  if (isMatchFlagged(s)) {
-    const content = s.may_be_assessed?.length ? (
+  const flagged = isMatchFlagged(s);
+  if (s.may_be_assessed?.length) {
+    const content = (
       <div className="text-left space-y-1">
         <div className="font-semibold">⚑ May be an assessed species</div>
         <div>
           The Red List assesses {s.may_be_assessed.map((n, i) => (
             <span key={n}>{i > 0 ? " or " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
-          ))}, whose name leads to this CoL species, but that species&apos; own match is flagged or unresolved. This may be the same species.
+          ))}, whose name leads to this CoL species, but whose own match is flagged or unresolved. This may be the same species.
         </div>
         {s.col_id && <a className={link} href={checklistBankUrl(COL_RELEASE.key, s.col_id)} target="_blank" rel="noopener noreferrer">This species in CoL ({COL_RELEASE.alias}) ↗</a>}
       </div>
-    ) : (
-      <div className="text-left space-y-1">
-        <div className="font-semibold">⚑ Flagged: {barLabel(s.match ?? "")}</div>
-        {s.flag_note && <div>{s.flag_note}</div>}
-        {!!s.flag_records?.length && (
-          <ul className="space-y-0.5">
-            {s.flag_records.map(r => (
-              <li key={r.id}>
-                <a className={link} href={checklistBankUrl(COL_RELEASE.key, r.id)} target="_blank" rel="noopener noreferrer">
-                  <i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}
-                </a>
-                <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
-                {r.counted && <span className="ml-1 text-amber-400">← counted</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
-      </div>
     );
-    return (
-      <SelectableHoverTooltip content={content}>
-        <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span>
-      </SelectableHoverTooltip>
-    );
+    return <SelectableHoverTooltip content={content}><span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span></SelectableHoverTooltip>;
   }
-  const note = countsText(s);
-  return note ? (
-    <HoverTooltip text={note}>
-      <span className="ml-0.5 text-zinc-400 dark:text-zinc-500 cursor-help align-super text-[10px]" aria-label="How this count is made">⁺</span>
-    </HoverTooltip>
-  ) : null;
+  const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
+  if (!s.match_note && kinds.length === 0) return null;
+  const content = (
+    <div className="text-left space-y-1">
+      <div className="font-semibold">{flagged ? "⚑ Flagged: " : ""}{kinds.map(barLabel).join(" · ")}</div>
+      <div>{s.match_note ?? countsText(s)}</div>
+      {!!s.match_records?.length && (
+        <ul className="space-y-0.5">
+          {s.match_records.map(r => (
+            <li key={r.id}>
+              <a className={link} href={checklistBankUrl(COL_RELEASE.key, r.id)} target="_blank" rel="noopener noreferrer">
+                <i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}
+              </a>
+              <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
+              {r.role !== "not" && <span className="ml-1 text-amber-400">← {r.role === "counted" ? "counted" : "also counted"}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
+    </div>
+  );
+  return (
+    <SelectableHoverTooltip content={content}>
+      {flagged
+        ? <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span>
+        : <span className="ml-0.5 text-zinc-400 dark:text-zinc-500 cursor-help align-super text-[10px]" aria-label="How this count is made">⁺</span>}
+    </SelectableHoverTooltip>
+  );
 }
 
 // A HoverTooltip you can move the pointer INTO — so its content can be read at
@@ -4087,7 +4088,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const single = isSingleSpecies && singleSpecies
       ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length))
       : [];
-    const swatch = (c: string) => <span className="inline-block w-2 h-2 rounded-sm align-middle mr-1" style={{ background: c }} />;
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
         <div className="flex items-center justify-between gap-2 mb-1 min-h-[24px]">
@@ -4126,33 +4126,48 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             )}
           </div>
         ) : barData.length > 0 ? (
-          <>
-            <div style={{ height: Math.max(90, barData.length * 24) }}>
-              <FilterBarChart
-                data={barData}
-                dataKey="code"
-                selectedItems={selectedShort}
-                onBarClick={(data: { payload?: { code?: string } }, event: React.MouseEvent) => {
-                  const k = data.payload?.code ? keyFor.get(data.payload.code) : undefined;
-                  if (!k) return;
-                  const isMulti = event.metaKey || event.ctrlKey;
-                  setMatch(prev => {
-                    const next = new Set(isMulti ? prev : [...prev].filter(x => x === k));
-                    if (next.has(k)) next.delete(k); else next.add(k);
-                    return next;
-                  });
-                }}
-                barColor={GROUP_COLOR.resolved}
-                yAxisWidth={190}
-                rightMargin={60}
-                labelFormatter={(short: string) => short}
-              />
-            </div>
-            <p className="mt-1 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
-              {swatch(GROUP_COLOR.flagged)}Flagged: the count may include another species&apos; records.{" "}
-              {swatch(GROUP_COLOR.resolved)}Resolved by a rule: reliable, but not a plain one-name match.
-            </p>
-          </>
+          <div className="space-y-2">
+            {(["flagged", "resolved", "includes"] as MatchGroup[]).map(g => {
+              // Each section's bars, largest first.
+              const rows = barData.filter(d => MATCH_BARS.find(b => b.key === d.rawCode)?.group === g).sort((x, y) => y.count - x.count);
+              if (rows.length === 0) return null;
+              return (
+                <div key={g}>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <span className="font-semibold" style={{ color: g === "flagged" ? GROUP_COLOR.flagged : undefined }}>{GROUP_TITLE[g].title}</span>
+                    <span>: {GROUP_TITLE[g].sub}</span>
+                  </div>
+                  <div style={{ height: Math.max(30, rows.length * 24) }}>
+                    <FilterBarChart
+                      data={rows}
+                      dataKey="code"
+                      selectedItems={selectedShort}
+                      onBarClick={(data: { payload?: { code?: string } }, event: React.MouseEvent) => {
+                        const k = data.payload?.code ? keyFor.get(data.payload.code) : undefined;
+                        if (!k) return;
+                        const isMulti = event.metaKey || event.ctrlKey;
+                        setMatch(prev => {
+                          const next = new Set(isMulti ? prev : [...prev].filter(x => x === k));
+                          if (next.has(k)) next.delete(k); else next.add(k);
+                          return next;
+                        });
+                      }}
+                      barColor={GROUP_COLOR[g]}
+                      yAxisWidth={190}
+                      rightMargin={60}
+                      labelFormatter={(short: string) => short}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+            {(matchTally.counts.none ?? 0) > 0 && (
+              <button type="button" onClick={() => setMatch(prev => (prev.size === 1 && prev.has("none") ? new Set<string>() : new Set(["none"])))}
+                className={`text-[11px] ${selectedMatch.has("none") ? "text-zinc-900 dark:text-zinc-100 font-semibold" : "text-zinc-500 dark:text-zinc-400"} hover:underline`}>
+                {GROUP_TITLE.none.title}: {(matchTally.counts.none ?? 0).toLocaleString()} species, {GROUP_TITLE.none.sub}
+              </button>
+            )}
+          </div>
         ) : (
           <div style={{ height: 90 }} className="flex items-center justify-center">
             <span className="text-sm text-zinc-400 dark:text-zinc-500">Every name here is an exact match</span>

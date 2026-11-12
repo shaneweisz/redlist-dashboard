@@ -328,16 +328,16 @@ export async function buildLink(
   const sisByName = new Map(species.map((s) => [norm(s.name), s.sis]));
   describeLinks(links, { usages, sisByName, species: new Map(species.map((s) => [s.sis, s])), answers, nameCtx,
     primary: new Map(primary.map((p) => [p.sis, p])), toReview });
-  const flags = flagNotes(links, { usages, species: new Map(species.map((s) => [s.sis, s])), answers, primary: new Map(primary.map((p) => [p.sis, p])) });
+  const notes = matchNotes(links, { usages, species: new Map(species.map((s) => [s.sis, s])), answers, nameCtx, primary: new Map(primary.map((p) => [p.sis, p])) });
 
   // counts, not the rules' verdict: what the row counts is what a reader needs.
   const counts = (l: LinkRow) => !l.counted ? "nothing" : l.verdict === "own" ? "the whole CoL species" : "only records under its own name";
   await writeTable(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
     counts: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", match_reason: "VARCHAR", col_treatment: "VARCHAR",
-    match_description: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN", flag_note: "VARCHAR", flag_records: "VARCHAR" },
+    match_description: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN", match_note: "VARCHAR", match_records: "VARCHAR" },
     links.map(({ verdict: _, ...l }) => {
-      const f = l.role === "primary" ? flags.get(l.sis_taxon_id) : undefined;
-      return { ...l, counts: counts({ verdict: _, ...l }), flag_note: f?.note ?? null, flag_records: f ? JSON.stringify(f.records) : null };
+      const f = l.role === "primary" ? notes.get(l.sis_taxon_id) : undefined;
+      return { ...l, counts: counts({ verdict: _, ...l }), match_note: f?.note ?? null, match_records: f ? JSON.stringify(f.records) : null };
     }));
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
 
@@ -473,66 +473,127 @@ function describeLinks(links: LinkRow[], ctx: {
   }
 }
 
-/** A CoL record a flag names, for the app to link to (ChecklistBank, in the release the sync used). */
-interface FlagRecord { id: string; name: string; authorship: string | null; status: string; species: string | null; counted: boolean }
+/** A CoL record a match note names, for the app to link to (ChecklistBank, in the release the sync used). */
+interface NoteRecord {
+  id: string; name: string; authorship: string | null; status: string; species: string | null;
+  /** counted: the record the link counts through; also: another CoL name whose records count too; not: named, not counted. */
+  role: "counted" | "also" | "not";
+}
 
 /**
- * flag_note / flag_records: for a flagged count, why it is in doubt, in one short
- * sentence with the names, and the CoL records the doubt is about, the counted
- * one marked. A species whose own name waits but which counts other names gets
- * the same. Everything else: none.
+ * match_note / match_records: for every species whose match isn't a plain one
+ * (the Red List name once in CoL, counting that species), how it was matched or
+ * why it is in doubt, in short sentences with the names, and the CoL records
+ * they are about. A sentence on what the count also includes (other CoL names,
+ * or only its own name) follows. Exact matches with nothing else to say: none.
  */
-function flagNotes(links: LinkRow[], ctx: {
+function matchNotes(links: LinkRow[], ctx: {
   usages: Map<string, Usage>; species: Map<number, { sis: number; name: string; authority: string | null }>;
-  answers: Map<number, MatchAnswer>; primary: Map<number, { picked_id: string }>;
-}): Map<number, { note: string; records: FlagRecord[] }> {
-  const out = new Map<number, { note: string; records: FlagRecord[] }>();
+  answers: Map<number, MatchAnswer>; primary: Map<number, { picked_id: string; method: string }>;
+  nameCtx: Map<number, { why?: string; variant?: true; override?: MatchOverride }>;
+}): Map<number, { note: string; records: NoteRecord[] }> {
+  const out = new Map<number, { note: string; records: NoteRecord[] }>();
   const nameAuth = (n: string, a: string | null) => `${n}${a ? ` ${a}` : ""}`;
-  const countedOther = new Map<number, LinkRow[]>();
-  for (const l of links) if (l.role === "covered" && l.counted) countedOther.set(l.sis_taxon_id, [...(countedOther.get(l.sis_taxon_id) ?? []), l]);
+  const an = (w: string) => (/^[aeiou]/i.test(w) ? `an ${w}` : `a ${w}`);
+  const what = (r: NoteRecord) => r.status === "accepted" ? "an accepted species" : `${an(r.status)} of ${r.species}`;
+  const fromUsage = (id: string | null, role: NoteRecord["role"]): NoteRecord => {
+    const u = id ? ctx.usages.get(id) : undefined;
+    return { id: id ?? "", name: u?.name ?? "?", authorship: u?.authorship ?? null, status: status(u?.status ?? null), species: null, role };
+  };
+  const ALSO: Record<string, string> = {
+    "CoL duplicate": "a second CoL record for this species",
+    "CoL duplicate, respelled": "the same name spelt another way in CoL",
+    "CoL duplicate, Red List synonym": "a name the Red List lists as its synonym, which CoL holds as a species",
+    "name under another species": "its own name, which CoL also files under another species",
+  };
+  const alsoRows = new Map<number, LinkRow[]>();
+  for (const l of links) if (l.role === "covered" && l.counted) alsoRows.set(l.sis_taxon_id, [...(alsoRows.get(l.sis_taxon_id) ?? []), l]);
+
   for (const l of links) {
     if (l.role !== "primary") continue;
     const sp = ctx.species.get(l.sis_taxon_id);
     if (!sp) continue;
-    if (!l.col_species_id) {
-      const others = countedOther.get(l.sis_taxon_id) ?? [];
-      if (others.length === 0) continue;
-      const recs = others.map((o) => { const u = o.col_taxon_id ? ctx.usages.get(o.col_taxon_id) : undefined;
-        return { id: o.col_taxon_id ?? "", name: u?.name ?? "?", authorship: u?.authorship ?? null, status: status(u?.status ?? null), species: u?.name ?? null, counted: true }; });
-      out.set(l.sis_taxon_id, { note: `No clear CoL match for ${sp.name} itself yet. Counted: records under ${recs.map((r) => r.name).join(", ")}, which the Red List lists as ${recs.length > 1 ? "synonyms" : "a synonym"}.`, records: recs });
-      continue;
-    }
-    if (!l.match_reason?.startsWith("flagged: ")) continue;
-    const doubt = l.match_reason.slice("flagged: ".length);
     const m = ctx.answers.get(l.sis_taxon_id);
     const pickedId = ctx.primary.get(l.sis_taxon_id)?.picked_id;
-    if (!m || !pickedId) continue;
-    const pick = { id: pickedId, name: m.matcher_name ?? "?", authorship: m.matcher_authorship, status: status(m.matcher_status),
-      species: m.matcher_accepted_name ?? m.matcher_name, counted: true };
-    const same = m.alternatives.filter((a) => a.col_id !== pickedId && a.status !== "MISAPPLIED" && binomialOf(a.name) === binomialOf(pick.name))
-      .map((a) => ({ id: a.col_id, name: a.name, authorship: a.authorship, status: status(a.status), species: a.accepted_name ?? a.name, counted: false }));
-    const records = [pick, ...same];
-    const p = nameAuth(pick.name, pick.authorship);
-    const speciesCount = new Set(records.map((r) => r.species)).size;
-    const an = (w: string) => (/^[aeiou]/i.test(w) ? `an ${w}` : `a ${w}`);
-    const filed = pick.status === "accepted" ? "" : `, ${an(pick.status)} of ${pick.species}`;
-    const byRl = records.filter((r) => sp.authority && compareAuthors(sp.authority, r.authorship) === "same");
-    const what = (r: FlagRecord) => r.status === "accepted" ? "an accepted species" : `${an(r.status)} of ${r.species}`;
-    const homonym = !sp.authority ? "The Red List gives no author to choose between them"
-      : byRl.length === 0 ? `The Red List cites ${sp.authority}, and none has that exact citation`
-      : byRl.length === 1 ? `The Red List cites ${sp.authority}; the record with that citation is ${what(byRl[0])}`
-      : `The Red List cites ${sp.authority}, and ${byRl.length} records have that citation`;
-    const counted = `Counted: GBIF's matcher's pick, ${pick.authorship ? `the record by ${pick.authorship}` : "the record with no author"}${filed}.`;
-    const synonymRecord = records.find((r) => r.status !== "accepted" && r.species !== r.name);
-    const note = {
-      "homonym the authors don't decide": `CoL has ${records.length} records named ${pick.name}, under ${speciesCount} different species. ${homonym}. ${counted}`,
-      "lower confidence": `GBIF's matcher is only ${m.confidence ?? "?"}% sure of its match: CoL's ${p}${filed}.`,
-      "provisional name": `CoL only provisionally accepts ${p}.${same.some((r) => r.status === "accepted") ? " It also holds the name as accepted, so records may be split between the two." : ""}`,
-      "synonym by other authors": `The Red List cites ${sp.authority ?? "no author"}; CoL's ${pick.name} is by ${pick.authorship ?? "no author"}${filed}. It may be a different species.`,
-      "ambiguous synonym": `CoL marks ${p} as an ambiguous synonym, filed under ${pick.species}.`,
-      "accepted and a synonym in CoL": `CoL holds ${pick.name} both as an accepted species and as a synonym of ${synonymRecord?.species ?? "another species"}. Counted: the ${pick.status === "accepted" ? "accepted species" : `synonym (of ${pick.species})`}, which GBIF's matcher picks.`,
-    }[doubt] ?? `Flagged: ${doubt}.`;
-    out.set(l.sis_taxon_id, { note, records });
+    const n = ctx.nameCtx.get(l.sis_taxon_id) ?? {};
+    const sentences: string[] = [];
+    let records: NoteRecord[] = [];
+
+    // The record the link counts through, and CoL's other records with that name.
+    const pick: NoteRecord | null = pickedId ? (() => {
+      const u = ctx.usages.get(pickedId);
+      const sameAsAnswer = m?.matcher_col_id === pickedId;
+      return { id: pickedId, name: u?.name ?? m?.matcher_name ?? "?", authorship: u?.authorship ?? m?.matcher_authorship ?? null,
+        status: status(u?.status ?? m?.matcher_status ?? null),
+        species: [sameAsAnswer ? m?.matcher_accepted_name : undefined, l.col_species_id ? ctx.usages.get(l.col_species_id)?.name : undefined, u?.name].find((x) => !!x) ?? null,
+        role: "counted" as const };
+    })() : null;
+    const same = pick && m ? m.alternatives.filter((a) => a.col_id !== pick.id && a.status !== "MISAPPLIED" && binomialOf(a.name) === binomialOf(pick.name))
+      .map((a) => ({ id: a.col_id, name: a.name, authorship: a.authorship, status: status(a.status), species: a.accepted_name ?? a.name, role: "not" as const })) : [];
+    const p = pick ? nameAuth(pick.name, pick.authorship) : "";
+    const filed = pick && pick.status !== "accepted" ? `, ${an(pick.status)} of ${pick.species}` : "";
+    const counted = pick ? `Counted: GBIF's matcher's pick, ${pick.authorship ? `the record by ${pick.authorship}` : "the record with no author"}${filed}.` : "";
+
+    if (!l.col_species_id) {
+      const others = alsoRows.get(l.sis_taxon_id) ?? [];
+      if (others.length === 0) continue;
+      records = others.map((o) => fromUsage(o.col_taxon_id, "also"));
+      sentences.push(`No clear CoL match for ${sp.name} itself yet. Counted: records under ${records.map((r) => r.name).join(", ")}, which the Red List lists as ${records.length > 1 ? "synonyms" : "a synonym"}.`);
+      out.set(l.sis_taxon_id, { note: sentences.join(" "), records });
+      continue;
+    }
+    if (!pick) continue;
+    const speciesCount = new Set([pick, ...same].map((r) => r.species)).size;
+    const byRl = [pick, ...same].filter((r) => sp.authority && compareAuthors(sp.authority, r.authorship) === "same");
+
+    if (l.match_reason?.startsWith("flagged: ")) {
+      const doubt = l.match_reason.slice("flagged: ".length);
+      const homonym = !sp.authority ? "The Red List gives no author to choose between them"
+        : byRl.length === 0 ? `The Red List cites ${sp.authority}, and none has that exact citation`
+        : byRl.length === 1 ? `The Red List cites ${sp.authority}; the record with that citation is ${what(byRl[0])}`
+        : `The Red List cites ${sp.authority}, and ${byRl.length} records have that citation`;
+      const synonymRecord = [pick, ...same].find((r) => r.status !== "accepted" && r.species !== r.name);
+      sentences.push({
+        "homonym the authors don't decide": `CoL has ${same.length + 1} records named ${pick.name}, under ${speciesCount} different species. ${homonym}. ${counted}`,
+        "lower confidence": `GBIF's matcher is only ${m?.confidence ?? "?"}% sure of its match: CoL's ${p}${filed}.`,
+        "provisional name": `CoL only provisionally accepts ${p}.${same.some((r) => r.status === "accepted") ? " It also holds the name as accepted, so records may be split between the two." : ""}`,
+        "synonym by other authors": `The Red List cites ${sp.authority ?? "no author"}; CoL's ${pick.name} is by ${pick.authorship ?? "no author"}${filed}. It may be a different species.`,
+        "ambiguous synonym": `CoL marks ${p} as an ambiguous synonym, filed under ${pick.species}.`,
+        "accepted and a synonym in CoL": `CoL holds ${pick.name} both as an accepted species and as a synonym of ${synonymRecord?.species ?? "another species"}. ${counted}`,
+      }[doubt] ?? `Flagged: ${doubt}.`);
+      records = [pick, ...same];
+    } else if (n.override) {
+      const o = n.override;
+      sentences.push(`Decided by ${o.by}${o.date ? ` (${o.date})` : ""}${o.colVersion ? ` against ${o.colVersion}` : ""}: it is CoL's ${p}${filed}.${o.note ? ` ${o.note.replace(/^checks\/fixtures\/matching\.ts: /, "")}${/[.!?]$/.test(o.note) ? "" : "."}` : ""}`);
+      records = [pick];
+    } else if (n.why === "authors pick it") {
+      sentences.push(`CoL has ${same.length + 1} records named ${pick.name}, under ${speciesCount} different species. The Red List cites ${sp.authority}, which matches only ${p}${filed}, so that one counts.`);
+      records = [pick, ...same];
+    } else if (n.why === "CoL holds it twice") {
+      const all = [pick, ...same.map((r) => ({ ...r, role: "also" as const }))];
+      sentences.push(`CoL holds ${pick.name} ${all.length === 2 ? "twice" : `${all.length} times`} (${all.map((r) => `${r.authorship ?? "no author"}, ${r.status}`).join("; ")}), all one species, so records under each count.`);
+      records = all;
+    }
+    if (n.variant) {
+      sentences.unshift(`CoL spells it ${pick.name}, not ${sp.name}: the naming codes treat the two as one name (a Latin ending or transliteration).`);
+      if (records.length === 0) records = [pick];
+    }
+
+    // What the count includes beyond the record it is linked through.
+    // Records already named above (CoL's copies of a duplicate) aren't repeated.
+    const also = (alsoRows.get(l.sis_taxon_id) ?? []).filter((o) => !records.some((r) => r.id === o.col_taxon_id));
+    if (also.length > 0) {
+      const alsoRecs = also.map((o) => ({ ...fromUsage(o.col_taxon_id, "also" as const), species: null }));
+      sentences.push(`Also counts records under ${also.map((o, i) => `${nameAuth(alsoRecs[i].name, alsoRecs[i].authorship)} (${ALSO[o.match_reason ?? ""] ?? "another CoL name"})`).join("; ")}.`);
+      if (records.length === 0) records = [pick];
+      records = [...records, ...alsoRecs.filter((r) => !records.some((x) => x.id === r.id))];
+    }
+    if (l.counted && l.verdict === "lumped") {
+      const target = ctx.usages.get(l.col_species_id);
+      sentences.push(`CoL files ${pick.name} under ${target?.name ?? "a broader species"}, so only records under ${pick.name} count, not the rest of ${target?.name ?? "that species"}.`);
+      if (records.length === 0) records = [pick];
+    }
+    if (sentences.length > 0) out.set(l.sis_taxon_id, { note: sentences.join(" "), records });
   }
   return out;
 }
