@@ -18,3 +18,62 @@ models:
           - accepted_values:
               arguments:
                 values: ['openalex', 'bhl']
+
+unit_tests:
+  - name: paper_counts_rules
+    description: >
+      One case per rule paper_counts applies. Species 1 (assessed 2020-06-15) is
+      named by its own name and by a synonym, and a work naming both counts once.
+      New is by date where a work has one, else by year, and a work dated only
+      to the assessment's year, or after the sync date, isn't new. A name two
+      species own ("Cus dus") counts for neither, while a misapplied usage of
+      "Aus bus" doesn't make it ambiguous. An unassessed species counts per
+      source, with no window, as does one assessed after the sync date.
+    model: paper_counts
+    overrides:
+      vars: {sync_date: "2026-11-01"}
+    given:
+      - input: source('sources', 'taxa')
+        format: sql
+        rows: |
+          SELECT *, 'species' AS rank FROM (VALUES
+            ('U1', 'Aus bus', 'accepted'), ('U2', 'Aus oldus', 'synonym'), ('U9', 'Aus bus', 'misapplied'),
+            ('U3', 'Cus dus', 'accepted'), ('U4', 'Cus dus', 'accepted'),
+            ('C6', 'Eus fus', 'accepted'), ('U7', 'Gus hus', 'accepted')
+          ) t(col_id, scientific_name, status)
+      - input: ref('usage_owner')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('U1', 1::BIGINT, 'U1', NULL), ('U2', 1, 'U1', NULL), ('U9', 9, 'U9', NULL),
+            ('U3', 2, 'U3', NULL), ('U4', NULL, NULL, 'C5'),
+            ('C6', NULL, NULL, 'C6'), ('U7', 3, 'U7', NULL)
+          ) t(usage_key, sis_taxon_id, link_usage_id, col_id)
+      - input: source('sources', 'assessments')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            (1::BIGINT, '2020-06-15', true), (3, '2027-01-01', true), (9, '2010-01-01', true)
+          ) t(sis_taxon_id, assessment_date, is_latest)
+      - input: source('sources', 'literature_mentions')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('openalex', 'W1', DATE '2019-01-01', 2019, 'Aus bus'),
+            ('openalex', 'W2', DATE '2021-03-01', 2021, 'Aus oldus'),
+            ('openalex', 'W3', DATE '2022-05-01', 2022, 'Aus bus'),
+            ('openalex', 'W3', DATE '2022-05-01', 2022, 'Aus oldus'),
+            ('openalex', 'W4', NULL, 2020, 'Aus bus'),
+            ('openalex', 'W5', NULL, 2023, 'Aus bus'),
+            ('openalex', 'W6', DATE '2027-01-01', 2027, 'Aus bus'),
+            ('openalex', 'W7', DATE '2022-01-01', 2022, 'Cus dus'),
+            ('openalex', 'W8', DATE '2022-01-01', 2022, 'Eus fus'),
+            ('bhl', 'item:8', NULL, 1890, 'Eus fus'),
+            ('openalex', 'W9', DATE '2022-01-01', 2022, 'Gus hus')
+          ) t(source, work_id, publication_date, publication_year, name)
+    expect:
+      rows:
+        - {source: openalex, sis_taxon_id: 1, col_id: null, works: 6, works_since_assessment: 3}
+        - {source: openalex, sis_taxon_id: 3, col_id: null, works: 1, works_since_assessment: null}
+        - {source: openalex, sis_taxon_id: null, col_id: C6, works: 1, works_since_assessment: null}
+        - {source: bhl, sis_taxon_id: null, col_id: C6, works: 1, works_since_assessment: null}

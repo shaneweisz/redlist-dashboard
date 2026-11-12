@@ -5,8 +5,9 @@
  * BHL publishes its whole catalogue as tab-separated tables once a month
  * (https://www.biodiversitylibrary.org/Data/TSV/data.zip, about 2.5 GB),
  * including every scientific name its name-finding found on each scanned page
- * (pagename.txt). The export is downloaded to ~/Data/bhl/ and reduced once per
- * month to ~/.cache/redlist-dashboard/bhl/<month>/mentions.parquet:
+ * (pagename.txt). The export is downloaded to ~/Data/bhl/ (again whenever BHL
+ * publishes a new one) and reduced once per export, named by the month BHL
+ * published it, to ~/.cache/redlist-dashboard/bhl/<month>/mentions.parquet:
  *
  *   work_id            'part:<id>' for an article BHL has segmented, else
  *                      'item:<id>' for the volume the page is in
@@ -31,17 +32,54 @@ const TABLES = ["pagename", "page", "item", "part", "partpage"];
 const tsv = (file: string) =>
   `read_csv(${lit(file)}, delim='\t', header=true, quote='', escape='', all_varchar=true, ignore_errors=true, null_padding=true)`;
 
-/** The export's mentions, reduced once per month. Downloads it if it isn't there. */
+/** What BHL's server says about the export: when it was last published, and its size. */
+interface ExportVersion { lastModified: string; size: number }
+
+function remoteVersion(): ExportVersion | null {
+  try {
+    const head = execFileSync("curl", ["-sSfLI", "--retry", "3", EXPORT_URL], { encoding: "utf-8" });
+    const header = (name: string) => head.match(new RegExp(`^${name}:\\s*(.+?)\\s*$`, "im"))?.[1];
+    const lastModified = header("last-modified"), size = Number(header("content-length"));
+    return lastModified && size ? { lastModified: new Date(lastModified).toISOString(), size } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The export's mentions, reduced once per published export. The zip is
+ * downloaded again whenever BHL's copy has changed (its Last-Modified or size
+ * differ from the ones recorded beside it, data.json), and its tables
+ * re-extracted. Offline, the last download is used.
+ */
 export async function ensureBhlMentions(): Promise<{ month: string; mentions: string }> {
   const zip = path.join(DOWNLOADS, "data.zip");
-  if (!fs.existsSync(zip)) {
-    fs.mkdirSync(DOWNLOADS, { recursive: true });
-    execFileSync("curl", ["-sSfLR", "--retry", "5", "-o", zip, EXPORT_URL], { stdio: "inherit" });
+  const recorded = path.join(DOWNLOADS, "data.json");
+  const dir = path.join(DOWNLOADS, "Data");
+  fs.mkdirSync(DOWNLOADS, { recursive: true });
+  const have: ExportVersion | null = fs.existsSync(recorded) ? JSON.parse(fs.readFileSync(recorded, "utf-8")) : null;
+  const remote = remoteVersion();
+  let version = have;
+  if (remote && fs.existsSync(zip) && !have && fs.statSync(zip).size === remote.size) {
+    // A download from before versions were recorded, of this same export: adopt it.
+    version = remote;
+  } else if (remote && (!fs.existsSync(zip) || !have || have.lastModified !== remote.lastModified || have.size !== remote.size)) {
+    console.log(`   BHL: downloading the ${remote.lastModified.slice(0, 10)} export (${(remote.size / 2 ** 30).toFixed(1)} GiB)`);
+    const part = `${zip}.part`;
+    execFileSync("curl", ["-sSfL", "--retry", "5", "-o", part, EXPORT_URL], { stdio: "inherit" });
+    if (fs.statSync(part).size !== remote.size) throw new Error(`bhl: downloaded ${fs.statSync(part).size} bytes, expected ${remote.size}`);
+    fs.renameSync(part, zip);
+    fs.rmSync(dir, { recursive: true, force: true });
+    version = remote;
+  } else if (!remote) {
+    if (!fs.existsSync(zip)) throw new Error(`bhl: can't reach ${EXPORT_URL} and there is no earlier download`);
+    console.warn("   BHL: couldn't check for a newer export; using the last download");
   }
-  const month = fs.statSync(zip).mtime.toISOString().slice(0, 7);
+  if (!version) throw new Error("bhl: the export's version is unknown; delete ~/Data/bhl/data.zip to download it again");
+  fs.writeFileSync(recorded, JSON.stringify(version, null, 2) + "\n");
+  const month = version.lastModified.slice(0, 7);
   const out = path.join(CACHE_ROOT, "bhl", month, "mentions.parquet");
   if (fs.existsSync(out)) return { month, mentions: out };
-  const dir = path.join(DOWNLOADS, "Data");
   if (!TABLES.every((t) => fs.existsSync(path.join(dir, `${t}.txt`)))) {
     execFileSync("unzip", ["-oq", zip, ...TABLES.map((t) => `Data/${t}.txt`), "-d", DOWNLOADS], { stdio: "inherit" });
   }

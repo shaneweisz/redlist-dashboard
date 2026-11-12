@@ -12,7 +12,9 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
-import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, literatureSearchUrl, LITERATURE_LINK_NOTE, type LiteratureSource } from "@/lib/literature";
+import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, literatureSearchUrl, LITERATURE_LINK_NOTE, type LiteratureSource,
+  LITERATURE_RANGE_KEYS, LITERATURE_BUCKETS, literatureKeyParts, literatureRangeKeyLabel, literatureBucket, literatureMetricValue,
+  matchesLiteratureRanges, hasLiteratureRanges, type LiteratureMetric, type LiteratureRangeKey } from "@/lib/literature";
 import { countNoteText } from "@/lib/count-note";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
@@ -541,7 +543,7 @@ type FilterAxis =
   | "search" | "categories" | "countries" | "years" | "assessmentYears" | "obs"
   | "assessmentCounts" | "systems" | "trends" | "movement" | "threats" | "criteria"
   | "habitat" | "endemics" | "growthForms" | "assessors" | "reviewers" | "facilitators"
-  | "contributors" | "institutions" | "revision" | "priority";
+  | "contributors" | "institutions" | "revision" | "priority" | "lit";
 
 // Species-table column classes. Deliberately the same treatment as the taxa summary
 // table above it (TaxaSummary's numericThClasses and friends): sentence-case bold
@@ -586,6 +588,7 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 // A chart's own axis, so its bars keep showing what clicking them would select.
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
+const SKIP_LIT = skipSet("lit");
 const SKIP_PRIORITY = skipSet("priority");
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
@@ -1185,6 +1188,27 @@ function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: 
   );
 }
 
+function LiteratureChartControls({ value, onChange, showMetric }: {
+  value: LiteratureRangeKey; onChange: (k: LiteratureRangeKey) => void; showMetric: boolean;
+}) {
+  const { metric, source } = literatureKeyParts(value);
+  return (
+    <div className="flex items-center gap-1">
+      {showMetric && (
+        <select aria-label="Which literature metric the chart shows" value={metric} className={CHART_SELECT_CLASS}
+          onChange={(e) => onChange(`${e.target.value as LiteratureMetric}.${source}`)}>
+          <option value="total">Total</option>
+          <option value="new">New</option>
+        </select>
+      )}
+      <select aria-label="Which literature source the chart counts" value={source} className={CHART_SELECT_CLASS}
+        onChange={(e) => onChange(`${metric}.${e.target.value as LiteratureSource}`)}>
+        {LITERATURE_SOURCES.map((src) => <option key={src} value={src}>{LITERATURE_SOURCE_LABEL[src]}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChange: (mode: GbifRecordMode) => void }) {
   return (
     <div role="radiogroup" aria-label="Which GBIF records to count"
@@ -1322,6 +1346,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
     literatureSource = DEFAULT_LITERATURE_SOURCE, setLiteratureSource,
+    literatureRanges, setLiteratureRanges, literatureChartKey: literatureChartKeyParam, setLiteratureChartKey,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
     selectedPopulationTrends, setSelectedPopulationTrends,
@@ -1360,6 +1385,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // shows Total there whatever the URL asks for.
   const gbifChartKeys = isNewAssessments ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
   const gbifChartKey: GbifRangeKey = gbifChartKeys.includes(gbifChartKeyParam) ? gbifChartKeyParam : "total.all";
+  // Likewise the Literature chart: Total only for Not Evaluated species.
+  const literatureChartKey: LiteratureRangeKey = isNewAssessments
+    ? `total.${literatureKeyParts(literatureChartKeyParam).source}` : literatureChartKeyParam;
 
   // Both habitat checkbox-dropdowns default to "everything checked" (see
   // useFilterParams.ts) — only a proper subset actually restricts anything,
@@ -1988,8 +2016,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Every GBIF Records selection (six: Total / New / % New, each all records or
   // georeferenced) must hold, the way assessors and reviewers combine. `skip`
   // is the chart's own key, so its bars keep showing what clicking would select.
-  const matchesGbifFilters = useCallback((s: Species, skip?: GbifRangeKey): boolean =>
-    matchesGbifRanges(s, gbifRanges, skip), [gbifRanges]);
+  // The Literature chart's selections hold the same way, alongside them (`skipLit`: its own key).
+  const matchesGbifFilters = useCallback((s: Species, skip?: GbifRangeKey, skipLit?: LiteratureRangeKey): boolean =>
+    matchesGbifRanges(s, gbifRanges, skip) && matchesLiteratureRanges(s, literatureRanges, skipLit), [gbifRanges, literatureRanges]);
 
   // Bucket a species' assessment_count into a chart-bar label. 5+ collapses the
   // long tail (a handful of species have 8-9 historical assessments) into one bar.
@@ -2504,7 +2533,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // assessment date to compare against.
     if (!skip.has("years") && s.category !== "NE" && selectedYearRanges.size > 0 && !matchesYearRangeFilter(s.assessment_date, selectedYearRanges)) return false;
     if (!skip.has("assessmentYears") && s.category !== "NE" && selectedAssessmentYears.size > 0 && !matchesAssessmentYearFilter(s.assessment_date, selectedAssessmentYears)) return false;
-    if (!matchesGbifFilters(s, skip.has("obs") ? gbifChartKey : undefined)) return false;
+    if (!matchesGbifFilters(s, skip.has("obs") ? gbifChartKey : undefined, skip.has("lit") ? literatureChartKey : undefined)) return false;
     if (!skip.has("assessmentCounts") && selectedAssessmentCounts.size > 0 && !matchesAssessmentCountFilter(s.assessment_count, selectedAssessmentCounts)) return false;
     if (!skip.has("systems") && selectedSystems.size > 0 && !s.systems?.some(sys => selectedSystems.has(sys))) return false;
     if (!skip.has("trends") && selectedPopulationTrends.size > 0 && (!s.population_trend || !selectedPopulationTrends.has(s.population_trend))) return false;
@@ -2523,7 +2552,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (!skip.has("priority") && !matchesPriorityBox(s)) return false;
     return true;
   }, [matchesSearch, selectedCategories, selectedCountries, selectedYearRanges, matchesYearRangeFilter,
-      selectedAssessmentYears, matchesAssessmentYearFilter, gbifChartKey, matchesGbifFilters,
+      selectedAssessmentYears, matchesAssessmentYearFilter, gbifChartKey, literatureChartKey, matchesGbifFilters,
       selectedAssessmentCounts, matchesAssessmentCountFilter, selectedSystems, selectedPopulationTrends,
       selectedMovementPatterns, matchesThreatFilter, selectedCriteria, endemicsOnly, selectedGrowthForms,
       matchesAssessorsFilter, matchesHabitatFilter, matchesReviewersFilter, matchesFacilitatorsFilter,
@@ -2635,6 +2664,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       label: `${r.count.toLocaleString()} (${total > 0 ? Math.round((r.count / total) * 100) : 0}%)`,
     }));
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
+
+  const literatureChartData = useMemo(() => {
+    const ranges = LITERATURE_BUCKETS.map((r) => ({ range: r as string, shortRange: r as string, count: 0 }));
+    const byBucket: Record<string, number> = Object.fromEntries(ranges.map((r, i) => [r.range, i]));
+    taxaFilteredSpecies.forEach(s => {
+      if (!matchesFilters(s, SKIP_LIT)) return;
+      const b = literatureBucket(literatureMetricValue(s, literatureChartKey));
+      if (b != null) ranges[byBucket[b]].count++;
+    });
+    const total = ranges.reduce((sum, r) => sum + r.count, 0);
+    return ranges.map(r => ({
+      ...r,
+      label: `${r.count.toLocaleString()} (${total > 0 ? Math.round((r.count / total) * 100) : 0}%)`,
+    }));
+  }, [taxaFilteredSpecies, matchesFilters, literatureChartKey]);
 
   // Triage scatter: every assessed species passing every filter but its own box.
   const priorityPoints = useMemo((): PriorityPoint[] => {
@@ -3655,6 +3699,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     });
   };
 
+  const handleLiteratureClick = (data: { payload?: { range?: string } }, event: React.MouseEvent) => {
+    const range = data.payload?.range;
+    if (!range) return;
+    const isMultiSelect = event.metaKey || event.ctrlKey;
+    setLiteratureRanges(literatureChartKey, (prev: Set<string>) => {
+      if (isMultiSelect) {
+        const next = new Set(prev);
+        if (next.has(range)) next.delete(range);
+        else next.add(range);
+        return next;
+      }
+      if (prev.size === 1 && prev.has(range)) return new Set();
+      return new Set([range]);
+    });
+  };
+
   // Handle Number of Assessments bar click
   const handleAssessmentCountClick = (data: { payload?: { range?: string } }, event: React.MouseEvent) => {
     const range = data.payload?.range;
@@ -3719,6 +3779,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const rangeSelectYearRanges = useMemo(() => makeRangeSelect(setSelectedYearRanges), [makeRangeSelect, setSelectedYearRanges]);
   const rangeSelectAssessmentYears = useMemo(() => makeRangeSelect(setSelectedAssessmentYears), [makeRangeSelect, setSelectedAssessmentYears]);
   const rangeSelectObsRanges = useMemo(() => makeRangeSelect((u) => setGbifRanges(gbifChartKey, u)), [makeRangeSelect, setGbifRanges, gbifChartKey]);
+  const rangeSelectLiterature = useMemo(() => makeRangeSelect((u) => setLiteratureRanges(literatureChartKey, u)), [makeRangeSelect, setLiteratureRanges, literatureChartKey]);
   const rangeSelectDescribedYears = useMemo(() => makeRangeSelect(setSelectedDescribedYears), [makeRangeSelect, setSelectedDescribedYears]);
   const rangeSelectAssessmentCounts = useMemo(() => makeRangeSelect(setSelectedAssessmentCounts), [makeRangeSelect, setSelectedAssessmentCounts]);
   const rangeSelectColReasons = useMemo(() => makeRangeSelect(setColReasons), [makeRangeSelect, setColReasons]);
@@ -3798,6 +3859,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     && selectedYearRanges.size === 0
     && selectedAssessmentYears.size === 0
     && !hasGbifRanges(gbifRanges)
+    && !hasLiteratureRanges(literatureRanges)
     && selectedAssessmentCounts.size === 0
     && selectedCountries.size === 0
     && selectedSystems.size === 0
@@ -4793,6 +4855,45 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // that familiarity. Deeper levels stay exactly as before: renderCriteriaLevel's
   // recursive pill rows, unchanged — the issue's "opens pills not nested bars"
   // ask was already true for Criteria beyond the top level.
+  const literatureRangeCount = LITERATURE_RANGE_KEYS.reduce((n, k) => n + literatureRanges[k].size, 0);
+  // Literature: works per species, one metric of one source at a time (see literature.ts).
+  const literatureCard = (
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
+          Literature
+          <HoverTooltip text={LITERATURE_SOURCE_HINT[literatureKeyParts(literatureChartKey).source]}>
+            <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4M12 8h.01" />
+            </svg>
+          </HoverTooltip>
+        </span>
+        <LiteratureChartControls value={literatureChartKey} onChange={setLiteratureChartKey} showMetric={!isNewAssessments} />
+      </div>
+      <div style={{ height: 170 }} className="flex items-center justify-center">
+        {speciesLoading && assessedSpecies.length === 0 ? (
+          <Spinner />
+        ) : isSingleSpecies && singleSpecies ? (
+          <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
+            {literatureMetricValue(singleSpecies, literatureChartKey)?.toLocaleString() ?? "—"}
+          </span>
+        ) : (
+          <FilterBarChart
+            data={literatureChartData}
+            dataKey="shortRange"
+            selectedItems={literatureRanges[literatureChartKey]}
+            onBarClick={handleLiteratureClick}
+            onRangeSelect={rangeSelectLiterature}
+            barColor="#0ea5e9"
+            yAxisWidth={42}
+            rightMargin={85}
+          />
+        )}
+      </div>
+    </div>
+  );
+
   const criteriaCard = (() => {
     // code === rawCode here (CRITERIA_CATEGORIES' top-level code is already
     // the bare letter) — bare letters on the axis match Number of
@@ -5374,7 +5475,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               the always-visible primary view (see countryMapCard/threatsCard,
               defined above). */}
           {isNewAssessments && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {countryMapCard}
 
             {/* Year Described */}
@@ -5449,6 +5550,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 )}
               </div>
             </div>
+
+            {literatureCard}
           </div>
           )}
 
@@ -5468,9 +5571,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                   More Filters
-                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size > 0) && (
+                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size + literatureRangeCount > 0) && (
                     <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
-                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size} active
+                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size + literatureRangeCount} active
                     </span>
                   )}
                 </button>
@@ -5608,8 +5711,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   );
                 })()}
 
-                {/* Assessment Criteria alongside Number of Assessments. */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Assessment Criteria alongside Number of Assessments and Literature. */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {/* Criteria — top-level A-E bar chart (see criteriaCard);
                       clicking a bar both selects it as a filter AND expands
                       its next level below (number -> sub-clause -> roman
@@ -5671,6 +5774,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       </div>
                     </div>
                   )}
+                  {!isNewAssessments && literatureCard}
                 </div>
 
                 {/* Realm, Movement, and Trend as three columns in one row. Plain
@@ -5848,7 +5952,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
-            {(isNewAssessments || selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated) && (
+            {(isNewAssessments || selectedTaxa.size > 0 || selectedSubgroups.size > 0 || selectedCategories.size > 0 || selectedYearRanges.size > 0 || selectedAssessmentYears.size > 0 || selectedDescribedYears.size > 0 || hasGbifRanges(gbifRanges) || hasLiteratureRanges(literatureRanges) || selectedAssessmentCounts.size > 0 || selectedCountries.size > 0 || selectedSystems.size > 0 || endemicsOnly || selectedGrowthForms.size > 0 || selectedPopulationTrends.size > 0 || selectedMovementPatterns.size > 0 || selectedThreats.size > 0 || selectedCriteria.size > 0 || selectedHabitat.size > 0 || habitatBreadth || colMatch || selectedColReasons.size > 0 || habitatImportanceActive || habitatSeasonsActive || habitatSuitabilityActive || selectedAssessors.size > 0 || selectedReviewers.size > 0 || selectedFacilitators.size > 0 || selectedContributors.size > 0 || selectedInstitutions.size > 0 || showOnlyStarred || exactFilters.outdated) && (
               <button
                 onClick={() => {
                   // The "Awaiting 1st assessment" chip is cleared with the rest,
@@ -5989,6 +6093,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 className="px-3 py-1.5 text-sm font-medium rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400 flex items-center gap-1 hover:opacity-80"
               >
                 GBIF {gbifRangeKeyLabel(key)}: {range}
+                <span className="text-sm">×</span>
+              </button>
+            )))}
+            {LITERATURE_RANGE_KEYS.flatMap(key => Array.from(literatureRanges[key]).map((range: string) => (
+              <button
+                key={`lit-${key}-${range}`}
+                onClick={() => setLiteratureRanges(key, (prev: Set<string>) => { const next = new Set(prev); next.delete(range); return next; })}
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400 flex items-center gap-1 hover:opacity-80"
+              >
+                Literature {literatureRangeKeyLabel(key)}: {range}
                 <span className="text-sm">×</span>
               </button>
             )))}
@@ -6890,6 +7004,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 assessmentDate={s.assessment_date ?? null}
                                 assessmentId={s.assessment_id ? String(s.assessment_id) : null}
                                 assessmentYear={assessmentYear}
+                                syncedCounts={{ openalex: s.openalex_works ?? null, bhl: s.bhl_works ?? null }}
                               />
                             </div>
                           )}

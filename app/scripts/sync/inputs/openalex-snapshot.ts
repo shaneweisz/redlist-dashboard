@@ -143,7 +143,8 @@ export async function openAlexMentions(inputs: { works: string[]; taxa: string }
   const instance = await DuckDBInstance.create(":memory:", { threads: "16", memory_limit: "32GB", temp_directory: DUCKDB_TMP });
   const setup = await instance.connect();
   await createBinomials(setup, inputs.taxa);
-  const pairs = (col: string) => `list_transform(range(1, len(${col})), i -> ${WORD(`${col}[i]`)} || ' ' || ${WORD(`${col}[i + 1]`)})`;
+  // Each pair of consecutive words, raw (the abbreviation test needs the full stop WORD strips).
+  const pairs = (col: string) => `list_transform(range(1, len(${col})), i -> struct_pack(a := ${col}[i], b := ${col}[i + 1]))`;
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
     const conn = await instance.connect();
@@ -155,13 +156,36 @@ export async function openAlexMentions(inputs: { works: string[]; taxa: string }
                  string_split(coalesce(title, ''), ' ') AS t, string_split(coalesce(abstract, ''), ' ') AS a
           FROM read_parquet(${lit(file)})
           WHERE type IN (${LITERATURE_TYPES.map(lit).join(", ")}) AND NOT coalesce(is_retracted, false)),
-        p AS (
-          SELECT work_id, publication_date, publication_year, 'title' AS part, unnest(${pairs("t")}) AS name FROM w
+        raw AS (
+          SELECT work_id, 'title' AS part, unnest(${pairs("t")}) AS pr FROM w
           UNION ALL
-          SELECT work_id, publication_date, publication_year, 'abstract', unnest(${pairs("a")}) FROM w)
-        SELECT work_id, publication_date, publication_year, name,
-               bool_or(part = 'title') AS in_title, bool_or(part = 'abstract') AS in_abstract
-        FROM p SEMI JOIN binomials USING (name)
+          SELECT work_id, 'abstract', unnest(${pairs("a")}) FROM w),
+        cand AS MATERIALIZED (
+          SELECT work_id, part, pr.a AS ra, ${WORD("pr.a")} AS wa, ${WORD("pr.b")} AS wb FROM raw),
+        -- A name as written, or one written in capitals ("FICUS BENJAMINA") in its usual case.
+        written AS (
+          SELECT work_id, part,
+                 CASE WHEN regexp_full_match(wa, '[A-Z]{2,}') AND regexp_full_match(wb, '[A-Z][A-Z-]+')
+                      THEN upper(left(wa, 1)) || lower(substr(wa, 2)) || ' ' || lower(wb)
+                      ELSE wa || ' ' || wb END AS name
+          FROM cand),
+        named AS (SELECT * FROM written SEMI JOIN binomials USING (name)),
+        -- An abbreviated genus ("E. carletoni") stands for a genus the same work names
+        -- in full: kept only where exactly one of its genera with that initial makes a CoL name.
+        expanded AS (
+          SELECT c.work_id, c.part, g.genus || ' ' || c.wb AS name, c.ra, c.wb
+          FROM cand c
+          JOIN (SELECT DISTINCT work_id, split_part(name, ' ', 1) AS genus FROM named) g
+            ON g.work_id = c.work_id AND left(g.genus, 1) = regexp_extract(c.ra, '([A-Z])\\.$', 1)
+          WHERE regexp_full_match(c.ra, '\\(?[A-Z]\\.') AND regexp_full_match(c.wb, '[a-z][\\p{Ll}-]+')
+            AND g.genus || ' ' || c.wb IN (SELECT name FROM binomials)),
+        abbreviated AS (
+          SELECT work_id, part, name FROM expanded
+          QUALIFY count(DISTINCT name) OVER (PARTITION BY work_id, regexp_extract(ra, '([A-Z])\\.$', 1), wb) = 1),
+        p AS (SELECT work_id, part, name FROM named UNION ALL SELECT work_id, part, name FROM abbreviated)
+        SELECT p.work_id, w.publication_date, w.publication_year, p.name,
+               bool_or(p.part = 'title') AS in_title, bool_or(p.part = 'abstract') AS in_abstract
+        FROM p JOIN w USING (work_id)
         GROUP BY ALL
       ) TO ${lit(path.join(mentionsDir, path.basename(file)))} (FORMAT parquet, COMPRESSION zstd)`);
     }

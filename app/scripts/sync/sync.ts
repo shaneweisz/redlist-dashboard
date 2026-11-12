@@ -49,6 +49,7 @@ import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
 import { buildLiteratureMentions, localOpenAlexWorks } from "./sources/literature";
 import { ensureBhlMentions } from "./inputs/bhl";
+import { listOpenAlexWorks } from "./inputs/openalex-snapshot";
 import { buildSpecialistGroups } from "./sources/specialist-groups";
 import { askMatcher } from "./link/matches";
 import { buildLink } from "./link/assessment-link";
@@ -101,7 +102,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   const bhl = await ensureBhlMentions();
   const openalex = localOpenAlexWorks();
   if (!openalex) throw new Error("sync: no OpenAlex works read yet; run npm run sync:openalex once (days, bandwidth-bound)");
-  manifest.literature = { openalex: openalex.release, bhl: bhl.month };
+  // OpenAlex publishes a release quarterly: say when a newer one is waiting to be read.
+  const newestOpenAlex = await listOpenAlexWorks().then((r) => r.release).catch(() => null);
+  if (newestOpenAlex && newestOpenAlex > openalex.release) {
+    console.log(`   OpenAlex ${newestOpenAlex} is out; this sync counts ${openalex.release}. Read it with npm run sync:openalex (days).`);
+  }
+  manifest.literature = { openalex: openalex.release, openalex_newest: newestOpenAlex, bhl: bhl.month };
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
   manifest.inat = path.basename(path.dirname(inat));
