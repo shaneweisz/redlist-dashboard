@@ -3,7 +3,7 @@
  * col_id, which is also its GBIF key. Looked up by that key (the map's
  * tooltips, nearby species, search), which species/'s partitions can't prune.
  *
- * Built from: species/, assessment_link, record_counts, paper_counts, occurrence_countries
+ * Built from: species/, assessment_link, record_counts, occurrence_countries
  * with usage_owner, common_names.
  *
  * Columns:
@@ -14,7 +14,6 @@
  *   countries                      GBIF countries of its georeferenced records
  *   gbif_all_records_countries     … of all its records
  *   gbif_georeferenced_records_count, gbif_all_records_count
- *   openalex_works, bhl_works      literature works mentioning it (paper_counts)
  *
  * Decisions:
  *   - Not Evaluated: described (species/), linked by no assessment_link row of
@@ -36,13 +35,10 @@ SELECT s.col_id AS id, s.col_id, s.scientific_name,
        s.taxon_group, s.class_name, s.order_name, s.family, 'NE' AS iucn_category,
        c.countries, c.all_records_countries AS gbif_all_records_countries,
        s.col_id AS gbif_species_key,
-       rc.georef AS gbif_georeferenced_records_count, rc.all_records AS gbif_all_records_count,
-       coalesce(oa.works, 0)::BIGINT AS openalex_works, coalesce(bhl.works, 0)::BIGINT AS bhl_works
+       rc.georef AS gbif_georeferenced_records_count, rc.all_records AS gbif_all_records_count
 FROM {{ ref('species') }} s
 JOIN {{ ref('record_counts') }} rc ON rc.col_id = s.col_id
 LEFT JOIN ne_countries c ON c.col_id = s.col_id
-LEFT JOIN {{ ref('paper_counts') }} oa ON oa.source = 'openalex' AND oa.col_id = s.col_id
-LEFT JOIN {{ ref('paper_counts') }} bhl ON bhl.source = 'bhl' AND bhl.col_id = s.col_id
 LEFT JOIN {{ source('sources', 'common_names') }} col ON col.source = 'col' AND col.kind = 'display' AND col.col_id = s.col_id
 LEFT JOIN {{ source('sources', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'
   AND inat.scientific_name = s.scientific_name AND inat.kingdom = {{ inat_kingdom("s.taxon_group") }}

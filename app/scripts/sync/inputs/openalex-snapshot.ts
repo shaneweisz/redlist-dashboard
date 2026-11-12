@@ -38,19 +38,15 @@ import { promisify } from "util";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { CACHE_ROOT, DUCKDB_TMP, parquet } from "../paths";
 import { lit } from "../sql";
+import { OPENALEX_LITERATURE_TYPES } from "../../../src/lib/literature";
 
 const run = promisify(execFile);
 const BUCKET = "https://openalex.s3.amazonaws.com";
 const PREFIX = "data/parquet/works/";
 /** What the reduced files hold; a change here rebuilds them rather than reusing them. */
 const GRAIN = "works-v1";
-/**
- * The OpenAlex work types that count as literature. The rest are kept locally
- * but not counted: most "dataset" and "other" records are specimens, samples and
- * occurrence downloads registered with DataCite (DiSSCo, GBIF, PlutoF, SESAR,
- * BacDive), one record per specimen, and would swamp the papers.
- */
-const LITERATURE_TYPES = ["article", "review", "book", "book-chapter", "dissertation", "preprint", "report", "conference-paper", "letter", "data-paper"];
+/** The OpenAlex work types that count as literature (shared with the app, which links to the same search). */
+const LITERATURE_TYPES = OPENALEX_LITERATURE_TYPES;
 /** OpenAlex fields a work is kept for whatever its text says. */
 const KEPT_FIELDS = ["Agricultural and Biological Sciences", "Environmental Science"];
 

@@ -13,6 +13,16 @@
 
 export type LiteratureSource = "openalex" | "bhl";
 
+/**
+ * The OpenAlex work types that count as literature, for the sync's counts
+ * (scripts/sync/inputs/openalex-snapshot.ts) and the search a count links to.
+ * The rest aren't counted: most "dataset" and "other" records are specimens,
+ * samples and occurrence downloads registered with DataCite, one per specimen,
+ * and would swamp the papers.
+ */
+export const OPENALEX_LITERATURE_TYPES = ["article", "review", "book", "book-chapter", "dissertation", "preprint", "report",
+  "conference-paper", "letter", "data-paper"] as const;
+
 export const LITERATURE_SOURCES: readonly LiteratureSource[] = ["openalex", "bhl"];
 export const DEFAULT_LITERATURE_SOURCE: LiteratureSource = "openalex";
 
@@ -50,3 +60,23 @@ export function literatureWorks(s: LiteratureCounts, source: LiteratureSource): 
 export function literatureWorksSinceAssessment(s: LiteratureCounts, source: LiteratureSource): number | null {
   return (source === "bhl" ? s.bhl_works_since_assessment : s.openalex_works_since_assessment) ?? null;
 }
+
+/**
+ * Where a count links to: the source's own search for the species' name.
+ * OpenAlex: works whose title or abstract has the name, of the types counted,
+ * not retracted, published from `since` (YYYY-MM-DD) when given. BHL: its page
+ * for the name, which can't be narrowed by date, so New has no BHL link.
+ *
+ * Both search the name alone, while the count also credits the synonyms CoL
+ * lists for the species, so the source's number can differ (LITERATURE_LINK_NOTE).
+ */
+export function literatureSearchUrl(source: LiteratureSource, scientificName: string, since?: string | null): string | null {
+  const name = scientificName.trim();
+  if (!name) return null;
+  if (source === "bhl") return since ? null : `https://www.biodiversitylibrary.org/name/${encodeURIComponent(name.replace(/ /g, "_"))}`;
+  const filters = [`title_and_abstract.search:"${name}"`, `type:${OPENALEX_LITERATURE_TYPES.join("|")}`, "is_retracted:false"];
+  if (since) filters.push(`from_publication_date:${since}`);
+  return `https://openalex.org/works?filter=${encodeURIComponent(filters.join(","))}`;
+}
+
+export const LITERATURE_LINK_NOTE = "Search the source for this name. Its count can differ: the count here also includes the synonyms CoL lists for the species.";

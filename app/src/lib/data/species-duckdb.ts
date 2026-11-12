@@ -79,7 +79,7 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
-               countries, gbif_all_records_countries, common_name, openalex_works, bhl_works
+               countries, gbif_all_records_countries, common_name
         FROM read_parquet('${neUri}')`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
   }
@@ -348,9 +348,10 @@ export async function querySpecies(opts: {
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year, u.specialist_group,
                g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
-               g.countries, g.gbif_all_records_countries, g.common_name, g.openalex_works, g.bhl_works
+               g.countries, g.gbif_all_records_countries, g.common_name, u.openalex_works, u.bhl_works
         FROM (
-          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group
+          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group,
+                 openalex_works, bhl_works
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
         ) u
         LEFT JOIN ne_gbif_by_col g ON g.col_id = u.col_id`;
