@@ -6351,30 +6351,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={SPECIES_TH_NOWRAP}>New</span>
-                    <HoverTooltip text="Records dated after the assessment date.">
+                    <HoverTooltip text="Records dated after the assessment date, and in grey their share of Total.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
                       </svg>
                     </HoverTooltip>
                     <SortIndicator field="newGbif" />
-                  </span>
-                </th>
-                )}
-                {!isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
-                  onClick={(e) => handleSort("pctNewGbif", e)}
-                >
-                  <span className="flex items-center justify-end gap-1">
-                    <span className={SPECIES_TH_NOWRAP}>% New</span>
-                    <HoverTooltip text="New records as a share of Total.">
-                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 16v-4M12 8h.01" />
-                      </svg>
-                    </HoverTooltip>
-                    <SortIndicator field="pctNewGbif" />
                   </span>
                 </th>
                 )}
@@ -6452,7 +6435,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 )}
                 {/* One heading over the GBIF columns, with the record-mode toggle:
                     the mode is said once here, not under every column. */}
-                <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
+                <th colSpan={isNewAssessments ? 1 : 2} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
                     <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records</span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
@@ -6737,33 +6720,32 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         // so does the search it links to. A null count already
                         // means there is no window (an assessment dated today or later).
                         const since = sinceAssessmentStart(s.assessment_date);
+                        // Their share of Total, quietly beside them (it was a column of its own).
+                        const total = s.gbif_records;
+                        const pct = total ? (newObs / total) * 100 : null;
+                        const share = pct == null ? null : (
+                          <span className="ml-1 text-xs text-zinc-400 dark:text-zinc-500" title="Share of Total">
+                            {pct > 0 && pct < 1 ? "<1" : Math.round(pct)}%
+                          </span>
+                        );
                         if (key && since) {
                           return (
-                            <a
-                              href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={TABLE_NUMBER_LINK}
-                              title="Open the new records on GBIF"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {newObs.toLocaleString()}
-                            </a>
+                            <>
+                              <a
+                                href={`/api/gbif-link?key=${key}&eventDate=${since},*&${gbifFiltersFor(s.taxon_group)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={TABLE_NUMBER_LINK}
+                                title="Open the new records on GBIF"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {newObs.toLocaleString()}
+                              </a>
+                              {share}
+                            </>
                           );
                         }
-                        return newObs.toLocaleString();
-                      })()}
-                    </td>
-                    )}
-                    {/* % New GBIF */}
-                    {!isNewAssessments && (
-                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
-                      {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
-                        const total = s.gbif_records;
-                        const newObs = s.gbif_records_since_assessment;
-                        if (total == null || total === 0 || newObs == null) return "—";
-                        const pct = (newObs / total) * 100;
-                        return `${pct < 1 && pct > 0 ? "<1" : Math.round(pct)}%`;
+                        return <>{newObs.toLocaleString()}{share}</>;
                       })()}
                     </td>
                     )}
@@ -6783,7 +6765,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 5 : 10} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 5 : 8} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -6991,7 +6973,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 5 : 10} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 5 : 8} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>
