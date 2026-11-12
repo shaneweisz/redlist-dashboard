@@ -8,7 +8,7 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
-import { DEFAULT_LITERATURE_SOURCE, LITERATURE_PARAM, parseLiteratureSource, type LiteratureSource, LITERATURE_RANGE_KEYS, LITERATURE_RANGE_PARAM, LITERATURE_CHART_PARAM, DEFAULT_LITERATURE_CHART_KEY, emptyLiteratureRanges, parseLiteratureChartKey, type LiteratureRangeKey, type LiteratureRanges } from "@/lib/literature";
+import { DEFAULT_LITERATURE_SOURCE, LITERATURE_PARAM, parseLiteratureSource, type LiteratureSource } from "@/lib/literature";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
@@ -92,9 +92,8 @@ export const OWN_PARAM_NAMES = [
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
   "search", "outdated",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
-  GBIF_RECORDS_PARAM, GBIF_CHART_PARAM, LITERATURE_PARAM, LITERATURE_CHART_PARAM,
+  GBIF_RECORDS_PARAM, GBIF_CHART_PARAM, LITERATURE_PARAM,
   ...Object.values(GBIF_RANGE_PARAM),
-  ...Object.values(LITERATURE_RANGE_PARAM),
 ];
 
 /**
@@ -256,11 +255,6 @@ export function parseParams(search: string) {
       const v = p.get(GBIF_RANGE_PARAM[key]);
       return [key, v ? new Set(v.split(",").filter(Boolean)) : new Set<string>()];
     })) as GbifRanges,
-    // The Literature chart's four selections (Total / New, each OpenAlex or BHL); see literature.ts.
-    literatureRanges: Object.fromEntries(LITERATURE_RANGE_KEYS.map((key) => {
-      const v = p.get(LITERATURE_RANGE_PARAM[key]);
-      return [key, v ? new Set(v.split(",").filter(Boolean)) : new Set<string>()];
-    })) as LiteratureRanges,
     assessmentCounts: p.get("assessmentCounts")
       ? new Set(p.get("assessmentCounts")!.split(",").filter(Boolean))
       : new Set<string>(),
@@ -362,7 +356,6 @@ export function parseParams(search: string) {
     literatureSource: parseLiteratureSource(p.get(LITERATURE_PARAM)),
     // Which of the six the GBIF Records chart shows (a display choice, like mapview).
     gbifChartKey: parseGbifChartKey(p.get(GBIF_CHART_PARAM)),
-    literatureChartKey: parseLiteratureChartKey(p.get(LITERATURE_CHART_PARAM)),
     mapSortKey: (
       p.get("mapsort") === "name" ? "name" :
       p.get("mapsort") === "outdated" ? "outdated" :
@@ -415,7 +408,6 @@ export function buildQs(state: {
   describedYears: Set<string>;
   countries: Set<string>;
   gbifRanges: GbifRanges;
-  literatureRanges?: LiteratureRanges;
   assessmentCounts: Set<string>;
   systems: Set<string>;
   populationTrends: Set<string>;
@@ -451,7 +443,6 @@ export function buildQs(state: {
   gbifRecordMode?: GbifRecordMode;
   literatureSource?: LiteratureSource;
   gbifChartKey?: GbifRangeKey;
-  literatureChartKey?: LiteratureRangeKey;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
   species: string | null;
@@ -472,10 +463,6 @@ export function buildQs(state: {
   if (state.countries.size > 0) p.set("countries", [...state.countries].join(","));
   for (const key of GBIF_RANGE_KEYS) {
     if (state.gbifRanges[key].size > 0) p.set(GBIF_RANGE_PARAM[key], [...state.gbifRanges[key]].join(","));
-  }
-  for (const key of LITERATURE_RANGE_KEYS) {
-    const sel = state.literatureRanges?.[key];
-    if (sel && sel.size > 0) p.set(LITERATURE_RANGE_PARAM[key], [...sel].join(","));
   }
   if (state.assessmentCounts.size > 0) p.set("assessmentCounts", [...state.assessmentCounts].join(","));
   if (state.systems.size > 0) p.set("systems", [...state.systems].join(","));
@@ -526,7 +513,6 @@ export function buildQs(state: {
   if (state.gbifRecordMode && state.gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE) p.set(GBIF_RECORDS_PARAM, state.gbifRecordMode);
   if (state.literatureSource && state.literatureSource !== DEFAULT_LITERATURE_SOURCE) p.set(LITERATURE_PARAM, state.literatureSource);
   if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(GBIF_CHART_PARAM, state.gbifChartKey);
-  if (state.literatureChartKey && state.literatureChartKey !== DEFAULT_LITERATURE_CHART_KEY) p.set(LITERATURE_CHART_PARAM, state.literatureChartKey);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set("mapsort", state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set("mapdir", "asc");
   const qs = prettifyQs(p.toString());
@@ -694,30 +680,6 @@ export function useFilterParams() {
       setState(prev => {
         const nextSel = typeof updater === "function" ? updater(prev.gbifRanges[key]) : updater;
         const next = { ...prev, gbifRanges: { ...prev.gbifRanges, [key]: nextSel } };
-        queueMicrotask(() => syncUrl(next, false));
-        return next;
-      });
-    },
-    [syncUrl]
-  );
-
-  const setLiteratureRanges = useCallback(
-    (key: LiteratureRangeKey, updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-      setState(prev => {
-        const ranges = prev.literatureRanges ?? emptyLiteratureRanges();
-        const nextSel = typeof updater === "function" ? updater(ranges[key]) : updater;
-        const next = { ...prev, literatureRanges: { ...ranges, [key]: nextSel } };
-        queueMicrotask(() => syncUrl(next, false));
-        return next;
-      });
-    },
-    [syncUrl]
-  );
-
-  const setLiteratureChartKey = useCallback(
-    (key: LiteratureRangeKey) => {
-      setState(prev => {
-        const next = { ...prev, literatureChartKey: key };
         queueMicrotask(() => syncUrl(next, false));
         return next;
       });
@@ -1264,7 +1226,6 @@ export function useFilterParams() {
         describedYears: new Set<string>(),
         countries: new Set<string>(),
         gbifRanges: emptyGbifRanges(),
-        literatureRanges: emptyLiteratureRanges(),
         assessmentCounts: new Set<string>(),
         systems: new Set<string>(),
         populationTrends: new Set<string>(),
@@ -1316,7 +1277,6 @@ export function useFilterParams() {
         describedYears: new Set<string>(),
         countries: new Set<string>(),
         gbifRanges: emptyGbifRanges(),
-        literatureRanges: emptyLiteratureRanges(),
         assessmentCounts: new Set<string>(),
         systems: new Set<string>(),
         populationTrends: new Set<string>(),
@@ -1366,8 +1326,6 @@ export function useFilterParams() {
     selectedCountries: state.countries,
     gbifRanges: state.gbifRanges,
     gbifChartKey: state.gbifChartKey ?? DEFAULT_GBIF_CHART_KEY,
-    literatureRanges: state.literatureRanges ?? emptyLiteratureRanges(),
-    literatureChartKey: state.literatureChartKey ?? DEFAULT_LITERATURE_CHART_KEY,
     selectedAssessmentCounts: state.assessmentCounts,
     selectedSystems: state.systems,
     selectedPopulationTrends: state.populationTrends,
@@ -1420,8 +1378,6 @@ export function useFilterParams() {
     setSelectedCountries,
     setGbifRanges,
     setGbifChartKey,
-    setLiteratureRanges,
-    setLiteratureChartKey,
     setSelectedAssessmentCounts,
     setSelectedSystems,
     setSelectedPopulationTrends,

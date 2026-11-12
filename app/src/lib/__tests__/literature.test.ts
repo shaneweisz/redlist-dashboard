@@ -1,16 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  emptyLiteratureRanges,
-  hasLiteratureRanges,
-  literatureBucket,
-  literatureMetricValue,
-  literatureSearchUrl,
-  literatureWorks,
-  literatureWorksSinceAssessment,
-  matchesLiteratureRanges,
-  parseLiteratureChartKey,
-  parseLiteratureSource,
-} from "../literature";
+import { literatureSearchUrl, literatureWorks, literatureWorksSinceAssessment, parseLiteratureSource } from "../literature";
 
 const species = { openalex_works: 42, openalex_works_since_assessment: 7, bhl_works: 0, bhl_works_since_assessment: null };
 
@@ -43,40 +32,5 @@ describe("literature search links", () => {
     expect(literatureSearchUrl("bhl", "Panthera leo")).toBe("https://www.biodiversitylibrary.org/name/Panthera_leo");
     expect(literatureSearchUrl("bhl", "Panthera leo", "2016-09-12")).toBeNull();
     expect(literatureSearchUrl("openalex", "  ")).toBeNull();
-  });
-});
-
-describe("literature chart filters", () => {
-  it("buckets counts, and gives no bucket to no value", () => {
-    expect([0, 1, 5, 6, 20, 21, 100, 101, 1000, 1001].map(literatureBucket))
-      .toEqual(["0", "1-5", "1-5", "6-20", "6-20", "21-100", "21-100", "101-1K", "101-1K", "1K+"]);
-    expect(literatureBucket(null)).toBeNull();
-  });
-
-  it("values a species per key: Total counts a missing count as 0, New has none without a window", () => {
-    expect(literatureMetricValue(species, "total.openalex")).toBe(42);
-    expect(literatureMetricValue({}, "total.bhl")).toBe(0);
-    expect(literatureMetricValue(species, "new.bhl")).toBeNull();
-  });
-
-  it("requires every selection to hold, except the chart's own", () => {
-    const ranges = emptyLiteratureRanges();
-    expect(hasLiteratureRanges(ranges)).toBe(false);
-    expect(matchesLiteratureRanges(species, ranges)).toBe(true);
-    ranges["total.openalex"] = new Set(["21-100"]);
-    ranges["total.bhl"] = new Set(["0"]);
-    expect(hasLiteratureRanges(ranges)).toBe(true);
-    expect(matchesLiteratureRanges(species, ranges)).toBe(true);
-    ranges["new.openalex"] = new Set(["0"]);
-    expect(matchesLiteratureRanges(species, ranges)).toBe(false);
-    expect(matchesLiteratureRanges(species, ranges, "new.openalex")).toBe(true);
-    // No window, so no New bucket: a New selection excludes it.
-    ranges["new.bhl"] = new Set(["0"]);
-    expect(matchesLiteratureRanges(species, ranges, "new.openalex")).toBe(false);
-  });
-
-  it("parses the chart key, falling back to OpenAlex Total", () => {
-    expect(parseLiteratureChartKey("new.bhl")).toBe("new.bhl");
-    expect(parseLiteratureChartKey("bogus")).toBe("total.openalex");
   });
 });
