@@ -50,8 +50,9 @@ export interface RedListSpecies {
   match?: MatchKey | null;
   match_counts_keys?: CountsKey[];
   match_other_names?: number | null;
-  /** The Red List's authority, where there is a match note. */
+  /** The Red List's authority and listed synonyms, where there is a match note. */
   redlist_authority?: string | null;
+  redlist_synonyms?: string[];
   /** NE rows: the assessed species it may be, when their match is flagged or waiting. */
   may_be_assessed?: string[];
   /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */
