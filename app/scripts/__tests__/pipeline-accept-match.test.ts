@@ -4,7 +4,7 @@
  * against COL26.6 XR, trimmed to the fields the rule reads.
  */
 import { describe, it, expect } from "vitest";
-import { acceptMatch, type MatchAnswer } from "../sync/link/accept-match";
+import { acceptMatch, authorPick, type MatchAnswer } from "../sync/link/accept-match";
 
 const answer = (over: Partial<MatchAnswer>): MatchAnswer => ({
   matcher_col_id: "U1", matcher_name: "Puma concolor", matcher_authorship: "(Linnaeus, 1771)", matcher_rank: "SPECIES",
@@ -73,6 +73,29 @@ describe("acceptMatch", () => {
   it("queues a synonym that leads nowhere (Vestia roschitzi)", () => {
     expect(acceptMatch(puma, answer({ matcher_status: "SYNONYM" }), speciesOf({ U1: null })))
       .toEqual({ accepted: false, reason: "synonym of no species" });
+  });
+
+  it("matches an unpublished name like any other (Vepris onanae Cheek ined.)", () => {
+    const m = answer({ matcher_name: "Vepris onanae", matcher_authorship: "Cheek" });
+    expect(acceptMatch({ name: "Vepris onanae", authority: "Cheek ined." }, m, speciesOf({}))).toEqual({ accepted: true, why: "unique name" });
+  });
+
+  describe("authorPick: the matcher answers only the genus", () => {
+    const genus = (alts: MatchAnswer["alternatives"]) => answer({ match_type: "HIGHERRANK", matcher_rank: "GENUS", matcher_name: "Pittosporum", alternatives: alts });
+    const syn = (col_id: string, authorship: string) => ({ col_id, name: "Pittosporum verticillatum", authorship, rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" });
+    const three = genus([syn("M", "Montrouz."), syn("W", "Wall."), syn("B", "Bojer")]);
+    const of = speciesOf({ M: "S1", W: "S2", B: "S3" });
+    it("picks the one record whose citation matches the Red List's (Pittosporum verticillatum Bojer)", () => {
+      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, three, of)).toBe("B");
+    });
+    it("picks none when no citation matches, there is none, or matching records lead to different species", () => {
+      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Smith" }, three, of)).toBeNull();
+      expect(authorPick({ name: "Pittosporum verticillatum", authority: null }, three, of)).toBeNull();
+      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, genus([syn("B", "Bojer"), syn("B2", "Bojer")]), speciesOf({ B: "S3", B2: "S4" }))).toBeNull();
+    });
+    it("picks none for a name the Red List marks as another taxon", () => {
+      expect(authorPick({ name: "Pittosporum aff. verticillatum", authority: "Bojer" }, three, of)).toBeNull();
+    });
   });
 
   it("queues names the Red List marks as unsettled (Heliotropium aff. wagneri, [non Vierh.])", () => {

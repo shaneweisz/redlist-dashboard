@@ -26,6 +26,11 @@ describe("coverer", () => {
     expect(cover({ ...row, col_species_id: "A", col_taxon_id: "A" })).toBe(false);
     expect(covered(links)).toHaveLength(1);
   });
+  it("adds the whole species when the link counts only its own name (Tangara cyanoptera → Thraupis cyanoptera)", () => {
+    const links = [primary(1, "THR", { verdict: "lumped", method: "ambiguous_synonym", col_taxon_id: "TAN" })];
+    const row = { sis_taxon_id: 1, col_species_id: "THR", col_taxon_id: "THR", verdict: "own" as const, method: "redlist_synonym", match_reason: "Red List synonym", counted: true };
+    expect(coverer(links)(row)).toBe(true);
+  });
 });
 
 describe("coverSynonymSpecies", () => {

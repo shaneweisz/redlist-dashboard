@@ -64,7 +64,7 @@
 import { decideKey, isSeparatelyAssessed, isCoLRespelling } from "./species-key";
 import { coverer, coverSynonymSpecies, coverTwins, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum,
   oneOwnerPerUsage, type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym, type Candidate as UndecidedCandidate } from "./rules";
-import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
+import { acceptMatch, authorPick, type MatchAnswer, type QueueReason } from "./accept-match";
 import { orthographicallySame } from "./name-variants";
 import { compareAuthors } from "../../../src/lib/authors";
 import { readOverrides, resolveOverride, type Candidate, type MatchOverride } from "./match-overrides";
@@ -72,7 +72,7 @@ import { output, parquet } from "../paths";
 import { lit, rows, writeTable, openDuckDB } from "../sql";
 
 /** Doubts with no answer to show: no species found, a name the Red List marks unsettled, a spelling the codes don't make the same name. */
-const NO_GUESS = new Set<QueueReason>(["no species match", "informal or qualified name", "spelling variant", "matched another rank"]);
+const NO_GUESS = new Set<QueueReason>(["no species match", "informal or qualified name", "matched another rank"]);
 
 const NAME = (col: string) => `lower(regexp_replace(trim(${col}), '\\s+', ' ', 'g'))`;
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
@@ -133,12 +133,20 @@ export async function buildLink(
   const nameCtx = new Map<number, { why?: keyof typeof WHY; variant?: true; override?: MatchOverride }>();
   // The matcher's answer is the link even when the rule doubts it, as GBIF files a
   // record with that bare name there: flagged, labelled with the doubt, and
-  // queued for review. Not when there's no species answer, the Red List marks the
-  // name unsettled, or the spelling is one the codes don't make the same name.
-  const guess = (m: MatchAnswer | undefined, reason: QueueReason) => !!m?.matcher_col_id && !NO_GUESS.has(reason);
-  const takeGuess = (sis: number, m: MatchAnswer, reason: QueueReason) => {
-    nameReason.set(sis, `flagged: ${reason}`);
-    picks.push({ sis, col_id: m.matcher_col_id!, basis: "matcher", by_: null });
+  // queued for review. When it answers only the genus, the Red List's author
+  // citation may still pick one of CoL's records with the name (authorPick),
+  // flagged too. No link when the Red List marks the name another taxon, or
+  // CoL has nothing to pick.
+  const guess = (s: { name: string; authority: string | null; sis: number }, m: MatchAnswer | undefined, reason: QueueReason) => {
+    if (!m) return;
+    if (reason === "no species match") {
+      const id = authorPick(s, m, (u) => speciesOf.get(u) ?? null);
+      if (id) { nameReason.set(s.sis, "flagged: picked by the author citation"); picks.push({ sis: s.sis, col_id: id, basis: "matcher", by_: null }); }
+      return;
+    }
+    if (!m.matcher_col_id || NO_GUESS.has(reason)) return;
+    nameReason.set(s.sis, `flagged: ${reason}`);
+    picks.push({ sis: s.sis, col_id: m.matcher_col_id, basis: "matcher", by_: null });
   };
   for (const s of species) {
     const m = answers.get(s.sis);
@@ -159,12 +167,12 @@ export async function buildLink(
       toReview.set(s.sis, `override no longer holds: ${res.why}`);
       if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); }
       if (acc.accepted) picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null });
-      else if (guess(m, acc.reason)) takeGuess(s.sis, m!, acc.reason);
+      else guess(s, m, acc.reason);
       continue;
     }
     if (acc.accepted) { nameReason.set(s.sis, taken(acc)); nameCtx.set(s.sis, { why: acc.why, variant: acc.variant }); picks.push({ sis: s.sis, col_id: m!.matcher_col_id!, basis: "matcher", by_: null }); continue; }
     toReview.set(s.sis, acc.reason);
-    if (guess(m, acc.reason)) takeGuess(s.sis, m!, acc.reason);
+    guess(s, m, acc.reason);
   }
   const rlSis = new Set(species.map((s) => s.sis));
   const orphaned = [...decisions.keys()].filter((k) => !rlSis.has(k));
@@ -558,6 +566,8 @@ function matchNotes(links: LinkRow[], ctx: {
         "lower confidence": `GBIF's matcher is only ${m?.confidence ?? "?"}% sure of its match: CoL's ${p}${filed}.`,
         "synonym by other authors": `The Red List cites ${sp.authority ?? "no author"}; CoL's ${pick.name} is by ${pick.authorship ?? "no author"}${filed}. It may be a different species.`,
         "ambiguous synonym": `CoL marks ${p} as an ambiguous synonym, filed under ${pick.species}.`,
+        "spelling variant": `CoL has no ${sp.name}. GBIF's matcher takes ${p}${filed}, spelt differently, and the naming codes don't make the two one name, so it may be another species.`,
+        "picked by the author citation": `CoL has ${same.length + 1} records named ${pick.name}, each a synonym of a different species, so GBIF's matcher picks none and answers only the genus. The Red List cites ${sp.authority}, which matches only ${p}${filed}, so that one counts.`,
         "accepted and a synonym in CoL": `CoL holds ${pick.name} both as an accepted species and as a synonym of ${synonymRecord?.species ?? "another species"}. ${counted}`,
       }[doubt] ?? `Flagged: ${doubt}.`);
       records = [pick, ...same];

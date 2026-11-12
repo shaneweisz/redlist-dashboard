@@ -63,7 +63,10 @@ const genus = (n: string) => n.split(" ")[0].toLowerCase();
 export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role" | "to_review" | "col_treatment" | "match_description">) => boolean;
 
 export function coverer(links: LinkRow[]): Cover {
-  const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_species_id]));
+  // A species' own link to a CoL species, unless it counts only records under its
+  // own name (lumped): then a rule that finds the whole species, say a synonym the
+  // Red List lists, still adds it (Tangara cyanoptera → Thraupis cyanoptera).
+  const primaryTarget = new Map(links.filter((l) => l.role === "primary" && l.verdict !== "lumped").map((l) => [l.sis_taxon_id, l.col_species_id]));
   const seen = new Set<string>();
   return (row) => {
     // One row per species, taxon counted from (none when nothing counts), so a refused row and an own one for one species stay two.

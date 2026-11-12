@@ -184,10 +184,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Agrotis sabine",
     authority: "Brandstetter, 2010",
-    why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 — neither that name nor a spelling of it (#490).",
+    why: "GBIF's matcher put it on Agrotis sabura Mabille, 1888 (a synonym of Agrotis lasserrei), neither that name nor a spelling the codes allow (#490). Until 2026-11 it had no link; now the matcher's answer counts, flagged, since a different spelling may be another species. If it is wrong, an override row corrects it.",
     source: "accept-match.ts; name-variants.ts",
-    confirmed: NOVEMBER_2026,
-    expect: { linkedTo: null, gbifKeyName: null, rules: ["candidate", "waiting: spelling variant"] },
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Agrotis lasserrei", rules: ["flagged: spelling variant"] },
   },
 
   // ── Lumped: a synonym in CoL keeps its own records ─────────────────────────
@@ -547,8 +547,23 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Vepris onanae",
     authority: "Cheek ined.",
-    why: "An unpublished name (ined.): the Red List itself marks it unsettled.",
-    source: "link/accept-match.ts INFORMAL_NAME, DISOWNED_AUTHORITY",
+    why: "An unpublished name (ined.), which CoL holds as Vepris onanae Cheek. Unpublished is still the name, so it matches like any other; until 2026-11 it had no link.",
+    source: "link/accept-match.ts citation()",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Vepris onanae", rules: ["exact, unique"] },
+  },
+  {
+    name: "Chalepoxenus muellerianus",
+    authority: "(Finzi, 1922)",
+    why: "CoL holds it as an accepted species and, by the same authors, as a synonym of Temnothorax muellerianus; the matcher answers the synonym, so the link is flagged. The CoL species Chalepoxenus muellerianus may be the same one, so it is a candidate: listed on the NE list, flagged as possibly this assessed species, not hidden.",
+    source: "link/rules.ts coverUndecidedCandidates",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Temnothorax muellerianus", rules: ["flagged: accepted and a synonym in CoL", "candidate"] },
+  },
+  {
+    name: "Heliotropium aff. wagneri",
+    why: "aff.: the Red List says it is near Heliotropium wagneri, not that species, so wagneri's records aren't its.",
+    source: "link/accept-match.ts INFORMAL_NAME",
     confirmed: NOVEMBER_12,
     expect: { linkedTo: null, rules: ["waiting: informal or qualified name"] },
   },
@@ -571,8 +586,16 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Rubus fruticosus",
     authority: "L.",
-    why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. Until 2026-11 the link owned all three, counting Loureiro's Vietnamese Rubus with it.",
-    source: "link/accept-match.ts",
+    why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. The Red List cites L., which matches only Linnaeus's record, a synonym of Rubus plicatus: that one counts, flagged, as a pick the matcher didn't make. Before, the link owned all three (counting Loureiro's Vietnamese Rubus), then none.",
+    source: "link/accept-match.ts authorPick",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Rubus plicatus", rules: ["flagged: picked by the author citation"] },
+  },
+  {
+    name: "Pleurothallis elegantula",
+    authority: "Cogn.",
+    why: "CoL holds two Pleurothallis elegantula Cogn., synonyms of different species, so the matcher answers only the genus and the citation can't choose either. No count.",
+    source: "link/accept-match.ts authorPick",
     confirmed: NOVEMBER_12,
     expect: { linkedTo: null, rules: ["waiting: no species match"] },
   },

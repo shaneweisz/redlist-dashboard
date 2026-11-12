@@ -67,9 +67,15 @@ export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice"; variant?: true }
   | { accepted: false; reason: QueueReason };
 
-/** Names the Red List itself marks as unsettled: aff., cf., sp., "[...]" in the name; ined., auct., non, sensu in the authority. */
+/**
+ * Names the Red List itself marks as another taxon or not yet one: aff., cf.,
+ * sp., "[...]" in the name; auct., non, sensu in the authority. Not "ined.": an
+ * unpublished name is still the name, and when CoL holds it, its records count.
+ */
 const INFORMAL_NAME = /\b(aff|cf|sp|spp|nov|indet)\.|\[|\bsp\b/i;
-const DISOWNED_AUTHORITY = /\b(ined|auct)\b\.?|\bnon\b|\bsensu\b/i;
+const DISOWNED_AUTHORITY = /\bauct\b\.?|\bnon\b|\bsensu\b/i;
+/** The authority without "ined.", for comparing citations (Cheek ined. / Cheek). */
+const citation = (authority: string | null) => authority?.replace(/\s*,?\s*\bined\b\.?/gi, "").trim() || null;
 
 const binomial = (n: string | null) => (n ?? "").replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
 
@@ -82,6 +88,7 @@ export function acceptMatch(
   speciesOf: (usageId: string) => string | null,
 ): Acceptance {
   const no = (reason: QueueReason): Acceptance => ({ accepted: false, reason });
+  species = { ...species, authority: citation(species.authority) };
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
   if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
   if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
@@ -115,4 +122,26 @@ export function acceptMatch(
     return yes("authors pick it");
   }
   return no("homonym the authors don't decide");
+}
+
+/**
+ * When the matcher answers only the genus because every CoL record with the
+ * name is a synonym of a different species (Pittosporum verticillatum, by
+ * Montrouzier, Wallich and Bojer), the Red List's author citation can still
+ * pick one: the record whose citation matches, when the matching records all
+ * lead to one species. A pick the matcher didn't make, so the link is flagged.
+ * GBIF's own search lists the same records as options.
+ */
+export function authorPick(
+  species: { name: string; authority: string | null },
+  m: MatchAnswer,
+  speciesOf: (usageId: string) => string | null,
+): string | null {
+  const authority = citation(species.authority);
+  if (!authority || INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(authority)) return null;
+  const sameName = m.alternatives.filter((a) => a.rank === "SPECIES" && a.status !== "MISAPPLIED" && binomial(a.name) === binomial(species.name));
+  const picked = sameName.filter((a) => compareAuthors(authority, a.authorship) === "same");
+  const leadTo = new Set(picked.map((a) => speciesOf(a.col_id)));
+  if (picked.length === 0 || leadTo.size !== 1 || leadTo.has(null)) return null;
+  return picked[0].col_id;
 }

@@ -16,7 +16,7 @@
 
 export type MatchKey =
   | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided"
-  | "f_homonym" | "f_confidence" | "f_other_authors" | "f_ambiguous" | "f_synonyms_only" | "agent"
+  | "f_homonym" | "f_author_pick" | "f_spelling" | "f_confidence" | "f_other_authors" | "f_ambiguous" | "f_synonyms_only" | "agent"
   | "none" | "ne_candidate";
 
 /** What else a count includes, beside how it was matched (overlaps the keys above). */
@@ -30,6 +30,8 @@ export interface MatchBar { key: MatchKey | CountsKey; label: string; group: Mat
 /** The card's bars, in order. "plain" and "renamed" are the header's Exact count, not bars. */
 export const MATCH_BARS: MatchBar[] = [
   { key: "f_homonym", label: "Homonym the author doesn't settle", group: "flagged" },
+  { key: "f_author_pick", label: "Picked by author, matcher unsure", group: "flagged" },
+  { key: "f_spelling", label: "Different spelling in CoL", group: "flagged" },
   { key: "f_confidence", label: "Matcher not fully sure", group: "flagged" },
   { key: "f_other_authors", label: "CoL name by other authors", group: "flagged" },
   { key: "f_ambiguous", label: "Ambiguous in CoL", group: "flagged" },
@@ -58,6 +60,8 @@ export const GROUP_TITLE: Record<MatchGroup, { title: string; sub: string }> = {
 const FLAGGED: Record<string, MatchKey> = {
   "homonym the authors don't decide": "f_homonym",
   "lower confidence": "f_confidence",
+  "picked by the author citation": "f_author_pick",
+  "spelling variant": "f_spelling",
   "synonym by other authors": "f_other_authors",
   "ambiguous synonym": "f_ambiguous",
   "accepted and a synonym in CoL": "f_ambiguous",
