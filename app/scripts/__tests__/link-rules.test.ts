@@ -109,6 +109,14 @@ describe("coverSameNameSynonyms", () => {
       { sis: 1, usage: "S4", target: "R4", authority: "Hook.f.", authorship: null }]);
     expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S3", "S4"]);
   });
+  it("takes only the same citation when the citation picked the link (Rubus fruticosus L., not Lour.)", () => {
+    const links = [primary(1, "R1", { verdict: "lumped", method: "synonym", col_taxon_id: "S1", match_reason: "flagged: picked by the author citation" })];
+    coverSameNameSynonyms(links, coverer(links), [
+      { sis: 1, usage: "S2", target: "R2", authority: "L.", authorship: "Lour." },
+      { sis: 1, usage: "S3", target: "R3", authority: "L.", authorship: "G.N.Jones" },
+      { sis: 1, usage: "S4", target: "R4", authority: "L.", authorship: "L." }]);
+    expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S4"]);
+  });
   it("does nothing for a species that isn't lumped", () => {
     const links = [primary(1, "R1")];
     expect(coverSameNameSynonyms(links, coverer(links), [{ sis: 1, usage: "S2", target: "R2" }]).size).toBe(0);

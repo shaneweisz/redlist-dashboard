@@ -586,10 +586,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Rubus fruticosus",
     authority: "L.",
-    why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. The Red List cites L., which matches only Linnaeus's record, a synonym of Rubus plicatus: that one counts, flagged, as a pick the matcher didn't make. Before, the link owned all three (counting Loureiro's Vietnamese Rubus), then none.",
-    source: "link/accept-match.ts authorPick",
+    why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. The Red List cites L., which matches only Linnaeus's record, a synonym of Rubus plicatus: that one counts, flagged, as a pick the matcher didn't make; the other two citations don't. Before, the link owned all three (counting Loureiro's Vietnamese Rubus), then none.",
+    source: "link/accept-match.ts authorPick; link/rules.ts coverSameNameSynonyms",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Rubus plicatus", rules: ["flagged: picked by the author citation"] },
+    expect: { linkedTo: "Rubus plicatus", rules: ["flagged: picked by the author citation", "Red List synonym"] },
   },
   {
     name: "Pleurothallis elegantula",
