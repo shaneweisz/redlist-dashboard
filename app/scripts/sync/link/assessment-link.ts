@@ -62,7 +62,7 @@
  */
 
 import { decideKey, isSeparatelyAssessed, isCoLRespelling } from "./species-key";
-import { coverer, coverSynonymSpecies, coverTwins, coverDuplicateConcepts, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum,
+import { coverer, coverSynonymSpecies, coverTwins, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum,
   oneOwnerPerUsage, type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym, type Candidate as UndecidedCandidate } from "./rules";
 import { acceptMatch, type MatchAnswer, type QueueReason } from "./accept-match";
 import { orthographicallySame } from "./name-variants";
@@ -290,7 +290,6 @@ export async function buildLink(
   const rules: [string, () => Set<number> | Promise<Set<number>>][] = [
     ["covered: another accepted species IUCN's synonyms or CoL's name it", () => coverSynonymSpecies(cover, synonymCandidates, assessedNames)],
     ["covered: CoL holds the name twice", () => coverTwins(links, cover, accepted, listedName, assessedNames)],
-    ["covered: one organism under two genera", () => coverDuplicateConcepts(links, cover, accepted, listedName, assessedNames)],
     ["covered: a lumped species' other same-name synonyms", () => coverSameNameSynonyms(links, cover, sameNameSynonyms)],
     ["covered: what a species waiting for a decision might be, kept off the NE list", () => coverUndecidedCandidates(links, cover, undecidedCandidates)],
     ["no link across a phylum", async () => dropCrossPhylum(links, await crossing())],
@@ -376,7 +375,6 @@ function describeLinks(links: LinkRow[], ctx: {
       const lead: Record<string, string> = {
         "CoL duplicate": `CoL also holds it as ${fmt(taxon)}, ${status(taxon?.status ?? null)}`,
         "CoL duplicate, respelled": `CoL also holds it spelt ${fmt(taxon)}`,
-        "CoL duplicate, other genus": `CoL also holds it as ${fmt(taxon)}, with the same epithet and citation`,
         "CoL duplicate, Red List synonym": `CoL also holds it as ${fmt(taxon)}, a name the Red List lists as a synonym`,
         "name under another species": `CoL also files ${fmt(taxon)} under ${fmt(target)}`,
         "Red List synonym": `The Red List lists ${fmt(taxon)} as a synonym; kept off the Not Evaluated list`,

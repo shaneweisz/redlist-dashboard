@@ -491,10 +491,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Charadrius nivosus",
     authority: "(Cassin, 1858)",
-    why: "CoL holds the snowy plover twice, as Charadrius and Anarhynchus nivosus, both Cassin, 1858: the second holds 196,733 of its records.",
-    source: "link/rules.ts coverDuplicateConcepts",
+    why: "CoL holds the snowy plover twice, as Charadrius and Anarhynchus nivosus (Cassin, 1858), two accepted species, and the Red List lists neither as the other's synonym. A rule counted the same epithet and dated author in one family under another genus as one organism; the agent audit (2026-11-12) found it wrong for 7 of 20 (Atractus / Apostolepis collaris, both Peracca, 1897, are two snakes), so it was dropped: nothing direct says the two are one, so Anarhynchus nivosus's 196,733 records no longer count for the plover. That copy is outside CoL's curated core, so it isn't listed as unassessed either.",
+    source: "link/rules.ts (no rule for another genus)",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Charadrius nivosus", minRecords: 100_000, neListed: { "Anarhynchus nivosus": false }, rules: ["CoL duplicate, other genus"] },
+    expect: { linkedTo: "Charadrius nivosus", maxRecords: 100_000, neListed: { "Anarhynchus nivosus": false }, rules: ["exact, unique"] },
   },
   {
     name: "Turraeanthus africana",

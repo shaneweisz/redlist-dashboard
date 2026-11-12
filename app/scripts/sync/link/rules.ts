@@ -12,7 +12,7 @@
 
 import { sameOrganism, isSeparatelyAssessed, type Verdict } from "./species-key";
 import { compareAuthors, normaliseAuthorship } from "../../../src/lib/authors";
-import { speciesNameParts, canonicalEpithet, orthographicKey } from "./name-variants";
+import { orthographicKey } from "./name-variants";
 
 export interface LinkRow {
   sis_taxon_id: number;
@@ -49,7 +49,7 @@ export interface LinkRow {
 
 /** Ownership order: the more direct the name, the stronger the claim. */
 const METHODS = ["accepted", "synonym", "provisional", "ambiguous_synonym",
-  "iucn_synonym_covered", "same_name_twin", "respelled_twin", "duplicate_concept", "same_name_synonym", "undecided_candidate"] as const;
+  "iucn_synonym_covered", "same_name_twin", "respelled_twin", "same_name_synonym", "undecided_candidate"] as const;
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 const genus = (n: string) => n.split(" ")[0].toLowerCase();
@@ -174,40 +174,6 @@ export function coverTwins(links: LinkRow[], cover: Cover, accepted: AcceptedSpe
       if (same.has(id) || (t.authorship && other.authorship && compareAuthors(t.authorship, other.authorship) !== "same")) continue;
       if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "respelled_twin",
         "CoL duplicate, respelled")) touched.add(l.sis_taxon_id);
-    }
-  }
-  return touched;
-}
-
-const dupKey = (x: AcceptedSpecies) => {
-  const p = speciesNameParts(x.scientific_name);
-  const year = x.authorship?.match(/\b(1[7-9]\d\d|20\d\d)\b/)?.[1];
-  const surname = x.authorship ? normaliseAuthorship(x.authorship).replace(/\b\d{4}\b/g, "").replace(/\b[a-z]\b/g, "").replace(/\s+/g, " ").trim() : "";
-  return p && year && surname ? `${x.family}|${canonicalEpithet(p[1])}|${surname}|${year}` : null;
-};
-
-/**
- * Rule: the same epithet stem and the same dated author citation in one family,
- * under another genus, is one organism CoL holds twice, so both count
- * (Charadrius nivosus / Anarhynchus nivosus, both Cassin, 1858).
- */
-export function coverDuplicateConcepts(links: LinkRow[], cover: Cover, accepted: AcceptedSpecies[], listedName: Map<number, string>,
-  assessedNames: Set<string>): Set<number> {
-  const byId = new Map(accepted.map((x) => [x.col_id, x]));
-  const dups = new Map<string, string[]>();
-  for (const x of accepted) { const d = dupKey(x); if (d) dups.set(d, [...(dups.get(d) ?? []), x.col_id]); }
-  const touched = new Set<number>();
-  for (const l of ownTargets(links)) {
-    const t = byId.get(l.col_species_id!);
-    const dk = t ? dupKey(t) : null;
-    if (!t || !dk) continue;
-    for (const id of dups.get(dk) ?? []) {
-      const other = byId.get(id)!;
-      if (genus(other.scientific_name) === genus(t.scientific_name)) continue;
-      if (coverAlongside(cover, l, t, other, listedName.get(l.sis_taxon_id), assessedNames, "duplicate_concept",
-        "CoL duplicate, other genus")) {
-        touched.add(l.sis_taxon_id);
-      }
     }
   }
   return touched;
