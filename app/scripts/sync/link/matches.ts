@@ -90,12 +90,12 @@ export function parseScore(note: string | undefined | null): Score | null {
 
 // No authority, on purpose (see Decisions). matching-ws reads it only as
 // `scientificNameAuthorship`; this once sent `authorship`, which it ignores.
-export interface Query { scientificName: string; kingdom?: string; phylum?: string; class?: string; order?: string; family?: string }
+export interface Query { scientificName: string; scientificNameAuthorship?: string; kingdom?: string; phylum?: string; class?: string; order?: string; family?: string }
 
 /** The query for one assessed species: its name, and IUCN's lineage as hints. */
-export function matcherQuery(s: { scientific_name: string; kingdom_name: string | null; phylum_name: string | null;
+export function matcherQuery(s: { scientific_name: string; authority?: string | null; kingdom_name: string | null; phylum_name: string | null;
   class_name: string | null; order_name: string | null; family: string | null }): Query {
-  return { scientificName: s.scientific_name, kingdom: cap(s.kingdom_name),
+  return { scientificName: s.scientific_name, ...(s.authority ? { scientificNameAuthorship: s.authority } : {}), kingdom: cap(s.kingdom_name),
     phylum: cap(s.phylum_name), class: cap(s.class_name), order: cap(s.order_name), family: cap(s.family) };
 }
 
@@ -146,9 +146,9 @@ export async function askMatcher(inputs: { assessments: string; matcher: Matcher
   const conn = await openDuckDB();
   const out = output(matchesFile);
   const species = (await conn.runAndReadAll(`
-    SELECT sis_taxon_id::INTEGER AS sis, scientific_name, kingdom_name, phylum_name, class_name, order_name, family
+    SELECT sis_taxon_id::INTEGER AS sis, scientific_name, authority, kingdom_name, phylum_name, class_name, order_name, family
     FROM ${parquet(inputs.assessments)} WHERE is_latest ORDER BY sis`)).getRowObjects() as unknown as {
-      sis: number; scientific_name: string; kingdom_name: string | null; phylum_name: string | null;
+      sis: number; scientific_name: string; authority: string | null; kingdom_name: string | null; phylum_name: string | null;
       class_name: string | null; order_name: string | null; family: string | null }[];
 
   const cacheDir = path.join(CACHE_ROOT, "matching", `${matcher.datasetKey}-${matcher.version}`);

@@ -86,7 +86,11 @@ export function acceptMatch(
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
   if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
   if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
-  if (m.matcher_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
+  // A provisional copy of a name CoL also holds as accepted or as a synonym is CoL holding it twice: the twin
+  // rules count both (Melospiza melodia; Ixobrychus exilis, filed under Botaurus).
+  const acceptedCopy = m.matcher_status === "PROVISIONALLY_ACCEPTED" && m.alternatives.some((a) => (a.status === "ACCEPTED" || a.status === "SYNONYM")
+    && binomial(a.name) === binomial(m.matcher_name) && compareAuthors(m.matcher_authorship, a.authorship) !== "other");
+  if (m.matcher_status === "PROVISIONALLY_ACCEPTED" && !acceptedCopy) return no("provisional name");
   if (m.matcher_status === "MISAPPLIED") return no("misapplied name");
   // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
   const variant = m.match_type !== "EXACT" && !!m.matcher_name && orthographicallySame(binomial(species.name), binomial(m.matcher_name))
