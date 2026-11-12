@@ -37,7 +37,7 @@ describe("literature search links", () => {
 
 describe("links to the works counted", () => {
   it("filters OpenAlex to the works' ids, at most 100", () => {
-    expect(decodeURIComponent(openAlexWorksUrl([123n, 456]))).toBe("https://openalex.org/works?filter=openalex:W123|W456");
+    expect(decodeURIComponent(openAlexWorksUrl([BigInt(123), 456]))).toBe("https://openalex.org/works?filter=openalex:W123|W456");
     const many = Array.from({ length: 150 }, (_, i) => i + 1);
     expect(decodeURIComponent(openAlexWorksUrl(many)).split("|")).toHaveLength(100);
   });

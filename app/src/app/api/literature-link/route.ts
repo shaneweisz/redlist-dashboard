@@ -7,11 +7,14 @@
  * abbreviated genera, and finds what the sync's rules leave out), so the link
  * lists the works instead. `since` narrows to the works counted as New.
  *
- * If the works can't be read (a sync without them), it falls back to OpenAlex's
- * search for the name, so a link never dead-ends.
+ * Records OpenAlex has merged since the sync are swapped for the record they
+ * became (lib/literature/current-works.ts), since its id filter doesn't follow a
+ * merge. If the works can't be read (a sync without them), it falls back to
+ * OpenAlex's search for the name, so a link never dead-ends.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getLiteratureWorks } from "@/lib/data/literature-works";
+import { currentWorks } from "@/lib/literature/current-works";
 import { literatureSearchUrl, openAlexWorksUrl, OPENALEX_LINK_MAX_WORKS } from "@/lib/literature";
 
 export async function GET(request: NextRequest) {
@@ -28,7 +31,8 @@ export async function GET(request: NextRequest) {
       sisTaxonId: sisTaxonId && sisTaxonId > 0 ? sisTaxonId : undefined, colId: col ?? undefined,
       since: since ?? undefined, limit: OPENALEX_LINK_MAX_WORKS,
     });
-    if (works.length > 0) return NextResponse.redirect(openAlexWorksUrl(works), 302);
+    // Records OpenAlex has merged since the sync are swapped for the ones they became.
+    if (works.length > 0) return NextResponse.redirect(openAlexWorksUrl(await currentWorks(works)), 302);
   } catch (error) {
     console.error("literature-link: falling back to a name search:", error);
   }

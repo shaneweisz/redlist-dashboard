@@ -24,10 +24,12 @@
  *   - BHL: the names its own name-finding confirmed on a page, credited to the
  *     article the page is in, else to the volume.
  *   - The same paper: OpenAlex records with the same title (letters and digits,
- *     lowercased) and year, for a title of five words or more; else the same
- *     DOI; else the record alone. A short title ("Mus musculus", "Book
- *     reviews") is shared by different works, so it never merges records. A
- *     BHL work is its own paper.
+ *     lowercased), for a title of five words or more; else the same DOI; else
+ *     the record alone. Not the same year: a preprint and its journal version,
+ *     or a repository copy filed under a later year, are one paper (it's dated
+ *     by its earliest record). A short title ("Mus musculus", "Book reviews")
+ *     is shared by different works, so it never merges records. A BHL work is
+ *     its own paper.
  *   - The OpenAlex works are the newest release already read in full: reading
  *     a new one takes days (npm run sync:openalex), so a sync never starts it.
  */
@@ -56,8 +58,8 @@ export async function buildLiteratureMentions(
   await conn.run(`COPY (
     SELECT 'openalex' AS source, work_id, TRY_CAST(publication_date AS DATE) AS publication_date,
            CAST(publication_year AS INTEGER) AS publication_year,
-           CASE WHEN len(string_split(trim(coalesce(title, '')), ' ')) >= 5 AND publication_year IS NOT NULL
-                  THEN 'title:' || lower(regexp_replace(title, '[^\\p{L}\\p{N}]', '', 'g')) || ':' || publication_year
+           CASE WHEN len(string_split(trim(coalesce(title, '')), ' ')) >= 5
+                  THEN 'title:' || lower(regexp_replace(title, '[^\\p{L}\\p{N}]', '', 'g'))
                 WHEN doi IS NOT NULL THEN 'doi:' || lower(doi)
                 ELSE work_id END AS paper,
            name
