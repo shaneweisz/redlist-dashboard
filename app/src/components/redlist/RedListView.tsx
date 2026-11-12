@@ -6345,19 +6345,27 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 {!isNewAssessments && (
-                <th
-                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
-                  onClick={(e) => handleSort("newGbif", e)}
-                >
+                <th className={`${SPECIES_TH} text-right min-w-[60px]`}>
+                  {/* Two sorts in one header: New sorts by the count, % by its share
+                      of Total (the grey figure beside each count). */}
                   <span className="flex items-center justify-end gap-1">
-                    <span className={SPECIES_TH_NOWRAP}>New</span>
-                    <HoverTooltip text="Records dated after the assessment date, and in grey their share of Total.">
+                    <button type="button" className={`flex items-center gap-1 ${SPECIES_TH_SORTABLE}`}
+                      onClick={(e) => handleSort("newGbif", e)} aria-label="Sort by new records">
+                      <span className={SPECIES_TH_NOWRAP}>New</span>
+                      <SortIndicator field="newGbif" />
+                    </button>
+                    <span className="text-zinc-300 dark:text-zinc-600" aria-hidden>·</span>
+                    <button type="button" className={`flex items-center gap-1 ${SPECIES_TH_SORTABLE}`}
+                      onClick={(e) => handleSort("pctNewGbif", e)} aria-label="Sort by new records as a share of Total">
+                      <span className={SPECIES_TH_NOWRAP}>%</span>
+                      <SortIndicator field="pctNewGbif" />
+                    </button>
+                    <HoverTooltip text="Records dated after the assessment date, and in grey their share of Total. Click New or % to sort by either.">
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
                       </svg>
                     </HoverTooltip>
-                    <SortIndicator field="newGbif" />
                   </span>
                 </th>
                 )}
