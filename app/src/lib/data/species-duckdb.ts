@@ -79,7 +79,7 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
-               countries, gbif_all_records_countries, common_name
+               countries, gbif_all_records_countries, common_name, openalex_works, bhl_works
         FROM read_parquet('${neUri}')`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
   }
@@ -146,6 +146,7 @@ const ASSESSED_SELECT = `
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
+  openalex_works, openalex_works_since_assessment, bhl_works, bhl_works_since_assessment,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -197,6 +198,11 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     gbif_all_records_count: num(r.gbif_all_records_count),
     gbif_all_records_since_assessment: num(r.gbif_all_records_since_assessment),
     count_note: isCountNote(r.count_note) ? r.count_note : null,
+    // Literature works mentioning it (the sync's paper_counts): OpenAlex and BHL.
+    openalex_works: num(r.openalex_works),
+    openalex_works_since_assessment: num(r.openalex_works_since_assessment),
+    bhl_works: num(r.bhl_works),
+    bhl_works_since_assessment: num(r.bhl_works_since_assessment),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,
@@ -342,7 +348,7 @@ export async function querySpecies(opts: {
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year, u.specialist_group,
                g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
-               g.countries, g.gbif_all_records_countries, g.common_name
+               g.countries, g.gbif_all_records_countries, g.common_name, g.openalex_works, g.bhl_works
         FROM (
           SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
@@ -392,6 +398,8 @@ export async function querySpecies(opts: {
           gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
           gbif_all_records_count: num(r.gbif_all_records_count),
           gbif_all_records_countries: splitList(r.gbif_all_records_countries),
+          openalex_works: num(r.openalex_works),
+          bhl_works: num(r.bhl_works),
         } as unknown as ReturnType<typeof toSpeciesRow>);
       }
     }

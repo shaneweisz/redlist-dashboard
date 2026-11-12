@@ -43,6 +43,15 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
+  /**
+   * Literature works mentioning it (the sync's paper_counts), from OpenAlex and
+   * the Biodiversity Heritage Library. The since-assessment counts are works
+   * published after the assessment date (assessed species only).
+   */
+  openalex_works?: number | null;
+  openalex_works_since_assessment?: number | null;
+  bhl_works?: number | null;
+  bhl_works_since_assessment?: number | null;
   /** Why it has no count (src/lib/count-note.ts): linked to no CoL species yet. */
   count_note?: CountNote | null;
   /**

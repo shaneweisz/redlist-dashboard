@@ -84,6 +84,7 @@ function exports(T: Tables) {
   return [
     { model: "usage_owner", file: T.usageOwner, orderBy: "usage_key" },
     { model: "record_counts", file: T.recordCounts, orderBy: "sis_taxon_id, col_id" },
+    { model: "paper_counts", file: T.paperCounts, orderBy: "source, sis_taxon_id, col_id" },
     { model: "assessment_history", file: T.assessmentHistory, orderBy: "sis_taxon_id, seq" },
     { model: "assessed", file: T.assessed, orderBy: "class_name, order_name, family, scientific_name" },
     // Partitioned by group, in row groups small enough that a lookup reads little.

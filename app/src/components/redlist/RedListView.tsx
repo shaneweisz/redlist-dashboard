@@ -393,7 +393,33 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     }
     case "describedYear":
       return (a.described_year ?? -1) - (b.described_year ?? -1);
+    case "openalexWorks":
+      return (a.openalex_works ?? -1) - (b.openalex_works ?? -1);
+    case "newOpenalexWorks":
+      return (a.openalex_works_since_assessment ?? -1) - (b.openalex_works_since_assessment ?? -1);
+    case "bhlWorks":
+      return (a.bhl_works ?? -1) - (b.bhl_works ?? -1);
+    case "newBhlWorks":
+      return (a.bhl_works_since_assessment ?? -1) - (b.bhl_works_since_assessment ?? -1);
   }
+}
+
+/**
+ * The literature column groups beside GBIF Records: works mentioning the
+ * species, from each source the sync counts (paper_counts). New is works
+ * published after the assessment date, for assessed species.
+ */
+const LITERATURE_SOURCES = [
+  { key: "openalex", label: "OpenAlex Papers", total: "openalexWorks", fresh: "newOpenalexWorks",
+    hint: "Papers in OpenAlex whose title or abstract names the species (or a synonym CoL lists for it)." },
+  { key: "bhl", label: "BHL Works", total: "bhlWorks", fresh: "newBhlWorks",
+    hint: "Articles and volumes in the Biodiversity Heritage Library whose scanned pages name the species (or a synonym CoL lists for it)." },
+] as const satisfies readonly { key: string; label: string; total: SortField; fresh: SortField; hint: string }[];
+
+function literatureCounts(s: Species, key: (typeof LITERATURE_SOURCES)[number]["key"]): { total: number | null; fresh: number | null } {
+  return key === "openalex"
+    ? { total: s.openalex_works ?? null, fresh: s.openalex_works_since_assessment ?? null }
+    : { total: s.bhl_works ?? null, fresh: s.bhl_works_since_assessment ?? null };
 }
 
 const HABITAT_IMPORTANCE_OPTIONS: { value: string; short: string }[] = [
@@ -6337,6 +6363,36 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
+                {LITERATURE_SOURCES.map((src) => (
+                  <React.Fragment key={src.key}>
+                    <th
+                      className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} ${src.key === "openalex" ? "border-l border-zinc-200 dark:border-zinc-700" : ""}`}
+                      onClick={(e) => handleSort(src.total, e)}
+                    >
+                      <span className="flex items-center justify-end gap-1">
+                        <span className={SPECIES_TH_NOWRAP}>Total</span>
+                        <SortIndicator field={src.total} />
+                      </span>
+                    </th>
+                    {!isNewAssessments && (
+                    <th
+                      className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
+                      onClick={(e) => handleSort(src.fresh, e)}
+                    >
+                      <span className="flex items-center justify-end gap-1">
+                        <span className={SPECIES_TH_NOWRAP}>New</span>
+                        <HoverTooltip text="Published after the assessment date.">
+                          <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 16v-4M12 8h.01" />
+                          </svg>
+                        </HoverTooltip>
+                        <SortIndicator field={src.fresh} />
+                      </span>
+                    </th>
+                    )}
+                  </React.Fragment>
+                ))}
                                 </>
                 );
                 return (
@@ -6347,7 +6403,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                   </svg>
                 </th>
-                <th rowSpan={gbifHeadRows} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left text-sm font-bold text-zinc-600 dark:text-zinc-300">
+                <th rowSpan={gbifHeadRows} className="border-b border-zinc-200 dark:border-zinc-700 sticky left-[40px] z-10 bg-zinc-50 dark:bg-zinc-800 px-2 md:px-4 py-3 text-left md:min-w-[200px] text-sm font-bold text-zinc-600 dark:text-zinc-300">
                   Species
                 </th>
                 {!isNewAssessments && (
@@ -6391,6 +6447,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
+                {LITERATURE_SOURCES.map((src) => (
+                  <th key={src.key} colSpan={isNewAssessments ? 1 : 2}
+                    className={`px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700 ${src.key === "openalex" ? "border-l" : ""}`}>
+                    <span className="flex items-center justify-end gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                      {src.label}
+                      <HoverTooltip text={src.hint}>
+                        <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                      </HoverTooltip>
+                    </span>
+                  </th>
+                ))}
               </tr>
               <tr className="border-b border-zinc-200 dark:border-zinc-700">{gbifColumns}</tr>
                   </>
@@ -6686,10 +6756,26 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       })()}
                     </td>
                     )}
+                    {LITERATURE_SOURCES.map((src) => {
+                      const { total, fresh } = literatureCounts(s, src.key);
+                      const cell = "px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap";
+                      return (
+                        <React.Fragment key={src.key}>
+                          <td className={`${cell} ${src.key === "openalex" ? "border-l border-zinc-200 dark:border-zinc-800" : ""}`}>
+                            {total != null ? total.toLocaleString() : "—"}
+                          </td>
+                          {!isNewAssessments && (
+                          <td className={cell}>
+                            {isNE(s) ? <span className="text-zinc-400">N/A</span> : fresh != null ? fresh.toLocaleString() : "—"}
+                          </td>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 4 : 8} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 6 : 12} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -6896,7 +6982,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 4 : 8} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 6 : 12} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>

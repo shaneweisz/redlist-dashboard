@@ -49,6 +49,7 @@ export function tables(buildDir = BUILD_DIR) {
     commonNames: working("sources", "common_names.parquet"),
     specialistGroupRemits: working("sources", "specialist_group_remits.parquet"),
     rankAliases: working("sources", "rank_aliases.parquet"),
+    literatureMentions: working("sources", "literature_mentions.parquet"),
     // 2. Link
     matches: working("link", "matches.parquet"),
     link: working("link", "assessment_link.parquet"),
@@ -56,6 +57,7 @@ export function tables(buildDir = BUILD_DIR) {
     // 3. Count
     usageOwner: working("count", "usage_owner.parquet"),
     recordCounts: working("count", "record_counts.parquet"),
+    paperCounts: working("count", "paper_counts.parquet"),
     // 4. Lists
     specialistGroupSpecies: working("lists", "specialist_group_species.parquet"),
     assessed: data("assessed.parquet"),

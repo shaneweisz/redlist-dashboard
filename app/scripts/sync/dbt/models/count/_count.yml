@@ -9,3 +9,12 @@ models:
           - unique
   - name: record_counts
     description: GBIF record counts per species (see the header in record_counts.sql).
+  - name: paper_counts
+    description: Literature works per species and source (see the header in paper_counts.sql).
+    columns:
+      - name: source
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['openalex', 'bhl']

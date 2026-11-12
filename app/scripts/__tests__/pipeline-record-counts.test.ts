@@ -70,6 +70,9 @@ beforeAll(async () => {
   await copy(`SELECT * FROM (VALUES ('N1', 'MX', false, 5::BIGINT)) t(usage_key, countrycode, georef, n)`, T.occurrenceCountries);
   await copy(`SELECT 'col' AS source, 'display' AS kind, 'N1' AS col_id, 'species' AS rank, 'Accipiter three' AS scientific_name,
       NULL::VARCHAR AS kingdom, 'Some name' AS name`, T.commonNames);
+  // No literature: this test is about record counts (paper_counts reads it).
+  await copy(`SELECT 'openalex' AS source, 'W1' AS work_id, NULL::DATE AS publication_date, NULL::INTEGER AS publication_year,
+      'x' AS name WHERE false`, T.literatureMentions);
 
   const today = "2026-11-06";
   // The real Specialist Groups' remits; dbt's unit test (dbt/models/lists/_lists.yml)
