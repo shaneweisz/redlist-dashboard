@@ -264,7 +264,7 @@ export async function buildLink(
     SELECT col_id, scientific_name, authorship, family, class_name FROM col_usages
     WHERE rank = 'species' AND status IN ('accepted', 'provisionally accepted') AND NOT demoted`);
   const sameNameSynonyms = await rows<SameNameSynonym>(conn, `
-    SELECT r.sis, t.col_id AS usage, t.species_id AS target FROM redlist_species r
+    SELECT r.sis, t.col_id AS usage, t.species_id AS target, r.authority, t.authorship FROM redlist_species r
     JOIN col_usages t ON t.name_key = r.name_key AND t.rank = 'species' AND t.status IN ('synonym', 'ambiguous synonym') AND t.species_id IS NOT NULL`);
   const listedName = new Map(species.map((s) => [s.sis, norm(s.name)]));
   // What a species waiting for a decision might be: every CoL species a usage with

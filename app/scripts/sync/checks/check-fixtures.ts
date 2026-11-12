@@ -5,8 +5,10 @@
  * number, or a rule written for one. This checks what a sync actually
  * published for it: which CoL species an assessed species is linked to, which
  * GBIF key the app uses, whether it has records, and whether given CoL species
- * appear in the Not Evaluated list. It reads the same facts as the comparison
- * (compare/facts.ts). The sync stops if any case fails.
+ * appear in the Not Evaluated list, and which link rules its rows show. It
+ * reads the same facts as the comparison (compare/facts.ts). The sync stops if
+ * any case fails, or if a build gives some species a rule no case shows: every
+ * rule has a real species to read it by.
  *
  * Expectations are by name, not CoL id, because CoL renumbers about 2% of
  * ids each release.
@@ -38,6 +40,25 @@ export interface Observed {
   gbifKeyName: string | null;
   records: number | null;
   neListed: Record<string, boolean>;
+  /** The rule labels its link rows carry (ruleLabel). */
+  rules: string[];
+}
+
+/** A link row's rule: how it was made (match_reason), and for a species still waiting, why. */
+export const ruleLabel = (matchReason: string | null, toReview: string | null): string | null =>
+  matchReason === "waiting" ? `waiting: ${toReview ?? "?"}` : matchReason;
+
+/** The rule labels the build in `dir` gives at least one species. */
+export async function rulesInBuild(conn: DuckDBConnection, dir: string): Promise<string[]> {
+  const rows = (await conn.runAndReadAll(`SELECT DISTINCT match_reason, to_review FROM read_parquet(${lit(inSync(dir, "assessment_link.parquet"))})
+    WHERE match_reason IS NOT NULL`)).getRowObjects();
+  return [...new Set(rows.map((r) => ruleLabel(r.match_reason as string | null, r.to_review as string | null)).filter((x): x is string => !!x))].sort();
+}
+
+/** Rules the build shows that no case names: each needs a real species, read by name, before it ships. */
+export function uncoveredRules(cases: MatchCase[], inBuild: string[]): string[] {
+  const named = new Set(cases.flatMap((c) => c.expect.rules ?? []));
+  return inBuild.filter((r) => !named.has(r));
 }
 
 
@@ -65,7 +86,7 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
   const out = new Map<string, Observed>();
   for (const c of cases) {
     const [row] = (await conn.runAndReadAll(`
-      SELECT a.iucn_category AS category, l.species_name AS linked, l.species_authorship AS linked_auth, a.gbif_species_key AS gkey,
+      SELECT a.key AS sis, a.iucn_category AS category, l.species_name AS linked, l.species_authorship AS linked_auth, a.gbif_species_key AS gkey,
              g.scientific_name AS gname, a.gbif_georeferenced_records_count AS n
       FROM f.assessed a
       LEFT JOIN names l ON l.col_id = a.link_col_id
@@ -77,6 +98,9 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
         SELECT count(*) AS c FROM f.ne WHERE scientific_name = ${lit(n)}`)).getRowObjects();
       neListed[n] = Number(r.c) > 0;
     }
+    const rules = row ? (await conn.runAndReadAll(`SELECT DISTINCT match_reason, to_review FROM read_parquet(${lit(inSync(dir, "assessment_link.parquet"))})
+      WHERE sis_taxon_id::VARCHAR = ${lit(String(row.sis))}`)).getRowObjects()
+      .map((r) => ruleLabel(r.match_reason as string | null, r.to_review as string | null)).filter((x): x is string => !!x).sort() : [];
     out.set(c.name, {
       assessed: row !== undefined,
       category: row ? (row.category as string | null) : null,
@@ -87,6 +111,7 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
       gbifKeyName: row ? (row.gname as string | null) : null,
       records: row && row.n !== null ? Number(row.n) : null,
       neListed,
+      rules,
     });
   }
   return out;
@@ -152,6 +177,9 @@ export function mismatches(c: MatchCase, o: Observed): string[] {
   for (const [n, listed] of Object.entries(e.neListed ?? {})) {
     want(`${n} in NE list`, listed, o.neListed[n]);
   }
+  for (const r of e.rules ?? []) {
+    if (!o.rules.includes(r)) miss.push(`rule: expected "${r}", its rows show ${JSON.stringify(o.rules)}`);
+  }
   return miss;
 }
 
@@ -179,6 +207,8 @@ if (isDirectRun) {
       console.log(`FAIL    ${c.name}: ${miss.join("; ")} (${failureKind(c, build)})`);
     }
     console.log(`\n${MATCHING_CASES.length} cases: ${failed} failed.`);
-    if (failed > 0) process.exitCode = 1;
+    const uncovered = uncoveredRules(MATCHING_CASES, await rulesInBuild(conn, dir));
+    for (const r of uncovered) console.log(`NO CASE ${r}`);
+    if (failed > 0 || uncovered.length > 0) process.exitCode = 1;
   })().catch((e) => { console.error(e); process.exit(1); });
 }

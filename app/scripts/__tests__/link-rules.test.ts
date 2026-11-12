@@ -109,6 +109,14 @@ describe("coverSameNameSynonyms", () => {
     expect(touched.size).toBe(1);
     expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S2", "S3"]);
   });
+  it("leaves the same name by other authors alone (Ilex wallichii Hook.f., not Steud.)", () => {
+    const links = [primary(1, "R1", { verdict: "lumped", method: "synonym", col_taxon_id: "S1" })];
+    coverSameNameSynonyms(links, coverer(links), [
+      { sis: 1, usage: "S2", target: "R2", authority: "Hook.f.", authorship: "Steud." },
+      { sis: 1, usage: "S3", target: "R3", authority: "Hook.f.", authorship: "Hook. f." },
+      { sis: 1, usage: "S4", target: "R4", authority: "Hook.f.", authorship: null }]);
+    expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S3", "S4"]);
+  });
   it("does nothing for a species that isn't lumped", () => {
     const links = [primary(1, "R1")];
     expect(coverSameNameSynonyms(links, coverer(links), [{ sis: 1, usage: "S2", target: "R2" }]).size).toBe(0);

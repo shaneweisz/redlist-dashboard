@@ -54,7 +54,7 @@ import { runDbt, exportDbtTables } from "./dbt";
 import { buildColRevisions } from "./precomputed/col-revisions";
 import { buildSummaries } from "./precomputed/summaries";
 import { buildColTaxonIds } from "./precomputed/col-taxon-ids";
-import { observe, mismatches, buildVersions, failureKind } from "./checks/check-fixtures";
+import { observe, mismatches, buildVersions, failureKind, rulesInBuild, uncoveredRules } from "./checks/check-fixtures";
 import { specialistGroupMismatches } from "./checks/specialist-groups";
 import { MATCHING_CASES } from "./checks/fixtures/matching";
 import { buildReviewLinks } from "./checks/review-links";
@@ -176,6 +176,12 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   if (failed.length > 0) {
     writeManifest(T.syncJson, manifest);
     throw new Error(`sync: ${failed.length} matching fixtures fail:\n  ${failed.map((c) => `${c.name}: ${mismatches(c, obs.get(c.name)!).join("; ")}\n    ${failureKind(c, versions)}`).join("\n  ")}`);
+  }
+  // Every rule the link applied needs a named case to read it by.
+  const uncovered = uncoveredRules(MATCHING_CASES, await rulesInBuild(conn, PUBLISH_DIR));
+  if (uncovered.length > 0) {
+    writeManifest(T.syncJson, manifest);
+    throw new Error(`sync: link rules with no matching fixture (add a species to fixtures/matching.ts):\n  ${uncovered.join("\n  ")}`);
   }
   const groupMismatches = await specialistGroupMismatches(conn, T);
   manifest.specialist_groups = { mismatches: groupMismatches };
