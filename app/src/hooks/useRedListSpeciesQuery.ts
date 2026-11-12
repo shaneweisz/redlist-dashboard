@@ -61,6 +61,9 @@ export interface RedListSpecies {
    */
   gbif_records?: number | null;
   gbif_records_since_assessment?: number | null;
+  /** The literature counts the view shows, for its source (lit=), set alongside gbif_records. */
+  literature_works?: number | null;
+  literature_works_since_assessment?: number | null;
   // Latest assessment's credits, inline in the species list (drives the credit
   // filters). The full history array is fetched lazily into previous_assessments
   // when a detail panel opens — empty in the list response.

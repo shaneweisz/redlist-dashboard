@@ -12,6 +12,7 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
+import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, type LiteratureSource } from "@/lib/literature";
 import { countNoteText } from "@/lib/count-note";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
@@ -138,11 +139,14 @@ type Species = RedListSpecies;
  * species' Red List range). The cached rows are left as they arrived, so
  * switching mode re-derives from them.
  */
-function inGbifMode(s: Species, mode: GbifRecordMode): Species {
+function inGbifMode(s: Species, mode: GbifRecordMode, literature: LiteratureSource = DEFAULT_LITERATURE_SOURCE): Species {
   return {
     ...s,
     gbif_records: gbifRecordCount(s, mode),
     gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
+    // The Literature columns' source (lit=), derived here for the same reason.
+    literature_works: literatureWorks(s, literature),
+    literature_works_since_assessment: literatureWorksSinceAssessment(s, literature),
     countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
   };
 }
@@ -393,33 +397,11 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     }
     case "describedYear":
       return (a.described_year ?? -1) - (b.described_year ?? -1);
-    case "openalexWorks":
-      return (a.openalex_works ?? -1) - (b.openalex_works ?? -1);
-    case "newOpenalexWorks":
-      return (a.openalex_works_since_assessment ?? -1) - (b.openalex_works_since_assessment ?? -1);
-    case "bhlWorks":
-      return (a.bhl_works ?? -1) - (b.bhl_works ?? -1);
-    case "newBhlWorks":
-      return (a.bhl_works_since_assessment ?? -1) - (b.bhl_works_since_assessment ?? -1);
+    case "totalWorks":
+      return (a.literature_works ?? -1) - (b.literature_works ?? -1);
+    case "newWorks":
+      return (a.literature_works_since_assessment ?? -1) - (b.literature_works_since_assessment ?? -1);
   }
-}
-
-/**
- * The literature column groups beside GBIF Records: works mentioning the
- * species, from each source the sync counts (paper_counts). New is works
- * published after the assessment date, for assessed species.
- */
-const LITERATURE_SOURCES = [
-  { key: "openalex", label: "OpenAlex Papers", total: "openalexWorks", fresh: "newOpenalexWorks",
-    hint: "Papers in OpenAlex whose title or abstract names the species (or a synonym CoL lists for it)." },
-  { key: "bhl", label: "BHL Works", total: "bhlWorks", fresh: "newBhlWorks",
-    hint: "Articles and volumes in the Biodiversity Heritage Library whose scanned pages name the species (or a synonym CoL lists for it)." },
-] as const satisfies readonly { key: string; label: string; total: SortField; fresh: SortField; hint: string }[];
-
-function literatureCounts(s: Species, key: (typeof LITERATURE_SOURCES)[number]["key"]): { total: number | null; fresh: number | null } {
-  return key === "openalex"
-    ? { total: s.openalex_works ?? null, fresh: s.openalex_works_since_assessment ?? null }
-    : { total: s.bhl_works ?? null, fresh: s.bhl_works_since_assessment ?? null };
 }
 
 const HABITAT_IMPORTANCE_OPTIONS: { value: string; short: string }[] = [
@@ -1223,6 +1205,26 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
   );
 }
 
+function LiteratureSourceToggle({ source, onChange }: { source: LiteratureSource; onChange: (source: LiteratureSource) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Which literature source to count" className={CHART_SEGMENTED_CLASS}>
+      {LITERATURE_SOURCES.map((src) => (
+        <button
+          key={src}
+          type="button"
+          role="radio"
+          aria-checked={source === src}
+          onClick={() => onChange(src)}
+          className={chartSegmentClass(source === src)}
+          title={LITERATURE_SOURCE_HINT[src]}
+        >
+          {LITERATURE_SOURCE_LABEL[src]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface RedListViewProps {
   viewMode?: "reassessments" | "new-assessments";
   // The view switch, shown as the full-width Species Assessed / Awaiting 1st
@@ -1307,6 +1309,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedCountries, setSelectedCountries,
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
+    literatureSource = DEFAULT_LITERATURE_SOURCE, setLiteratureSource,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
     selectedPopulationTrends, setSelectedPopulationTrends,
@@ -1801,7 +1804,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
   // Every memo below reads the GBIF counts of the record mode in force.
-  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
+  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode, literatureSource)), [assessedSpecies, gbifRecordMode, literatureSource]);
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
@@ -2317,7 +2320,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
       return taxaFilteredSpeciesNoPreview;
     }
-    return [inGbifMode(singleSpeciesPreview, gbifRecordMode), ...taxaFilteredSpeciesNoPreview];
+    return [inGbifMode(singleSpeciesPreview, gbifRecordMode, literatureSource), ...taxaFilteredSpeciesNoPreview];
   }, [taxaFilteredSpeciesNoPreview, singleSpeciesPreview, gbifRecordMode]);
 
   const [mounted, setMounted] = useState(false);
@@ -6363,36 +6366,32 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
-                {LITERATURE_SOURCES.map((src) => (
-                  <React.Fragment key={src.key}>
-                    <th
-                      className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} ${src.key === "openalex" ? "border-l border-zinc-200 dark:border-zinc-700" : ""}`}
-                      onClick={(e) => handleSort(src.total, e)}
-                    >
-                      <span className="flex items-center justify-end gap-1">
-                        <span className={SPECIES_TH_NOWRAP}>Total</span>
-                        <SortIndicator field={src.total} />
-                      </span>
-                    </th>
-                    {!isNewAssessments && (
-                    <th
-                      className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
-                      onClick={(e) => handleSort(src.fresh, e)}
-                    >
-                      <span className="flex items-center justify-end gap-1">
-                        <span className={SPECIES_TH_NOWRAP}>New</span>
-                        <HoverTooltip text="Published after the assessment date.">
-                          <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 16v-4M12 8h.01" />
-                          </svg>
-                        </HoverTooltip>
-                        <SortIndicator field={src.fresh} />
-                      </span>
-                    </th>
-                    )}
-                  </React.Fragment>
-                ))}
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} border-l border-zinc-200 dark:border-zinc-700`}
+                  onClick={(e) => handleSort("totalWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>Total</span>
+                    <SortIndicator field="totalWorks" />
+                  </span>
+                </th>
+                {!isNewAssessments && (
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
+                  onClick={(e) => handleSort("newWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>New</span>
+                    <HoverTooltip text="Published after the assessment date.">
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    <SortIndicator field="newWorks" />
+                  </span>
+                </th>
+                )}
                                 </>
                 );
                 return (
@@ -6447,20 +6446,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
-                {LITERATURE_SOURCES.map((src) => (
-                  <th key={src.key} colSpan={isNewAssessments ? 1 : 2}
-                    className={`px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700 ${src.key === "openalex" ? "border-l" : ""}`}>
-                    <span className="flex items-center justify-end gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
-                      {src.label}
-                      <HoverTooltip text={src.hint}>
+                <th colSpan={isNewAssessments ? 1 : 2} className="px-2 md:px-4 pt-2 pb-1 border-b border-l border-zinc-200 dark:border-zinc-700">
+                  <span className="flex items-center justify-end gap-2">
+                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                      Literature
+                      <HoverTooltip text={LITERATURE_SOURCE_HINT[literatureSource]}>
                         <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="12" cy="12" r="10" />
                           <path d="M12 16v-4M12 8h.01" />
                         </svg>
                       </HoverTooltip>
                     </span>
-                  </th>
-                ))}
+                    {setLiteratureSource && <LiteratureSourceToggle source={literatureSource} onChange={setLiteratureSource} />}
+                  </span>
+                </th>
               </tr>
               <tr className="border-b border-zinc-200 dark:border-zinc-700">{gbifColumns}</tr>
                   </>
@@ -6756,26 +6755,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       })()}
                     </td>
                     )}
-                    {LITERATURE_SOURCES.map((src) => {
-                      const { total, fresh } = literatureCounts(s, src.key);
-                      const cell = "px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap";
-                      return (
-                        <React.Fragment key={src.key}>
-                          <td className={`${cell} ${src.key === "openalex" ? "border-l border-zinc-200 dark:border-zinc-800" : ""}`}>
-                            {total != null ? total.toLocaleString() : "—"}
-                          </td>
-                          {!isNewAssessments && (
-                          <td className={cell}>
-                            {isNE(s) ? <span className="text-zinc-400">N/A</span> : fresh != null ? fresh.toLocaleString() : "—"}
-                          </td>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
+                    {/* Literature, in the source the heading's toggle chose */}
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap border-l border-zinc-200 dark:border-zinc-800">
+                      {s.literature_works != null ? s.literature_works.toLocaleString() : "—"}
+                    </td>
+                    {!isNewAssessments && (
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
+                      {isNE(s) ? <span className="text-zinc-400">N/A</span>
+                        : s.literature_works_since_assessment != null ? s.literature_works_since_assessment.toLocaleString() : "—"}
+                    </td>
+                    )}
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 6 : 12} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 5 : 10} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -6982,7 +6975,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 6 : 12} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 5 : 10} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>
