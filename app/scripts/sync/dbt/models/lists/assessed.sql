@@ -13,9 +13,29 @@
  *   countries, systems, growth_forms, threat_codes, habitat_codes
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
- *   count_note               'unlinked' when it is linked to no CoL species
- *                            (waiting for a decision: to_review), so no records are
- *                            counted; else NULL
+ *   count_note               'unlinked' when it is linked to no CoL species, so
+ *                            no records are counted; 'flagged' when the
+ *                            count rests on the matcher's answer the link's rule
+ *                            doubts (match_reason 'flagged: …'), or only on
+ *                            other CoL names while its own link waits; else NULL
+ *   match_reason             how its CoL name was found (assessment_link's primary
+ *                            row): exact, unique | … | flagged: <doubt> |
+ *                            override | waiting | …
+ *   match_decided_by         who decided an override (a GitHub handle, agent:<model>)
+ *   match_counts             what its link counts: the whole CoL species | only
+ *                            records under its own name | nothing
+ *   match_note, match_records  for a match that isn't plain: how it was matched or why
+ *                            it is in doubt, in sentences, and the CoL
+ *                            records it is about (JSON: id, name, authorship, status,
+ *                            species, role), from assessment_link
+ *   redlist_authority, redlist_synonyms
+ *                            the Red List's authority and its listed synonyms
+ *                            (';'-joined), where there is a match note
+ *   match_treatment          what CoL makes of the record it is linked through, when
+ *                            not 'accepted': synonym, other name (renamed) | synonym,
+ *                            other spelling | lumped, …
+ *   match_other_names        how many other CoL names' records count for it too
+ *                            (covered rows that count), 0 when none
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   gbif_georeferenced_records_since_assessment, gbif_all_records_since_assessment
  *   latest_assessors, latest_reviewers, latest_facilitators, latest_contributors,
@@ -40,7 +60,16 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CAST(latest.assessment_date AS VARCHAR) AS assessment_date, latest.year_published,
        {{ semicolon_list("latest.countries") }} AS countries,
        gbif.gbif_species_key,
-       CASE WHEN link.col_species_id IS NULL THEN 'unlinked' END AS count_note,
+       -- A species with no link of its own can still count other CoL names' records (a Red List synonym CoL holds as a species): that count is shown, flagged.
+       CASE WHEN link.col_species_id IS NULL AND other.n IS NULL THEN 'unlinked'
+            WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'flagged: %' THEN 'flagged' END AS count_note,
+       link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
+       link.match_note, link.match_records,
+       -- Shown beside a match note (the panel's Red List line); not needed otherwise.
+       CASE WHEN link.match_note IS NOT NULL THEN latest.authority END AS redlist_authority,
+       CASE WHEN link.match_note IS NOT NULL THEN array_to_string([regexp_replace(trim(x.name), '\s+', ' ', 'g') FOR x IN latest.synonyms], ';') END AS redlist_synonyms,
+       CASE WHEN link.col_treatment <> 'accepted' THEN link.col_treatment END AS match_treatment,
+       coalesce(other.n, 0)::INTEGER AS match_other_names,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,
        CASE WHEN gbif.sis_taxon_id IS NOT NULL THEN gbif.georef_since
@@ -60,6 +89,8 @@ FROM {{ source('sources', 'assessments') }} latest
 LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ source('link', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
+LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ source('link', 'assessment_link') }} WHERE role = 'covered' AND counted GROUP BY 1) other
+  ON other.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
   ON history.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ source('sources', 'common_names') }} inat ON inat.source = 'inat' AND inat.kind = 'display'

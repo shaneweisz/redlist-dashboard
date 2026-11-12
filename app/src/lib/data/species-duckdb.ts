@@ -10,6 +10,7 @@
  * that's fetched lazily per species (getAssessmentHistory) when a detail panel
  * opens. Search / summaries land in later steps.
  */
+import { matchKey, countsKeys } from "@/lib/gbif-match";
 import { isCountNote } from "@/lib/count-note";
 import * as fs from "fs";
 import * as path from "path";
@@ -75,11 +76,11 @@ export function ensureNeHelpers(conn: DuckDBConnection): Promise<void> {
       const linkUri = parquetUri("assessment_link.parquet");
       const neUri = parquetUri("ne.parquet");
       await conn.run(`CREATE TEMP TABLE ne_assessed_col_ids AS
-        SELECT DISTINCT col_species_id AS col_id FROM read_parquet('${linkUri}') WHERE col_species_id IS NOT NULL`);
+        SELECT DISTINCT col_species_id AS col_id FROM read_parquet('${linkUri}') WHERE col_species_id IS NOT NULL AND method <> 'undecided_candidate'`);
       // ne.parquet is one row per col_id already (its GBIF key IS the col_id).
       await conn.run(`CREATE TEMP TABLE ne_gbif_by_col AS
         SELECT col_id, gbif_species_key, gbif_georeferenced_records_count, gbif_all_records_count,
-               countries, gbif_all_records_countries, common_name
+               countries, gbif_all_records_countries, common_name, may_be_assessed
         FROM read_parquet('${neUri}')`);
     })().catch((e) => { neHelpersPromise = null; throw e; });
   }
@@ -146,6 +147,7 @@ const ASSESSED_SELECT = `
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
+  match_reason, match_decided_by, match_counts, match_other_names, match_note, match_records, match_treatment, redlist_authority, redlist_synonyms,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -197,6 +199,13 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     gbif_all_records_count: num(r.gbif_all_records_count),
     gbif_all_records_since_assessment: num(r.gbif_all_records_since_assessment),
     count_note: isCountNote(r.count_note) ? r.count_note : null,
+    // How its count was matched (src/lib/gbif-match.ts): one key, plus what else it counts.
+    match: matchKey(r),
+    match_counts_keys: countsKeys(r),
+    match_other_names: num(r.match_other_names),
+    // Only where there is something to say, to keep the list slim.
+    ...(r.match_note ? { match_note: String(r.match_note), match_records: r.match_records ? JSON.parse(String(r.match_records)) : [],
+      redlist_authority: str(r.redlist_authority), redlist_synonyms: splitList(r.redlist_synonyms) } : {}),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.
     latest_assessors: (r.latest_assessors as string) ?? null,
@@ -342,7 +351,7 @@ export async function querySpecies(opts: {
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year, u.specialist_group,
                g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
-               g.countries, g.gbif_all_records_countries, g.common_name
+               g.countries, g.gbif_all_records_countries, g.common_name, g.may_be_assessed
         FROM (
           SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
@@ -392,6 +401,8 @@ export async function querySpecies(opts: {
           gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
           gbif_all_records_count: num(r.gbif_all_records_count),
           gbif_all_records_countries: splitList(r.gbif_all_records_countries),
+          // Only on the few it applies to (src/lib/gbif-match.ts), to keep the row slim.
+          ...(r.may_be_assessed ? { may_be_assessed: splitList(r.may_be_assessed) } : {}),
         } as unknown as ReturnType<typeof toSpeciesRow>);
       }
     }

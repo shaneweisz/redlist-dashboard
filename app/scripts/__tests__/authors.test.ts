@@ -52,6 +52,13 @@ describe("compareAuthors", () => {
     ["Tamaka & Limada", "Yu.Tanaka & Shimada"],
   ])("unclear: %s / %s", (a, b) => expect(compareAuthors(a, b)).toBe("unclear"));
 
+  it("needs the same original author when both cite one in brackets (Malaxis brachystachys: two orchids)", () => {
+    expect(compareAuthors("(Rchb.f.) Kuntze", "(Lindl.) Rchb.fil.")).toBe("other");
+    expect(compareAuthors("(Willd.) Standl.", "(Vahl) Standl.")).toBe("other");
+    expect(compareAuthors("(Linnaeus) Roth", "(Linnaeus) Hoffm.")).toBe("same");
+    expect(compareAuthors("Druce", "(Hill) Druce")).toBe("same");
+    expect(compareAuthors("(Pall.) Regel", "(Parl.) Regel")).toBe("same");
+  });
   it("is unclear when either side has no authorship", () => {
     expect(compareAuthors(null, "L.")).toBe("unclear");
     expect(compareAuthors("Fabricius", undefined)).toBe("unclear");

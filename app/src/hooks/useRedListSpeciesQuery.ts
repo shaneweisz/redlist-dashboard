@@ -2,6 +2,7 @@
 // by RedListView. (The data is fetched inline in RedListView; this module is the
 // canonical type definition imported across the app.)
 
+import type { MatchKey, CountsKey, NoteRecord } from "@/lib/gbif-match";
 import type { CountNote } from "@/lib/count-note";
 import type { ColRevision } from "@/lib/col-revision";
 
@@ -43,8 +44,20 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
-  /** Why it has no count (src/lib/count-note.ts): linked to no CoL species yet. */
+  /** Why its count needs a caveat (src/lib/count-note.ts): linked to no CoL species yet, or a flagged match. */
   count_note?: CountNote | null;
+  /** How its count was matched, and what else it counts (src/lib/gbif-match.ts). */
+  match?: MatchKey | null;
+  match_counts_keys?: CountsKey[];
+  match_other_names?: number | null;
+  /** The Red List's authority and listed synonyms, where there is a match note. */
+  redlist_authority?: string | null;
+  redlist_synonyms?: string[];
+  /** NE rows: the assessed species it may be, when their match is flagged or waiting. */
+  may_be_assessed?: string[];
+  /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */
+  match_note?: string | null;
+  match_records?: NoteRecord[];
   /**
    * The counts the view shows, for the record mode it is in. Set by RedListView
    * when species arrive (inGbifMode), so charts, filters, sorting and the table

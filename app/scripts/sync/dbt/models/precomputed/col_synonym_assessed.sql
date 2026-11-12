@@ -21,7 +21,7 @@
  *     names IUCN assesses separately under one species, and picking one would
  *     present a coin toss as a finding.
  */
-WITH assessed_cids AS (SELECT DISTINCT col_species_id AS col_id FROM {{ source('link', 'assessment_link') }} WHERE col_species_id IS NOT NULL),
+WITH assessed_cids AS (SELECT DISTINCT col_species_id AS col_id FROM {{ source('link', 'assessment_link') }} WHERE col_species_id IS NOT NULL AND method <> 'undecided_candidate'),
 species_synonyms AS (
   SELECT b.parent_id AS ne_col_id, lower(b.scientific_name) AS lname
   FROM {{ ref('app_taxa') }} b

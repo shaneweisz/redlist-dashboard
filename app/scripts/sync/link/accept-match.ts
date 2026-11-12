@@ -54,7 +54,6 @@ export type QueueReason =
   | "informal or qualified name"
   | "no species match"
   | "spelling variant"
-  | "provisional name"
   | "ambiguous synonym"
   | "misapplied name"
   | "matched another rank"
@@ -68,9 +67,15 @@ export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice"; variant?: true }
   | { accepted: false; reason: QueueReason };
 
-/** Names the Red List itself marks as unsettled: aff., cf., sp., "[...]" in the name; ined., auct., non, sensu in the authority. */
+/**
+ * Names the Red List itself marks as another taxon or not yet one: aff., cf.,
+ * sp., "[...]" in the name; auct., non, sensu in the authority. Not "ined.": an
+ * unpublished name is still the name, and when CoL holds it, its records count.
+ */
 const INFORMAL_NAME = /\b(aff|cf|sp|spp|nov|indet)\.|\[|\bsp\b/i;
-const DISOWNED_AUTHORITY = /\b(ined|auct)\b\.?|\bnon\b|\bsensu\b/i;
+const DISOWNED_AUTHORITY = /\bauct\b\.?|\bnon\b|\bsensu\b/i;
+/** The authority without "ined.", for comparing citations (Cheek ined. / Cheek). */
+const citation = (authority: string | null) => authority?.replace(/\s*,?\s*\bined\b\.?/gi, "").trim() || null;
 
 const binomial = (n: string | null) => (n ?? "").replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
 
@@ -83,10 +88,10 @@ export function acceptMatch(
   speciesOf: (usageId: string) => string | null,
 ): Acceptance {
   const no = (reason: QueueReason): Acceptance => ({ accepted: false, reason });
+  species = { ...species, authority: citation(species.authority) };
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
   if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
   if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
-  if (m.matcher_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
   if (m.matcher_status === "MISAPPLIED") return no("misapplied name");
   // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
   const variant = m.match_type !== "EXACT" && !!m.matcher_name && orthographicallySame(binomial(species.name), binomial(m.matcher_name))
@@ -104,7 +109,9 @@ export function acceptMatch(
     (variant ? { accepted: true, why, variant: true } : { accepted: true, why });
   if (rivals.length === 0) return yes("unique name");
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
-  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
+  // CoL holding a name twice, once accepted and once provisionally, whichever the matcher answered.
+  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => (
+      (m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED") || (m.matcher_status === "PROVISIONALLY_ACCEPTED" && a.status === "ACCEPTED"))
     && compareAuthors(m.matcher_authorship, a.authorship) !== "other";
   const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
@@ -115,4 +122,26 @@ export function acceptMatch(
     return yes("authors pick it");
   }
   return no("homonym the authors don't decide");
+}
+
+/**
+ * When the matcher answers only the genus because every CoL record with the
+ * name is a synonym of a different species (Pittosporum verticillatum, by
+ * Montrouzier, Wallich and Bojer), the Red List's author citation can still
+ * pick one: the record whose citation matches, when the matching records all
+ * lead to one species. A pick the matcher didn't make, so the link is flagged.
+ * GBIF's own search lists the same records as options.
+ */
+export function authorPick(
+  species: { name: string; authority: string | null },
+  m: MatchAnswer,
+  speciesOf: (usageId: string) => string | null,
+): string | null {
+  const authority = citation(species.authority);
+  if (!authority || INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(authority)) return null;
+  const sameName = m.alternatives.filter((a) => a.rank === "SPECIES" && a.status !== "MISAPPLIED" && binomial(a.name) === binomial(species.name));
+  const picked = sameName.filter((a) => compareAuthors(authority, a.authorship) === "same");
+  const leadTo = new Set(picked.map((a) => speciesOf(a.col_id)));
+  if (picked.length === 0 || leadTo.size !== 1 || leadTo.has(null)) return null;
+  return picked[0].col_id;
 }
