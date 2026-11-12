@@ -54,7 +54,6 @@ export type QueueReason =
   | "informal or qualified name"
   | "no species match"
   | "spelling variant"
-  | "provisional name"
   | "ambiguous synonym"
   | "misapplied name"
   | "matched another rank"
@@ -86,7 +85,6 @@ export function acceptMatch(
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
   if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
   if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
-  if (m.matcher_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
   if (m.matcher_status === "MISAPPLIED") return no("misapplied name");
   // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
   const variant = m.match_type !== "EXACT" && !!m.matcher_name && orthographicallySame(binomial(species.name), binomial(m.matcher_name))
@@ -104,7 +102,9 @@ export function acceptMatch(
     (variant ? { accepted: true, why, variant: true } : { accepted: true, why });
   if (rivals.length === 0) return yes("unique name");
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
-  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
+  // CoL holding a name twice, once accepted and once provisionally, whichever the matcher answered.
+  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => (
+      (m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED") || (m.matcher_status === "PROVISIONALLY_ACCEPTED" && a.status === "ACCEPTED"))
     && compareAuthors(m.matcher_authorship, a.authorship) !== "other";
   const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {

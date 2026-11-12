@@ -556,7 +556,6 @@ function matchNotes(links: LinkRow[], ctx: {
       sentences.push({
         "homonym the authors don't decide": `CoL has ${same.length + 1} records named ${pick.name}, under ${speciesCount} different species. ${homonym}. ${counted}`,
         "lower confidence": `GBIF's matcher is only ${m?.confidence ?? "?"}% sure of its match: CoL's ${p}${filed}.`,
-        "provisional name": `CoL only provisionally accepts ${p}.${same.some((r) => r.status === "accepted") ? " It also holds the name as accepted, so records may be split between the two." : ""}`,
         "synonym by other authors": `The Red List cites ${sp.authority ?? "no author"}; CoL's ${pick.name} is by ${pick.authorship ?? "no author"}${filed}. It may be a different species.`,
         "ambiguous synonym": `CoL marks ${p} as an ambiguous synonym, filed under ${pick.species}.`,
         "accepted and a synonym in CoL": `CoL holds ${pick.name} both as an accepted species and as a synonym of ${synonymRecord?.species ?? "another species"}. ${counted}`,

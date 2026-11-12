@@ -579,10 +579,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Allanaspides helonomus",
     authority: "Swain, Wilson, Hickman & Ong, 1970",
-    why: "The matcher answers CoL's provisional copy; CoL also holds the name as accepted by the same authors. The matcher's answer is the link now, flagged: flagged, and queued for review.",
-    source: "link/accept-match.ts",
+    why: "CoL holds it twice by the same authors: accepted, and provisionally (the matcher's answer). Provisional is CoL's doubt about the taxonomy, not about which records are this species', so both copies count, as for any species CoL holds twice. Until 2026-11 a provisional answer waited, then was flagged.",
+    source: "link/accept-match.ts (provisionalCopy)",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Allanaspides helonomus", rules: ["flagged: provisional name"] },
+    expect: { linkedTo: "Allanaspides helonomus", hasRecords: true, rules: ["exact, duplicate in CoL", "CoL duplicate"] },
   },
   {
     name: "Bulimulus eschariferus",
