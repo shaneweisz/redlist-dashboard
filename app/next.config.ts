@@ -137,6 +137,7 @@ const nextConfig: NextConfig = {
     // Applies to every DuckDB-backed route: species list + history + search.
     "/api/redlist/species": DUCKDB_TRACE,
     "/api/redlist/species/history": DUCKDB_TRACE,
+    "/api/literature-link": DUCKDB_TRACE,
     "/api/search": DUCKDB_TRACE,
     "/api/search/warm": DUCKDB_TRACE,
     "/api/taxa/species": DUCKDB_TRACE,
@@ -200,6 +201,8 @@ const nextConfig: NextConfig = {
     // taxa-summary.json for the instant tooLarge check.
     "/api/redlist/species": ONLY_SMALL_SUMMARIES,
     "/api/redlist/species/history": ["**/data/**"],
+    // Reads literature-works.parquet in R2 (httpfs) — no local data.
+    "/api/literature-link": ["**/data/**"],
     // Queries taxa.parquet + assessment_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning

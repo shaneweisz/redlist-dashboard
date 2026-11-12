@@ -10,6 +10,9 @@
  *   work_id           OpenAlex's work id; BHL's 'part:<id>' or 'item:<id>'
  *   publication_date  the work's full date, where it has one
  *   publication_year
+ *   paper             which paper the work is: OpenAlex can hold one paper as
+ *                     several records (a repository copy, a second DOI), and
+ *                     works with the same paper count once (below)
  *   name              the binomial, exactly as a CoL species-rank name spells it
  *
  * Which species a name counts for is decided in count/paper_counts.sql.
@@ -20,6 +23,11 @@
  *     types count, not retracted works (LITERATURE_TYPES).
  *   - BHL: the names its own name-finding confirmed on a page, credited to the
  *     article the page is in, else to the volume.
+ *   - The same paper: OpenAlex records with the same title (letters and digits,
+ *     lowercased) and year, for a title of five words or more; else the same
+ *     DOI; else the record alone. A short title ("Mus musculus", "Book
+ *     reviews") is shared by different works, so it never merges records. A
+ *     BHL work is its own paper.
  *   - The OpenAlex works are the newest release already read in full: reading
  *     a new one takes days (npm run sync:openalex), so a sync never starts it.
  */
@@ -47,10 +55,15 @@ export async function buildLiteratureMentions(
   // BHL's names are kept as its name-finding spelled them; only those CoL holds are kept here, as for OpenAlex.
   await conn.run(`COPY (
     SELECT 'openalex' AS source, work_id, TRY_CAST(publication_date AS DATE) AS publication_date,
-           CAST(publication_year AS INTEGER) AS publication_year, name
+           CAST(publication_year AS INTEGER) AS publication_year,
+           CASE WHEN len(string_split(trim(coalesce(title, '')), ' ')) >= 5 AND publication_year IS NOT NULL
+                  THEN 'title:' || lower(regexp_replace(title, '[^\\p{L}\\p{N}]', '', 'g')) || ':' || publication_year
+                WHEN doi IS NOT NULL THEN 'doi:' || lower(doi)
+                ELSE work_id END AS paper,
+           name
     FROM read_parquet(${lit(path.join(oaDir, "*.parquet"))})
     UNION ALL
-    SELECT 'bhl', b.work_id, TRY_CAST(b.publication_date AS DATE), CAST(b.publication_year AS INTEGER), b.name
+    SELECT 'bhl', b.work_id, TRY_CAST(b.publication_date AS DATE), CAST(b.publication_year AS INTEGER), b.work_id, b.name
     FROM read_parquet(${lit(inputs.bhlMentions)}) b
     SEMI JOIN (SELECT DISTINCT scientific_name AS name FROM read_parquet(${lit(inputs.taxa)}) WHERE rank = 'species') USING (name)
   ) TO ${lit(output(mentionsFile))} (FORMAT parquet, COMPRESSION zstd)`);

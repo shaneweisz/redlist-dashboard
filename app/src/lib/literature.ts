@@ -79,4 +79,32 @@ export function literatureSearchUrl(source: LiteratureSource, scientificName: st
   return `https://openalex.org/works?filter=${encodeURIComponent(filters.join(","))}`;
 }
 
-export const LITERATURE_LINK_NOTE = "Search the source for this name. Its count can differ: the count here also includes the synonyms CoL lists for the species.";
+/** What a count's link opens, per source. */
+export const LITERATURE_LINK_NOTE: Record<LiteratureSource, string> = {
+  openalex: "Open the works counted here on OpenAlex (the 100 most recent, where there are more). OpenAlex may have merged or re-typed a few since the sync.",
+  bhl: "Open BHL's page for this name. It lists books and journals by title, not the articles counted here, so its numbers differ.",
+};
+
+/** The most works one link lists: OpenAlex takes at most 100 values in one filter. */
+export const OPENALEX_LINK_MAX_WORKS = 100;
+
+/** OpenAlex filtered to these works (their numeric ids: W123 → 123). */
+export function openAlexWorksUrl(works: readonly (number | bigint)[]): string {
+  const ids = works.slice(0, OPENALEX_LINK_MAX_WORKS).map((w) => `W${w}`).join("|");
+  return `https://openalex.org/works?filter=${encodeURIComponent(`openalex:${ids}`)}`;
+}
+
+/**
+ * The link for a species' OpenAlex count: the app's route, which opens OpenAlex
+ * filtered to the works counted (from `since`, YYYY-MM-DD, for New). `name` is
+ * its fallback, should the works not be readable.
+ */
+export function literatureLinkHref(species: { sis_taxon_id?: number | null; col_id?: string | null; scientific_name: string }, since?: string | null): string | null {
+  const p = new URLSearchParams();
+  if (species.sis_taxon_id != null) p.set("sis", String(species.sis_taxon_id));
+  else if (species.col_id) p.set("col", species.col_id);
+  else return null;
+  p.set("name", species.scientific_name);
+  if (since) p.set("since", since);
+  return `/api/literature-link?${p}`;
+}

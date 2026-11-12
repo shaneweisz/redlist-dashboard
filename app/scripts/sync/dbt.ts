@@ -85,6 +85,10 @@ function exports(T: Tables) {
     { model: "usage_owner", file: T.usageOwner, orderBy: "usage_key" },
     { model: "record_counts", file: T.recordCounts, orderBy: "sis_taxon_id, col_id" },
     { model: "paper_counts", file: T.paperCounts, orderBy: "source, sis_taxon_id, col_id" },
+    // Read one species at a time, newest first (/api/literature-link): sorted by
+    // species, in row groups small enough that a lookup reads one.
+    { model: "paper_works", file: T.literatureWorks, orderBy: "sis_taxon_id, col_id, publication_date DESC NULLS LAST, publication_year DESC, work",
+      options: "ROW_GROUP_SIZE 50000" },
     { model: "assessment_history", file: T.assessmentHistory, orderBy: "sis_taxon_id, seq" },
     { model: "assessed", file: T.assessed, orderBy: "class_name, order_name, family, scientific_name" },
     // Partitioned by group, in row groups small enough that a lookup reads little.

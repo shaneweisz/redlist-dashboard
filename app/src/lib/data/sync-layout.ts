@@ -6,7 +6,8 @@
  * Its files are grouped by what they are for:
  *
  *   lists/      the species the dashboard lists: assessed, their assessment
- *               history, the Not Evaluated list, the CoL species universe
+ *               history, the Not Evaluated list, the CoL species universe,
+ *               and the OpenAlex works behind each literature count
  *   taxonomy/   the CoL taxonomy and the links to it, and what the
  *               CoL-differences card and the tree's labels need
  *   search/     the search bar's indexes
@@ -23,7 +24,7 @@
  */
 
 export const SYNC_LAYOUT = {
-  lists: ["assessed.parquet", "assessments.parquet", "ne.parquet", "species"],
+  lists: ["assessed.parquet", "assessments.parquet", "ne.parquet", "species", "literature-works.parquet"],
   taxonomy: [
     "taxa.parquet", "assessment_link.parquet",
     "col-split-candidates.parquet", "col-synonym-assessed.parquet", "col-to-assessed.parquet",

@@ -129,7 +129,7 @@ export async function reduceFile(conn: DuckDBConnection, file: string, out: stri
 
 /**
  * The binomials each kept work of a literature type (not retracted) mentions, one row per work and name:
- * work_id, publication_date, publication_year, name, in_title, in_abstract.
+ * work_id, publication_date, publication_year, doi, title, name, in_title, in_abstract.
  *
  * Written as one parquet file per works file into `mentionsDir` (read it as
  * mentionsDir/*.parquet). All 56M works in one query means a self-join of ~7.5
@@ -152,7 +152,7 @@ export async function openAlexMentions(inputs: { works: string[]; taxa: string }
       const file = inputs.works[next++];
       await conn.run(`COPY (
         WITH w AS (
-          SELECT work_id, publication_date, publication_year,
+          SELECT work_id, publication_date, publication_year, doi, title,
                  string_split(coalesce(title, ''), ' ') AS t, string_split(coalesce(abstract, ''), ' ') AS a
           FROM read_parquet(${lit(file)})
           WHERE type IN (${LITERATURE_TYPES.map(lit).join(", ")}) AND NOT coalesce(is_retracted, false)),
@@ -183,7 +183,7 @@ export async function openAlexMentions(inputs: { works: string[]; taxa: string }
           SELECT work_id, part, name FROM expanded
           QUALIFY count(DISTINCT name) OVER (PARTITION BY work_id, regexp_extract(ra, '([A-Z])\\.$', 1), wb) = 1),
         p AS (SELECT work_id, part, name FROM named UNION ALL SELECT work_id, part, name FROM abbreviated)
-        SELECT p.work_id, w.publication_date, w.publication_year, p.name,
+        SELECT p.work_id, w.publication_date, w.publication_year, w.doi, w.title, p.name,
                bool_or(p.part = 'title') AS in_title, bool_or(p.part = 'abstract') AS in_abstract
         FROM p JOIN w USING (work_id)
         GROUP BY ALL

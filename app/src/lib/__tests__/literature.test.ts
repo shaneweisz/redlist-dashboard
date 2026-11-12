@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { literatureSearchUrl, literatureWorks, literatureWorksSinceAssessment, parseLiteratureSource } from "../literature";
+import { literatureLinkHref, literatureSearchUrl, literatureWorks, literatureWorksSinceAssessment, openAlexWorksUrl, parseLiteratureSource } from "../literature";
 
 const species = { openalex_works: 42, openalex_works_since_assessment: 7, bhl_works: 0, bhl_works_since_assessment: null };
 
@@ -32,5 +32,21 @@ describe("literature search links", () => {
     expect(literatureSearchUrl("bhl", "Panthera leo")).toBe("https://www.biodiversitylibrary.org/name/Panthera_leo");
     expect(literatureSearchUrl("bhl", "Panthera leo", "2016-09-12")).toBeNull();
     expect(literatureSearchUrl("openalex", "  ")).toBeNull();
+  });
+});
+
+describe("links to the works counted", () => {
+  it("filters OpenAlex to the works' ids, at most 100", () => {
+    expect(decodeURIComponent(openAlexWorksUrl([123n, 456]))).toBe("https://openalex.org/works?filter=openalex:W123|W456");
+    const many = Array.from({ length: 150 }, (_, i) => i + 1);
+    expect(decodeURIComponent(openAlexWorksUrl(many)).split("|")).toHaveLength(100);
+  });
+
+  it("points at the app's route by sis id, else col id, with the name to fall back on and since for New", () => {
+    expect(literatureLinkHref({ sis_taxon_id: 42, col_id: null, scientific_name: "Panthera leo" }))
+      .toBe("/api/literature-link?sis=42&name=Panthera+leo");
+    expect(literatureLinkHref({ sis_taxon_id: null, col_id: "ABC12", scientific_name: "Eumops chiribaya" }, "2020-01-02"))
+      .toBe("/api/literature-link?col=ABC12&name=Eumops+chiribaya&since=2020-01-02");
+    expect(literatureLinkHref({ sis_taxon_id: null, col_id: null, scientific_name: "X y" })).toBeNull();
   });
 });

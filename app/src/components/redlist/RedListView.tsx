@@ -12,7 +12,7 @@ import LiteratureTimeline from "../LiteratureTimeline";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
-import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, literatureSearchUrl, LITERATURE_LINK_NOTE, type LiteratureSource } from "@/lib/literature";
+import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureWorksSinceAssessment, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE, type LiteratureSource } from "@/lib/literature";
 import { countNoteText } from "@/lib/count-note";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
@@ -1206,11 +1206,11 @@ function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChan
 }
 
 /** A literature count, linked to the source's own search for the name when there is one (and something to find). */
-function LiteratureCount({ n, href }: { n: number | null | undefined; href: string | null }) {
+function LiteratureCount({ n, href, title }: { n: number | null | undefined; href: string | null; title: string }) {
   if (n == null) return <>—</>;
   if (!href || n === 0) return <>{n.toLocaleString()}</>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={TABLE_NUMBER_LINK} title={LITERATURE_LINK_NOTE}
+    <a href={href} target="_blank" rel="noopener noreferrer" className={TABLE_NUMBER_LINK} title={title}
       onClick={(e) => e.stopPropagation()}>
       {n.toLocaleString()}
     </a>
@@ -6769,13 +6769,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     )}
                     {/* Literature, in the source the heading's toggle chose */}
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap border-l border-zinc-200 dark:border-zinc-800">
-                      <LiteratureCount n={s.literature_works} href={literatureSearchUrl(literatureSource, s.scientific_name)} />
+                      <LiteratureCount n={s.literature_works} title={LITERATURE_LINK_NOTE[literatureSource]}
+                        href={literatureSource === "openalex" ? literatureLinkHref(s) : literatureSearchUrl("bhl", s.scientific_name)} />
                     </td>
                     {!isNewAssessments && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? <span className="text-zinc-400">N/A</span> : (
-                        <LiteratureCount n={s.literature_works_since_assessment}
-                          href={sinceAssessmentStart(s.assessment_date) ? literatureSearchUrl(literatureSource, s.scientific_name, sinceAssessmentStart(s.assessment_date)) : null} />
+                        <LiteratureCount n={s.literature_works_since_assessment} title={LITERATURE_LINK_NOTE[literatureSource]}
+                          href={literatureSource === "openalex" && sinceAssessmentStart(s.assessment_date) ? literatureLinkHref(s, sinceAssessmentStart(s.assessment_date)) : null} />
                       )}
                     </td>
                     )}
