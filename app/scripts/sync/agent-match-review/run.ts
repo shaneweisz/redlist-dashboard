@@ -10,6 +10,10 @@
  *                      one the species is linked to, and the verdicts go to
  *                      agent-match-review/audit.tsv, to measure how often each
  *                      kind of link (match_reason · col_treatment) is wrong
+ *   --audit --covered  the extra CoL names whose records also count for a linked
+ *                      species (covered rows that count records): the record under
+ *                      review is that name, beside the species' main link
+ *                      (linked_to); verdicts go to agent-match-review/audit-covered.tsv
  *
  *   npm run sync:agent-match-review -- --sis 194894,19620213     the links named
  *   npm run sync:agent-match-review -- --sample 10                N links, round-robin across strata
@@ -79,6 +83,7 @@ const PROMPT_FILE = path.join(HERE, "reviewer-prompt.md");
 const SCHEMA_FILE = path.join(HERE, "verdict-schema.json");
 const OVERRIDES_TSV = path.join(SEEDS_DIR, "agent-match-overrides.tsv");
 const AUDIT_TSV = path.join(HERE, "audit.tsv");
+const COVERED_TSV = path.join(HERE, "audit-covered.tsv");
 
 type Verdict = { verdict: string; col_id: string | null; confidence: string; reasoning: string; sources: string[] };
 type Row = Record<string, unknown> & { sis_taxon_id: number; stratum: string; under_review: { col_id: string; name: string; authorship: string | null } };
@@ -93,7 +98,8 @@ function opts() {
     concurrency: Number(get("concurrency") ?? 6),
     model: get("model") ?? "haiku",
     upload: a.includes("--upload"),
-    audit: a.includes("--audit"),
+    audit: a.includes("--audit") || a.includes("--covered"),
+    covered: a.includes("--covered"),
     perStratum: get("per-stratum") ? Number(get("per-stratum")) : undefined,
     dryRun: a.includes("--dry-run"),
   };
@@ -103,11 +109,12 @@ function opts() {
 const SHOWN = ["sis_taxon_id", "redlist_name", "redlist_authority", "common_name", "category", "taxon_group", "class", "order", "family", "countries", "systems",
   "redlist_synonyms", "under_review", "matcher_col_id", "matcher_name", "matcher_authorship", "matcher_status", "matcher_accepted_col_id", "matcher_accepted_name",
   "matcher_accepted_authorship", "matcher_lineage", "match_type", "confidence", "matcher_alternatives"];
-const shown = (r: Row) => Object.fromEntries(SHOWN.map((k) => [k, r[k]]));
+const shown = (r: Row) => Object.fromEntries([...SHOWN, ...(r.linked_to ? ["linked_to"] : [])].map((k) => [k, r[k]]));
 
 const SITUATION = {
   waiting: "The sync's rules could not decide this match on their own, so the species is waiting, linked to nothing; the record under review is the matcher's answer.",
   audit: "This is a check on a match the sync made: the record under review is the one the Red List species is linked to now. We are measuring how often such links are right, so judge it on the evidence alone.",
+  covered: "This is a check on a match the sync made. The species is linked to `linked_to`; the record under review is a second CoL name whose GBIF records the sync also counts for it (CoL holding the same organism twice, or a name the Red List lists as its synonym). Judge whether that record is this same organism, so that its records are this species' records: \"same species\" or \"lumped\" if so, \"different species\" if not. We are measuring how often such extra names are right, so judge it on the evidence alone.",
 };
 
 async function selectRows(o: ReturnType<typeof opts>): Promise<Row[]> {
@@ -119,9 +126,19 @@ async function selectRows(o: ReturnType<typeof opts>): Promise<Row[]> {
     : `struct_pack(col_id := l.matcher_col_id, name := l.matcher_name, authorship := l.matcher_authorship, status := lower(replace(l.matcher_status, '_', ' ')),
          species_col_id := coalesce(l.matcher_accepted_col_id, l.matcher_col_id), species_name := coalesce(l.matcher_accepted_name, l.matcher_name),
          species_authorship := coalesce(l.matcher_accepted_authorship, l.matcher_authorship))`;
-  const where = o.audit ? `l.role = 'primary' AND l.col_species_id IS NOT NULL`
+  // Covered: each counting covered row, with its species' primary row for the Red List side and the matcher's evidence; one per species (the most records).
+  const source = o.covered
+    ? `(SELECT p.* REPLACE (c.col_taxon_id AS col_taxon_id, c.col_taxon_name AS col_taxon_name, c.col_taxon_authorship AS col_taxon_authorship,
+          c.col_taxon_status AS col_taxon_status, c.col_species_id AS col_species_id, c.col_species_name AS col_species_name,
+          c.col_species_authorship AS col_species_authorship, c.match_reason AS match_reason, c.col_treatment AS col_treatment, c.counts AS counts),
+          struct_pack(col_id := p.col_taxon_id, name := p.col_taxon_name, authorship := p.col_taxon_authorship, species_name := p.col_species_name) AS linked_to
+        FROM read_parquet('${T.reviewLinks}') c JOIN read_parquet('${T.reviewLinks}') p ON p.sis_taxon_id = c.sis_taxon_id AND p.role = 'primary'
+        WHERE c.role = 'covered' AND c.records > 0
+        QUALIFY row_number() OVER (PARTITION BY c.sis_taxon_id ORDER BY c.records DESC, c.col_taxon_id) = 1)`
+    : `(SELECT *, NULL AS linked_to FROM read_parquet('${T.reviewLinks}'))`;
+  const where = o.covered ? "TRUE" : o.audit ? `l.role = 'primary' AND l.col_species_id IS NOT NULL`
     : `l.role = 'primary' AND l.to_review IS NOT NULL AND l.matcher_col_id IS NOT NULL AND l.match_type NOT IN ('HIGHERRANK', 'NONE')`;
-  const stratum = o.audit
+  const stratum = o.covered ? `l.match_reason` : o.audit
     ? `CASE WHEN count(*) OVER (PARTITION BY l.match_reason, l.col_treatment) >= 500 THEN l.match_reason || ' · ' || l.col_treatment ELSE 'rarer kinds' END`
     : `l.to_review`;
   const all = await query<Row>(conn, `
@@ -130,8 +147,8 @@ async function selectRows(o: ReturnType<typeof opts>): Promise<Row[]> {
              a.countries, a.systems, l.redlist_synonyms, ${review} AS under_review,
              l.matcher_col_id, l.matcher_name, l.matcher_authorship, l.matcher_status, l.matcher_accepted_col_id, l.matcher_accepted_name,
              l.matcher_accepted_authorship, l.matcher_lineage, l.match_type, l.confidence, l.matcher_alternatives,
-             l.to_review, l.match_reason, l.col_treatment, l.counts, ${stratum} AS stratum
-      FROM read_parquet('${T.reviewLinks}') l
+             l.to_review, l.match_reason, l.col_treatment, l.counts, l.linked_to, ${stratum} AS stratum
+      FROM ${source} l
       JOIN read_parquet('${T.assessments}') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
       WHERE ${where})
     SELECT *, row_number() OVER (PARTITION BY stratum ORDER BY hash(sis_taxon_id)) AS k FROM x`);
@@ -139,6 +156,7 @@ async function selectRows(o: ReturnType<typeof opts>): Promise<Row[]> {
     const list = (v: unknown) => (v as { items?: unknown[] } | null)?.items ?? v ?? [];
     const struct = (v: unknown) => (v as { entries?: unknown } | null)?.entries ?? v;
     return { ...r, sis_taxon_id: Number(r.sis_taxon_id), k: Number(r.k), countries: list(r.countries), systems: list(r.systems), under_review: struct(r.under_review) as Row["under_review"],
+      linked_to: r.linked_to ? struct(r.linked_to) : undefined,
       redlist_synonyms: r.redlist_synonyms ? JSON.parse(String(r.redlist_synonyms)) : [],
       matcher_alternatives: r.matcher_alternatives ? JSON.parse(String(r.matcher_alternatives)) : [] };
   };
@@ -257,8 +275,8 @@ async function main() {
   const sync = JSON.parse(fs.readFileSync(path.join(BUILD_DIR, "publish", syncPath("sync.json")), "utf-8"));
   const releases = { redlist: sync.redlist?.database ?? "", col: sync.col?.xr?.alias ?? "", col_dataset: sync.col?.xr?.key ?? "" };
 
-  const mode = o.audit ? "audit" : "waiting";
-  const TSV = o.audit ? AUDIT_TSV : OVERRIDES_TSV;
+  const mode = o.covered ? "covered" : o.audit ? "audit" : "waiting";
+  const TSV = o.covered ? COVERED_TSV : o.audit ? AUDIT_TSV : OVERRIDES_TSV;
   const links = await selectRows(o);
   if (o.dryRun) {
     for (const l of links) console.log(`${l.sis_taxon_id}\t${l.stratum}\t${l.redlist_name} ${l.redlist_authority ?? ""} -> ${l.under_review.name} ${l.under_review.authorship ?? ""} [${l.under_review.col_id}]\t${JSON.stringify(l.countries)}`);
