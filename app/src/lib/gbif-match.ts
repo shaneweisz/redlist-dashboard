@@ -4,7 +4,9 @@
  * assessment_link, via assessed.parquet's match_* columns).
  *
  * Three groups, by one simple rule each:
- *   - Exact: the Red List name appears once in CoL, accepted under that name.
+ *   - Exact: the Red List name appears once in CoL, accepted there or as a
+ *     synonym of one species (Sorbus greenii, counted under Aria greenii). The
+ *     rename itself is a taxonomic difference, which the CoL card shows.
  *   - Resolved (grey): not a plain one-name match, but a rule settles it
  *     reliably (an author citation picks a homonym, CoL holds one species twice…).
  *   - Flagged (orange): the count follows GBIF's matcher, but something about the
@@ -25,7 +27,7 @@ export type MatchGroup = "flagged" | "resolved" | "includes" | "none";
 
 export interface MatchBar { key: MatchKey | CountsKey; label: string; group: MatchGroup }
 
-/** The card's bars, in order. "plain" is the header's Exact count, not a bar. */
+/** The card's bars, in order. "plain" and "renamed" are the header's Exact count, not bars. */
 export const MATCH_BARS: MatchBar[] = [
   { key: "f_homonym", label: "Homonym the author doesn't settle", group: "flagged" },
   { key: "f_confidence", label: "Matcher not fully sure", group: "flagged" },
@@ -34,7 +36,6 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "f_synonyms_only", label: "Only its synonyms matched", group: "flagged" },
   { key: "agent", label: "Proposed by AI, not yet checked", group: "flagged" },
   { key: "ne_candidate", label: "Not Evaluated, may be assessed", group: "flagged" },
-  { key: "renamed", label: "Renamed in CoL", group: "resolved" },
   { key: "author", label: "Homonym settled by author", group: "resolved" },
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
@@ -111,7 +112,7 @@ export function matchesMatchFilter(s: SpeciesMatch, selected: ReadonlySet<string
   if (selected.size === 0) return true;
   const keys = new Set<string>([...(s.match ? [s.match] : []), ...(s.match_counts_keys ?? []), ...(s.may_be_assessed?.length ? ["ne_candidate"] : [])]);
   for (const k of selected) {
-    if (k === "flagged" ? isFlagged(s) : k === "exact" ? s.match === "plain" : keys.has(k)) return true;
+    if (k === "flagged" ? isFlagged(s) : k === "exact" ? isExact(s) : keys.has(k)) return true;
   }
   return false;
 }
@@ -121,13 +122,16 @@ export function newMatchTally() {
   return { counts: {} as Record<string, number>, exact: 0, flagged: 0 };
 }
 export function tallyMatch(t: ReturnType<typeof newMatchTally>, s: SpeciesMatch): void {
-  const keys = [...(s.match && s.match !== "plain" ? [s.match] : []), ...(s.match_counts_keys ?? []), ...(s.may_be_assessed?.length ? ["ne_candidate"] : [])];
+  const keys = [...(s.match && !isExact(s) ? [s.match] : []), ...(s.match_counts_keys ?? []), ...(s.may_be_assessed?.length ? ["ne_candidate"] : [])];
   for (const k of keys) t.counts[k] = (t.counts[k] ?? 0) + 1;
   if (isFlagged(s)) t.flagged++;
-  if (s.match === "plain") t.exact++;
+  if (isExact(s)) t.exact++;
 }
 
-export const barLabel = (k: string) => MATCH_BARS.find((b) => b.key === k)?.label ?? k;
+/** Exact matches: one CoL record for the name, whether CoL accepts it or holds it as a synonym. */
+export const isExact = (s: SpeciesMatch) => s.match === "plain" || s.match === "renamed";
+
+export const barLabel = (k: string) => (k === "renamed" ? "Exact, under CoL's accepted name" : MATCH_BARS.find((b) => b.key === k)?.label ?? k);
 
 /** The quiet note beside a count that includes other names, or only its own. */
 export function countsText(s: SpeciesMatch): string | null {

@@ -25,6 +25,8 @@ describe("the filter and tally", () => {
   const guess = { match: "f_confidence" as const, match_counts_keys: countsKeys({ match_other_names: 2 }) };
   const resolved = { match: "author" as const, match_counts_keys: [] };
   const ne = { may_be_assessed: ["Coenonympha gardetta"] };
+  // Sorbus greenii: found once, as a synonym CoL counts under Aria greenii.
+  const renamed = { match: "renamed" as const, match_counts_keys: [] };
   it("selects by bar, or by Flagged / Exact", () => {
     expect(matchesMatchFilter(exact, new Set())).toBe(true);
     expect(matchesMatchFilter(lumped, new Set(["own_name"]))).toBe(true);
@@ -34,11 +36,12 @@ describe("the filter and tally", () => {
     expect(matchesMatchFilter(resolved, new Set(["flagged"]))).toBe(false);
     expect(matchesMatchFilter(lumped, new Set(["exact"]))).toBe(true);
     expect(matchesMatchFilter(resolved, new Set(["exact"]))).toBe(false);
+    expect(matchesMatchFilter(renamed, new Set(["exact"]))).toBe(true);
   });
-  it("counts Exact and Flagged, and each bar a species belongs to", () => {
+  it("counts Exact (a rename included, no bar of its own) and Flagged, and each bar a species belongs to", () => {
     const t = newMatchTally();
-    for (const s of [exact, lumped, guess, resolved, ne]) tallyMatch(t, s);
-    expect(t).toEqual({ exact: 2, flagged: 2, counts: { own_name: 1, f_confidence: 1, other_names: 1, author: 1, ne_candidate: 1 } });
+    for (const s of [exact, lumped, guess, resolved, ne, renamed]) tallyMatch(t, s);
+    expect(t).toEqual({ exact: 3, flagged: 2, counts: { own_name: 1, f_confidence: 1, other_names: 1, author: 1, ne_candidate: 1 } });
     expect(isFlagged(resolved)).toBe(false);
   });
 });

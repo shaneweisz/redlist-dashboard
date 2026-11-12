@@ -13,7 +13,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, barLabel, countsText, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, countsText, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -894,7 +894,7 @@ function SelectableHoverTooltip({ children, content, prepare }: {
 }
 
 
-// The ⚑ tooltip's body. Every species it names links to that species' own
+// The ≠ tooltip's body. Every species it names links to that species' own
 // Catalogue of Life record — those names are the actionable part ("what is
 // Hedlundia minima?"), and a link per name beats one link on the flag, which
 // could only ever point at a single record.
@@ -924,7 +924,7 @@ function prefetchColProvenance(colId: string): Promise<void> {
 }
 
 /**
- * Warm the cache for every ⚑ on the current table page, a few lookups at a
+ * Warm the cache for every ≠ on the current table page, a few lookups at a
  * time, so a hover opens the panel complete. Uncached, the route takes
  * 0.3-0.75s on prod (three ChecklistBank hops), longer than the tooltip will
  * wait, and a source block landing after the panel opened grew it upward under
@@ -1147,7 +1147,7 @@ function RevisionTooltipContent({ flag, name, category }: { flag: ColRevision; n
       <div className="space-y-2.5">
         {sentences.map(({ code, node }, i) => (
           <div key={i}>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-300/80">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/90">
               {/* The BAR's words, not the reason's: a reader who filtered by
                   "No 1:1 CoL match" has to recognise the block it returned.
                   The sentence under it still gives the specific reason. */}
@@ -2166,7 +2166,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     [matchesRevisionOnly, matchesGbifMatch],
   );
 
-  // Is either half of that filter active? The ⚑ marker on a species row keys off
+  // Is either half of that filter active? The ≠ marker on a species row keys off
   // this — see the row itself for why the flag is opt-in rather than always on.
   const colFilterActive = colMatch != null || selectedColReasons.size > 0;
 
@@ -3248,7 +3248,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return [singleSpeciesPreview, ...paginatedSpeciesBase];
   }, [paginatedSpeciesBase, singleSpeciesPreview]);
 
-  // The CoL records behind this page's ⚑ markers, as one string so the effect
+  // The CoL records behind this page's ≠ markers, as one string so the effect
   // below re-runs when the page's flags change, not on every render.
   const pageFlagColIds = colFilterActive
     ? [...new Set(paginatedSpecies.flatMap((s) => (isFlagged(s.col_revision) && s.col_revision!.colId ? [s.col_revision!.colId] : [])))].join(",")
@@ -4121,7 +4121,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         <div className="flex items-center justify-between gap-2 mb-1 min-h-[24px]">
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
             GBIF matching reconciliation
-            <HoverTooltip text="GBIF counts records by Catalogue of Life (CoL) name. Exact: the Red List name appears once in CoL. The bars show every other case.">
+            <HoverTooltip text="GBIF counts records by Catalogue of Life (CoL) name. Exact: the Red List name appears once in CoL, accepted or as a synonym of one species. The bars show every other case. Whether CoL agrees with the Red List's taxonomy is the other card's question.">
               <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 16v-4M12 8h.01" />
@@ -4135,12 +4135,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               ⚑ Flagged {matchTally.flagged.toLocaleString()}
             </button>
             <button type="button" onClick={toggle("exact")} className={toggleClass(selectedMatch.has("exact"), "bg-emerald-600")}
-              aria-pressed={selectedMatch.has("exact")} title="Only species whose Red List name appears once in CoL">
+              aria-pressed={selectedMatch.has("exact")} title="Only species whose Red List name appears once in CoL, accepted or as a synonym">
               Exact {matchTally.exact.toLocaleString()}
             </button>
           </div>
           )}
         </div>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-2">Is the GBIF count the right records?</p>
         {loading ? (
           <div style={{ height: 150 }} className="flex items-center justify-center"><Spinner className="h-4 w-4" /></div>
         ) : isSingleSpecies && singleSpecies ? (
@@ -4150,7 +4151,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 {single.map(b => <span key={b.key} className={STATIC_TAG}>{b.group === "flagged" ? "⚑ " : ""}{b.label}</span>)}
               </div>
             ) : (
-              <span className={SINGLE_EMPTY}>{singleSpecies.match === "plain" ? "Exact: the Red List name appears once in CoL" : "No match data"}</span>
+              <span className={SINGLE_EMPTY}>{isExactMatch(singleSpecies) ? "Exact: the Red List name appears once in CoL" : "No match data"}</span>
             )}
           </div>
         ) : barData.length > 0 ? (
@@ -4247,11 +4248,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <button
               type="button"
               onClick={toggle("flagged")}
-              className={toggleClass(flaggedActive, "bg-amber-600")}
+              className={toggleClass(flaggedActive, "bg-violet-600")}
               aria-pressed={flaggedActive}
-              title="Only species with no clean 1:1 Catalogue of Life match"
+              title="Only species whose taxonomy differs from Catalogue of Life"
             >
-              ⚑ {colTally.flagged.toLocaleString()}
+              ≠ Differs {colTally.flagged.toLocaleString()}
             </button>
             <button
               type="button"
@@ -4265,6 +4266,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           </div>
           )}
         </div>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-2">Does Catalogue of Life agree with the Red List&apos;s taxonomy?</p>
         {loading ? (
           <div style={{ height: 150 }} className="flex items-center justify-center"><Spinner className="h-4 w-4" /></div>
         ) : isSingleSpecies && singleSpecies ? (
@@ -4272,10 +4274,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <div style={{ height: 120 }} className="flex flex-col items-center justify-center gap-2 text-center">
             {barData.length > 0 ? (
               <div className="flex flex-wrap justify-center gap-1">
-                {barData.map(d => <span key={d.rawCode} className={STATIC_TAG}>⚑ {d.code}</span>)}
+                {barData.map(d => <span key={d.rawCode} className={STATIC_TAG}>≠ {d.code}</span>)}
               </div>
             ) : (
-              <span className={SINGLE_EMPTY}>{colTally.flagged > 0 ? "Flagged" : "Clean one-to-one match"}</span>
+              <span className={SINGLE_EMPTY}>{colTally.flagged > 0 ? "Differs from CoL" : "Clean one-to-one match"}</span>
             )}
           </div>
         ) : barData.length > 0 ? (
@@ -4311,7 +4313,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   const reasons = keys.flatMap(k => [...reasonsForLabel(k)]);
                   if (reasons.length) rangeSelectColReasons(reasons, event);
                 }}
-                barColor="#d97706"
+                barColor="#7c3aed"
                 yAxisWidth={180}
                 rightMargin={60}
                 // Just the label. It used to append the reason's one-line
@@ -4320,12 +4322,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 // were about to click, and clipping its own text off the edge.
                 // The summary was there when the labels were cryptic ("Renamed",
                 // "In XR, not Base"); they now say what they mean, and the
-                // sentence lives in the ⚑ tooltip on each row where there is room
+                // sentence lives in the ≠ tooltip on each row where there is room
                 // for it.
                 labelFormatter={(short: string) => short}
               />
             </div>
-            {/* Why the bars total more than the ⚑ count. Split, lumped and the
+            {/* Why the bars total more than the ≠ count. Split, lumped and the
                 no-match reasons are independent properties, not one axis, so a
                 species can sit in more than one bar. Rather than leave that as a
                 silent gap for a reader to trip over, state it — and only when
@@ -6316,9 +6318,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {selectedColReasons.size === 0 && colMatch && (
               <button
                 onClick={() => setColMatch(null)}
-                className="px-3 py-1.5 text-sm font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-500 flex items-center gap-1 hover:opacity-80"
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 flex items-center gap-1 hover:opacity-80"
               >
-                {colMatch === "flagged" ? "⚑ Differs from Catalogue of Life" : "Clean CoL match"}
+                {colMatch === "flagged" ? "≠ Differs from Catalogue of Life" : "Clean CoL match"}
                 <span className="text-sm">×</span>
               </button>
             )}
@@ -6333,9 +6335,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   return next;
                 })}
                 title={bar.reasons.map(r => REVISION_REASON_SUMMARY[r]).filter(Boolean).join("; ")}
-                className="px-3 py-1.5 text-sm font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-500 flex items-center gap-1 hover:opacity-80"
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400 flex items-center gap-1 hover:opacity-80"
               >
-                ⚑ {bar.label}
+                ≠ {bar.label}
                 <span className="text-sm">×</span>
               </button>
             ))}
@@ -6741,9 +6743,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
                                 aria-label={`Differs from Catalogue of Life — ${revisionReasons(s.col_revision!).map(r => REVISION_REASON_SUMMARY[r] ?? r).join("; ")}. Open in Catalogue of Life`}
-                                className="ml-1 align-middle text-amber-600 dark:text-amber-500 hover:text-amber-700 dark:hover:text-amber-400 text-xs"
+                                className="ml-1 align-middle text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 text-xs"
                               >
-                                ⚑
+                                ≠
                               </a>
                             </SelectableHoverTooltip>
                           )}
