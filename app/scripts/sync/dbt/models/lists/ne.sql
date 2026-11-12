@@ -15,7 +15,7 @@
  *   gbif_all_records_countries     … of all its records
  *   gbif_georeferenced_records_count, gbif_all_records_count
  *   may_be_assessed                the assessed species it may be, ';'-joined: ones
- *                                  whose link is unconfirmed or waiting and whose
+ *                                  whose link is flagged or waiting and whose
  *                                  name leads here (a candidate row); else NULL
  *
  * Decisions:

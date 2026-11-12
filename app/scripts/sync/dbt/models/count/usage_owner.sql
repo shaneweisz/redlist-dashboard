@@ -23,7 +23,7 @@
  *      its synonyms, its subspecies, their BINs. If an assessed species' counted
  *      "own" link row is that species, for the assessed species.
  *   3. Otherwise, if no link row names that species at all (a candidate row,
- *      what an unconfirmed or waiting species might be, doesn't count), for the
+ *      what a flagged or waiting species might be, doesn't count), for the
  *      species itself, unassessed. A species linked only by rows that don't count
  *      (counts nothing) counts for no one.
  *

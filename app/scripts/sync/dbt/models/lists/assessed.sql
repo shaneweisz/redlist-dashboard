@@ -14,16 +14,19 @@
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
  *   count_note               'unlinked' when it is linked to no CoL species, so
- *                            no records are counted; 'unconfirmed' when the
+ *                            no records are counted; 'flagged' when the
  *                            count rests on the matcher's answer the link's rule
- *                            doubts (match_reason 'unconfirmed: …'), or only on
+ *                            doubts (match_reason 'flagged: …'), or only on
  *                            other CoL names while its own link waits; else NULL
  *   match_reason             how its CoL name was found (assessment_link's primary
- *                            row): exact, unique | … | unconfirmed: <doubt> |
+ *                            row): exact, unique | … | flagged: <doubt> |
  *                            override | waiting | …
  *   match_decided_by         who decided an override (a GitHub handle, agent:<model>)
  *   match_counts             what its link counts: the whole CoL species | only
  *                            records under its own name | nothing
+ *   flag_note, flag_records  for a flagged count: why, in a sentence, and the CoL
+ *                            records it is about (JSON: id, name, authorship, status,
+ *                            species, counted), from assessment_link
  *   match_other_names        how many other CoL names' records count for it too
  *                            (covered rows that count), 0 when none
  *   gbif_georeferenced_records_count, gbif_all_records_count
@@ -52,8 +55,9 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        gbif.gbif_species_key,
        -- A species with no link of its own can still count other CoL names' records (a Red List synonym CoL holds as a species): that count is shown, flagged.
        CASE WHEN link.col_species_id IS NULL AND other.n IS NULL THEN 'unlinked'
-            WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'unconfirmed: %' THEN 'unconfirmed' END AS count_note,
+            WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'flagged: %' THEN 'flagged' END AS count_note,
        link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
+       link.flag_note, link.flag_records,
        coalesce(other.n, 0)::INTEGER AS match_other_names,
        coalesce(gbif.georef, 0) AS gbif_georeferenced_records_count,
        coalesce(gbif.all_records, 0) AS gbif_all_records_count,

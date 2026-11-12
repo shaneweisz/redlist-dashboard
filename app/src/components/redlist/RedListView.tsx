@@ -13,7 +13,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, matchesMatchFilter, newMatchTally, tallyMatch, isUnconfirmedKey, unconfirmedText, countsText, type SpeciesMatch } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, barLabel, countsText, checklistBankUrl, type SpeciesMatch } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -727,15 +727,47 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 }
 
 
-// Beside a GBIF count: ⚑ when the match it rests on is unconfirmed (or an NE
-// species may be an assessed one), a faint ⁺ when a confirmed count includes
-// other CoL names or only its own name; nothing for a plain match.
-function MatchFlag({ s }: { s: SpeciesMatch & { match_other_names?: number | null } }) {
-  if (isUnconfirmedKey(s.match) || s.may_be_assessed?.length) {
+// Beside a GBIF count: ⚑ when its match to CoL is flagged (or an NE species may
+// be an assessed one), opening a short, specific explanation with the CoL
+// records involved, each linked so a reader can check it; a faint ⁺ when a
+// count includes other CoL names or only its own; nothing for an exact match.
+function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; scientific_name?: string; col_id?: string | null } }) {
+  const link = "underline decoration-dotted hover:text-white";
+  if (isMatchFlagged(s)) {
+    const content = s.may_be_assessed?.length ? (
+      <div className="text-left space-y-1">
+        <div className="font-semibold">⚑ May be an assessed species</div>
+        <div>
+          The Red List assesses {s.may_be_assessed.map((n, i) => (
+            <span key={n}>{i > 0 ? " or " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
+          ))}, whose name leads to this CoL species, but that species&apos; own match is flagged or unresolved. This may be the same species.
+        </div>
+        {s.col_id && <a className={link} href={checklistBankUrl(COL_RELEASE.key, s.col_id)} target="_blank" rel="noopener noreferrer">This species in CoL ({COL_RELEASE.alias}) ↗</a>}
+      </div>
+    ) : (
+      <div className="text-left space-y-1">
+        <div className="font-semibold">⚑ Flagged: {barLabel(s.match ?? "")}</div>
+        {s.flag_note && <div>{s.flag_note}</div>}
+        {!!s.flag_records?.length && (
+          <ul className="space-y-0.5">
+            {s.flag_records.map(r => (
+              <li key={r.id}>
+                <a className={link} href={checklistBankUrl(COL_RELEASE.key, r.id)} target="_blank" rel="noopener noreferrer">
+                  <i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}
+                </a>
+                <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
+                {r.counted && <span className="ml-1 text-amber-400">← counted</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
+      </div>
+    );
     return (
-      <HoverTooltip text={unconfirmedText(s)}>
-        <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Unconfirmed match">⚑</span>
-      </HoverTooltip>
+      <SelectableHoverTooltip content={content}>
+        <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span>
+      </SelectableHoverTooltip>
     );
   }
   const note = countsText(s);
@@ -2097,7 +2129,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     (s: Species): boolean => matchesRevisionFilter(s.col_revision, colMatch, selectedColReasons),
     [colMatch, selectedColReasons],
   );
-  // The GBIF match card's filter (lib/gbif-match.ts) rides on the same predicate,
+  // The GBIF matching reconciliation card's filter (lib/gbif-match.ts) rides on the same predicate,
   // so every chart's cross-filter applies it; each card's own tally skips its own half.
   const matchesGbifMatch = useCallback((s: Species): boolean => matchesMatchFilter(s, selectedMatch), [selectedMatch]);
   const matchesColFilter = useCallback(
@@ -2936,7 +2968,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return tally;
   }, [taxaFilteredSpecies, matchesFilters, matchesGbifMatch]);
 
-  // GBIF match counts: every filter except the match card's own.
+  // GBIF matching reconciliation counts: every filter except the card's own.
   const matchTally = useMemo(() => {
     const tally = newMatchTally();
     taxaFilteredSpecies.forEach(s => {
@@ -4040,25 +4072,28 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the bars below break the flagged bucket down by reason, which is the part
   // that actually says what KIND of taxonomic disagreement this is. Clicking a
   // reason implies flagged, so it also lights the toggle.
-  // GBIF match: how each count was matched to Catalogue of Life. Plain matches
-  // (the header's Confirmed count) need nothing said; the bars are the edge
-  // cases, and the unconfirmed ones (amber) are the review list.
+  // GBIF matching reconciliation: how each Red List name was matched to CoL.
+  // Exact matches are the header's count; the bars are the rest, orange when the
+  // count is flagged (in doubt), grey when a rule resolved it reliably.
   const gbifMatchCard = (() => {
     const loading = speciesLoading && assessedSpecies.length === 0;
     const bars = MATCH_BARS.filter(b => (matchTally.counts[b.key] ?? 0) > 0 || selectedMatch.has(b.key));
-    // Amber for the unconfirmed (the review list), grey for confirmed edge cases.
-    const barData = bars.map(b => ({ code: b.label, rawCode: b.key, count: matchTally.counts[b.key] ?? 0, label: (matchTally.counts[b.key] ?? 0).toLocaleString(), color: b.unconfirmed ? "#d97706" : "#a1a1aa" }));
+    const barData = bars.map(b => ({ code: b.label, rawCode: b.key, count: matchTally.counts[b.key] ?? 0,
+      label: (matchTally.counts[b.key] ?? 0).toLocaleString(), color: GROUP_COLOR[b.group] }));
     const selectedShort = new Set(bars.filter(b => selectedMatch.has(b.key)).map(b => b.label));
     const keyFor = new Map(MATCH_BARS.map(b => [b.label, b.key]));
-    const toggle = (k: string) => () => setMatch(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else { n.clear(); n.add(k); } return n; });
+    const toggle = (k: string) => () => setMatch(prev => (prev.size === 1 && prev.has(k) ? new Set<string>() : new Set([k])));
     const toggleClass = (active: boolean, activeColor: string) => chartControlClass(active, `${activeColor} text-white border-transparent`);
-    const single = isSingleSpecies && singleSpecies ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length)) : [];
+    const single = isSingleSpecies && singleSpecies
+      ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length))
+      : [];
+    const swatch = (c: string) => <span className="inline-block w-2 h-2 rounded-sm align-middle mr-1" style={{ background: c }} />;
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
         <div className="flex items-center justify-between gap-2 mb-1 min-h-[24px]">
           <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
-            GBIF match
-            <HoverTooltip text="How each species' GBIF count was matched to Catalogue of Life, whose ids GBIF files records under. Most are the Red List name found once there and need nothing said. The bars are the rest. Amber ones are unconfirmed: the count follows GBIF's own matcher, but the dashboard's rules doubt it, so it may include another organism's records until reviewed.">
+            GBIF matching reconciliation
+            <HoverTooltip text="GBIF counts records by Catalogue of Life (CoL) name. Exact: the Red List name appears once in CoL. The bars show every other case.">
               <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 16v-4M12 8h.01" />
@@ -4067,13 +4102,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           </span>
           {!isSingleSpecies && (
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button type="button" onClick={toggle("unconfirmed")} className={toggleClass(selectedMatch.has("unconfirmed"), "bg-amber-600")}
-              aria-pressed={selectedMatch.has("unconfirmed")} title="Only species whose count rests on an unconfirmed match">
-              ⚑ {matchTally.unconfirmed.toLocaleString()}
+            <button type="button" onClick={toggle("flagged")} className={toggleClass(selectedMatch.has("flagged"), "bg-amber-600")}
+              aria-pressed={selectedMatch.has("flagged")} title="Only species whose count is flagged">
+              ⚑ Flagged {matchTally.flagged.toLocaleString()}
             </button>
-            <button type="button" onClick={toggle("confirmed")} className={toggleClass(selectedMatch.has("confirmed"), "bg-emerald-600")}
-              aria-pressed={selectedMatch.has("confirmed")} title="Only species whose count rests on a confirmed match">
-              Confirmed {matchTally.confirmed.toLocaleString()}
+            <button type="button" onClick={toggle("exact")} className={toggleClass(selectedMatch.has("exact"), "bg-emerald-600")}
+              aria-pressed={selectedMatch.has("exact")} title="Only species whose Red List name appears once in CoL">
+              Exact {matchTally.exact.toLocaleString()}
             </button>
           </div>
           )}
@@ -4083,41 +4118,44 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         ) : isSingleSpecies && singleSpecies ? (
           <div style={{ height: 120 }} className="flex flex-col items-center justify-center gap-2 text-center px-2">
             {single.length > 0 ? (
-              <>
-                <div className="flex flex-wrap justify-center gap-1">
-                  {single.map(b => <span key={b.key} className={STATIC_TAG}>{b.unconfirmed ? "⚑ " : ""}{b.label}</span>)}
-                </div>
-                <span className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">{single[0].summary}</span>
-              </>
+              <div className="flex flex-wrap justify-center gap-1">
+                {single.map(b => <span key={b.key} className={STATIC_TAG}>{b.group === "flagged" ? "⚑ " : ""}{b.label}</span>)}
+              </div>
             ) : (
-              <span className={SINGLE_EMPTY}>{singleSpecies.match === "plain" ? "The Red List name, found once in Catalogue of Life" : "No match data"}</span>
+              <span className={SINGLE_EMPTY}>{singleSpecies.match === "plain" ? "Exact: the Red List name appears once in CoL" : "No match data"}</span>
             )}
           </div>
         ) : barData.length > 0 ? (
-          <div style={{ height: Math.max(90, barData.length * 26) }}>
-            <FilterBarChart
-              data={barData}
-              dataKey="code"
-              selectedItems={selectedShort}
-              onBarClick={(data: { payload?: { code?: string } }, event: React.MouseEvent) => {
-                const k = data.payload?.code ? keyFor.get(data.payload.code) : undefined;
-                if (!k) return;
-                const isMulti = event.metaKey || event.ctrlKey;
-                setMatch(prev => {
-                  const next = new Set(isMulti ? prev : [...prev].filter(x => x === k));
-                  if (next.has(k)) next.delete(k); else next.add(k);
-                  return next;
-                });
-              }}
-              barColor="#d97706"
-              yAxisWidth={200}
-              rightMargin={60}
-              labelFormatter={(short: string) => short}
-            />
-          </div>
+          <>
+            <div style={{ height: Math.max(90, barData.length * 24) }}>
+              <FilterBarChart
+                data={barData}
+                dataKey="code"
+                selectedItems={selectedShort}
+                onBarClick={(data: { payload?: { code?: string } }, event: React.MouseEvent) => {
+                  const k = data.payload?.code ? keyFor.get(data.payload.code) : undefined;
+                  if (!k) return;
+                  const isMulti = event.metaKey || event.ctrlKey;
+                  setMatch(prev => {
+                    const next = new Set(isMulti ? prev : [...prev].filter(x => x === k));
+                    if (next.has(k)) next.delete(k); else next.add(k);
+                    return next;
+                  });
+                }}
+                barColor={GROUP_COLOR.resolved}
+                yAxisWidth={190}
+                rightMargin={60}
+                labelFormatter={(short: string) => short}
+              />
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+              {swatch(GROUP_COLOR.flagged)}Flagged: the count may include another species&apos; records.{" "}
+              {swatch(GROUP_COLOR.resolved)}Resolved by a rule: reliable, but not a plain one-name match.
+            </p>
+          </>
         ) : (
           <div style={{ height: 90 }} className="flex items-center justify-center">
-            <span className="text-sm text-zinc-400 dark:text-zinc-500">Every count here is a plain match</span>
+            <span className="text-sm text-zinc-400 dark:text-zinc-500">Every name here is an exact match</span>
           </div>
         )}
       </div>
@@ -5622,6 +5660,59 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   )}
                 </div>
 
+                {/* Reassessment Triage, full width below the map and credits: years
+                    since assessment against GBIF records (not for a single species). */}
+                  {!isNewAssessments && showPriority && (
+                    <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {priorityBox && (
+                            <button type="button" onClick={() => setPriorityBox(null)}
+                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {speciesLoading && assessedSpecies.length === 0 ? (
+                        <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
+                      ) : (
+                        <PriorityScatter
+                          points={priorityPoints}
+                          colors={CATEGORY_COLORS}
+                          yAxis={
+                            // The y axis title is its controls, read as a phrase:
+                            // "[New ▾] GBIF records ([all ▾])", each select sized to
+                            // its chosen option where the browser supports it.
+                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                              </select>
+                              GBIF records (
+                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                              </select>
+                              )
+                            </span>
+                          }
+                          box={priorityBox}
+                          onBoxChange={setPriorityBox}
+                          onPointClick={openSpeciesFromScatter}
+                          selectedKey={selectedSpeciesKey}
+                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                          maxYears={priorityExtent.maxYears}
+                          maxValue={priorityExtent.maxValue}
+                        />
+                      )}
+                    </div>
+                  )}
+
                 {/* Growth Form (plants/fungi only) */}
                 {(() => {
                   if (speciesLoading && assessedSpecies.length === 0) {
@@ -5839,68 +5930,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {threatsCard}
                 </div>
 
-                {/* Taxonomic differences from CoL — assessed-only: the flag is a
-                    property of an IUCN assessment's name, so it has no meaning
-                    in the Not Evaluated (new-assessments) view, whose rows are
-                    CoL species with no assessment to disagree with. */}
-                {/* ...with the Reassessment Triage scatter beside it: years since
-                    assessment against GBIF records (not for a single species). */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{gbifMatchCard}</div>
-                {!isNewAssessments && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {taxonomicRevisionCard}
-                    {showPriority && (
-                      <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
-                          <div className="min-w-0">
-                            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                            <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1">
-                            {priorityBox && (
-                              <button type="button" onClick={() => setPriorityBox(null)}
-                                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {speciesLoading && assessedSpecies.length === 0 ? (
-                          <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-                        ) : (
-                          <PriorityScatter
-                            points={priorityPoints}
-                            colors={CATEGORY_COLORS}
-                            yAxis={
-                              // The y axis title is its controls, read as a phrase:
-                              // "[New ▾] GBIF records ([all ▾])", each select sized to
-                              // its chosen option where the browser supports it.
-                              <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                                <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                  onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                  {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                                </select>
-                                GBIF records (
-                                <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                  onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                  {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                                </select>
-                                )
-                              </span>
-                            }
-                            box={priorityBox}
-                            onBoxChange={setPriorityBox}
-                            onPointClick={openSpeciesFromScatter}
-                            selectedKey={selectedSpeciesKey}
-                            yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                            maxYears={priorityExtent.maxYears}
-                            maxValue={priorityExtent.maxValue}
-                          />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* The two reconciliation cards side by side: how each Red List
+                    name was matched to CoL for GBIF's counts, and where CoL's
+                    taxonomy differs from the Red List's (assessed-only: an NE
+                    row has no assessment to differ from). */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {gbifMatchCard}
+                  {!isNewAssessments && taxonomicRevisionCard}
+                </div>
             </>
           )}
 
@@ -6229,7 +6266,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 onClick={() => setMatch(prev => { const n = new Set(prev); n.delete(k); return n; })}
                 className="px-3 py-1.5 text-sm font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-500 flex items-center gap-1 hover:opacity-80"
               >
-                {k === "unconfirmed" ? "⚑ Unconfirmed GBIF match" : k === "confirmed" ? "Confirmed GBIF match" : `GBIF match: ${MATCH_BARS.find(b => b.key === k)?.label ?? k}`}
+                {k === "flagged" ? "⚑ Flagged GBIF match" : k === "exact" ? "Exact GBIF match" : `GBIF match: ${barLabel(k)}`}
                 <span className="text-sm">×</span>
               </button>
             ))}

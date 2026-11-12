@@ -205,10 +205,10 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
 export interface Candidate { sis: number; target_id: string; target_name: string }
 
 /** A primary row the matcher's answer made though the rule doubts it (assessment-link.ts). */
-export const isUnconfirmed = (l: Pick<LinkRow, "match_reason">) => !!l.match_reason?.startsWith("unconfirmed: ");
+export const isFlaggedLink = (l: Pick<LinkRow, "match_reason">) => !!l.match_reason?.startsWith("flagged: ");
 
 /**
- * Rule: for a species whose link is unconfirmed or still waiting, every CoL
+ * Rule: for a species whose link is flagged or still waiting, every CoL
  * species its own name leads to (as an accepted name, or as a synonym CoL files
  * under it), and the matcher's guess, is a candidate: a row counting nothing,
  * which the Not Evaluated list shows flagged ("may be the assessed X") rather
@@ -216,7 +216,7 @@ export const isUnconfirmed = (l: Pick<LinkRow, "match_reason">) => !!l.match_rea
  * CoL files under the small heath, C. pamphilus). Its records count for it there.
  */
 export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
-  const waiting = new Set(links.filter((l) => l.role === "primary" && (!l.col_species_id || isUnconfirmed(l))).map((l) => l.sis_taxon_id));
+  const waiting = new Set(links.filter((l) => l.role === "primary" && (!l.col_species_id || isFlaggedLink(l))).map((l) => l.sis_taxon_id));
   const touched = new Set<number>();
   for (const c of candidates) {
     if (!waiting.has(c.sis)) continue;
@@ -248,7 +248,7 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
 
 /**
  * Rule: each usage counts for one assessed species at most. When two claim it,
- * one wins: confirmed before unconfirmed (an unconfirmed link never takes a
+ * one wins: unflagged before flagged (a flagged link never takes a
  * confirmed species' records; it loses, flagged), then primary before covered, own before lumped, the matcher before a
  * decision, the more direct name, the name CoL spells exactly before a spelling
  * variant of it, then the lower SIS id. The loser counts nothing; a losing
@@ -259,8 +259,8 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
  * `exactName`: the species whose primary row's CoL name is their Red List name, as written.
  */
 export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new Set()): Set<number> {
-  const unconfirmed = new Set(links.filter((l) => l.role === "primary" && isUnconfirmed(l)).map((l) => l.sis_taxon_id));
-  const rank = (l: LinkRow) => [unconfirmed.has(l.sis_taxon_id) ? 1 : 0, l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
+  const flagged = new Set(links.filter((l) => l.role === "primary" && isFlaggedLink(l)).map((l) => l.sis_taxon_id));
+  const rank = (l: LinkRow) => [flagged.has(l.sis_taxon_id) ? 1 : 0, l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
     Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.role === "primary" && exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted).sort((a, b) => {
     const x = rank(a), y = rank(b);
