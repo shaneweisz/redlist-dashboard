@@ -39,7 +39,6 @@ beforeAll(async () => {
       CASE WHEN col_taxon_id IS NULL THEN 'waiting' WHEN sis = 2 THEN 'flagged: lower confidence' ELSE 'exact, unique' END AS match_reason,
       CASE WHEN sis = 2 THEN 'GBIF''s matcher is only 94% sure.' END AS match_note,
       CASE WHEN sis = 2 THEN '[{"id":"S2","name":"Astur two","authorship":null,"status":"synonym","species":"Accipiter two","role":"counted"},'
-        || '{"id":"A2","name":"Accipiter two","authorship":null,"status":"accepted","species":null,"role":"also"},'
         || '{"id":"Z9","name":"Astur two","authorship":"Other","status":"synonym","species":"Accipiter nine","role":"not"}]' END AS match_records,
       CASE WHEN col_taxon_id IS NOT NULL THEN 'accepted' END AS col_treatment
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
@@ -117,10 +116,12 @@ describe("GBIF counts in the lists", () => {
     expect(rows["2"].match_reason).toBe("flagged: lower confidence");
     expect(rows["2"].match_note).toBe("GBIF's matcher is only 94% sure.");
   });
-  it("splits the count among the match records, a subspecies under its species", () => {
+  it("splits the count among the match records, and names the CoL species holding the rest", () => {
     expect(Number(rows["2"].gbif_all_records_count)).toBe(13);
-    const recs = JSON.parse(String(rows["2"].match_records)) as { id: string; records: number | null }[];
-    expect(Object.fromEntries(recs.map((r) => [r.id, r.records]))).toEqual({ S2: 3, A2: 10, Z9: null });
+    const recs = JSON.parse(String(rows["2"].match_records)) as { id: string; name: string; role: string; records: number | null }[];
+    // S2 holds its own 3; A2 isn't listed, so it and its subspecies Q2 (8 + 2) are added under its name.
+    expect(recs.map((r) => [r.id, r.role, r.records])).toEqual([["S2", "counted", 3], ["Z9", "not", null], ["A2", "also", 10]]);
+    expect(recs[2].name).toBe("Accipiter two");
   });
 
   it("says when a species is linked to no CoL species, so nothing is counted", () => {

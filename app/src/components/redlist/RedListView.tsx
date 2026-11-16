@@ -727,11 +727,11 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 }
 
 
-// Beside a GBIF count whose match isn't one plain name: ⚑ (amber) when it is
+// Beside a GBIF count whose match isn't one plain name, once a GBIF-match bar is selected: ⚑ (amber) when it is
 // flagged, else a faint ⓘ that darkens on row hover. Either opens the bare facts:
 // the Red List name, the CoL records involved (each linked to the release the sync
-// used) with how many records each holds, and GBIF's records.
-function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string; gbif_all_records_count?: number | null;
+// used) with how many records each holds, linked to them on GBIF, and all GBIF's records counted.
+function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string;
   sis_taxon_id?: number | null; assessment_id?: number | null } }) {
   const link = "underline decoration-dotted hover:text-white";
   // The Red List side: its name and authority, linked to the assessment, and the synonyms it lists.
@@ -765,9 +765,8 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
     const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
     const records = s.match_records?.length ? s.match_records
       : s.gbif_species_key ? [{ id: s.gbif_species_key, name: s.scientific_name ?? "", authorship: null, status: "", species: null, role: "counted" as const }] : [];
-    // What no listed record holds: records under other CoL names the species counts.
     const split = records.some(r => r.records != null);
-    const rest = split && s.gbif_all_records_count != null ? s.gbif_all_records_count - records.reduce((a, r) => a + (r.records ?? 0), 0) : 0;
+    const gbif = (id: string) => `/api/gbif-link?key=${encodeURIComponent(id)}`;
     content = (
       <div className="text-left space-y-1">
         <div className="font-semibold">{flagged ? "⚑ " : ""}{kinds.map(barLabel).join(" · ") || "Matched"}</div>
@@ -783,10 +782,10 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
                   {r.status && <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? <> of <i>{r.species}</i></> : null}</span>}
                   {r.role === "not"
                     ? <span className="ml-1 text-zinc-500">· not counted</span>
-                    : <span className="ml-1 text-amber-400 tabular-nums">· {r.records != null ? r.records.toLocaleString() : "counted"}</span>}
+                    : <span className="ml-1 text-amber-400 tabular-nums">· <a className={link} href={gbif(r.id)} target="_blank" rel="noopener noreferrer"
+                        title="Its records on GBIF">{r.records != null ? `${r.records.toLocaleString()} ↗` : "counted ↗"}</a></span>}
                 </li>
               ))}
-              {rest > 0 && <li className="text-zinc-400">Other CoL names <span className="ml-1 text-amber-400 tabular-nums">· {rest.toLocaleString()}</span></li>}
             </ul>
           </div>
         )}
@@ -5509,7 +5508,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
-                    <span className="text-xl align-top"><MatchFlag s={singleSpecies} /></span>
+                    {selectedMatch.size > 0 && <span className="text-xl align-top"><MatchFlag s={singleSpecies} /></span>}
                   </span>
                 ) : gbifObsData.length > 0 ? (
                   <FilterBarChart
@@ -5595,7 +5594,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 ) : isSingleSpecies && singleSpecies ? (
                   <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
                     {formatSingleGbif(gbifMetricValue(singleSpecies, gbifChartKey), gbifKeyParts(gbifChartKey).metric)}
-                    <span className="text-xl align-top"><MatchFlag s={singleSpecies} /></span>
+                    {selectedMatch.size > 0 && <span className="text-xl align-top"><MatchFlag s={singleSpecies} /></span>}
                   </span>
                 ) : (
                   <FilterBarChart
@@ -5641,7 +5640,60 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {!isNewAssessments && moreFiltersOpen && (
             <>
-                {/* Country alongside the assessors/reviewers credits, at the top of More Filters. */}
+                {/* Reassessment Triage, full width at the top of More Filters: years
+                    since assessment against GBIF records (not for a single species). */}
+                  {!isNewAssessments && showPriority && (
+                    <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {priorityBox && (
+                            <button type="button" onClick={() => setPriorityBox(null)}
+                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {speciesLoading && assessedSpecies.length === 0 ? (
+                        <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
+                      ) : (
+                        <PriorityScatter
+                          points={priorityPoints}
+                          colors={CATEGORY_COLORS}
+                          yAxis={
+                            // The y axis title is its controls, read as a phrase:
+                            // "[New ▾] GBIF records ([all ▾])", each select sized to
+                            // its chosen option where the browser supports it.
+                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                              </select>
+                              GBIF records (
+                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                              </select>
+                              )
+                            </span>
+                          }
+                          box={priorityBox}
+                          onBoxChange={setPriorityBox}
+                          onPointClick={openSpeciesFromScatter}
+                          selectedKey={selectedSpeciesKey}
+                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                          maxYears={priorityExtent.maxYears}
+                          maxValue={priorityExtent.maxValue}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                {/* Country alongside the assessors/reviewers credits, below the triage. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {countryMapCard}
                   {isSingleSpecies && singleSpecies ? (() => {
@@ -5700,59 +5752,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     />
                   )}
                 </div>
-
-                {/* Reassessment Triage, full width below the map and credits: years
-                    since assessment against GBIF records (not for a single species). */}
-                  {!isNewAssessments && showPriority && (
-                    <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {priorityBox && (
-                            <button type="button" onClick={() => setPriorityBox(null)}
-                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {speciesLoading && assessedSpecies.length === 0 ? (
-                        <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-                      ) : (
-                        <PriorityScatter
-                          points={priorityPoints}
-                          colors={CATEGORY_COLORS}
-                          yAxis={
-                            // The y axis title is its controls, read as a phrase:
-                            // "[New ▾] GBIF records ([all ▾])", each select sized to
-                            // its chosen option where the browser supports it.
-                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                              </select>
-                              GBIF records (
-                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                              </select>
-                              )
-                            </span>
-                          }
-                          box={priorityBox}
-                          onBoxChange={setPriorityBox}
-                          onPointClick={openSpeciesFromScatter}
-                          selectedKey={selectedSpeciesKey}
-                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                          maxYears={priorityExtent.maxYears}
-                          maxValue={priorityExtent.maxValue}
-                        />
-                      )}
-                    </div>
-                  )}
 
                 {/* Growth Form (plants/fungi only) */}
                 {(() => {
@@ -6846,7 +6845,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         >
                           {s.gbif_records.toLocaleString()}
                         </a>
-                        <MatchFlag s={s} />
+                        {/* Opt-in, like the CoL card's ≠: only once a GBIF-match bar or toggle is selected. */}
+                        {selectedMatch.size > 0 && <MatchFlag s={s} />}
                         </>
                       ) : details?.gbifMatchStatus?.matchType === 'HIGHERRANK' || details?.gbifMatchStatus?.matchType === 'NONE' ? (
                         <HoverTooltip

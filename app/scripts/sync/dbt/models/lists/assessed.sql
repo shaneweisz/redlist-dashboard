@@ -28,7 +28,8 @@
  *                            it is in doubt, in sentences, and the CoL
  *                            records it is about (JSON: id, name, authorship, status,
  *                            species, role), from assessment_link, plus each counted
- *                            record's share of the all-records count (records)
+ *                            record's share of the all-records count (records), and
+ *                            the CoL species holding the rest of the count, if any
  *   redlist_authority, redlist_synonyms
  *                            the Red List's authority and its listed synonyms
  *                            (';'-joined), where there is a match note
@@ -56,16 +57,22 @@
 
 -- Each counted match record's share of the count (all records): the records under it, and
 -- under any usage below it (a subspecies, a synonym) that no closer listed record claims.
--- What no listed record claims is the rest of the count ("other CoL names").
+-- What no listed record claims is listed too, one record per CoL species it falls under,
+-- largest first, so every record counted is under a named CoL record.
 WITH RECURSIVE note AS (
   SELECT sis_taxon_id AS sis,
          from_json(match_records, '[{"id":"VARCHAR","name":"VARCHAR","authorship":"VARCHAR","status":"VARCHAR","species":"VARCHAR","role":"VARCHAR"}]') AS recs
   FROM {{ source('link', 'assessment_link') }} WHERE role = 'primary' AND match_records IS NOT NULL
 ),
 listed AS (SELECT DISTINCT sis, r.id FROM note, unnest(recs) t(r) WHERE r.role <> 'not'),
--- Each counted usage and the usages above it, as deep as usage_owner reaches.
+-- Each counted usage and its records, then the usages above it, as deep as usage_owner reaches.
+counted AS (
+  SELECT o.sis_taxon_id AS sis, o.usage_key, sum(c.n)::BIGINT AS n
+  FROM {{ ref('usage_owner') }} o JOIN {{ source('sources', 'occurrences') }} c ON c.usage_key = o.usage_key
+  WHERE o.sis_taxon_id IN (SELECT sis FROM note) GROUP BY ALL
+),
 up(sis, usage_key, anc, depth) AS (
-  SELECT o.sis_taxon_id, o.usage_key, o.usage_key, 0 FROM {{ ref('usage_owner') }} o WHERE o.sis_taxon_id IN (SELECT sis FROM note)
+  SELECT sis, usage_key, usage_key, 0 FROM counted
   UNION ALL
   SELECT u.sis, u.usage_key, t.parent_id, u.depth + 1
   FROM up u JOIN {{ source('sources', 'taxa') }} t ON t.col_id = u.anc WHERE u.depth < 3 AND t.parent_id IS NOT NULL
@@ -73,12 +80,24 @@ up(sis, usage_key, anc, depth) AS (
 nearest AS (SELECT u.sis, u.usage_key, arg_min(u.anc, u.depth) AS id FROM up u JOIN listed l ON l.sis = u.sis AND l.id = u.anc GROUP BY ALL),
 per_record AS (
   SELECT sis, map(list(id), list(n)) AS n
-  FROM (SELECT x.sis, x.id, sum(c.n)::BIGINT AS n FROM nearest x JOIN {{ source('sources', 'occurrences') }} c ON c.usage_key = x.usage_key GROUP BY ALL)
+  FROM (SELECT x.sis, x.id, sum(c.n)::BIGINT AS n FROM nearest x JOIN counted c USING (sis, usage_key) GROUP BY ALL)
   GROUP BY sis
 ),
+-- The rest, by the CoL species each usage falls under.
+unlisted AS (
+  SELECT g.sis, list({'id': g.id, 'name': t.scientific_name, 'authorship': t.authorship, 'status': t.status,
+                      'species': NULL::VARCHAR, 'role': 'also', 'records': g.n} ORDER BY g.n DESC, g.id) AS recs
+  FROM (SELECT c.sis, coalesce(t.species_id, c.usage_key) AS id, sum(c.n)::BIGINT AS n
+        FROM counted c LEFT JOIN {{ source('sources', 'taxa') }} t ON t.col_id = c.usage_key
+        WHERE NOT EXISTS (SELECT 1 FROM nearest x WHERE x.sis = c.sis AND x.usage_key = c.usage_key) GROUP BY ALL) g
+  LEFT JOIN {{ source('sources', 'taxa') }} t ON t.col_id = g.id
+  GROUP BY g.sis
+),
 match_records AS (
-  SELECT note.sis, to_json(list_transform(note.recs, lambda r: struct_insert(r, records := CASE WHEN r.role <> 'not' THEN coalesce(p.n[r.id], 0) END)))::VARCHAR AS records
-  FROM note LEFT JOIN per_record p USING (sis)
+  SELECT note.sis, to_json(list_concat(
+           list_transform(note.recs, lambda r: struct_insert(r, records := CASE WHEN r.role <> 'not' THEN coalesce(p.n[r.id], 0) END)),
+           coalesce(u.recs, [])))::VARCHAR AS records
+  FROM note LEFT JOIN per_record p USING (sis) LEFT JOIN unlisted u USING (sis)
 )
 
 SELECT latest.sis_taxon_id AS id, latest.scientific_name,
