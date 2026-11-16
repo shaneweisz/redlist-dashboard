@@ -119,9 +119,11 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 `link/`: `matches.ts`, `accept-match.ts`, `match-overrides.ts` (with `seeds/match-overrides.tsv`) and `assessment-link.ts`. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
-![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-631-link-explains-itself/01-link-flow-v2.png)
+![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-639-gbif-match/46-link-flow.png)
 
-Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch.
+Generated from a build, with a real species on every branch: `python3 -I docs/diagrams/link_flow.py <build dir> <out.dot>`, then `dot -Tpng -Gdpi=110`. It stops if an example no longer takes its branch, or if question 1's branches no longer cover every assessed species.
+
+In short: GBIF's matcher looks up the bare name and returns its best CoL record plus every other record spelt the same (the alternatives). When only one species has the name, its answer is the link. When several do, or it finds only the genus, the Red List's author citation chooses among those same records: it confirms the matcher's answer, picks another record instead (flagged), or can't tell, and the matcher's answer counts (flagged). Any other doubt is flagged too, and only a name with nothing to count through gets no link.
 
 Matching is two questions, answered separately so each can be explained on its own.
 
