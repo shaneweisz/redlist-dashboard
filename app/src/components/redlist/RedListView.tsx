@@ -733,15 +733,10 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 // used) with how many records each holds, linked to them on GBIF.
 function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string;
   sis_taxon_id?: number | null; assessment_id?: number | null } }) {
-  const link = "underline decoration-dotted hover:text-white";
-  // The Red List side: its name and authority, linked to the assessment, and the synonyms it lists.
+  const link = "underline decoration-dotted decoration-zinc-500 hover:decoration-current hover:text-white";
+  // The Red List side: its name and authority, linked to the assessment.
   const redListUrl = s.sis_taxon_id ? `https://www.iucnredlist.org/species/${s.sis_taxon_id}${s.assessment_id ? `/${s.assessment_id}` : ""}` : null;
   const redListName = <><i>{s.scientific_name}</i>{s.redlist_authority ? ` ${s.redlist_authority}` : ""}</>;
-  const redListLine = (
-    <div>Red List: {redListUrl ? <a className={link} href={redListUrl} target="_blank" rel="noopener noreferrer">{redListName}</a> : redListName}
-      {!!s.redlist_synonyms?.length && <span className="text-zinc-400"> · lists as synonyms: {s.redlist_synonyms.map((n, i) => <span key={n}>{i > 0 ? ", " : ""}<i>{n}</i></span>)}</span>}
-    </div>
-  );
   const flagged = isMatchFlagged(s);
   const cbl = (id: string, label: React.ReactNode) =>
     <a className={link} href={checklistBankUrl(COL_RELEASE.key, id)} target="_blank" rel="noopener noreferrer">{label}</a>;
@@ -767,26 +762,47 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
       : s.gbif_species_key ? [{ id: s.gbif_species_key, name: s.scientific_name ?? "", authorship: null, status: "", species: null, role: "counted" as const }] : [];
     const split = records.some(r => r.records != null);
     const gbif = (id: string) => `/api/gbif-link?key=${encodeURIComponent(id)}`;
+    const section = "text-[10px] uppercase tracking-wide text-zinc-400";
     content = (
-      <div className="text-left space-y-1">
-        <div className="font-semibold">{flagged ? "⚑ " : ""}{kinds.map(barLabel).join(" · ") || "Matched"}</div>
-        {redListLine}
-        {s.match_decided_by && <div>Decided by {s.match_decided_by}</div>}
+      <div className="text-left w-[360px] max-w-full divide-y divide-zinc-700">
+        {/* What kind of match: the bar labels, the doubt first. */}
+        <div className="pb-1.5 flex flex-wrap gap-1">
+          {(kinds.length ? kinds : ["plain" as const]).map((k, i) => (
+            <span key={k} className={`px-1.5 py-px rounded text-[11px] font-medium ${i === 0 && flagged ? "bg-amber-500/20 text-amber-300" : "bg-zinc-700 text-zinc-200"}`}>
+              {i === 0 && flagged ? "⚑ " : ""}{k === "plain" ? "Matched" : barLabel(k)}
+            </span>
+          ))}
+          {s.match_decided_by && <span className="px-1.5 py-px text-[11px] text-zinc-400">Decided by {s.match_decided_by}</span>}
+        </div>
+        {/* The Red List side. */}
+        <div className="py-1.5">
+          <div className={section}>Red List</div>
+          <div>{redListUrl ? <a className={link} href={redListUrl} target="_blank" rel="noopener noreferrer">{redListName}</a> : redListName}</div>
+          {!!s.redlist_synonyms?.length && (
+            <div className="text-[11px] text-zinc-400">lists as synonyms: {s.redlist_synonyms.map((n, i) => <span key={n}>{i > 0 ? ", " : ""}<i>{n}</i></span>)}</div>
+          )}
+        </div>
+        {/* CoL's records: each with its status beneath, and the records it holds on the right. */}
         {records.length > 0 && (
-          <div>
-            <div className="text-zinc-400">In CoL ({COL_RELEASE.alias}){split ? ", with the records counted under each (all records)" : ""}:</div>
-            <ul className="space-y-0.5">
+          <div className="pt-1.5">
+            <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 items-baseline">
+              <div className={section}>In CoL ({COL_RELEASE.alias})</div>
+              <div className={`${section} text-right`}>{split ? "All records" : ""}</div>
               {records.map(r => (
-                <li key={`${r.id}-${r.role}`}>
-                  {cbl(r.id, <><i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}</>)}
-                  {r.status && <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? <> of <i>{r.species}</i></> : null}</span>}
-                  {r.role === "not"
-                    ? <span className="ml-1 text-zinc-500">· not counted</span>
-                    : <span className="ml-1 text-amber-400 tabular-nums">· <a className={link} href={gbif(r.id)} target="_blank" rel="noopener noreferrer"
-                        title="Its records on GBIF">{r.records != null ? `${r.records.toLocaleString()} ↗` : "counted ↗"}</a></span>}
-                </li>
+                <React.Fragment key={`${r.id}-${r.role}`}>
+                  <div className={`min-w-0 ${r.role === "not" ? "opacity-50" : ""}`}>
+                    <div>{cbl(r.id, <><i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}</>)}</div>
+                    {r.status && <div className="text-[11px] text-zinc-400">{r.status}{r.species && r.species !== r.name ? <> of <i>{r.species}</i></> : null}</div>}
+                  </div>
+                  <div className="text-right tabular-nums whitespace-nowrap">
+                    {r.role === "not"
+                      ? <span className="text-zinc-500" title="Not counted">—</span>
+                      : <a className={`${link} text-amber-300`} href={gbif(r.id)} target="_blank" rel="noopener noreferrer" title="Its records on GBIF">
+                          {r.records != null ? r.records.toLocaleString() : "counted"} ↗</a>}
+                  </div>
+                </React.Fragment>
               ))}
-            </ul>
+            </div>
           </div>
         )}
       </div>
