@@ -64,7 +64,7 @@
 import { decideKey, isSeparatelyAssessed, isCoLRespelling } from "./species-key";
 import { coverer, coverSynonymSpecies, coverTwins, coverSameNameSynonyms, coverUndecidedCandidates, dropCrossPhylum,
   oneOwnerPerUsage, type LinkRow, type SynonymCandidate, type AcceptedSpecies, type SameNameSynonym, type Candidate as UndecidedCandidate } from "./rules";
-import { acceptMatch, authorPick, type MatchAnswer, type QueueReason } from "./accept-match";
+import { acceptMatch, citationPick, type MatchAnswer, type QueueReason } from "./accept-match";
 import { orthographicallySame } from "./name-variants";
 import { compareAuthors } from "../../../src/lib/authors";
 import { readOverrides, resolveOverride, type Candidate, type MatchOverride } from "./match-overrides";
@@ -135,13 +135,13 @@ export async function buildLink(
   // record with that bare name there: flagged, labelled with the doubt, and
   // queued for review. When it answers only the genus, or a homonym the Red
   // List's author citation rules out, the citation may pick one of CoL's records
-  // with the name instead (authorPick), flagged too. No link when the Red List marks the name another taxon, or
+  // with the name instead (citationPick), flagged too. No link when the Red List marks the name another taxon, or
   // CoL has nothing to pick.
   const guess = (s: { name: string; authority: string | null; sis: number }, m: MatchAnswer | undefined, reason: QueueReason) => {
     if (!m) return;
     if (reason === "no species match" || reason === "homonym the authors don't decide") {
-      const id = authorPick(s, m, (u) => speciesOf.get(u) ?? null);
-      if (id) { nameReason.set(s.sis, "flagged: picked by the author citation"); picks.push({ sis: s.sis, col_id: id, basis: "matcher", by_: null }); return; }
+      const id = citationPick(s, m, (u) => speciesOf.get(u) ?? null);
+      if (id && id !== m.matcher_col_id) { nameReason.set(s.sis, "flagged: picked by the author citation"); picks.push({ sis: s.sis, col_id: id, basis: "matcher", by_: null }); return; }
       if (reason === "no species match") return;
     }
     if (!m.matcher_col_id || NO_GUESS.has(reason)) return;
@@ -516,6 +516,8 @@ function matchNotes(links: LinkRow[], ctx: {
   };
   const alsoRows = new Map<number, LinkRow[]>();
   for (const l of links) if (l.role === "covered" && l.counted) alsoRows.set(l.sis_taxon_id, [...(alsoRows.get(l.sis_taxon_id) ?? []), l]);
+  // In id order, so a note and its records read the same every build.
+  for (const rows of alsoRows.values()) rows.sort((x, y) => (x.col_taxon_id ?? "").localeCompare(y.col_taxon_id ?? ""));
 
   for (const l of links) {
     if (l.role !== "primary") continue;

@@ -4,7 +4,7 @@
  * against COL26.6 XR, trimmed to the fields the rule reads.
  */
 import { describe, it, expect } from "vitest";
-import { acceptMatch, authorPick, type MatchAnswer } from "../sync/link/accept-match";
+import { acceptMatch, citationPick, type MatchAnswer } from "../sync/link/accept-match";
 
 const answer = (over: Partial<MatchAnswer>): MatchAnswer => ({
   matcher_col_id: "U1", matcher_name: "Puma concolor", matcher_authorship: "(Linnaeus, 1771)", matcher_rank: "SPECIES",
@@ -80,39 +80,45 @@ describe("acceptMatch", () => {
     expect(acceptMatch({ name: "Vepris onanae", authority: "Cheek ined." }, m, speciesOf({}))).toEqual({ accepted: true, why: "unique name" });
   });
 
-  describe("authorPick: the matcher answers only the genus", () => {
+  describe("citationPick: the matcher answers only the genus", () => {
     const genus = (alts: MatchAnswer["alternatives"]) => answer({ match_type: "HIGHERRANK", matcher_rank: "GENUS", matcher_name: "Pittosporum", alternatives: alts });
     const syn = (col_id: string, authorship: string) => ({ col_id, name: "Pittosporum verticillatum", authorship, rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" });
     const three = genus([syn("M", "Montrouz."), syn("W", "Wall."), syn("B", "Bojer")]);
     const of = speciesOf({ M: "S1", W: "S2", B: "S3" });
     it("picks the one record whose citation matches the Red List's (Pittosporum verticillatum Bojer)", () => {
-      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, three, of)).toBe("B");
+      expect(citationPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, three, of)).toBe("B");
     });
     it("picks none when no citation matches, there is none, or matching records lead to different species", () => {
-      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Smith" }, three, of)).toBeNull();
-      expect(authorPick({ name: "Pittosporum verticillatum", authority: null }, three, of)).toBeNull();
-      expect(authorPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, genus([syn("B", "Bojer"), syn("B2", "Bojer")]), speciesOf({ B: "S3", B2: "S4" }))).toBeNull();
+      expect(citationPick({ name: "Pittosporum verticillatum", authority: "Smith" }, three, of)).toBeNull();
+      expect(citationPick({ name: "Pittosporum verticillatum", authority: null }, three, of)).toBeNull();
+      expect(citationPick({ name: "Pittosporum verticillatum", authority: "Bojer" }, genus([syn("B", "Bojer"), syn("B2", "Bojer")]), speciesOf({ B: "S3", B2: "S4" }))).toBeNull();
     });
     it("picks none for a name the Red List marks as another taxon", () => {
-      expect(authorPick({ name: "Pittosporum aff. verticillatum", authority: "Bojer" }, three, of)).toBeNull();
+      expect(citationPick({ name: "Pittosporum aff. verticillatum", authority: "Bojer" }, three, of)).toBeNull();
     });
   });
 
-  describe("authorPick: the matcher answers a homonym the citation rules out", () => {
+  describe("citationPick: the matcher answers a homonym the citation rules out", () => {
     const lopez = { col_id: "L", name: "Weinmannia heterophylla", authorship: "Ruiz & Pav. ex López", rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" };
     const kunth = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: "Kunth", alternatives: [lopez] });
     const of = speciesOf({ K: "K", L: "C" });
     it("picks the record the citation matches over the matcher's (Weinmannia heterophylla Ruiz & Pav.)", () => {
       expect(acceptMatch({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, kunth, of)).toEqual({ accepted: false, reason: "homonym the authors don't decide" });
-      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, kunth, of)).toBe("L");
+      expect(citationPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, kunth, of)).toBe("L");
+    });
+    it("picks the matcher's own answer when the citation matches it alone, which acceptMatch then takes as settled", () => {
+      const ruiz = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: "Ruiz & Pav.",
+        alternatives: [{ ...lopez, authorship: "Kunth" }] });
+      expect(citationPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, ruiz, of)).toBe("K");
+      expect(acceptMatch({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, ruiz, of)).toEqual({ accepted: true, why: "authors pick it" });
     });
     it("picks none when the matcher's answer has no citation, so may be the same species (Vireo chivi)", () => {
       const bare = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: null, alternatives: [lopez] });
-      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, bare, of)).toBeNull();
+      expect(citationPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, bare, of)).toBeNull();
     });
     it("picks none when the citation matches the matcher's answer as well", () => {
       const both = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: "Ruiz & Pav.", alternatives: [lopez] });
-      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, both, of)).toBeNull();
+      expect(citationPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, both, of)).toBeNull();
     });
   });
 

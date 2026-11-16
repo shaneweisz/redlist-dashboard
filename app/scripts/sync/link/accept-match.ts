@@ -118,43 +118,46 @@ export function acceptMatch(
     if (m.matcher_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
     return yes("CoL holds it twice");
   }
-  if (same(species.authority, m.matcher_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
-    return yes("authors pick it");
-  }
+  // A homonym: settled when the citation picks the matcher's own answer.
+  if (citationPick(species, m, speciesOf) === m.matcher_col_id) return yes("authors pick it");
   return no("homonym the authors don't decide");
 }
 
 /**
- * The Red List's author citation picks one of CoL's records with the name: the
- * record whose citation matches, when the matching records all lead to one
- * species. A pick the matcher didn't make, so the link is flagged. GBIF's own
- * search lists the same records as options. Two cases:
- *   - the matcher answers only the genus, because every CoL record with the name
- *     is a synonym of a different species (Pittosporum verticillatum, by
- *     Montrouzier, Wallich and Bojer);
- *   - the matcher answers a homonym the citation rules out: Weinmannia
- *     heterophylla Ruiz & Pav. is CoL's "Ruiz & Pav. ex López", not Kunth's the
- *     matcher takes.
- * The matcher's own answer is a candidate too, so a citation matching it as well
- * as another record picks neither. And the citation must clearly rule the
- * matcher's answer out: one with no citation, or a year apart, may be the same
- * species (Vireo chivi, accepted with no author, holds GBIF's 155k records; the
- * Red List's "(Vieillot, 1817)" matches only an old synonym of Vireo olivaceus).
+ * Which of CoL's records with the name the Red List's author citation picks: the
+ * one question behind every author-decided link. The records are the matcher's
+ * answer and its alternatives with the same name (misapplied names aside). The
+ * citation picks when the records whose citation matches all lead to one
+ * species, and:
+ *   - it is the matcher's answer: the link is settled ("authors pick it",
+ *     Centropogon australis (White, 1790), the fish, not Gleason's plant);
+ *   - it is another record, and the matcher answered only the genus (every
+ *     record a synonym of a different species: Pittosporum verticillatum Bojer)
+ *     or a record the citation clearly rules out (Weinmannia heterophylla Ruiz &
+ *     Pav. is CoL's "Ruiz & Pav. ex López", not Kunth's): that record, a pick the
+ *     matcher didn't make, so the link is flagged.
+ * A matcher answer with no citation, or one only a year or an initial apart, is
+ * not ruled out: it may be the same species (Vireo chivi, accepted in CoL with no
+ * author, holds GBIF's 155k records; "(Vieillot, 1817)" matches only an old
+ * synonym of Vireo olivaceus). No pick for a name the Red List marks as another
+ * taxon, or without a citation.
  */
-export function authorPick(
+export function citationPick(
   species: { name: string; authority: string | null },
   m: MatchAnswer,
   speciesOf: (usageId: string) => string | null,
 ): string | null {
   const authority = citation(species.authority);
   if (!authority || INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(authority)) return null;
-  if (m.matcher_rank === "SPECIES" && compareAuthors(authority, m.matcher_authorship) !== "other") return null;
-  const answer = m.matcher_col_id && m.matcher_name
-    ? [{ col_id: m.matcher_col_id, name: m.matcher_name, authorship: m.matcher_authorship, rank: m.matcher_rank, status: m.matcher_status }] : [];
-  const sameName = [...answer, ...m.alternatives.filter((a) => a.col_id !== m.matcher_col_id)]
-    .filter((a) => a.rank === "SPECIES" && a.status !== "MISAPPLIED" && binomial(a.name) === binomial(species.name));
-  const picked = sameName.filter((a) => compareAuthors(authority, a.authorship) === "same");
+  const answer = m.matcher_col_id && m.matcher_name && m.matcher_rank === "SPECIES"
+    ? { col_id: m.matcher_col_id, name: m.matcher_name, authorship: m.matcher_authorship, rank: m.matcher_rank, status: m.matcher_status } : null;
+  const name = binomial(answer ? answer.name : species.name);
+  const records = [...(answer ? [answer] : []), ...m.alternatives.filter((a) => a.col_id !== m.matcher_col_id)]
+    .filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === name);
+  const picked = records.filter((a) => compareAuthors(authority, a.authorship) === "same");
   const leadTo = new Set(picked.map((a) => speciesOf(a.col_id)));
-  if (picked.length === 0 || leadTo.size !== 1 || leadTo.has(null)) return null;
-  return picked[0].col_id;
+  if (leadTo.size !== 1 || leadTo.has(null)) return null;
+  if (answer && picked.includes(answer)) return answer.col_id;
+  if (answer && compareAuthors(authority, answer.authorship) !== "other") return null;
+  return picked.find((a) => a.rank === "SPECIES")?.col_id ?? null;
 }
