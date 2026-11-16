@@ -133,16 +133,16 @@ export async function buildLink(
   const nameCtx = new Map<number, { why?: keyof typeof WHY; variant?: true; override?: MatchOverride }>();
   // The matcher's answer is the link even when the rule doubts it, as GBIF files a
   // record with that bare name there: flagged, labelled with the doubt, and
-  // queued for review. When it answers only the genus, the Red List's author
-  // citation may still pick one of CoL's records with the name (authorPick),
-  // flagged too. No link when the Red List marks the name another taxon, or
+  // queued for review. When it answers only the genus, or a homonym the Red
+  // List's author citation rules out, the citation may pick one of CoL's records
+  // with the name instead (authorPick), flagged too. No link when the Red List marks the name another taxon, or
   // CoL has nothing to pick.
   const guess = (s: { name: string; authority: string | null; sis: number }, m: MatchAnswer | undefined, reason: QueueReason) => {
     if (!m) return;
-    if (reason === "no species match") {
+    if (reason === "no species match" || reason === "homonym the authors don't decide") {
       const id = authorPick(s, m, (u) => speciesOf.get(u) ?? null);
-      if (id) { nameReason.set(s.sis, "flagged: picked by the author citation"); picks.push({ sis: s.sis, col_id: id, basis: "matcher", by_: null }); }
-      return;
+      if (id) { nameReason.set(s.sis, "flagged: picked by the author citation"); picks.push({ sis: s.sis, col_id: id, basis: "matcher", by_: null }); return; }
+      if (reason === "no species match") return;
     }
     if (!m.matcher_col_id || NO_GUESS.has(reason)) return;
     nameReason.set(s.sis, `flagged: ${reason}`);
@@ -536,7 +536,11 @@ function matchNotes(links: LinkRow[], ctx: {
         species: [sameAsAnswer ? m?.matcher_accepted_name : undefined, l.col_species_id ? ctx.usages.get(l.col_species_id)?.name : undefined, u?.name].find((x) => !!x) ?? null,
         role: "counted" as const };
     })() : null;
-    const same = pick && m ? m.alternatives.filter((a) => a.col_id !== pick.id && a.status !== "MISAPPLIED" && binomialOf(a.name) === binomialOf(pick.name))
+    // The matcher's own answer too, where the link isn't it (an author pick over a homonym).
+    const answerAlt = m?.matcher_col_id && m.matcher_name && m.matcher_rank === "SPECIES"
+      ? [{ col_id: m.matcher_col_id, name: m.matcher_name, authorship: m.matcher_authorship, rank: m.matcher_rank, status: m.matcher_status, accepted_name: m.matcher_accepted_name ?? null }] : [];
+    const same = pick && m ? [...answerAlt, ...m.alternatives.filter((a) => a.col_id !== m.matcher_col_id)]
+      .filter((a) => a.col_id !== pick.id && a.status !== "MISAPPLIED" && binomialOf(a.name) === binomialOf(pick.name))
       .map((a) => ({ id: a.col_id, name: a.name, authorship: a.authorship, status: status(a.status), species: a.accepted_name ?? a.name, role: "not" as const })) : [];
     const p = pick ? nameAuth(pick.name, pick.authorship) : "";
     const filed = pick && pick.status !== "accepted" ? `, ${an(pick.status)} of ${pick.species}` : "";
@@ -567,7 +571,9 @@ function matchNotes(links: LinkRow[], ctx: {
         "synonym by other authors": `The Red List cites ${sp.authority ?? "no author"}; CoL's ${pick.name} is by ${pick.authorship ?? "no author"}${filed}. It may be a different species.`,
         "ambiguous synonym": `CoL marks ${p} as an ambiguous synonym, filed under ${pick.species}.`,
         "spelling variant": `CoL has no ${sp.name}. GBIF's matcher takes ${p}${filed}, spelt differently, and the naming codes don't make the two one name, so it may be another species.`,
-        "picked by the author citation": `CoL has ${same.length + 1} records named ${pick.name}, each a synonym of a different species, so GBIF's matcher picks none and answers only the genus. The Red List cites ${sp.authority}, which matches only ${p}${filed}, so that one counts.`,
+        "picked by the author citation": m?.match_type === "HIGHERRANK"
+          ? `CoL has ${same.length + 1} records named ${pick.name}, each a synonym of a different species, so GBIF's matcher picks none and answers only the genus. The Red List cites ${sp.authority}, which matches only ${p}${filed}, so that one counts.`
+          : `CoL has ${same.length + 1} records named ${pick.name}. GBIF's matcher takes the one by ${m?.matcher_authorship ?? "no author"}, but the Red List cites ${sp.authority}, which matches only ${p}${filed}, so that one counts.`,
         "accepted and a synonym in CoL": `CoL holds ${pick.name} both as an accepted species and as a synonym of ${synonymRecord?.species ?? "another species"}. ${counted}`,
       }[doubt] ?? `Flagged: ${doubt}.`);
       records = [pick, ...same];

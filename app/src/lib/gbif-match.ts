@@ -30,7 +30,7 @@ export interface MatchBar { key: MatchKey | CountsKey; label: string; group: Mat
 /** The card's bars, in order. "plain" and "renamed" are the header's Exact count, not bars. */
 export const MATCH_BARS: MatchBar[] = [
   { key: "f_homonym", label: "Homonym the author doesn't settle", group: "flagged" },
-  { key: "f_author_pick", label: "Picked by author, matcher unsure", group: "flagged" },
+  { key: "f_author_pick", label: "Picked by the author citation", group: "flagged" },
   { key: "f_spelling", label: "Different spelling in CoL", group: "flagged" },
   { key: "f_confidence", label: "Matcher not fully sure", group: "flagged" },
   { key: "f_other_authors", label: "CoL name by other authors", group: "flagged" },

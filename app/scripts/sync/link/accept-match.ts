@@ -125,12 +125,21 @@ export function acceptMatch(
 }
 
 /**
- * When the matcher answers only the genus because every CoL record with the
- * name is a synonym of a different species (Pittosporum verticillatum, by
- * Montrouzier, Wallich and Bojer), the Red List's author citation can still
- * pick one: the record whose citation matches, when the matching records all
- * lead to one species. A pick the matcher didn't make, so the link is flagged.
- * GBIF's own search lists the same records as options.
+ * The Red List's author citation picks one of CoL's records with the name: the
+ * record whose citation matches, when the matching records all lead to one
+ * species. A pick the matcher didn't make, so the link is flagged. GBIF's own
+ * search lists the same records as options. Two cases:
+ *   - the matcher answers only the genus, because every CoL record with the name
+ *     is a synonym of a different species (Pittosporum verticillatum, by
+ *     Montrouzier, Wallich and Bojer);
+ *   - the matcher answers a homonym the citation rules out: Weinmannia
+ *     heterophylla Ruiz & Pav. is CoL's "Ruiz & Pav. ex López", not Kunth's the
+ *     matcher takes.
+ * The matcher's own answer is a candidate too, so a citation matching it as well
+ * as another record picks neither. And the citation must clearly rule the
+ * matcher's answer out: one with no citation, or a year apart, may be the same
+ * species (Vireo chivi, accepted with no author, holds GBIF's 155k records; the
+ * Red List's "(Vieillot, 1817)" matches only an old synonym of Vireo olivaceus).
  */
 export function authorPick(
   species: { name: string; authority: string | null },
@@ -139,7 +148,11 @@ export function authorPick(
 ): string | null {
   const authority = citation(species.authority);
   if (!authority || INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(authority)) return null;
-  const sameName = m.alternatives.filter((a) => a.rank === "SPECIES" && a.status !== "MISAPPLIED" && binomial(a.name) === binomial(species.name));
+  if (m.matcher_rank === "SPECIES" && compareAuthors(authority, m.matcher_authorship) !== "other") return null;
+  const answer = m.matcher_col_id && m.matcher_name
+    ? [{ col_id: m.matcher_col_id, name: m.matcher_name, authorship: m.matcher_authorship, rank: m.matcher_rank, status: m.matcher_status }] : [];
+  const sameName = [...answer, ...m.alternatives.filter((a) => a.col_id !== m.matcher_col_id)]
+    .filter((a) => a.rank === "SPECIES" && a.status !== "MISAPPLIED" && binomial(a.name) === binomial(species.name));
   const picked = sameName.filter((a) => compareAuthors(authority, a.authorship) === "same");
   const leadTo = new Set(picked.map((a) => speciesOf(a.col_id)));
   if (picked.length === 0 || leadTo.size !== 1 || leadTo.has(null)) return null;

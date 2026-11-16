@@ -98,6 +98,24 @@ describe("acceptMatch", () => {
     });
   });
 
+  describe("authorPick: the matcher answers a homonym the citation rules out", () => {
+    const lopez = { col_id: "L", name: "Weinmannia heterophylla", authorship: "Ruiz & Pav. ex López", rank: "SPECIES", status: "AMBIGUOUS_SYNONYM" };
+    const kunth = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: "Kunth", alternatives: [lopez] });
+    const of = speciesOf({ K: "K", L: "C" });
+    it("picks the record the citation matches over the matcher's (Weinmannia heterophylla Ruiz & Pav.)", () => {
+      expect(acceptMatch({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, kunth, of)).toEqual({ accepted: false, reason: "homonym the authors don't decide" });
+      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, kunth, of)).toBe("L");
+    });
+    it("picks none when the matcher's answer has no citation, so may be the same species (Vireo chivi)", () => {
+      const bare = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: null, alternatives: [lopez] });
+      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, bare, of)).toBeNull();
+    });
+    it("picks none when the citation matches the matcher's answer as well", () => {
+      const both = answer({ matcher_col_id: "K", matcher_name: "Weinmannia heterophylla", matcher_authorship: "Ruiz & Pav.", alternatives: [lopez] });
+      expect(authorPick({ name: "Weinmannia heterophylla", authority: "Ruiz & Pav." }, both, of)).toBeNull();
+    });
+  });
+
   it("queues names the Red List marks as unsettled (Heliotropium aff. wagneri, [non Vierh.])", () => {
     const m = answer({ matcher_name: "Heliotropium wagneri", matcher_authorship: "Vierh." });
     expect(acceptMatch({ name: "Heliotropium aff. wagneri", authority: null }, m, speciesOf({})).accepted).toBe(false);

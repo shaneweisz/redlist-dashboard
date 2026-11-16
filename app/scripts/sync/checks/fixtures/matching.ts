@@ -539,10 +539,26 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Galium palustre",
     authority: "L.",
-    why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means. The matcher's answer is the link now, flagged: flagged, and queued for review. The agent pilot found the answer wrong (3F682, under Hydrogalium palustre, is the species): a decision should correct it.",
+    why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means. The matcher's answer is the link now, flagged: flagged, and queued for review. The citation (L.) can't rule M.Bieb.'s out on its own: a bare initial is unclear to compareAuthors, so no author pick. The agent pilot found the answer wrong (3F682, under Hydrogalium palustre, is the species): a decision should correct it.",
     source: "link/accept-match.ts",
     confirmed: NOVEMBER_12,
     expect: { assessed: true, rules: ["flagged: homonym the authors don't decide"] },
+  },
+  {
+    name: "Buteo rufinus",
+    authority: "(Cretzschmar, 1827)",
+    why: "CoL holds Cretzschmar's long-legged buzzard (accepted, dated 1829) and a Buteo rufinus credited to BirdLife International under Buteo socotraensis. The Red List's citation is dated 1827, so it matches neither record for sure: the matcher's answer counts, flagged as a homonym the authors don't settle.",
+    source: "link/accept-match.ts",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Buteo rufinus", rules: ["flagged: homonym the authors don't decide"] },
+  },
+  {
+    name: "Weinmannia heterophylla",
+    authority: "Ruiz & Pav.",
+    why: "CoL holds Kunth's Weinmannia heterophylla (accepted, the matcher's answer) and Ruiz & Pav. ex López's (an ambiguous synonym under Weinmannia cordata). The Red List cites Ruiz & Pav., the latter: it counts, flagged, only records under its own name. Before, Kunth's 70 records counted.",
+    source: "link/accept-match.ts authorPick",
+    confirmed: NOVEMBER_12,
+    expect: { linkedTo: "Weinmannia cordata", rules: ["flagged: picked by the author citation", "candidate"] },
   },
   {
     name: "Vepris onanae",

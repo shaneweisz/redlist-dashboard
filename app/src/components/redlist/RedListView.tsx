@@ -730,7 +730,7 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 // Beside a GBIF count whose match isn't one plain name, once a GBIF-match bar is selected: ⚑ (amber) when it is
 // flagged, else a faint ⓘ that darkens on row hover. Either opens the bare facts:
 // the Red List name, the CoL records involved (each linked to the release the sync
-// used) with how many records each holds, linked to them on GBIF, and all GBIF's records counted.
+// used) with how many records each holds, linked to them on GBIF.
 function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string;
   sis_taxon_id?: number | null; assessment_id?: number | null } }) {
   const link = "underline decoration-dotted hover:text-white";
@@ -789,7 +789,6 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
             </ul>
           </div>
         )}
-        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
       </div>
     );
   }
