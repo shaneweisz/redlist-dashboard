@@ -13,7 +13,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, countsText, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -727,11 +727,11 @@ function HoverTooltip({ children, text }: { children: React.ReactNode; text: str
 }
 
 
-// Beside every GBIF count: ⚑ (amber) when its match to CoL is flagged, else a
-// faint ⓘ that darkens on row hover. Either opens how the count was matched: the
-// Red List name and the CoL record counted, a short explanation, the CoL records
-// involved (each linked to the release the sync used), and GBIF's records.
-function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string;
+// Beside a GBIF count whose match isn't one plain name: ⚑ (amber) when it is
+// flagged, else a faint ⓘ that darkens on row hover. Either opens the bare facts:
+// the Red List name, the CoL records involved (each linked to the release the sync
+// used) with how many records each holds, and GBIF's records.
+function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null; col_id?: string | null; scientific_name?: string; gbif_all_records_count?: number | null;
   sis_taxon_id?: number | null; assessment_id?: number | null } }) {
   const link = "underline decoration-dotted hover:text-white";
   // The Red List side: its name and authority, linked to the assessment, and the synonyms it lists.
@@ -751,48 +751,44 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
       <div className="text-left space-y-1">
         <div className="font-semibold">⚑ May be an assessed species</div>
         <div>
-          The Red List assesses {s.may_be_assessed.map((n, i) => (
-            <span key={n}>{i > 0 ? " or " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
-          ))}, whose name leads to this CoL species, but whose own match is flagged or unresolved. This may be the same species.
+          Red List: {s.may_be_assessed.map((n, i) => (
+            <span key={n}>{i > 0 ? ", " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
+          ))} <span className="text-zinc-400">· its match leads here, flagged or unresolved</span>
         </div>
         {s.col_id && cbl(s.col_id, `This species in CoL (${COL_RELEASE.alias}) ↗`)}
       </div>
     );
-  } else if (s.match === "plain" && !s.match_note) {
-    // Exact: one name, the same in both.
-    content = (
-      <div className="text-left space-y-1">
-        <div className="font-semibold">Exact match</div>
-        <div><i>{s.scientific_name}</i> appears once in Catalogue of Life, accepted under the same name. GBIF counts its records there.</div>
-        <div className="flex gap-3">
-          {redListUrl && <a className={link} href={redListUrl} target="_blank" rel="noopener noreferrer">On the Red List ↗</a>}
-          {s.gbif_species_key && cbl(s.gbif_species_key, `In CoL (${COL_RELEASE.alias}) ↗`)}
-        </div>
-        {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
-      </div>
-    );
+  } else if (s.match === "plain" && !s.match_records?.length) {
+    // One name, accepted under it in CoL, nothing else counted: nothing to explain.
+    return null;
   } else {
     const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
-    const counted = s.match_records?.find(r => r.role === "counted");
+    const records = s.match_records?.length ? s.match_records
+      : s.gbif_species_key ? [{ id: s.gbif_species_key, name: s.scientific_name ?? "", authorship: null, status: "", species: null, role: "counted" as const }] : [];
+    // What no listed record holds: records under other CoL names the species counts.
+    const split = records.some(r => r.records != null);
+    const rest = split && s.gbif_all_records_count != null ? s.gbif_all_records_count - records.reduce((a, r) => a + (r.records ?? 0), 0) : 0;
     content = (
       <div className="text-left space-y-1">
-        <div className="font-semibold">{flagged ? "⚑ Flagged: " : ""}{kinds.map(barLabel).join(" · ") || "How this count was matched"}</div>
-        {/* Both sides first: the name as the Red List cites it, and the CoL record counted. */}
-        <div className="text-zinc-300">
-          {redListLine}
-          {counted && <div>CoL: {cbl(counted.id, <><i>{counted.name}</i>{counted.authorship ? ` ${counted.authorship}` : ""}</>)}{counted.status !== "accepted" && counted.species && counted.species !== counted.name ? <> → <i>{counted.species}</i></> : null}</div>}
-        </div>
-        <div>{s.match_note ?? countsText(s)}</div>
-        {(s.match_records?.length ?? 0) > 1 && (
-          <ul className="space-y-0.5">
-            {s.match_records!.map(r => (
-              <li key={r.id}>
-                {cbl(r.id, <><i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}</>)}
-                <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? ` of ${r.species}` : ""}</span>
-                {r.role !== "not" && <span className="ml-1 text-amber-400">← {r.role === "counted" ? "counted" : "also counted"}</span>}
-              </li>
-            ))}
-          </ul>
+        <div className="font-semibold">{flagged ? "⚑ " : ""}{kinds.map(barLabel).join(" · ") || "Matched"}</div>
+        {redListLine}
+        {s.match_decided_by && <div>Decided by {s.match_decided_by}</div>}
+        {records.length > 0 && (
+          <div>
+            <div className="text-zinc-400">In CoL ({COL_RELEASE.alias}){split ? ", with the records counted under each (all records)" : ""}:</div>
+            <ul className="space-y-0.5">
+              {records.map(r => (
+                <li key={`${r.id}-${r.role}`}>
+                  {cbl(r.id, <><i>{r.name}</i>{r.authorship ? ` ${r.authorship}` : ""}</>)}
+                  {r.status && <span className="text-zinc-400">, {r.status}{r.species && r.species !== r.name ? <> of <i>{r.species}</i></> : null}</span>}
+                  {r.role === "not"
+                    ? <span className="ml-1 text-zinc-500">· not counted</span>
+                    : <span className="ml-1 text-amber-400 tabular-nums">· {r.records != null ? r.records.toLocaleString() : "counted"}</span>}
+                </li>
+              ))}
+              {rest > 0 && <li className="text-zinc-400">Other CoL names <span className="ml-1 text-amber-400 tabular-nums">· {rest.toLocaleString()}</span></li>}
+            </ul>
+          </div>
         )}
         {s.gbif_species_key && <a className={link} href={`/api/gbif-link?key=${s.gbif_species_key}`} target="_blank" rel="noopener noreferrer">The records counted, on GBIF ↗</a>}
       </div>

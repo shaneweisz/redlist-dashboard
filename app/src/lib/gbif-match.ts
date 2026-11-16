@@ -92,21 +92,26 @@ export function countsKeys(r: { match_counts?: unknown; match_other_names?: unkn
 const GROUP = new Map<string, MatchGroup>(MATCH_BARS.map((b) => [b.key, b.group]));
 
 /** A CoL record a match note names (the sync's match_records): counted through, also counted, or named only. */
-export interface NoteRecord { id: string; name: string; authorship: string | null; status: string; species: string | null; role: "counted" | "also" | "not" }
+export interface NoteRecord {
+  id: string; name: string; authorship: string | null; status: string; species: string | null; role: "counted" | "also" | "not";
+  /** A counted record's share of the all-records count: records under it, or under a usage below it no closer record claims. */
+  records?: number | null;
+}
 
 /** The species' match facts as the list carries them. */
 export interface SpeciesMatch {
   match?: MatchKey | null;
   match_counts_keys?: CountsKey[];
   match_other_names?: number | null;
-  /** The Red List's authority and listed synonyms, where there is a match note. */
+  /** The Red List's authority and listed synonyms, where there are match records. */
   redlist_authority?: string | null;
   redlist_synonyms?: string[];
   /** NE rows: the assessed species it may be. */
   may_be_assessed?: string[];
-  /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */
-  match_note?: string | null;
+  /** A match that isn't plain: the CoL records it is about. */
   match_records?: NoteRecord[];
+  /** An override: who decided it (a GitHub handle, agent:<model>). */
+  match_decided_by?: string | null;
 }
 
 export const isFlagged = (s: SpeciesMatch) => GROUP.get(s.match ?? "plain") === "flagged" || !!s.may_be_assessed?.length;
@@ -136,15 +141,6 @@ export function tallyMatch(t: ReturnType<typeof newMatchTally>, s: SpeciesMatch)
 export const isExact = (s: SpeciesMatch) => s.match === "plain" || s.match === "renamed";
 
 export const barLabel = (k: string) => (k === "renamed" ? "Exact, under CoL's accepted name" : MATCH_BARS.find((b) => b.key === k)?.label ?? k);
-
-/** The quiet note beside a count that includes other names, or only its own. */
-export function countsText(s: SpeciesMatch): string | null {
-  const k = s.match_counts_keys ?? [];
-  const n = s.match_other_names ?? 0;
-  if (k.includes("other_names")) return `Also counts records under ${n === 1 ? "1 other CoL name" : `${n} other CoL names`} for this species.`;
-  if (k.includes("own_name")) return "CoL folds this species into a broader one, so only records under its own name count.";
-  return null;
-}
 
 /** A CoL record in the release the sync linked against (ChecklistBank). */
 export const checklistBankUrl = (datasetKey: string, id: string) => `https://www.checklistbank.org/dataset/${datasetKey}/taxon/${encodeURIComponent(id)}`;

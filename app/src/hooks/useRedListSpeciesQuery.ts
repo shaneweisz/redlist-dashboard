@@ -55,9 +55,9 @@ export interface RedListSpecies {
   redlist_synonyms?: string[];
   /** NE rows: the assessed species it may be, when their match is flagged or waiting. */
   may_be_assessed?: string[];
-  /** A match that isn't plain: how it was matched or why it is in doubt, and the CoL records it is about. */
-  match_note?: string | null;
+  /** A match that isn't plain: the CoL records it is about. */
   match_records?: NoteRecord[];
+  match_decided_by?: string | null;
   /**
    * The counts the view shows, for the record mode it is in. Set by RedListView
    * when species arrive (inGbifMode), so charts, filters, sorting and the table

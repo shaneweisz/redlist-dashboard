@@ -584,7 +584,8 @@ function matchNotes(links: LinkRow[], ctx: {
       records = all;
     }
     // Found under a synonym: GBIF files the records under CoL's accepted name (Sorbus greenii → Aria greenii).
-    if (sentences.length === 0 && l.verdict === "own" && pick.status !== "accepted") {
+    // (Not a provisionally accepted record: that is the species itself, not a synonym of it.)
+    if (sentences.length === 0 && l.verdict === "own" && pick.status !== "accepted" && pick.id !== l.col_species_id) {
       const target = ctx.usages.get(l.col_species_id);
       const accepted = target ? nameAuth(target.name, target.authorship) : pick.species ?? "its accepted name";
       sentences.push(l.col_treatment === "synonym, other spelling"

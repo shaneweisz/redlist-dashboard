@@ -27,7 +27,8 @@
  *   match_note, match_records  for a match that isn't plain: how it was matched or why
  *                            it is in doubt, in sentences, and the CoL
  *                            records it is about (JSON: id, name, authorship, status,
- *                            species, role), from assessment_link
+ *                            species, role), from assessment_link, plus each counted
+ *                            record's share of the all-records count (records)
  *   redlist_authority, redlist_synonyms
  *                            the Red List's authority and its listed synonyms
  *                            (';'-joined), where there is a match note
@@ -53,6 +54,33 @@
 {%- set today = "DATE '" ~ var('sync_date') ~ "'" %}
 
 
+-- Each counted match record's share of the count (all records): the records under it, and
+-- under any usage below it (a subspecies, a synonym) that no closer listed record claims.
+-- What no listed record claims is the rest of the count ("other CoL names").
+WITH RECURSIVE note AS (
+  SELECT sis_taxon_id AS sis,
+         from_json(match_records, '[{"id":"VARCHAR","name":"VARCHAR","authorship":"VARCHAR","status":"VARCHAR","species":"VARCHAR","role":"VARCHAR"}]') AS recs
+  FROM {{ source('link', 'assessment_link') }} WHERE role = 'primary' AND match_records IS NOT NULL
+),
+listed AS (SELECT DISTINCT sis, r.id FROM note, unnest(recs) t(r) WHERE r.role <> 'not'),
+-- Each counted usage and the usages above it, as deep as usage_owner reaches.
+up(sis, usage_key, anc, depth) AS (
+  SELECT o.sis_taxon_id, o.usage_key, o.usage_key, 0 FROM {{ ref('usage_owner') }} o WHERE o.sis_taxon_id IN (SELECT sis FROM note)
+  UNION ALL
+  SELECT u.sis, u.usage_key, t.parent_id, u.depth + 1
+  FROM up u JOIN {{ source('sources', 'taxa') }} t ON t.col_id = u.anc WHERE u.depth < 3 AND t.parent_id IS NOT NULL
+),
+nearest AS (SELECT u.sis, u.usage_key, arg_min(u.anc, u.depth) AS id FROM up u JOIN listed l ON l.sis = u.sis AND l.id = u.anc GROUP BY ALL),
+per_record AS (
+  SELECT sis, map(list(id), list(n)) AS n
+  FROM (SELECT x.sis, x.id, sum(c.n)::BIGINT AS n FROM nearest x JOIN {{ source('sources', 'occurrences') }} c ON c.usage_key = x.usage_key GROUP BY ALL)
+  GROUP BY sis
+),
+match_records AS (
+  SELECT note.sis, to_json(list_transform(note.recs, lambda r: struct_insert(r, records := CASE WHEN r.role <> 'not' THEN coalesce(p.n[r.id], 0) END)))::VARCHAR AS records
+  FROM note LEFT JOIN per_record p USING (sis)
+)
+
 SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        coalesce(nullif(latest.common_name, ''), inat.name, latest.common_name) AS common_name,
        latest.taxon_group, latest.class_name, latest.order_name, latest.family,
@@ -64,7 +92,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        CASE WHEN link.col_species_id IS NULL AND other.n IS NULL THEN 'unlinked'
             WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'flagged: %' THEN 'flagged' END AS count_note,
        link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
-       link.match_note, link.match_records,
+       link.match_note, mr.records AS match_records,
        -- Shown beside a match note (the panel's Red List line); not needed otherwise.
        CASE WHEN link.match_note IS NOT NULL THEN latest.authority END AS redlist_authority,
        CASE WHEN link.match_note IS NOT NULL THEN array_to_string([regexp_replace(trim(x.name), '\s+', ' ', 'g') FOR x IN latest.synonyms], ';') END AS redlist_synonyms,
@@ -89,6 +117,7 @@ FROM {{ source('sources', 'assessments') }} latest
 LEFT JOIN {{ ref('specialist_group_species') }} sg ON sg.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ ref('record_counts') }} gbif ON gbif.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN {{ source('link', 'assessment_link') }} link ON link.sis_taxon_id = latest.sis_taxon_id AND link.role = 'primary'
+LEFT JOIN match_records mr ON mr.sis = latest.sis_taxon_id
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ source('link', 'assessment_link') }} WHERE role = 'covered' AND counted GROUP BY 1) other
   ON other.sis_taxon_id = latest.sis_taxon_id
 LEFT JOIN (SELECT sis_taxon_id, count(*) AS n FROM {{ ref('assessment_history') }} GROUP BY 1) history
