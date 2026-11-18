@@ -1,6 +1,6 @@
 """How an assessed species is linked to a CoL species: the two questions the link
 stage answers (docs/sync.md, "Matching"), with every branch's count and a real
-species that takes it.
+species that takes it. Question 1's branches must cover every assessed species.
 
 Usage: python3 -I link_flow.py <build dir> <out.dot>
 Render: dot -Tpng -Gdpi=110 <out.dot> -o <out.png>
@@ -25,24 +25,25 @@ def duck(sql):
     return json.loads(out) if out.strip() else []
 
 
-LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, t.scientific_name AS col
+LINKS = f"""(SELECT l.*, a.scientific_name AS iucn, a.authority, t.scientific_name AS col, m.match_type
   FROM read_parquet('{CORE}/link/assessment_link.parquet') l
   JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/sources/taxa.parquet') t ON t.col_id = l.col_species_id
-  WHERE l.role = 'primary')"""
-# The queue: the links that need a person (assessment_link.to_review), with the Red List's name and the matcher's answer.
-QUEUE = f"""(SELECT a.scientific_name AS name, a.authority, m.matcher_name, m.matcher_authorship,
-  l.to_review AS reason
-  FROM read_parquet('{CORE}/link/assessment_link.parquet') l
-  JOIN read_parquet('{CORE}/sources/assessments.parquet') a ON a.sis_taxon_id = l.sis_taxon_id AND a.is_latest
   LEFT JOIN read_parquet('{CORE}/link/matches.parquet') m ON m.sis_taxon_id = l.sis_taxon_id
-  WHERE l.role = 'primary' AND l.to_review IS NOT NULL)"""
+  WHERE l.role = 'primary')"""
 
-# Each branch: how to count it, and a species that takes it (checked below).
+PICKED = "match_reason = 'flagged: picked by the author citation'"
+UNSETTLED = "match_reason = 'flagged: homonym the authors don''t decide'"
+# Each branch of question 1, by match_reason: how to count it, and a species that takes it (checked below).
 NAME_BRANCHES = {
     "decision": ("basis = 'decision'", "Cipangopaludina chinensis"),
-    "matcher": ("basis = 'matcher'", "Panthera leo"),
-    "unlinked": ("col_species_id IS NULL", "Diospyros sp. nov. 'malcomberi'"),
+    "unique": ("match_reason IN ('exact, unique', 'exact, duplicate in CoL', 'spelling variant', 'spelling variant, duplicate in CoL')", "Panthera leo"),
+    "settled": ("match_reason LIKE '%homonym, author decides'", "Coturnix coturnix"),
+    "picked_homonym": (f"{PICKED} AND match_type <> 'HIGHERRANK'", "Weinmannia heterophylla"),
+    "picked_genus": (f"{PICKED} AND match_type = 'HIGHERRANK'", "Rubus fruticosus"),
+    "unsettled": (UNSETTLED, "Buteo rufinus"),
+    "doubt": (f"match_reason LIKE 'flagged: %' AND NOT ({PICKED}) AND NOT ({UNSETTLED})", "Agrotis sabine"),
+    "none": ("col_species_id IS NULL", "Breviceps batrachophiliorum"),
 }
 CONCEPT_BRANCHES = {
     "accepted": ("col_treatment = 'accepted' AND counts = 'the whole CoL species'", "Panthera leo"),
@@ -51,14 +52,6 @@ CONCEPT_BRANCHES = {
     "refused": ("col_treatment = 'lumped, assessed'", "Turcichondrostoma fahirae"),
     "duplicate": ("counts = 'nothing' AND col_species_id IS NOT NULL AND col_treatment <> 'lumped, assessed'", "Agapanthia probsti"),
 }
-QUEUE_REASONS = [  # reason, example: the commonest reasons the matcher's answer waits for a person
-    ("no species match", "Breviceps batrachophiliorum"),
-    ("provisional name", "Acanthinomerus wollastoni"),
-    ("informal or qualified name", "Diospyros sp. nov. 'malcomberi'"),
-    ("homonym the authors don't decide", "Galium palustre"),
-]
-
-
 def branch(where, example):
     [r] = duck(f"SELECT count(*) AS n, count(*) FILTER (iucn = {q(example)}) AS hit,"
                f" any_value(col) FILTER (iucn = {q(example)}) AS col FROM {LINKS} WHERE {where}")
@@ -69,16 +62,15 @@ def branch(where, example):
 
 name = {k: branch(w, e) for k, (w, e) in NAME_BRANCHES.items()}
 concept = {k: branch(w, e) for k, (w, e) in CONCEPT_BRANCHES.items()}
-queue = {}
-for reason, example in QUEUE_REASONS:
-    [r] = duck(f"SELECT count(*) AS n, count(*) FILTER (name = {q(example)}) AS hit,"
-               f" any_value(authority) FILTER (name = {q(example)}) AS a,"
-               f" any_value(matcher_name) FILTER (name = {q(example)}) AS m,"
-               f" any_value(matcher_authorship) FILTER (name = {q(example)}) AS ma FROM {QUEUE} WHERE reason = {q(reason)}")
-    if not r["hit"]:
-        sys.exit(f"link_flow: {example} is no longer queued as '{reason}'; pick another example")
-    queue[reason] = (r["n"], example, r["a"], r["m"], r["ma"])
-[queued] = duck(f"SELECT count(*) AS n FROM {QUEUE}")
+[total] = duck(f"SELECT count(*) AS n FROM {LINKS}")
+if sum(n for n, _ in name.values()) != total["n"]:
+    sys.exit(f"link_flow: question 1's branches cover {sum(n for n, _ in name.values()):,} of {total['n']:,} species; a match_reason is missing")
+# The other doubts, by label, largest first.
+doubts = duck(f"SELECT replace(match_reason, 'flagged: ', '') AS d, count(*) AS n FROM {LINKS} WHERE {NAME_BRANCHES['doubt'][0]} GROUP BY 1 ORDER BY n DESC")
+# Of the unlinked, those that still count records through a covered row (a name the Red List lists as a synonym).
+[via] = duck(f"""SELECT count(*) AS n FROM {LINKS} p WHERE p.col_species_id IS NULL AND EXISTS (SELECT 1 FROM read_parquet('{CORE}/link/assessment_link.parquet') c
+  WHERE c.sis_taxon_id = p.sis_taxon_id AND c.role = 'covered' AND c.counted)""")
+[ex] = duck(f"SELECT any_value(authority) FILTER (iucn = 'Weinmannia heterophylla') AS w, any_value(authority) FILTER (iucn = 'Coturnix coturnix') AS c FROM {LINKS}")
 
 # The versions matched: one Red List release against one CoL release, as this build's sync.json records them.
 manifest = json.load(open(os.path.join(BUILD, "publish", "sync.json")))
@@ -108,29 +100,55 @@ def eg(iucn, col):
 
 
 out = ['digraph link {',
-       '  graph [rankdir=TB, nodesep=0.35, ranksep=0.45, pad=0.4, bgcolor="white", fontname="Helvetica", labelloc=t, labeljust=l,',
+       '  graph [rankdir=TB, newrank=true, nodesep=0.35, ranksep=0.45, pad=0.4, bgcolor="white", fontname="Helvetica", labelloc=t, labeljust=l,',
        '         label=<<FONT POINT-SIZE="26"><B>Which CoL species an assessed species is</B></FONT><BR ALIGN="LEFT"/>'
        f'<FONT POINT-SIZE="16"><B>{E(RL)} × {E(XR["alias"])}</B></FONT><FONT POINT-SIZE="14" COLOR="#495057">   (CoL\'s extended release of {E(XR["issued"])}: the one GBIF\'s {E(SNAP)} occurrence snapshot is keyed to; '
        f'curated release {E(CK["alias"])}, the one it was built from)</FONT><BR ALIGN="LEFT"/>'
        '<FONT POINT-SIZE="14" COLOR="#495057">Two questions, answered separately. Counts: assessed species in this build; each example is a real species taking that branch.</FONT><BR ALIGN="LEFT"/>>];',
        '  node [shape=plaintext, fontname="Helvetica"]; edge [color="#868e96", fontname="Helvetica", fontsize=12, fontcolor="#495057", arrowsize=0.7];']
 
-def named(n, a):
-    return f'<I>{E(n)}</I> {E(a or "")}'.strip()
+def node(nid, kind, title, lines=(), count=None):
+    out.append(f"  {nid} [label={box(kind, title, lines, count)}];")
 
 
-def queue_line(reason, n, e, a, m, ma):
-    # The homonym's point is its authors; elsewhere the name alone says it.
-    show = (lambda x, y: named(x, y)) if reason.startswith("homonym") else (lambda x, y: f"<I>{E(x)}</I>")
-    return f'{E(reason)} ({n:,}): {show(e, a)}' + (f', matcher: {show(m, ma)}' if m else "")
+def n(k):
+    return name[k][0]
 
 
-out.append(f'  start [label={box("src", "A Red List species: its name and authority")}];')
-out.append(f'  q1 [label={box("q", "1. Which CoL name is it?")}];')
-out.append(f'  mat [label={box("own", "matching-ws, when its answer is certain", ["the name found exactly (or spelt only as the codes allow), as a species, with full confidence,", "and no same-spelled name leads elsewhere (unless the authors decide;", "CoL's provisional copy of the name is not a rival);", "a synonym only if its authors could be the Red List's", eg("Panthera leo", name["matcher"][1])], name["matcher"][0])}];')
-out.append(f'  queue [label={box("q", "Otherwise a person decides: to_review", [queue_line(r, *v) for r, v in queue.items()], queued["n"])}];')
-out.append(f'  dec [label={box("own", "Decided: a row in match-overrides.tsv", ["for the releases it names, while what it rested on still holds", eg("Cipangopaludina chinensis", name["decision"][1])], name["decision"][0])}];')
-out.append(f'  und [label={box("none", "Not yet decided: linked to nothing", ["counts no records until someone decides;", "what it might be stays off the Not Evaluated list", f"<I>{E(NAME_BRANCHES['unlinked'][1])}</I>"], name["unlinked"][0])}];')
+doubt_text = [f"{E(d['d'])} ({d['n']:,})" for d in doubts]
+node("start", "src", "A Red List species: its name and authority")
+node("q1", "q", "1. Which CoL record is it?")
+node("dec", "own", "A row in match-overrides.tsv",
+     ["a person's decision beats the matcher, for the releases it names", eg("Cipangopaludina chinensis", name["decision"][1])], n("decision"))
+node("mat", "q", "GBIF's matcher (matching-ws), on the bare name",
+     ["returns its best CoL record, and every record spelt the same that it weighed (the alternatives);",
+      "it isn't given the author citation, as most GBIF records carry none,",
+      "so its answer is where GBIF files records carrying that bare name"])
+node("uniq", "own", "One CoL species has the name: the matcher's answer, confirmed",
+     ["found exactly (or spelt only as the codes allow), with full confidence;",
+      "CoL holding the species twice still counts as one", eg("Panthera leo", name["unique"][1])], n("unique"))
+node("cite", "q", "Several species share the name, or the matcher found only the genus",
+     ["the Red List's author citation decides (citationPick), among the matcher's answer and its alternatives:",
+      "whose citations match it, and do they all lead to one species?"])
+node("settled", "own", "It picks the matcher's answer: settled",
+     [f"<I>Coturnix coturnix</I> {E(ex['c'] or '')}: the quail, not CoL's other <I>Coturnix coturnix</I>"], n("settled"))
+node("picked", "part", "⚑ It picks another record: that one counts",
+     ["when the matcher's answer is clearly someone else's, or only the genus:",
+      f"<I>Weinmannia heterophylla</I> {E(ex['w'] or '')} → CoL's Ruiz &amp; Pav. ex López, not Kunth's ({n('picked_homonym'):,})",
+      f"<I>Rubus fruticosus</I> L. → Linnaeus's record; the matcher said only <I>Rubus</I> ({n('picked_genus'):,})"],
+     n("picked_homonym") + n("picked_genus"))
+node("unset", "part", "⚑ It can't tell: the matcher's answer counts",
+     ["no citation matches for sure (a year apart, a bare initial, none given)",
+      "<I>Buteo rufinus</I> (Cretzschmar, 1827); CoL's is dated 1829"], n("unsettled"))
+node("doubt", "part", "⚑ Another doubt: the matcher's answer counts",
+     [", ".join(doubt_text[:3]) + ",", ", ".join(doubt_text[3:]),
+      eg("Agrotis sabine", name["doubt"][1]) + ", spelt differently"], n("doubt"))
+node("none", "none", "No link: nothing to count through",
+     ["CoL has nothing at species level to pick, or the Red List marks the name",
+      "another taxon or not yet one (aff., cf., sp. nov., non, sensu)",
+      f"<I>{E(NAME_BRANCHES['none'][1])}</I>: the matcher found only <I>Breviceps</I>",
+      f"({via['n']:,} of them still count records under a name the Red List lists as a synonym, flagged)"], n("none"))
+out.append('  linked [shape=point, width=0.08, color="#868e96"];')
 out.append(f'  q2 [label={box("q", "2. What does that CoL name make the species?")}];')
 out.append(f'  acc [label={box("own", "accepted", ["CoL accepts the Red List name; counts the whole CoL species", eg("Panthera leo", concept["accepted"][1])], concept["accepted"][0])}];')
 out.append(f'  ren [label={box("own", "synonym, other name / other spelling", ["CoL accepts the species under another name; counts the whole CoL species", eg("Glossopsitta porphyrocephala", concept["renamed"][1])], concept["renamed"][0])}];')
@@ -138,10 +156,17 @@ out.append(f'  lum [label={box("part", "lumped, unassessed", ["CoL folds it into
 out.append(f'  ref [label={box("none", "lumped, assessed", ["CoL folds it into a species the Red List assesses too;", "counts nothing", eg("Turcichondrostoma fahirae", concept["refused"][1])], concept["refused"][0])}];')
 out.append(f'  dup [label={box("none", "counts nothing: another assessment owns that CoL species", ["each CoL species counts for one assessed species", eg("Agapanthia probsti", concept["duplicate"][1])], concept["duplicate"][0])}];')
 
-out += ['  start -> q1; q1 -> mat [label="  certain"]; q1 -> queue [label="  not certain"];',
-        '  queue -> dec; queue -> und;',
-        '  { rank=same; mat; queue }',
-        '  mat -> q2; dec -> q2;',
+out += ['  start -> q1; q1 -> mat; q1 -> dec [label="  if a person decided"];',
+        '  { rank=same; mat; dec }',
+        '  mat -> uniq; mat -> cite; mat -> none; mat -> doubt;',
+        '  { rank=same; uniq; cite; none; doubt }',
+        '  uniq -> cite -> none -> doubt [style=invis];',
+        '  cite -> settled; cite -> picked; cite -> unset; cite -> none [style=dotted, label="  only the genus, no pick"];',
+        '  { rank=same; settled; picked; unset }',
+        '  settled -> picked -> unset [style=invis];',
+        '  uniq -> linked [arrowhead=none]; settled -> linked [arrowhead=none]; picked -> linked [arrowhead=none];',
+        '  unset -> linked [arrowhead=none]; doubt -> linked [arrowhead=none]; dec -> linked [arrowhead=none];',
+        '  linked -> q2 [label="  ⚑ a flagged link loses to a confirmed one over the same records"];',
         '  q2 -> acc; q2 -> ren; q2 -> lum;',
         '  { rank=same; acc; ren; lum }',
         '  lum -> ref [label="  if IUCN assesses that species"];',

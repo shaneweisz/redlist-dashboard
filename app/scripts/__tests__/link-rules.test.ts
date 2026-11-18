@@ -26,6 +26,11 @@ describe("coverer", () => {
     expect(cover({ ...row, col_species_id: "A", col_taxon_id: "A" })).toBe(false);
     expect(covered(links)).toHaveLength(1);
   });
+  it("adds the whole species when the link counts only its own name (Tangara cyanoptera → Thraupis cyanoptera)", () => {
+    const links = [primary(1, "THR", { verdict: "lumped", method: "ambiguous_synonym", col_taxon_id: "TAN" })];
+    const row = { sis_taxon_id: 1, col_species_id: "THR", col_taxon_id: "THR", verdict: "own" as const, method: "redlist_synonym", match_reason: "Red List synonym", counted: true };
+    expect(coverer(links)(row)).toBe(true);
+  });
 });
 
 describe("coverSynonymSpecies", () => {
@@ -104,6 +109,14 @@ describe("coverSameNameSynonyms", () => {
       { sis: 1, usage: "S4", target: "R4", authority: "Hook.f.", authorship: null }]);
     expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S3", "S4"]);
   });
+  it("takes only the same citation when the citation picked the link (Rubus fruticosus L., not Lour.)", () => {
+    const links = [primary(1, "R1", { verdict: "lumped", method: "synonym", col_taxon_id: "S1", match_reason: "flagged: picked by the author citation" })];
+    coverSameNameSynonyms(links, coverer(links), [
+      { sis: 1, usage: "S2", target: "R2", authority: "L.", authorship: "Lour." },
+      { sis: 1, usage: "S3", target: "R3", authority: "L.", authorship: "G.N.Jones" },
+      { sis: 1, usage: "S4", target: "R4", authority: "L.", authorship: "L." }]);
+    expect(covered(links).map((l) => l.col_taxon_id)).toEqual(["S4"]);
+  });
   it("does nothing for a species that isn't lumped", () => {
     const links = [primary(1, "R1")];
     expect(coverSameNameSynonyms(links, coverer(links), [{ sis: 1, usage: "S2", target: "R2" }]).size).toBe(0);
@@ -125,6 +138,23 @@ describe("dropCrossPhylum", () => {
     const links = [primary(1, "CRAB"), { ...primary(2, "FISH"), role: "covered" as const }, primary(3, "OK")];
     expect(dropCrossPhylum(links, new Set(["1|CRAB", "2|FISH"])).size).toBe(2);
     expect(links.map((l) => [l.sis_taxon_id, l.verdict, l.col_species_id])).toEqual([[1, "none", null], [3, "own", "OK"]]);
+  });
+});
+
+describe("flagged links", () => {
+  it("lose a shared usage to a confirmed species, even its covered row", () => {
+    const links = [
+      primary(1, "U", { match_reason: "flagged: lower confidence" }),
+      { ...primary(2, "U"), role: "covered" as const, method: "same_name_twin", basis: "rule" as const },
+    ];
+    oneOwnerPerUsage(links);
+    expect(links.find((l) => l.sis_taxon_id === 2)!.counted).toBe(true);
+    expect(links.find((l) => l.sis_taxon_id === 1)!).toMatchObject({ counted: false, verdict: "duplicate" });
+  });
+  it("keep their candidates, as a waiting species does", () => {
+    const links = [primary(1, "G", { match_reason: "flagged: homonym the authors don't decide" })];
+    coverUndecidedCandidates(links, coverer(links), [{ sis: 1, target_id: "OTHER", target_name: "Other" }, { sis: 1, target_id: "G", target_name: "Guess" }]);
+    expect(covered(links).map((l) => [l.col_species_id, l.match_reason, l.counted])).toEqual([["OTHER", "candidate", false]]);
   });
 });
 

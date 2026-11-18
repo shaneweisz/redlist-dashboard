@@ -54,7 +54,6 @@ export type QueueReason =
   | "informal or qualified name"
   | "no species match"
   | "spelling variant"
-  | "provisional name"
   | "ambiguous synonym"
   | "misapplied name"
   | "matched another rank"
@@ -68,9 +67,15 @@ export type Acceptance =
   | { accepted: true; why: "unique name" | "authors pick it" | "CoL holds it twice"; variant?: true }
   | { accepted: false; reason: QueueReason };
 
-/** Names the Red List itself marks as unsettled: aff., cf., sp., "[...]" in the name; ined., auct., non, sensu in the authority. */
+/**
+ * Names the Red List itself marks as another taxon or not yet one: aff., cf.,
+ * sp., "[...]" in the name; auct., non, sensu in the authority. Not "ined.": an
+ * unpublished name is still the name, and when CoL holds it, its records count.
+ */
 const INFORMAL_NAME = /\b(aff|cf|sp|spp|nov|indet)\.|\[|\bsp\b/i;
-const DISOWNED_AUTHORITY = /\b(ined|auct)\b\.?|\bnon\b|\bsensu\b/i;
+const DISOWNED_AUTHORITY = /\bauct\b\.?|\bnon\b|\bsensu\b/i;
+/** The authority without "ined.", for comparing citations (Cheek ined. / Cheek). */
+const citation = (authority: string | null) => authority?.replace(/\s*,?\s*\bined\b\.?/gi, "").trim() || null;
 
 const binomial = (n: string | null) => (n ?? "").replace(/×/g, "").trim().split(/\s+/).slice(0, 2).join(" ").toLowerCase();
 
@@ -83,10 +88,10 @@ export function acceptMatch(
   speciesOf: (usageId: string) => string | null,
 ): Acceptance {
   const no = (reason: QueueReason): Acceptance => ({ accepted: false, reason });
+  species = { ...species, authority: citation(species.authority) };
   if (INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(species.authority ?? "")) return no("informal or qualified name");
   if (!m.matcher_col_id || m.match_type === "HIGHERRANK" || m.match_type === "NONE") return no("no species match");
   if (m.matcher_status === "AMBIGUOUS_SYNONYM") return no("ambiguous synonym");
-  if (m.matcher_status === "PROVISIONALLY_ACCEPTED") return no("provisional name");
   if (m.matcher_status === "MISAPPLIED") return no("misapplied name");
   // A variant's confidence is the matcher's doubt about the spelling, which the codes' rules settle.
   const variant = m.match_type !== "EXACT" && !!m.matcher_name && orthographicallySame(binomial(species.name), binomial(m.matcher_name))
@@ -104,15 +109,55 @@ export function acceptMatch(
     (variant ? { accepted: true, why, variant: true } : { accepted: true, why });
   if (rivals.length === 0) return yes("unique name");
   const same = (a: string | null, b: string | null) => compareAuthors(a, b) === "same";
-  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED"
+  // CoL holding a name twice, once accepted and once provisionally, whichever the matcher answered.
+  const provisionalCopy = (a: MatchAnswer["alternatives"][number]) => (
+      (m.matcher_status === "ACCEPTED" && a.status === "PROVISIONALLY_ACCEPTED") || (m.matcher_status === "PROVISIONALLY_ACCEPTED" && a.status === "ACCEPTED"))
     && compareAuthors(m.matcher_authorship, a.authorship) !== "other";
   const twins = rivals.filter((a) => same(m.matcher_authorship, a.authorship) || provisionalCopy(a));
   if (twins.length > 0) {
     if (m.matcher_status === "SYNONYM" && twins.some((a) => a.status === "ACCEPTED")) return no("accepted and a synonym in CoL");
     return yes("CoL holds it twice");
   }
-  if (same(species.authority, m.matcher_authorship) && !rivals.some((a) => same(species.authority, a.authorship))) {
-    return yes("authors pick it");
-  }
+  // A homonym: settled when the citation picks the matcher's own answer.
+  if (citationPick(species, m, speciesOf) === m.matcher_col_id) return yes("authors pick it");
   return no("homonym the authors don't decide");
+}
+
+/**
+ * Which of CoL's records with the name the Red List's author citation picks: the
+ * one question behind every author-decided link. The records are the matcher's
+ * answer and its alternatives with the same name (misapplied names aside). The
+ * citation picks when the records whose citation matches all lead to one
+ * species, and:
+ *   - it is the matcher's answer: the link is settled ("authors pick it",
+ *     Centropogon australis (White, 1790), the fish, not Gleason's plant);
+ *   - it is another record, and the matcher answered only the genus (every
+ *     record a synonym of a different species: Pittosporum verticillatum Bojer)
+ *     or a record the citation clearly rules out (Weinmannia heterophylla Ruiz &
+ *     Pav. is CoL's "Ruiz & Pav. ex López", not Kunth's): that record, a pick the
+ *     matcher didn't make, so the link is flagged.
+ * A matcher answer with no citation, or one only a year or an initial apart, is
+ * not ruled out: it may be the same species (Vireo chivi, accepted in CoL with no
+ * author, holds GBIF's 155k records; "(Vieillot, 1817)" matches only an old
+ * synonym of Vireo olivaceus). No pick for a name the Red List marks as another
+ * taxon, or without a citation.
+ */
+export function citationPick(
+  species: { name: string; authority: string | null },
+  m: MatchAnswer,
+  speciesOf: (usageId: string) => string | null,
+): string | null {
+  const authority = citation(species.authority);
+  if (!authority || INFORMAL_NAME.test(species.name) || DISOWNED_AUTHORITY.test(authority)) return null;
+  const answer = m.matcher_col_id && m.matcher_name && m.matcher_rank === "SPECIES"
+    ? { col_id: m.matcher_col_id, name: m.matcher_name, authorship: m.matcher_authorship, rank: m.matcher_rank, status: m.matcher_status } : null;
+  const name = binomial(answer ? answer.name : species.name);
+  const records = [...(answer ? [answer] : []), ...m.alternatives.filter((a) => a.col_id !== m.matcher_col_id)]
+    .filter((a) => a.status !== "MISAPPLIED" && binomial(a.name) === name);
+  const picked = records.filter((a) => compareAuthors(authority, a.authorship) === "same");
+  const leadTo = new Set(picked.map((a) => speciesOf(a.col_id)));
+  if (leadTo.size !== 1 || leadTo.has(null)) return null;
+  if (answer && picked.includes(answer)) return answer.col_id;
+  if (answer && compareAuthors(authority, answer.authorship) !== "other") return null;
+  return picked.find((a) => a.rank === "SPECIES")?.col_id ?? null;
 }
