@@ -3,7 +3,9 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { FaFilter } from "react-icons/fa";
-import { CHART_INPUT_CLASS, ChartPager } from "@/components/redlist/chart-controls";
+import { LuDownload } from "react-icons/lu";
+import { CHART_INPUT_CLASS, ChartPager, chartControlClass } from "@/components/redlist/chart-controls";
+import { downloadCsv, rowsToCsv } from "@/lib/exportCsv";
 import { type CountryStats } from "./WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { iucnRegionCountries } from "@/lib/regions";
@@ -50,6 +52,9 @@ interface CountryStatsListProps {
   sortKey?: SortKey;
   sortDir?: SortDir;
   onSortChange?: (key: SortKey, dir: SortDir) => void;
+  // The CSV download's file name, without ".csv" — the caller knows what the
+  // rows are counts of (which species groups), this list doesn't.
+  csvFileName?: string;
 }
 
 // How many rows a page holds is measured, not fixed: this list is absolutely
@@ -170,6 +175,7 @@ export default function CountryStatsList({
   sortKey: controlledSortKey,
   sortDir: controlledSortDir,
   onSortChange,
+  csvFileName = "countries",
 }: CountryStatsListProps) {
   const [localSortKey, setLocalSortKey] = useState<SortKey>("species");
   const [localSortDir, setLocalSortDir] = useState<SortDir>("desc");
@@ -317,6 +323,19 @@ export default function CountryStatsList({
     }
   }
 
+  // Every row the list holds after its region and column filters, in its sort
+  // order — all pages, not just the one on screen — with the same columns.
+  function exportCsv() {
+    const header = ["Country", "ISO Code", speciesLabel];
+    if (showOutdatedMode) header.push("# Needs Updating", "% Needs Updating");
+    const body = sorted.map((r) => {
+      const row: (string | number)[] = [r.name, r.code, r.species];
+      if (showOutdatedMode) row.push(r.outdated, r.percentOutdated.toFixed(1));
+      return row;
+    });
+    downloadCsv(rowsToCsv(header, body), `${csvFileName}.csv`);
+  }
+
   const openFilterConfig = openFilterKey ? filterConfigs[openFilterKey] : null;
   const cellPad = dense ? "px-2 py-1" : "px-3 py-2";
 
@@ -441,6 +460,15 @@ export default function CountryStatsList({
             onNext={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
             noun="countries"
           />
+          <button
+            type="button"
+            onClick={exportCsv}
+            title={`Download these ${sorted.length.toLocaleString()} countries as a CSV`}
+            className={`inline-flex items-center gap-1 ${chartControlClass(false, "")}`}
+          >
+            <LuDownload aria-hidden className="w-3 h-3" />
+            CSV
+          </button>
         </div>
       )}
       {openFilterKey && openFilterConfig && typeof document !== "undefined" && createPortal(
