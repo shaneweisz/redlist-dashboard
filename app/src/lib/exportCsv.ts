@@ -43,16 +43,13 @@ function escapeCsvField(value: string): string {
   return value;
 }
 
-export function speciesToCsv(species: RedListSpecies[]): string {
-  const header = CSV_COLUMNS.map((c) => c.header).join(",");
-  const rows = species.map((s) =>
-    CSV_COLUMNS.map((c) => escapeCsvField(c.getValue(s))).join(",")
-  );
-  return [header, ...rows].join("\n");
+/** A header row and data rows as CSV text, every field escaped. */
+export function rowsToCsv(header: string[], rows: (string | number)[][]): string {
+  return [header, ...rows].map((r) => r.map((v) => escapeCsvField(String(v))).join(",")).join("\n");
 }
 
-export function downloadSpeciesCsv(species: RedListSpecies[], filename = "species-export.csv") {
-  const csv = speciesToCsv(species);
+/** Hand the viewer `csv` as a file named `filename`. */
+export function downloadCsv(csv: string, filename: string) {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -62,4 +59,15 @@ export function downloadSpeciesCsv(species: RedListSpecies[], filename = "specie
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export function speciesToCsv(species: RedListSpecies[]): string {
+  return rowsToCsv(
+    CSV_COLUMNS.map((c) => c.header),
+    species.map((s) => CSV_COLUMNS.map((c) => c.getValue(s)))
+  );
+}
+
+export function downloadSpeciesCsv(species: RedListSpecies[], filename = "species-export.csv") {
+  downloadCsv(speciesToCsv(species), filename);
 }

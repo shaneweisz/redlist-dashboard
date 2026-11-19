@@ -659,6 +659,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
             sortKey={sortKey}
             sortDir={sortDir}
             onSortChange={setSort}
+            csvFileName={`countries-${taxaKey === "all" ? "all-species" : taxaKey.replace(/,/g, "-")}`}
           />
         </div>
       )}
