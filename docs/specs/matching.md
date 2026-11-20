@@ -125,21 +125,25 @@ here are from the 2026-11-16 build, without the three decisions.
 
 ### Functions
 
-- **`compareAuthors(a, b)`** (`src/lib/authors.ts`): `same`, `other` or
+All in `link/name-rules.ts`, the one library an implementer of this spec may
+use (it imports only `src/lib/authors.ts` and `src/lib/name-parts.ts`):
+
+- **`compareAuthors(a, b)`** (from `src/lib/authors.ts`): `same`, `other` or
   `unclear` (either missing, mixed evidence, or a bare initial such as "L."
   against another citation).
-- **`orthographicallySame(a, b)`** (`link/name-variants.ts`): two binomials
+- **`orthographicallySame(a, b)`**: two binomials
   are one name under the codes' spelling rules (*pallasii* / *pallasi*); for
   epithets, both under the first name's genus.
-- **`sameOrganism(a, b)`** (`link/species-key.ts`, each `{scientificName,
-  authorship?}`): the same name; or the same epithet; or different genera
+- **`sameOrganism(a, b)`** (each `{scientificName, authorship?}`): the same name; or the same epithet; or different genera
   and epithets differing only in a gender ending; or equal authorships
   (`normaliseAuthorship`) and epithets that are a respelling.
-- **`isCoLRespelling(synonym, accepted)`** (same file): one genus, the same
+- **`isCoLRespelling(synonym, accepted)`**: one genus, the same
   citation (`f.` = `fil.`, diacritics ignored), two different epithets that
   are a respelling.
 
-This change moves the last two to the respelling rule below.
+and `normaliseAuthorship`, `canonicalEpithet` and `epithetOf`, which they
+use. This change moves `sameOrganism` and `isCoLRespelling` to the
+respelling rule below.
 
 ### Definitions
 
@@ -416,12 +420,19 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      records with `relation`, relation step and `basis`; `"sync:select"`
      (`app/package.json`) writes `[{sis_taxon_id, step, reason, doubts,
      selected: [{id, relation, relation_step, basis}]}]` to stdout.
-   - `link/species-key.ts`: the respelling rule, replacing
-     `MAX_RESPELLING_EDITS = 3`.
+   - `link/name-rules.ts` (create): the functions above, moved from
+     `species-key.ts` and `name-variants.ts` (which import them back), with
+     the respelling rule replacing `MAX_RESPELLING_EDITS = 3`.
    - Tests: `link-select.test.ts` (each step, doubt, relation, example),
-     `species-key.test.ts`.
-   - **Rebuild check**: a fresh agent implements this spec alone; its output
-     and `sync:select`'s agree for every species.
+     `name-rules.test.ts`.
+   - **Rebuild check**, `npm run sync:rebuild-check` (`checks/rebuild-check.ts`):
+     builds a sealed folder with this spec, `name-rules.ts` bundled into one
+     file, the build's inputs as JSON (species, matcher responses, synonyms
+     with authors, the CoL records they name) and the output schema; runs
+     `claude -p` there with only read, write and run tools inside it and no
+     web; compares its output with `sync:select` species by species; and
+     keeps the agent's log, from which it lists every file read. Run after
+     every change to the rules and every release move.
 2. **The sync writes it.**
    - `link/assessment-link.ts` calls `select.ts` and writes *Output*;
      `decideKey` and its tests go.
