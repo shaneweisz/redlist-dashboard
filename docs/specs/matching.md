@@ -300,8 +300,8 @@ A species with a reason, or doubts and no holding decision, is **listed for
 review**: 2,332 (1,528 with doubts on the steps' records, the rest with
 the two synonym doubts or one of 255 reasons). A homonym the citation
 settles (3,555 of 3,698 species with several groups) has no doubt; its
-other groups stay on the NE list, unflagged, since the citation says they
-are other organisms.
+other groups stay on the NE list with a note, not a flag, since the citation
+says they are other organisms.
 
 ### Counting and the NE list
 
@@ -343,9 +343,11 @@ records:
 
 - **`may_be_assessed`** (flagged, as today): the CoL species of a candidate
   not taken, for an assessed species with a doubt.
-- **`part_of_assessed`** (a note, not a flag): the assessed species whose
-  *part of* records lie under it, with the names ("*Pararge xiphioides*,
-  assessed, is part of it in CoL").
+- **`assessed_here`** (a note, not a flag): an assessed species whose *part
+  of* records lie under it ("*Pararge xiphioides*, assessed, is part of it
+  in CoL"), or whose name it holds but the citation settled elsewhere
+  ("the Red List's *Gymnosporia gracilis* Loes. has this name; its citation
+  points to another CoL record").
 
 The build stops if a record has two owners, or if a described species is
 neither counted whole nor on the NE list; `sync.json` records the
@@ -467,6 +469,10 @@ Each is a fixture case (`checks/fixtures/matching.ts`).
   whose verdict differs.
 - **`compareAuthors` or `orthographicallySame` misreads a name** (*afer* /
   *afra* is refused): it shows as a doubt; the fix is general, under Goal 2.
+  The largest is "L.": `compareAuthors` treats it as a bare initial, so it is
+  `unclear` against any other author, though in botany it is Linnaeus
+  (*Mentha × verticillata* L. against D.Don; *Vicia dumetorum* L. against
+  Thuill.). Reading it as Linnaeus is the next general change to measure.
 - **Counts change**: the change list shows every one before publishing.
 
 ## Implementation plan
@@ -532,8 +538,8 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      `precomputed/col-differences.ts`, and `src/lib/data/species-duckdb.ts`'s
      `ne_assessed_col_ids` and `live-taxa-children.ts`.
    - `dbt/models/lists/species.sql`: `may_be_assessed` (moved from `ne.sql`,
-     whose `candidates` CTE goes) and `part_of_assessed` (`;`-joined
-     `<assessed name> (<record name>)` items, sorted), NULL when none.
+     whose `candidates` CTE goes) and `assessed_here` (`;`-joined
+     `<assessed name> (part of | same name)` items, sorted), NULL when none.
    - `sync.ts`: `describeBuild` counts by `basis` and writes `matching.steps`,
      `matching.doubts` and `matching.gbif_matcher` (GBIF's `buildInfo.sha`
      from `.../v2/species/match/metadata?checklistKey=xcol`, or `unknown`).
@@ -563,9 +569,8 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
    - `src/lib/data/species-duckdb.ts`: the two new columns, `match_doubt_keys:
      doubtKeys(r)` beside `match_counts_keys`, and `match_reason ===
      'decision'` at line 207; `src/hooks/useRedListSpeciesQuery.ts`: the
-     types; the NE list query reads `may_be_assessed` and `part_of_assessed`
-     from `species/`, and the match tooltip shows `part_of_assessed` as a
-     note. `components/redlist/RedListView.tsx`: tooltip pills
+     types; the NE list query reads `may_be_assessed` and `assessed_here`
+     from `species/`, and the match tooltip shows `assessed_here` as a note. `components/redlist/RedListView.tsx`: tooltip pills
      for every doubt; the single-species bars read doubts.
 4. **Remove the old rule**: `link/accept-match.ts`, its test, and every
    reference to it or to `match-overrides` (code, fixtures' `source` fields,
