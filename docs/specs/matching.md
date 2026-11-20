@@ -247,8 +247,9 @@ Each record *r*, with *s* = `speciesOf(r)`:
 3. Otherwise → **part of**, with the doubt `synonym filed elsewhere`: the
    occurrences GBIF filed under the Red List's synonym count for it, while
    CoL puts the name under another species (*Quercus montana*'s synonym
-   *Q. prinus* L., under *Q. michauxii* in CoL: 3,360 occurrences). *s* is
-   not hidden: it stays on the NE list, marked as possibly the species.
+   *Q. prinus* L., under *Q. michauxii* in CoL: 3,360 occurrences). *s*
+   itself is another organism and isn't hidden: it stays on the NE list
+   like any unassessed species.
 
 In 1 and 2, *s* being another assessed name makes it **refused**. On the
 2026-11-16 build, *split into* adds 7.3M occurrences for 1,145 species (the
@@ -295,8 +296,8 @@ groups are on the NE list, marked as possibly the species.
 - **The GBIF key** (`gbif_species_key`, `count/record_counts.sql`) is the
   primary row's, so *Butorides striata* keeps its own.
 - **NE list**: a species a record leads to is not on it, except through a
-  relation-3 synonym record; a candidate's species not taken, or one such a
-  record leads to, is on it, marked as possibly the species.
+  relation-3 synonym record; a candidate's species not taken is on it,
+  marked as possibly the species.
 
 ### Output
 
@@ -311,8 +312,8 @@ groups are on the NE list, marked as possibly the species.
   = 'the whole CoL species'`; *part of*: `col_taxon_id` = *r* (or its
   non-nominate infraspecific record), `counts = 'only records under its own
   name'`; *refused*: `counts = 'nothing'`, not counted. `col_species_id` is
-  *s*, except for relation-3 synonym records, whose *s* gets a candidate row
-  instead, so it isn't hidden.
+  *s*, except for relation-3 synonym records, where it is NULL, so *s* isn't
+  hidden.
 - **`basis`**: `matcher` (the answer), `citation` (any other step record),
   `synonym` or `decision`; `decided_by` and `reviewed` (boolean) for a
   decision.
