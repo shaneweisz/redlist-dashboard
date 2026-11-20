@@ -99,17 +99,14 @@ assessment), which filter counted occurrences.
 - **Species**, from `sources/assessments.parquet` (`is_latest`): `name`
   (`scientific_name`), `authority`, `kingdom` (`kingdom_name`), `phylum`
   (`phylum_name`), and `synonyms` in the Red List's order, each with
-  `authors`: the distinct non-empty `species_author` of the
-  `taxon_synonyms` rows whose name, whitespace collapsed, is the synonym's
-  (99 % have one). The
-  **assessed names** are every `name`.
+  `authors` (the distinct non-empty `species_author` of the `taxon_synonyms`
+  rows with that name, whitespace collapsed). The **assessed names** are
+  every `name`.
 - **The matcher's response** for `name` (`link/matches.parquet`; asked with
-  kingdom to family as hints, no authority): `match_type`, the `answer` and
-  the `alternatives` in its order. Each record has `id`, `name`,
-  `authorship`, `rank`, `status` and `classification` (its points for
-  classification against the hints): `matcher_col_id`, `matcher_name`, …,
-  and `classification` in `matcher_score` for the answer; `col_id`, `name`,
-  …, `score.classification` for an alternative.
+  kingdom to family as hints, no authority): `match_type`, the `answer`
+  (`matcher_*` columns) and the `alternatives` (JSON) in its order, each
+  with `id`, `name`, `authorship`, `rank`, `status` and `classification`
+  (its points for classification against the hints).
 - **The CoL release** (`sources/taxa.parquet`): `speciesOf(id)` =
   `species_id` (the accepted or provisional species a record leads to, or
   none), with that species' name, authorship, class, kingdom and phylum.
@@ -117,18 +114,14 @@ assessment), which filter counted occurrences.
 
 ### Releases
 
-The Red List database (`DB_NAME`), the CoL XR the GBIF snapshot is filed
-under and its curated release, matching-ws (`MATCHER_VERSION`), the commit
-GBIF's live matcher reports (`buildInfo.sha`, recorded, not checked: the
-snapshot was filed earlier), and the GBIF snapshot are recorded in
-`sync.json`. The build stops if the matcher serves another XR, or if `--from
-link` would reuse tables from another release of any of them (this change
-adds the Red List to `sources-releases.ts`). Decisions and fixtures carry
-over by names and citations (a decision's record by `id`, else by name and
-authorship); a decision for a species no longer assessed does nothing and is
-listed for deletion. Each build records its step and doubt counts, so the
-numbers here (the 2026-11-16 build, without the three decisions) can be
-checked later.
+`sync.json` records the Red List database, the CoL XR the snapshot is filed
+under and its curated release, `MATCHER_VERSION`, GBIF's live matcher
+commit (recorded, not checked), the snapshot, and the build's step and
+doubt counts. The build stops if the matcher serves another XR, or if
+`--from link` would reuse tables from another release (this change adds the
+Red List). Decisions and fixtures carry over by names and citations; a
+decision for a species no longer assessed is listed for deletion. Numbers
+here are from the 2026-11-16 build, without the three decisions.
 
 ### Functions
 
@@ -251,14 +244,11 @@ Each record *r*, with *s* = `speciesOf(r)`:
    itself is another organism and isn't hidden: it stays on the NE list,
    with a note naming the synonym and the assessed species, not a flag.
 
-In 1 and 2, *s* being another assessed name makes it **refused**. On the
-2026-11-16 build, *split into* adds 7.3M occurrences for 1,145 species (the
-green heron's 3.1M; *Polygonum persicaria* for *Persicaria maculosa*), and
-3 adds 64,528 occurrences for 712 species (the rest are already another
-species'). The author check keeps other authors' species out (*Solanum
-glabrum* Merr., for the Red List's *S. glabrum* Dunal); a bare "L." can't be
-told apart, so a split-into record that no author of the synonym that added
-it compares `same` with is a doubt (*Vicia sepium* would count *V.
+In 1 and 2, *s* being another assessed name makes it **refused**. *Split
+into* adds 7.3M occurrences for 1,145 species, and 3 adds 64,528 for 712.
+The author check keeps other authors' species out (*Solanum glabrum* Merr.,
+for the Red List's *S. glabrum* Dunal), but a bare "L." can't be told apart,
+hence the doubt `split, authors unclear` (*Vicia sepium* would count *V.
 dumetorum* L. for the Red List's *V. dumetorum* Thuill.).
 
 ### Doubts
@@ -333,21 +323,21 @@ groups are on the NE list, marked as possibly the species.
 
 ### Decisions
 
-`seeds/decisions.tsv`, one row per species: `sis_taxon_id`, `redlist_name`,
-`redlist_authority`; `selected` (`;`-separated `id|name|authorship|status|species
-name`, `\;` and `\|` escaped; empty for "not in CoL"); `candidates` (the
-candidates' species names when decided, sorted); `col_version`; `by` (a
-GitHub handle, `agent:<model>`, or `fixture`); `reviewed` (`yes`); `date`;
-`evidence`.
+`seeds/decisions.tsv`, one row per selected record (or one, with the record
+columns empty, for "not in CoL"): `sis_taxon_id`, `redlist_name`,
+`redlist_authority`, `id`, `name`, `authorship`, `status`, `species`;
+`candidates` (the candidates' species names when decided, sorted,
+`;`-separated); `by` (a GitHub handle, `agent:<model>`, or `fixture`);
+`reviewed` (`yes`); `date`; `evidence`.
 
 A decision **holds** while `name` is the same as `redlist_name`, the
-citation doesn't compare `other` with `redlist_authority`, no selected
-record's name or species name is another assessed name, and each record is
-found in `sources/taxa.parquet` (by `id` with the recorded name, status and
-species; else as the one such record with an equal authorship). One that
-doesn't hold is ignored and the species listed for review; one that holds
-is also listed when its `candidates` changed, or it isn't reviewed and `by`
-isn't `fixture`.
+citation doesn't compare `other` with `redlist_authority`, no record's name
+or species is another assessed name, and each record is found in
+`sources/taxa.parquet` (by `id` with the recorded name, status and species;
+else as the one such record with an equal authorship). One that doesn't hold
+is ignored and the species listed for review; one that holds is also listed
+when its `candidates` changed, or it isn't reviewed and `by` isn't
+`fixture`.
 
 ### Examples
 
@@ -390,8 +380,6 @@ Each is a fixture case (`checks/fixtures/matching.ts`).
   mostly hybrids and other authors' homonyms (*Ulmus major* → *U. ×
   hollandica*), which the synonym records above avoid by looking up the
   names directly.
-- **A confidence threshold.** A number of ours; its penalty is the doubt
-  `placed elsewhere`.
 - **Matching concepts through each Red List Authority's checklist.** Not
   machine-readable for most groups; GBIF files by name.
 - **Another typo limit.** Today's 3 letters merges 4 pairs of different
@@ -445,10 +433,8 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      85 go to the NE list) and `coverSynonymSpecies` (now synonym records).
      `isFlaggedLink` reads `doubts`; the one-owner keys as in *Counting*.
    - `sources/assessments.ts`: synonyms gain `authors`.
-   - `match-overrides.ts` → `decisions.ts` (`readDecisions`,
-     `writeDecisions`, `decisionHolds`, `Decision`, `DECISIONS_FILE`);
-     `match-overrides.tsv` → `decisions.tsv`, its three rows converted
-     (`col_*` → `selected`, `note` → `evidence`, `candidates` from the build,
+   - `match-overrides.ts` → `decisions.ts`, `match-overrides.tsv` →
+     `decisions.tsv` (its three rows converted; `candidates` from the build;
      `agent audit` → `agent:unrecorded`).
    - `dbt/models/lists/assessed.sql`: `match_doubts`, `match_reviewed`;
      `count_note = 'flagged'` also when `match_doubts` is set.
@@ -473,24 +459,18 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      `may_be_assessed`; `isExact` only without doubts; filter and tally read
      every doubt; `matchKey` reads `match_doubts` before `count_note`;
      `decision` replaces `override` (and `decided: not in CoL`, `override,`);
-     the `FLAGGED` map goes. Keys: `f_author_pick`, `f_homonym`,
-     `f_other_authors`, `f_spelling`, `f_ambiguous`, `f_confidence` (placed
-     elsewhere), `f_counts_nothing` ("Counts nothing in CoL"),
-     `f_split_unclear` ("Split in CoL, authors unclear"),
-     `f_filed_elsewhere` ("Synonym filed under another CoL species"),
-     `f_synonyms_only`.
+     the `FLAGGED` map goes; a bar per doubt (today's keys, and
+     `f_counts_nothing`, `f_split_unclear`, `f_filed_elsewhere`).
    - `src/lib/data/species-duckdb.ts`: the two new columns, `match_doubt_keys:
      doubtKeys(r)` beside `match_counts_keys`, and `match_reason ===
      'decision'` at line 207; `src/hooks/useRedListSpeciesQuery.ts`: the
      types, and NE rows' `redlist_synonym_of`, which the match tooltip shows
      as a note. `components/redlist/RedListView.tsx`: tooltip pills
      for every doubt; the single-species bars read doubts.
-4. **Remove the old rule**: `link/accept-match.ts` and
-   `pipeline-accept-match.test.ts`; references to it or to `match-overrides`
-   in `seeds/seeds.ts`, `trace.ts`, `src/lib/authors.ts`, `link/rules.ts`,
-   `link/matches.ts`, the fixtures' `source` fields, `matcher-query.test.ts`,
-   `README.md`, `docs/sync.md`, `docs/diagrams/versions.py`,
-   `app/scripts/README.md`; `docs/diagrams/link_flow.py` redrawn.
+4. **Remove the old rule**: `link/accept-match.ts`, its test, and every
+   reference to it or to `match-overrides` (code, fixtures' `source` fields,
+   `README.md`, `docs/`); `docs/sync.md` links here instead of restating
+   rules; `docs/diagrams/link_flow.py` redrawn.
 5. **The judge**, below. This change is judged and reported; there is no
    earlier judge to gate it.
 6. **Verify**: tests, typecheck, lint; `npm run sync -- --from link` with
