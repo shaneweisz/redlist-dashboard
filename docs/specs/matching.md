@@ -248,8 +248,8 @@ Each record *r*, with *s* = `speciesOf(r)`:
    occurrences GBIF filed under the Red List's synonym count for it, while
    CoL puts the name under another species (*Quercus montana*'s synonym
    *Q. prinus* L., under *Q. michauxii* in CoL: 3,360 occurrences). *s*
-   itself is another organism and isn't hidden: it stays on the NE list
-   like any unassessed species.
+   itself is another organism and isn't hidden: it stays on the NE list,
+   with a note naming the synonym and the assessed species, not a flag.
 
 In 1 and 2, *s* being another assessed name makes it **refused**. On the
 2026-11-16 build, *split into* adds 7.3M occurrences for 1,145 species (the
@@ -296,8 +296,12 @@ groups are on the NE list, marked as possibly the species.
 - **The GBIF key** (`gbif_species_key`, `count/record_counts.sql`) is the
   primary row's, so *Butorides striata* keeps its own.
 - **NE list**: a species a record leads to is not on it, except through a
-  relation-3 synonym record; a candidate's species not taken is on it,
-  marked as possibly the species.
+  relation-3 synonym record. A candidate's species not taken is on it,
+  flagged as possibly the assessed species (`may_be_assessed`, as today); a
+  species a relation-3 synonym record leads to carries a note instead
+  (`redlist_synonym_of`: the assessed species and the synonym, e.g. "*Q.
+  prinus*, a synonym of *Q. montana* in the Red List"), which the tooltip
+  shows and no filter counts as flagged.
 
 ### Output
 
@@ -313,7 +317,7 @@ groups are on the NE list, marked as possibly the species.
   non-nominate infraspecific record), `counts = 'only records under its own
   name'`; *refused*: `counts = 'nothing'`, not counted. `col_species_id` is
   *s*, except for relation-3 synonym records, where it is NULL, so *s* isn't
-  hidden.
+  hidden, and *s* goes in a new column, `filed_under_id`.
 - **`basis`**: `matcher` (the answer), `citation` (any other step record),
   `synonym` or `decision`; `decided_by` and `reviewed` (boolean) for a
   decision.
@@ -449,7 +453,8 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
    - `dbt/models/lists/assessed.sql`: `match_doubts`, `match_reviewed`;
      `count_note = 'flagged'` also when `match_doubts` is set.
      `dbt/models/count/record_counts.sql`: the GBIF key's `arg_min` puts
-     `role = 'primary'` first.
+     `role = 'primary'` first. `dbt/models/lists/ne.sql`: `redlist_synonym_of`
+     from rows' `filed_under_id`.
    - `sync.ts`: `describeBuild` counts by `basis` and writes `matching.steps`,
      `matching.doubts` and `matching.gbif_matcher` (GBIF's `buildInfo.sha`
      from `.../v2/species/match/metadata?checklistKey=xcol`, or `unknown`).
@@ -477,7 +482,8 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
    - `src/lib/data/species-duckdb.ts`: the two new columns, `match_doubt_keys:
      doubtKeys(r)` beside `match_counts_keys`, and `match_reason ===
      'decision'` at line 207; `src/hooks/useRedListSpeciesQuery.ts`: the
-     types. `components/redlist/RedListView.tsx`: tooltip pills
+     types, and NE rows' `redlist_synonym_of`, which the match tooltip shows
+     as a note. `components/redlist/RedListView.tsx`: tooltip pills
      for every doubt; the single-species bars read doubts.
 4. **Remove the old rule**: `link/accept-match.ts` and
    `pipeline-accept-match.test.ts`; references to it or to `match-overrides`
