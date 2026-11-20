@@ -100,7 +100,7 @@ assessment), which filter counted occurrences.
   (`scientific_name`), `authority`, `kingdom` (`kingdom_name`), `phylum`
   (`phylum_name`), and `synonyms` in the Red List's order, each with
   `authors` (the distinct non-empty `species_author` of the `taxon_synonyms`
-  rows with that name, whitespace collapsed). The **assessed names** are
+  rows whose name is the same name, per *Definitions*). The **assessed names** are
   every `name`.
 - **The matcher's response** for `name` (`link/matches.parquet`; asked with
   kingdom to family as hints, no authority): `match_type`, the `answer`
@@ -111,6 +111,8 @@ assessment), which filter counted occurrences.
 - **The CoL release** (`sources/taxa.parquet`): `speciesOf(id)` =
   `species_id` (the accepted or provisional species a record leads to, or
   none), with that species' name, authorship, class, kingdom and phylum.
+  Its statuses are lower-case (`ambiguous synonym`); the rules use the
+  matcher's forms (`AMBIGUOUS_SYNONYM`) for both.
 - **Occurrences** per CoL record, its own and those below it
   (`sources/occurrences.parquet`, `usage_key`, `n`).
 - **Described species**: `lists/species/`'s `described` (#604), the one
@@ -142,7 +144,8 @@ holds `orthographicKey` too):
   epithets, both under the first name's genus.
 - **`sameOrganism(a, b)`** (each `{scientificName, authorship?}`): the same name; or the same epithet; or different genera
   and epithets differing only in a gender ending; or equal authorships
-  (`normaliseAuthorship`) and epithets that are a respelling.
+  (`normaliseAuthorship`, both non-empty) and epithets that are a
+  respelling.
 - **`isCoLRespelling(synonym, accepted)`**: one genus, the same
   citation (`f.` = `fil.`, diacritics ignored), two different epithets that
   are a respelling.
@@ -162,7 +165,8 @@ respelling rule below.
 - **A respelling**: epithets that are `orthographicallySame`, or differ only
   in a gender ending, or only in a genitive ending (-i, -ii, -ae, -iae,
   -orum, -arum, -iorum, -iarum, the longest that fits: *jamesi* /
-  *jamesorum*), or by **at most 2 letters**. It is asked only of
+  *jamesorum*), or by **at most 2 letters** (Levenshtein: insertions,
+  deletions, substitutions). It is asked only of
   names with the same citation, which is the evidence; the limit keeps two
   words from one paper apart.
 - **Red List citation**: `authority` without "ined." and a comma before it;
@@ -231,11 +235,15 @@ citations, so it holds where the Red List writes its own differently.
 
 For a species at steps 3 to 6 (not informal, no holding decision), each Red
 List synonym, in order, adds the CoL records at species rank with its name
-(or `orthographicallySame`), accepted and provisional first, then by `id`,
-that agree with the lineage, aren't taken, don't lead to a species already
+(or `orthographicallySame`), not `MISAPPLIED`, accepted and provisional
+first, then by `id`, that agree with the lineage, aren't taken, don't lead to a species already
 counted whole (by the steps or an earlier synonym record), and whose
 authorship one of the synonym's unqualified authors doesn't compare `other`
-with (or it has none). A synonym whose every author is qualified adds
+with (or it has none). If one of those records compares `same`, only such
+records are added, as the steps prefer matching records (*Pogostemon
+crassicaulis*'s synonym *Mentha verticillata* D.Don takes the D.Don record,
+not the hybrid *Mentha × verticillata* L.). A synonym whose every author is
+qualified adds
 nothing: it names part of a taxon or a misapplied name (*Alchemilla
 vulgaris* "auct."; *Goggia rupicola* "[pro parte]"). A synonym the Red List
 files under two species was already dropped (`sources/assessments.ts`).
@@ -252,18 +260,20 @@ Each record *r*, with *s* = `speciesOf(r)`, the first that applies:
 2. *r* is *s* → **split into**: the Red List counts as one species what CoL
    holds as several (*Butorides striata* includes the green heron *B.
    virescens*).
-3. Otherwise, *s* is another species: if the steps' records already lead to
-   *s*, → **part of**; if *s* is another assessed name, or another assessed
-   species' steps count it whole, the record isn't added; else → **part
-   of**, with the doubt `synonym filed elsewhere`: the occurrences GBIF
-   filed under the Red List's synonym count for it, while *s* stays on the
-   NE list with a note (*Elymus farctus*'s synonym *E. junceiformis*, under
-   *Thinopyrum junceiforme*: 5,832 occurrences).
+3. Otherwise, *s* is another species. If *s* is another assessed name, or
+   another assessed species' steps count it whole, the record isn't added.
+   Else → **part of**: the occurrences GBIF filed under the Red List's
+   synonym count for it, and *s* keeps the rest, on the NE list. If the
+   steps' records don't already lead to *s*, the species gets the doubt
+   `synonym filed elsewhere` (*Elymus farctus*'s synonym *E. junceiformis*,
+   under *Thinopyrum junceiforme*: 5,832 occurrences).
 
 In 1 and 2, *s* being another assessed name makes it **refused**. On the
 2026-11-16 build, synonym records count 796 species' CoL species whole by
 1 (1.5M occurrences, most already counted by the steps), 1,144 by *split
-into* (7.3M), and 850 species' records by 3 (48,855). The author check
+into* (7.3M), and 1,751 species' records by 3 (850 with the doubt, 48,855
+occurrences; 901 without, 38,766). These figures predate the "only
+`same`" rule above (28 species, about 32,000 occurrences). The author check
 keeps other authors' species out (*Solanum glabrum* Merr., for the Red
 List's *S. glabrum* Dunal), but a bare "L." can't be told apart, hence the
 doubt `split, authors unclear` (*Vicia sepium* would count *V. dumetorum*
@@ -289,14 +299,15 @@ rows on synonym records:
 A species with a reason, or doubts and no holding decision, is **listed for
 review**: 2,332 (1,528 with doubts on the steps' records, the rest with
 the two synonym doubts or one of 255 reasons). A homonym the citation
-settles (3,555 of 3,698 species with several groups) has no doubt; the other
-groups are on the NE list, marked as possibly the species.
+settles (3,555 of 3,698 species with several groups) has no doubt; its
+other groups stay on the NE list, unflagged, since the citation says they
+are other organisms.
 
 ### Counting and the NE list
 
-Each CoL record's occurrences have at most one owner, an assessed species
-or an unassessed CoL species (`models/count/usage_owner.sql`); the first
-that applies:
+A CoL species is **counted whole** by an assessed species that has an *is*
+or *split into* record leading to it. Each CoL record's occurrences have one
+owner (`models/count/usage_owner.sql`), the first that applies:
 
 1. **Part of**: a *part of* record owns its occurrences and those of the
    records below it, three levels down (the deepest in the release). Roots
@@ -304,34 +315,41 @@ that applies:
    species' roots, the one whose own name it is (*Zosterops simplex* owns
    the synonym *Z. simplex* filed under *Z. japonicus simplex*).
 2. **Whole species**: otherwise a record counts for its CoL species (its own
-   name, synonyms, subspecies and their BINs), for the assessed species with
-   an *is* or *split into* record leading to it.
-3. **Unassessed**: otherwise, for the CoL species itself, if no link row but
-   a candidate leads to it. A species reached only by rows that count
-   nothing counts for no one.
+   name, synonyms, subspecies and their BINs): for the assessed species that
+   counts it whole, if one does.
+3. **Unassessed**: otherwise, for the CoL species itself.
 
-Where two assessed species claim one record, the first by: primary before
-covered; no doubts; *is*, *split into*, *part of*; a decision before the
-matcher; then as today (`oneOwnerPerUsage`, `link/rules.ts`). The build
-stops if a record has two owners.
+A *part of* or *refused* record never takes the rest of its species: *Pararge
+xiphioides* (assessed) owns the occurrences under its own name, and *P.
+aegeria*, which no assessed species counts whole, owns the rest (3.5M) and
+is on the NE list. (Today any link row hides its species; about 1,560
+described species with 20.4M occurrences count for no one that way.)
+
+Where two assessed species claim one record under the same rule, the first
+by: primary before covered; no doubts before doubts; *is*, then *split
+into*, then *part of*; a decision before the matcher; the species whose CoL
+name is its Red List name as written; the lower SIS id
+(`oneOwnerPerUsage`, `link/rules.ts`). The loser's row gets `relation =
+'duplicate'` and counts nothing.
 
 The **GBIF key** a species links to (`gbif_species_key`,
 `count/record_counts.sql`) is its primary row's record, so *Butorides
 striata* keeps its own.
 
-The **Not Evaluated list** is every described species that no link row
-leads to, other than candidate rows and relation-3 synonym records. GBIF
-counts are added where it has records (`lists/ne.parquet`, as today); a
-species with none is still listed. Two notes go with it, in
-`lists/ne_notes.parquet` (`col_id`, `may_be_assessed`, `redlist_synonym_of`),
-so they don't depend on GBIF records:
+The **Not Evaluated list** is every described species no assessed species
+counts whole, with or without GBIF records (counts added where there are,
+`lists/ne.parquet`). Two notes, on `lists/species/` so they don't depend on
+records:
 
-- **May be the assessed species** (`may_be_assessed`, flagged, as today):
-  the CoL species of an untaken candidate (*Miniopterus schreibersii*'s
-  copy by other authors).
-- **A Red List synonym is filed here** (`redlist_synonym_of`, a note, not
-  a flag): the CoL species of a relation-3 synonym record ("*E.
-  junceiformis*, a synonym of *Elymus farctus* in the Red List").
+- **`may_be_assessed`** (flagged, as today): the CoL species of a candidate
+  not taken, for an assessed species with a doubt.
+- **`part_of_assessed`** (a note, not a flag): the assessed species whose
+  *part of* records lie under it, with the names ("*Pararge xiphioides*,
+  assessed, is part of it in CoL").
+
+The build stops if a record has two owners, or if a described species is
+neither counted whole nor on the NE list; `sync.json` records the
+occurrences counted for no one (outside the release's species).
 
 ### Output
 
@@ -346,9 +364,10 @@ so they don't depend on GBIF records:
 - **Relation → columns**: *is*, *split into*: `col_taxon_id` = *s*, `counts
   = 'the whole CoL species'`; *part of*: `col_taxon_id` = *r* (or its
   non-nominate infraspecific record), `counts = 'only records under its own
-  name'`; *refused*: `counts = 'nothing'`, not counted. `col_species_id` is
-  *s*, except for relation-3 synonym records, where it is NULL, so *s* isn't
-  hidden, and *s* goes in a new column, `filed_under_id`.
+  name'` (*r*'s non-nominate infraspecific parent when CoL files a synonym
+  under one, as `assessment-link.ts`'s `lumpRoot` does today); *refused*:
+  `counts = 'nothing'`. `col_species_id` is
+  *s*. `counted` is false only for *refused*.
 - **`basis`**: `matcher` (the answer), `citation` (any other step record),
   `synonym` or `decision`; `decided_by` and `reviewed` (boolean) for a
   decision.
@@ -357,9 +376,9 @@ so they don't depend on GBIF records:
   `; `-joined), the reason, `decision lapsed (<name | citation | assessed
   name | record not found>)`, `decision's candidates changed (<species>)`
   or `decision not yet reviewed (<by>)`; NULL when not listed.
-- **Candidate rows**: one per untaken group's CoL species, `method =
-  'undecided_candidate'`, `counts = 'nothing'`, for every species with
-  untaken groups (today only flagged and waiting species have them).
+- **Candidate rows**: one per untaken group's CoL species, for species with
+  a doubt, as today (`method = 'undecided_candidate'`, `counts =
+  'nothing'`).
 - **Labels as today** for `method`, `col_treatment` (plus `split`),
   `match_reason` (`decision` replaces `override`; `flagged: …` and
   `waiting` go), `match_note`, `match_records`, candidate rows, the
@@ -462,12 +481,16 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      `selectAll(buildDir)`, giving `step`, `reason`, `groups`, `doubts`, and
      records with `relation`, relation step and `basis`; `"sync:select"`
      (`app/package.json`) writes `[{sis_taxon_id, step, reason, doubts,
-     selected: [{id, relation, relation_step, basis}]}]` to stdout.
+     selected: [{id, relation, relation_step, basis}]}]` to stdout;
+     `relation_step` is 1–5 for steps' records, and for synonym records 1, 2,
+     `3` (with the doubt) or `3s` (*s* already reached by the steps).
    - `link/name-rules.ts` (create): the functions above, moved from
      `species-key.ts` and `name-variants.ts` (which import them back), with
      the respelling rule replacing `MAX_RESPELLING_EDITS = 3`.
-   - Tests: `link-select.test.ts` (each step, doubt, relation, example),
-     `name-rules.test.ts`.
+   - Tests: `link-select.test.ts` (each step, doubt, relation, example);
+     `name-rules.test.ts`, taking the `sameOrganism`, `isCoLRespelling` and
+     `orthographicallySame` tests from `species-key.test.ts` and
+     `name-variants.test.ts`.
    - **Rebuild check**, `npm run sync:rebuild-check` (`checks/rebuild-check.ts`):
      builds a sealed folder with this spec, `name-rules.ts` bundled into one
      file, the build's inputs as JSON (species, matcher responses, synonyms
@@ -475,8 +498,11 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      authorship, class, kingdom and phylum, and the occurrences under each)
      and the output schema; runs
      `claude -p` there with only read, write and run tools inside it and no
-     web; compares its output with `sync:select` species by species; and
-     keeps the agent's log, from which it lists every file read. Run after
+     web (`--tools Read,Write,Edit,Bash`, `--setting-sources ""`,
+     `--strict-mcp-config`, `--output-format stream-json --verbose`, `HOME`
+     set to the folder); compares its output with `sync:select` species by
+     species; and keeps the agent's log, from which it lists every file it
+     read and every command it ran. Run after
      every change to the rules and every release move.
 2. **The sync writes it.**
    - `link/assessment-link.ts` calls `select.ts` and writes *Output*;
@@ -495,20 +521,30 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
    - `dbt/models/lists/assessed.sql`: `match_doubts`, `match_reviewed`;
      `count_note = 'flagged'` also when `match_doubts` is set.
      `dbt/models/count/record_counts.sql`: the GBIF key's `arg_min` puts
-     `role = 'primary'` first. `dbt/models/lists/ne.sql`: only the GBIF
-     overlay.
+     `role = 'primary'` first. `dbt/models/count/usage_owner.sql`: rules 2
+     and 3 read only *is* and *split into* rows as counting a species whole.
+   - **What makes a CoL species assessed**: every reader that today treats
+     any non-candidate link row as making a CoL species assessed reads only
+     *is* and *split into* rows (`relation`): `lists/ne.sql`, `lists/species.sql`
+     (EX/EW), `precomputed/name_index.sql`, `col_to_assessed.sql`,
+     `synonym_index.sql`, `col_split_candidates.sql`, `col_synonym_assessed.sql`,
+     `checks/compare/facts.ts`, `precomputed/summaries.ts`,
+     `precomputed/col-differences.ts`, and `src/lib/data/species-duckdb.ts`'s
+     `ne_assessed_col_ids` and `live-taxa-children.ts`.
+   - `dbt/models/lists/species.sql`: `may_be_assessed` (moved from `ne.sql`,
+     whose `candidates` CTE goes) and `part_of_assessed` (`;`-joined
+     `<assessed name> (<record name>)` items, sorted), NULL when none.
    - `sync.ts`: `describeBuild` counts by `basis` and writes `matching.steps`,
      `matching.doubts` and `matching.gbif_matcher` (GBIF's `buildInfo.sha`
      from `.../v2/species/match/metadata?checklistKey=xcol`, or `unknown`).
      `sources-releases.ts`: the Red List database.
    - `trace.ts` calls `select.ts`; `trace.ts` and `checks/review-links.ts`
-     show `relation`, `doubts` and `filed_under_id`.
-   - Candidate rows: `select.ts` returns the untaken groups and
-     `assessment-link.ts` writes their rows, as `rules.ts` does today.
-     `precomputed/summaries.ts` and `precomputed/col-differences.ts` gain
-     `method <> 'undecided_candidate'`, as the other readers have.
-   - `dbt/models/lists/ne_notes.sql` (create): `may_be_assessed` (moved
-     from `ne.sql`) and `redlist_synonym_of`, for every noted NE species.
+     show `relation` and `doubts`. `select.ts` returns the untaken groups and
+     `assessment-link.ts` writes their candidate rows, as `rules.ts` does
+     today.
+   - `sync.ts` also writes `matching.unowned` (occurrences counted for no
+     one) and stops if a described species is neither counted whole nor on
+     the NE list.
    - Fixtures (`checks/fixtures/matching.ts`, `checks/check-fixtures.ts`,
      `pipeline-fixtures.test.ts`): `expect` gains `doubts` and `selected`
      (`{name, authorship, relation}[]`); `flagged: …` labels become `doubts`,
@@ -527,9 +563,9 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
    - `src/lib/data/species-duckdb.ts`: the two new columns, `match_doubt_keys:
      doubtKeys(r)` beside `match_counts_keys`, and `match_reason ===
      'decision'` at line 207; `src/hooks/useRedListSpeciesQuery.ts`: the
-     types; the NE overlay (`ensureNeHelpers` and the NE list query) joins
-     `ne_notes.parquet`, and the match tooltip shows `redlist_synonym_of` as
-     a note. `components/redlist/RedListView.tsx`: tooltip pills
+     types; the NE list query reads `may_be_assessed` and `part_of_assessed`
+     from `species/`, and the match tooltip shows `part_of_assessed` as a
+     note. `components/redlist/RedListView.tsx`: tooltip pills
      for every doubt; the single-species bars read doubts.
 4. **Remove the old rule**: `link/accept-match.ts`, its test, and every
    reference to it or to `match-overrides` (code, fixtures' `source` fields,
@@ -550,7 +586,8 @@ the sync (`checks/judge.ts`, `checks/judge-prompt.md`; `npm run sync:judge
 -- <first | changed>`), and the sync never reads its output.
 
 - **Which species**: those that aren't easy. Easy is one group, no doubt
-  and no reason, every step record *is*, and no synonym record counted:
+  and no reason, every step record *is*, and no synonym record other than
+  refused:
   164,314 of 175,909 on the 2026-11-16 build. `first`, once this change's
   first build is ready, judges the other 11,595 and a random 1,000 easy
   ones (how often an easy species is wrong); `changed`, every species whose
@@ -562,12 +599,12 @@ the sync (`checks/judge.ts`, `checks/judge-prompt.md`; `npm run sync:judge
   synonym, each with its CoL species, classification, occurrences, and
   whether the Red List assesses that species separately. Not our
   selection.
-- **Call**: `claude -p`, run in an empty temporary folder holding only the
-  batch's facts, so it can't read our build or this repo; batches of 20
-  species, the default model, `--setting-sources ""`, `--tools
+- **Call**: `claude -p`, run in an empty temporary folder, with the batch's
+  facts (20 species) on stdin, so it can't read our build or this repo; the
+  default model, `--setting-sources ""`, `--strict-mcp-config`, `--tools
   WebSearch,WebFetch`, `--allowedTools WebSearch,WebFetch`,
-  `--disallowedTools "WebFetch(domain:dashforlife.org)"` (and the other
-  hosts that serve the dashboard), `--output-format json`, and
+  `--disallowedTools "WebFetch(domain:dashforlife.org)"
+  "WebFetch(domain:vercel.app)"`, `--output-format json`, and
   `--json-schema` for `{answers: [{sis_taxon_id, records: [{id, relation:
   "is" | "part of" | "split into"}] | "can't tell", reason, sources:
   [url]}]}`.
