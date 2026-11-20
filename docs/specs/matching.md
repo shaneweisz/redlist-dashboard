@@ -1,7 +1,7 @@
 # Matching and counting: which CoL records and GBIF occurrences represent a Red List species
 
 *   **Author:** shaneweisz
-*   **Status:** Proposed (revision 15: the eighth EGM review)
+*   **Status:** Proposed
 *   **Date:** 2026-11-20
 
 --------------------------------------------------------------------------------
@@ -66,8 +66,8 @@ citations, not concepts.
    species whose records change.
 2. **No change of ours makes a group worse.** A change to these rules or the
    four functions merges only if, among the species it changes, no taxonomic
-   group has fewer judged right, unless the maintainer adds each species
-   lost to the judge's calibration with its correct answer. Release moves
+   group has fewer judged right, unless the maintainer makes each species
+   lost a fixture case with its correct answer. Release moves
    are judged and reported, never gated.
 3. **Reproducible** from this document and the four functions.
 4. **Use what GBIF uses**: candidates come from matching-ws, queried as GBIF
@@ -408,8 +408,8 @@ Each is a fixture case (`checks/fixtures/matching.ts`).
   saying so (*Catapodium borgesii*, VU, would count 23,162 records of the
   widespread *C. marinum*). The judge reads every species whose records
   change; a decision corrects one.
-- **A web page steers the judge** (prompt injection): its verdicts only gate
-  a merge, never feed the sync, and the maintainer reads every species
+- **The judge is wrong, or a web page steers it**: its verdicts only gate a
+  merge and never feed the sync, and the maintainer reads every species
   whose verdict differs.
 - **`compareAuthors` or `orthographicallySame` misreads a name** (*afer* /
   *afra* is refused): it shows as a doubt; the fix is general, under Goal 2.
@@ -495,38 +495,36 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
 
 ## The judge
 
-An agent that reads one species' facts and says which records it would
-take; code compares its answer with ours. It runs by hand, outside the sync
-(`checks/judge.ts`, `checks/judge-prompt.md`, `checks/judge-calibration.ts`;
-`npm run sync:judge -- <all | changed | review>`); the sync never reads it.
+Headless Claude Code reads one species' facts and says which records it
+would take; code compares its answer with ours. It runs by hand, outside
+the sync (`checks/judge.ts`, `checks/judge-prompt.md`; `npm run sync:judge
+-- <all | changed>`), and the sync never reads its output.
 
-- **Given**: the Red List name, citation, lineage and synonyms with authors;
-  each candidate and synonym record with its CoL species, classification,
-  occurrences, and whether the Red List assesses that species separately.
-  Not our selection. It has web search and fetch, the dashboard's own
-  domains blocked.
-- **Answers**: the records it would take, each `is`, `part of` or `split
-  into`, or `can't tell`, with its reasoning and the pages it used. Asked
-  twice; if the answers differ, `unsettled`, for the maintainer.
-- **Verdict**, in code (*refused* counts as not taken): `right`, or `wrong`
-  graded `superset`, `subset`, `other relation` or `disjoint`; `can't tell`
-  and `unsettled` count as neither.
-- **When**: `all` once (the rate of wrong records no doubt flags; each is
-  listed for review); `changed`, every species whose records changed from
-  `.sync/publish/`; `review`, species in review whose facts changed. Under
-  Goal 2, one model judges old and new; groups are the CoL class, or
-  kingdom for plants and fungi.
-- **Calibration**: before each run, on cases a person has answered
-  (confirmed fixtures, reviewed decisions, cases an earlier rule got wrong);
-  no `wrong` answer passes. It starts with Claude Haiku, then Sonnet, then
-  Opus (the current ids, in `judge.ts`); if none passes, the run stops.
-- **Cost**: a 100-species pilot prices each run for the maintainer's
-  go-ahead; `all` uses the Batch API; answers are cached by facts, model,
-  prompt and attempt.
+- **Call**: `claude -p` with the prompt and a batch of species' facts,
+  `--json-schema` for the answer, web search and fetch allowed, and
+  `--disallowedTools` denying fetches from the dashboard's own domains
+  (they show our selection).
+- **Facts**, per species: the Red List name, citation, lineage and synonyms
+  with authors; each candidate and synonym record with its CoL species,
+  classification, occurrences, and whether the Red List assesses that
+  species separately. Not our selection.
+- **Answer**: the records it would take, each `is`, `part of` or `split
+  into`, or `can't tell`, with its reason and the pages it used. Code
+  scores it `right` (the same records and relations; *refused* counts as
+  not taken), `wrong` or `can't tell`.
+- **Runs**: `all` once, when the first build of this change is ready (the
+  rate of wrong records no doubt flags; each is listed for review); then
+  `changed`, every species whose records changed from `.sync/publish/`.
+  Under Goal 2, old and new are scored against the same answers; groups are
+  the CoL class, or kingdom for plants and fungi.
+- **Before each run**, it answers the fixture cases, whose answers are
+  known, and prints its score and an estimate of the run's size; the
+  maintainer decides whether to go on.
 - **Output**: `.sync/review/judgements.parquet` (`sis_taxon_id`, `answer`,
-  `sources`, `verdict`, `grade`, `reason`, `model`, `prompt_version`) and a
-  report by doubt and group; `checks/review-links.ts` shows each verdict.
-  Test: `judge.test.ts`, the API mocked.
+  `sources`, `verdict`, `reason`, `model`) and a report by doubt and group;
+  `checks/review-links.ts` shows each verdict. Answers are kept by species
+  and facts, so a run asks only what changed. Test: `judge.test.ts`, with
+  `claude` stubbed.
 
 --------------------------------------------------------------------------------
 
