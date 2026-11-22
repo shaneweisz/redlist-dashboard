@@ -4041,9 +4041,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   );
 
   // Country map card — shared between Charts row 2 (new-assessments mode) and
-  // More Filters (reassessments mode, moved there to keep the primary view
-  // focused on Conservation Status / Years Since Assessed / Geospatial GBIF
-  // Records; see the More Filters section below).
+  // the Country / Assessors row below Charts row 1 (reassessments mode).
   // First Assessments: Not Evaluated species have no assessed range, so
   // their countries come from GBIF records alone.
   const countryGbifInfo = (
@@ -5544,10 +5542,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {/* Charts row 2 (new-assessments mode only): Country map + Year
               Described + GBIF Records, 3-col, 1/3 each. For
-              reassessments, everything past Charts row 1 (Country, Threats,
-              etc.) lives in More Filters instead (below) — decluttered out of
-              the always-visible primary view (see countryMapCard/threatsCard,
-              defined above). */}
+              reassessments, Country sits beside the Assessors chart below
+              Charts row 1, and the rest (Threats, Triage, etc.) lives in More
+              Filters (see countryMapCard/threatsCard, defined above). */}
           {isNewAssessments && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {countryMapCard}
@@ -5628,10 +5625,73 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           </div>
           )}
 
-          {/* Charts row 1 is the only always-visible filter row in reassessments
-              mode. Everything else (Country, Assessors/Reviewers, Growth Form,
+          {/* Country alongside the assessors/reviewers credits: always visible in
+              reassessments mode, directly below Charts row 1. */}
+          {!isNewAssessments && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {countryMapCard}
+                {isSingleSpecies && singleSpecies ? (() => {
+                  // Facilitators are absent on ~62% of latest assessments, and
+                  // contributors (~67%) and institutions (~81%) more often still —
+                  // each is only filled in particular circumstances — so
+                  // "Contributors / None listed" is the common case, not the
+                  // exception. Drop those cards rather than spend the row saying
+                  // nothing. Assessors and Reviewers keep theirs: empty there is
+                  // genuinely notable.
+                  const cards = [
+                    { title: "Assessors", names: singleSpeciesAssessors },
+                    { title: "Reviewers", names: singleSpeciesReviewers },
+                    ...(singleSpeciesFacilitators.length > 0
+                      ? [{ title: "Facilitators", names: singleSpeciesFacilitators }]
+                      : []),
+                    ...(singleSpeciesContributors.length > 0
+                      ? [{ title: "Contributors", names: singleSpeciesContributors }]
+                      : []),
+                    ...(singleSpeciesInstitutions.length > 0
+                      ? [{ title: "Institutions", names: singleSpeciesInstitutions }]
+                      : []),
+                  ];
+                  return (
+                  <div className={`grid grid-cols-1 gap-3 ${cards.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                    {cards.map(({ title, names }) => (
+                      <div key={title} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</span>
+                        </div>
+                        <div className="overflow-y-auto mt-2" style={{ maxHeight: 260 }}>
+                          {names.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {names.map((name) => (
+                                <span key={name} className="inline-block px-3 py-1.5 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">{name}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-zinc-400 dark:text-zinc-500">None listed</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  );
+                })() : (
+                  <ReviewerChart
+                    data={creditChartData}
+                    viewMode={assessorReviewerMode}
+                    onViewModeChange={setAssessorReviewerMode}
+                    selectedItems={creditSelection[assessorReviewerMode].selected}
+                    onBarClick={makeAssessorClick(creditSelection[assessorReviewerMode].setter)}
+                    onRangeSelect={makeRangeSelect(creditSelection[assessorReviewerMode].setter)}
+                    onItemToggle={makeAssessorToggle(creditSelection[assessorReviewerMode].setter)}
+                    loading={speciesLoading && assessedSpecies.length === 0}
+                  />
+                )}
+              </div>
+          )}
+
+          {/* Charts row 1 and the Country / Assessors row are the always-visible
+              filter rows in reassessments mode. Everything else (Growth Form,
               Assessment Criteria / Number of Assessments, Realm/Movement/Trend,
-              Habitat/Threats, Taxonomic revision) lives behind the "More Filters"
+              Habitat/Threats, Taxonomic revision, Reassessment Triage) lives behind the "More Filters"
               toggle below. No independently-scrollable panel here: nested
               scrollbars read as confusing, so this is plain click-to-expand. */}
           {!isNewAssessments && (
@@ -5644,9 +5704,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                   More Filters
-                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size > 0) && (
+                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + (priorityBox ? 1 : 0) > 0) && (
                     <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
-                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + selectedCountries.size + selectedAssessors.size + selectedReviewers.size + selectedFacilitators.size + selectedContributors.size + selectedInstitutions.size} active
+                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + (priorityBox ? 1 : 0)} active
                     </span>
                   )}
                 </button>
@@ -5655,119 +5715,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {!isNewAssessments && moreFiltersOpen && (
             <>
-                {/* Reassessment Triage, full width at the top of More Filters: years
-                    since assessment against GBIF records (not for a single species). */}
-                  {!isNewAssessments && showPriority && (
-                    <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {priorityBox && (
-                            <button type="button" onClick={() => setPriorityBox(null)}
-                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {speciesLoading && assessedSpecies.length === 0 ? (
-                        <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-                      ) : (
-                        <PriorityScatter
-                          points={priorityPoints}
-                          colors={CATEGORY_COLORS}
-                          yAxis={
-                            // The y axis title is its controls, read as a phrase:
-                            // "[New ▾] GBIF records ([all ▾])", each select sized to
-                            // its chosen option where the browser supports it.
-                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                              </select>
-                              GBIF records (
-                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                              </select>
-                              )
-                            </span>
-                          }
-                          box={priorityBox}
-                          onBoxChange={setPriorityBox}
-                          onPointClick={openSpeciesFromScatter}
-                          selectedKey={selectedSpeciesKey}
-                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                          maxYears={priorityExtent.maxYears}
-                          maxValue={priorityExtent.maxValue}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                {/* Country alongside the assessors/reviewers credits, below the triage. */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {countryMapCard}
-                  {isSingleSpecies && singleSpecies ? (() => {
-                    // Facilitators are absent on ~62% of latest assessments, and
-                    // contributors (~67%) and institutions (~81%) more often still —
-                    // each is only filled in particular circumstances — so
-                    // "Contributors / None listed" is the common case, not the
-                    // exception. Drop those cards rather than spend the row saying
-                    // nothing. Assessors and Reviewers keep theirs: empty there is
-                    // genuinely notable.
-                    const cards = [
-                      { title: "Assessors", names: singleSpeciesAssessors },
-                      { title: "Reviewers", names: singleSpeciesReviewers },
-                      ...(singleSpeciesFacilitators.length > 0
-                        ? [{ title: "Facilitators", names: singleSpeciesFacilitators }]
-                        : []),
-                      ...(singleSpeciesContributors.length > 0
-                        ? [{ title: "Contributors", names: singleSpeciesContributors }]
-                        : []),
-                      ...(singleSpeciesInstitutions.length > 0
-                        ? [{ title: "Institutions", names: singleSpeciesInstitutions }]
-                        : []),
-                    ];
-                    return (
-                    <div className={`grid grid-cols-1 gap-3 ${cards.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
-                      {cards.map(({ title, names }) => (
-                        <div key={title} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</span>
-                          </div>
-                          <div className="overflow-y-auto mt-2" style={{ maxHeight: 260 }}>
-                            {names.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {names.map((name) => (
-                                  <span key={name} className="inline-block px-3 py-1.5 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">{name}</span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-sm text-zinc-400 dark:text-zinc-500">None listed</span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    );
-                  })() : (
-                    <ReviewerChart
-                      data={creditChartData}
-                      viewMode={assessorReviewerMode}
-                      onViewModeChange={setAssessorReviewerMode}
-                      selectedItems={creditSelection[assessorReviewerMode].selected}
-                      onBarClick={makeAssessorClick(creditSelection[assessorReviewerMode].setter)}
-                      onRangeSelect={makeRangeSelect(creditSelection[assessorReviewerMode].setter)}
-                      onItemToggle={makeAssessorToggle(creditSelection[assessorReviewerMode].setter)}
-                      loading={speciesLoading && assessedSpecies.length === 0}
-                    />
-                  )}
-                </div>
-
                 {/* Growth Form (plants/fungi only) */}
                 {(() => {
                   if (speciesLoading && assessedSpecies.length === 0) {
@@ -5993,6 +5940,60 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {gbifMatchCard}
                   {!isNewAssessments && taxonomicRevisionCard}
                 </div>
+
+                {/* Reassessment Triage, full width at the bottom of More Filters: years
+                    since assessment against GBIF records (not for a single species). */}
+                  {!isNewAssessments && showPriority && (
+                    <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {priorityBox && (
+                            <button type="button" onClick={() => setPriorityBox(null)}
+                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {speciesLoading && assessedSpecies.length === 0 ? (
+                        <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
+                      ) : (
+                        <PriorityScatter
+                          points={priorityPoints}
+                          colors={CATEGORY_COLORS}
+                          yAxis={
+                            // The y axis title is its controls, read as a phrase:
+                            // "[New ▾] GBIF records ([all ▾])", each select sized to
+                            // its chosen option where the browser supports it.
+                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+                              </select>
+                              GBIF records (
+                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+                              </select>
+                              )
+                            </span>
+                          }
+                          box={priorityBox}
+                          onBoxChange={setPriorityBox}
+                          onPointClick={openSpeciesFromScatter}
+                          selectedKey={selectedSpeciesKey}
+                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+                          maxYears={priorityExtent.maxYears}
+                          maxValue={priorityExtent.maxValue}
+                        />
+                      )}
+                    </div>
+                  )}
+
             </>
           )}
 
