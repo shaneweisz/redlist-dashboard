@@ -923,7 +923,7 @@ export function noMatchExplanation(flag: ColRevision, subject: string | null = n
 }
 
 /**
- * Where the ⚑ sends you: the CoL record this flag is about — the one that
+ * Where the ≠ sends you: the CoL record this flag is about — the one that
  * disagrees with the assessment, or the species' own record for a split-only
  * flag. Falls back to a CoL name search when there's no col_id at all, which is
  * the "unmatched" case (there is no record to link to — that IS the finding).

@@ -28,7 +28,7 @@ unit_tests:
       - input: source('link', 'assessment_link')
         format: sql
         rows: |
-          SELECT * FROM (VALUES (12::BIGINT, 'VC')) t(sis_taxon_id, col_species_id)
+          SELECT * FROM (VALUES (12::BIGINT, 'VC', 'accepted')) t(sis_taxon_id, col_species_id, method)
     expect:
       rows:
         - {ne_col_id: NEG, parent_id: 10, parent_name: Gazella gazella, parent_category: VU, rn: 1}
@@ -62,7 +62,7 @@ unit_tests:
       - input: source('link', 'assessment_link')
         format: sql
         rows: |
-          SELECT * FROM (VALUES (1::BIGINT, 'IN1')) t(sis_taxon_id, col_species_id)
+          SELECT * FROM (VALUES (1::BIGINT, 'IN1', 'accepted')) t(sis_taxon_id, col_species_id, method)
     expect:
       rows:
         - {ne_col_id: NEACC, assessed_id: 1, assessed_name: Clean species, assessed_category: LC}

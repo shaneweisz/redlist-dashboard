@@ -24,16 +24,23 @@ beforeAll(async () => {
   conn = await (await DuckDBInstance.create(":memory:")).connect();
   const copy = (sql: string, file: string) => conn.run(`COPY (${sql}) TO '${output(file)}' (FORMAT parquet)`);
 
-  // Two assessed birds and one Not Evaluated one.
-  await copy(`SELECT col_id, NULL::VARCHAR AS parent_id, col_id AS species_id, 'animalia' AS kingdom, 'species' AS rank,
-      'accepted' AS status, false AS demoted, true AS in_base, false AS extinct, NULL::VARCHAR AS ne_excluded,
+  // Two assessed birds and one Not Evaluated one. Accipiter two has a synonym (S2)
+  // and a subspecies (Q2) in CoL.
+  await copy(`SELECT col_id, parent_id, coalesce(parent_id, col_id) AS species_id, 'animalia' AS kingdom, 'species' AS rank,
+      status, false AS demoted, true AS in_base, false AS extinct, NULL::VARCHAR AS ne_excluded,
       'birds' AS taxon_group, name AS scientific_name, NULL::VARCHAR AS authorship, NULL::INTEGER AS described_year,
       'Chordata' AS phylum, 'AVES' AS class_name, 'ACCIPITRIFORMES' AS order_name, 'ACCIPITRIDAE' AS family, 'Accipiter' AS genus,
       true AS in_checklist, NULL::VARCHAR AS checklist_parent_id, NULL::VARCHAR AS checklist_name
-    FROM (VALUES ('A1', 'Accipiter one'), ('A2', 'Accipiter two'), ('N1', 'Accipiter three')) t(col_id, name)`, T.taxa);
+    FROM (VALUES ('A1', 'Accipiter one', NULL, 'accepted'), ('A2', 'Accipiter two', NULL, 'accepted'), ('N1', 'Accipiter three', NULL, 'accepted'),
+      ('S2', 'Astur two', 'A2', 'synonym'), ('Q2', 'Accipiter two minor', 'A2', 'accepted')) t(col_id, name, parent_id, status)`, T.taxa);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'the whole CoL species' AS counts, 'primary' AS role, true AS counted,
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
-      'matcher' AS basis, NULL::VARCHAR AS decided_by
+      'matcher' AS basis, NULL::VARCHAR AS decided_by,
+      CASE WHEN col_taxon_id IS NULL THEN 'waiting' WHEN sis = 2 THEN 'flagged: lower confidence' ELSE 'exact, unique' END AS match_reason,
+      CASE WHEN sis = 2 THEN 'GBIF''s matcher is only 94% sure.' END AS match_note,
+      CASE WHEN sis = 2 THEN '[{"id":"S2","name":"Astur two","authorship":null,"status":"synonym","species":"Accipiter two","role":"counted"},'
+        || '{"id":"Z9","name":"Astur two","authorship":"Other","status":"synonym","species":"Accipiter nine","role":"not"}]' END AS match_records,
+      CASE WHEN col_taxon_id IS NOT NULL THEN 'accepted' END AS col_treatment
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
       d::DATE AS assessment_date, 'VU' AS category, NULL::VARCHAR AS criteria, false AS possibly_extinct,
@@ -62,6 +69,8 @@ beforeAll(async () => {
       ('A1', '2026-02-01', true, 10::BIGINT),
       ('A1', '2026-02-01', false, 1::BIGINT),
       ('A2', '2026-11-01', true, 8::BIGINT),
+      ('S2', '2026-11-01', true, 3::BIGINT),
+      ('Q2', '2026-11-01', false, 2::BIGINT),
       ('N1', '2020-01-01', false, 5::BIGINT)) t(usage_key, d, georef, n)
     UNION ALL
     SELECT 'A1', 2025::SMALLINT, m::TINYINT, NULL::DATE, true, n::BIGINT FROM (VALUES (4, 5), (7, 7)) t(m, n)
@@ -102,6 +111,20 @@ describe("GBIF counts in the lists", () => {
     expect(Number(rows["1"].gbif_georeferenced_records_since_assessment)).toBe(21);
     // Plus the 2 ungeoreferenced in June 2025 and 1 in 2026.
     expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
+  });
+
+  it("flags a count that rests on a flagged match", () => {
+    expect(rows["2"].count_note).toBe("flagged");
+    expect(rows["1"].count_note).toBeNull();
+    expect(rows["2"].match_reason).toBe("flagged: lower confidence");
+    expect(rows["2"].match_note).toBe("GBIF's matcher is only 94% sure.");
+  });
+  it("splits the count among the match records, and names the CoL species holding the rest", () => {
+    expect(Number(rows["2"].gbif_all_records_count)).toBe(13);
+    const recs = JSON.parse(String(rows["2"].match_records)) as { id: string; name: string; role: string; records: number | null }[];
+    // S2 holds its own 3; A2 isn't listed, so it and its subspecies Q2 (8 + 2) are added under its name.
+    expect(recs.map((r) => [r.id, r.role, r.records])).toEqual([["S2", "counted", 3], ["Z9", "not", null], ["A2", "also", 10]]);
+    expect(recs[2].name).toBe("Accipiter two");
   });
 
   it("says when a species is linked to no CoL species, so nothing is counted", () => {

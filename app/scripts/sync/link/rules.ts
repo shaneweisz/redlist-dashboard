@@ -63,7 +63,10 @@ const genus = (n: string) => n.split(" ")[0].toLowerCase();
 export type Cover = (row: Omit<LinkRow, "basis" | "decided_by" | "role" | "to_review" | "col_treatment" | "match_description">) => boolean;
 
 export function coverer(links: LinkRow[]): Cover {
-  const primaryTarget = new Map(links.filter((l) => l.role === "primary").map((l) => [l.sis_taxon_id, l.col_species_id]));
+  // A species' own link to a CoL species, unless it counts only records under its
+  // own name (lumped): then a rule that finds the whole species, say a synonym the
+  // Red List lists, still adds it (Tangara cyanoptera → Thraupis cyanoptera).
+  const primaryTarget = new Map(links.filter((l) => l.role === "primary" && l.verdict !== "lumped").map((l) => [l.sis_taxon_id, l.col_species_id]));
   const seen = new Set<string>();
   return (row) => {
     // One row per species, taxon counted from (none when nothing counts), so a refused row and an own one for one species stay two.
@@ -186,7 +189,10 @@ export interface SameNameSynonym { sis: number; usage: string; target: string; a
  * Rule: a lumped species owns every synonym usage carrying its exact name, not
  * just the one matched, when its authors aren't clearly others: the same name by
  * another author is another organism (Ilex wallichii Hook.f. is not Steudel's,
- * filed under I. malayana), as for a synonym match (accept-match.ts).
+ * filed under I. malayana), as for a synonym match (accept-match.ts). When the
+ * citation is what picked the link among CoL's same-name records, the others
+ * are the ones it ruled out, so only those with the same citation count (Rubus
+ * fruticosus L. doesn't take Loureiro's or G.N.Jones's).
  */
 export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: SameNameSynonym[]): Set<number> {
   const lumped = new Map(links.filter((l) => l.role === "primary" && l.verdict === "lumped" && ["synonym", "ambiguous_synonym"].includes(l.method))
@@ -194,7 +200,10 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
   const touched = new Set<number>();
   for (const x of synonyms) {
     const l = lumped.get(x.sis);
-    if (!l || x.usage === l.col_taxon_id || compareAuthors(x.authority, x.authorship) === "other") continue;
+    if (!l || x.usage === l.col_taxon_id) continue;
+    const citationPicked = l.match_reason === "flagged: picked by the author citation" || !!l.match_reason?.includes("author decides");
+    const authors = compareAuthors(x.authority, x.authorship);
+    if (authors === "other" || (citationPicked && authors !== "same")) continue;
     if (cover({ sis_taxon_id: x.sis, col_species_id: x.target, col_taxon_id: x.usage, verdict: "lumped", method: "same_name_synonym",
       match_reason: "name under another species", counted: true })) touched.add(x.sis);
   }
@@ -204,24 +213,24 @@ export function coverSameNameSynonyms(links: LinkRow[], cover: Cover, synonyms: 
 /** A CoL species a species waiting for a decision might be: its name leads there, or the matcher guessed it. */
 export interface Candidate { sis: number; target_id: string; target_name: string }
 
+/** A primary row the matcher's answer made though the rule doubts it (assessment-link.ts). */
+export const isFlaggedLink = (l: Pick<LinkRow, "match_reason">) => !!l.match_reason?.startsWith("flagged: ");
+
 /**
- * Rule: while a species waits for a decision, every CoL species its own name
- * leads to (as an accepted name, or as a synonym CoL files under it), and the
- * matcher's guess, stay off the Not Evaluated list, counting nothing. Not knowing
- * which CoL species it is mustn't list as unassessed the species it is, under
- * CoL's name: Agama armata and ~150 others would otherwise appear there while
- * their links wait. Broad on purpose, as the retired passes' lumps were: CoL
- * files the assessed Coenonympha gardetta's name as a synonym under the small
- * heath, C. pamphilus, which the Red List hasn't assessed, and that stays off
- * the list too until gardetta is decided.
+ * Rule: for a species whose link is flagged or still waiting, every CoL
+ * species its own name leads to (as an accepted name, or as a synonym CoL files
+ * under it), and the matcher's guess, is a candidate: a row counting nothing,
+ * which the Not Evaluated list shows flagged ("may be the assessed X") rather
+ * than as plainly unassessed (Agama armata; Coenonympha gardetta's name, which
+ * CoL files under the small heath, C. pamphilus). Its records count for it there.
  */
 export function coverUndecidedCandidates(links: LinkRow[], cover: Cover, candidates: Candidate[]): Set<number> {
-  const waiting = new Set(links.filter((l) => l.role === "primary" && !l.col_species_id).map((l) => l.sis_taxon_id));
+  const waiting = new Set(links.filter((l) => l.role === "primary" && (!l.col_species_id || isFlaggedLink(l))).map((l) => l.sis_taxon_id));
   const touched = new Set<number>();
   for (const c of candidates) {
     if (!waiting.has(c.sis)) continue;
     if (cover({ sis_taxon_id: c.sis, col_species_id: c.target_id, col_taxon_id: c.target_id, verdict: "refused", method: "undecided_candidate",
-      match_reason: "candidate while waiting", counted: false })) touched.add(c.sis);
+      match_reason: "candidate", counted: false })) touched.add(c.sis);
   }
   return touched;
 }
@@ -248,7 +257,8 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
 
 /**
  * Rule: each usage counts for one assessed species at most. When two claim it,
- * one wins: primary before covered, own before lumped, the matcher before a
+ * one wins: unflagged before flagged (a flagged link never takes a
+ * confirmed species' records; it loses, flagged), then primary before covered, own before lumped, the matcher before a
  * decision, the more direct name, the name CoL spells exactly before a spelling
  * variant of it, then the lower SIS id. The loser counts nothing; a losing
  * primary row becomes a duplicate. The spelling matters where the Red List
@@ -258,7 +268,8 @@ export function dropCrossPhylum(links: LinkRow[], crossing: Set<string>): Set<nu
  * `exactName`: the species whose primary row's CoL name is their Red List name, as written.
  */
 export function oneOwnerPerUsage(links: LinkRow[], exactName: Set<number> = new Set()): Set<number> {
-  const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
+  const flagged = new Set(links.filter((l) => l.role === "primary" && isFlaggedLink(l)).map((l) => l.sis_taxon_id));
+  const rank = (l: LinkRow) => [flagged.has(l.sis_taxon_id) ? 1 : 0, l.role === "primary" ? 0 : 1, l.verdict === "own" ? 0 : 1, l.basis === "decision" ? 1 : 0,
     Math.max(0, (METHODS as readonly string[]).indexOf(l.method)), l.role === "primary" && exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted).sort((a, b) => {
     const x = rank(a), y = rank(b);

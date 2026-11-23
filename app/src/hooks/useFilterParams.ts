@@ -88,7 +88,7 @@ export const OWN_PARAM_NAMES = [
   "categories", "years", "assessmentYears", "describedYears", "assessmentCounts",
   "systems", "trends", "movement", "threats", "threatsScope", "criteria", "habitat", "habitatBreadth",
   "habitatImportance", "habitatSeasons", "habitatSuitability", "bd", "endemics", "growthForms",
-  "colMatch", "colReasons",
+  "colMatch", "colReasons", "match",
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
   "search", "outdated",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
@@ -292,6 +292,10 @@ export function parseParams(search: string) {
     colReasons: p.get("colReasons")
       ? new Set(p.get("colReasons")!.split(",").filter(Boolean))
       : new Set<string>(),
+    // GBIF match filter (lib/gbif-match.ts): bar keys, or "unconfirmed"/"confirmed".
+    match: p.get("match")
+      ? new Set(p.get("match")!.split(",").filter(Boolean))
+      : new Set<string>(),
     habitat: p.get("habitat")
       ? new Set(p.get("habitat")!.split(",").filter(Boolean))
       : new Set<string>(),
@@ -417,6 +421,7 @@ export function buildQs(state: {
   criteria: Set<string>;
   colMatch?: "flagged" | "clean" | null;
   colReasons?: Set<string>;
+  match?: Set<string>;
   habitat: Set<string>;
   habitatBreadth: "specialist" | "generalist" | null;
   habitatImportance: Set<string>;
@@ -474,6 +479,7 @@ export function buildQs(state: {
   if (state.criteria.size > 0) p.set("criteria", [...state.criteria].join(","));
   if (state.colMatch) p.set("colMatch", state.colMatch);
   if (state.colReasons && state.colReasons.size > 0) p.set("colReasons", [...state.colReasons].join(","));
+  if (state.match && state.match.size > 0) p.set("match", [...state.match].join(","));
   if (state.habitat.size > 0) p.set("habitat", [...state.habitat].join(","));
   if (state.habitatBreadth) p.set("habitatBreadth", state.habitatBreadth);
   if (!setEqualsArray(state.habitatImportance, ALL_HABITAT_IMPORTANCE)) p.set("habitatImportance", [...state.habitatImportance].join(","));
@@ -918,6 +924,18 @@ export function useFilterParams() {
     [syncUrl]
   );
 
+  const setMatch = useCallback(
+    (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+      setState(prev => {
+        const nextVal = typeof updater === "function" ? updater(prev.match ?? new Set<string>()) : updater;
+        const next = { ...prev, match: nextVal };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setSelectedHabitat = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       setState(prev => {
@@ -1235,6 +1253,7 @@ export function useFilterParams() {
         criteria: new Set<string>(),
         colMatch: null,
         colReasons: new Set<string>(),
+        match: new Set<string>(),
         habitat: new Set<string>(),
         habitatBreadth: null,
         habitatImportance: new Set<string>(ALL_HABITAT_IMPORTANCE),
@@ -1286,6 +1305,7 @@ export function useFilterParams() {
         criteria: new Set<string>(),
         colMatch: null,
         colReasons: new Set<string>(),
+        match: new Set<string>(),
         habitat: new Set<string>(),
         habitatBreadth: null,
         habitatImportance: new Set<string>(ALL_HABITAT_IMPORTANCE),
@@ -1335,6 +1355,7 @@ export function useFilterParams() {
     selectedCriteria: state.criteria,
     colMatch: state.colMatch,
     selectedColReasons: state.colReasons,
+    selectedMatch: state.match ?? new Set<string>(),
     selectedHabitat: state.habitat,
     habitatBreadth: state.habitatBreadth,
     selectedHabitatImportance: state.habitatImportance,
@@ -1363,6 +1384,7 @@ export function useFilterParams() {
 
     setColMatch,
     setColReasons,
+    setMatch,
     setViewMode,
     setLayoutMode,
     navigateToTaxonSubgroup,
