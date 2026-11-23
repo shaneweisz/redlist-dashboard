@@ -18,7 +18,7 @@
 export type MatchKey =
   | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided"
   | DoubtKey | "f_synonyms_only" | "agent"
-  | "none" | "ne_candidate";
+  | "none" | "ne_candidate" | "ne_assessed_here";
 
 /** One bar per doubt the sync can give (docs/specs/matching.md, "Doubts"). */
 export type DoubtKey = "f_author_pick" | "f_homonym" | "f_other_authors" | "f_spelling" | "f_ambiguous" | "f_confidence"
@@ -65,6 +65,7 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "f_synonyms_only", label: "Only its synonyms matched", group: "flagged" },
   { key: "agent", label: "Proposed by AI, not yet checked", group: "flagged" },
   { key: "ne_candidate", label: "Not Evaluated, may be assessed", group: "flagged" },
+  { key: "ne_assessed_here", label: "Not Evaluated, an assessed species is part of it", group: "includes" },
   { key: "author", label: "Homonym settled by author", group: "resolved" },
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
@@ -85,11 +86,12 @@ export const GROUP_TITLE: Record<MatchGroup, { title: string; sub: string }> = {
 };
 
 /** One species' key, from assessed.parquet's match columns: its first doubt, else how it was matched. */
-export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown; count_note?: unknown; match_treatment?: unknown; match_doubts?: unknown }): MatchKey {
+export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown; match_reviewed?: unknown; count_note?: unknown; match_treatment?: unknown; match_doubts?: unknown }): MatchKey {
   const reason = typeof r.match_reason === "string" ? r.match_reason : "";
   const doubts = doubtKeys(r);
   if (doubts.length > 0) return doubts[0];
-  if (reason === "decision") return String(r.match_decided_by ?? "").startsWith("agent:") ? "agent" : "decided";
+  // An AI's decision is flagged until a person has reviewed it.
+  if (reason === "decision") return String(r.match_decided_by ?? "").startsWith("agent:") && r.match_reviewed !== true ? "agent" : "decided";
   if (r.count_note === "flagged") return "f_synonyms_only";
   if (r.count_note === "unlinked" || !reason || reason.startsWith("decision,") || reason === "no candidate" || reason === "informal or qualified name") return "none";
   if (reason.includes("homonym, author decides")) return "author";
@@ -148,7 +150,7 @@ export const isFlagged = (s: SpeciesMatch) => GROUP.get(s.match ?? "plain") === 
 
 /** Every key a species shows: its match key, its doubts, what its count includes, and the NE flag. */
 const keysOf = (s: SpeciesMatch) => [...new Set<string>([...(s.match ? [s.match] : []), ...(s.match_doubt_keys ?? []), ...(s.match_counts_keys ?? []),
-  ...(s.may_be_assessed?.length ? ["ne_candidate"] : [])])];
+  ...(s.may_be_assessed?.length ? ["ne_candidate"] : []), ...(s.assessed_here?.length ? ["ne_assessed_here"] : [])])];
 
 /** Does a species pass the reconciliation filter? `selected` holds bar keys, or "flagged" / "exact" for the header toggles. */
 export function matchesMatchFilter(s: SpeciesMatch, selected: ReadonlySet<string>): boolean {

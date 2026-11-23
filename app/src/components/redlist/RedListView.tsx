@@ -4149,7 +4149,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const toggleClass = (active: boolean, activeColor: string) => chartControlClass(active, `${activeColor} text-white border-transparent`);
     const single = isSingleSpecies && singleSpecies
       ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never)
-          || singleSpecies.match_doubt_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length))
+          || singleSpecies.match_doubt_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length)
+          || (b.key === "ne_assessed_here" && singleSpecies.assessed_here?.length))
       : [];
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">

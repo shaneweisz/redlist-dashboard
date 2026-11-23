@@ -202,7 +202,8 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     // How its count was matched (src/lib/gbif-match.ts): one key, plus what else it counts.
     match: matchKey(r),
     match_counts_keys: countsKeys(r),
-    match_doubt_keys: doubtKeys(r),
+    // Only where there are doubts, to keep the list slim.
+    ...(r.match_doubts ? { match_doubt_keys: doubtKeys(r) } : {}),
     match_other_names: num(r.match_other_names),
     // Only where there is something to say, to keep the list slim.
     ...(r.match_records ? { match_records: JSON.parse(String(r.match_records)), match_decided_by: r.match_reason === "decision" ? str(r.match_decided_by) : null,

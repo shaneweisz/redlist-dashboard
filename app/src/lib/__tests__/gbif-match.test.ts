@@ -21,6 +21,7 @@ describe("matchKey", () => {
   it("tells a person's decision from an AI proposal", () => {
     expect(matchKey({ match_reason: "decision", match_decided_by: "fixture" })).toBe("decided");
     expect(matchKey({ match_reason: "decision", match_decided_by: "agent:unrecorded" })).toBe("agent");
+    expect(matchKey({ match_reason: "decision", match_decided_by: "agent:unrecorded", match_reviewed: true })).toBe("decided");
     expect(matchKey({ match_reason: "decision, not in CoL", match_decided_by: "someone", count_note: "unlinked" })).toBe("none");
   });
 });
@@ -61,5 +62,6 @@ describe("the filter and tally", () => {
     expect(assessedHere("Gymnosporia gracilis (same name)")).toEqual({ name: "Gymnosporia gracilis", kind: "same name" });
     // A note isn't a flag.
     expect(isFlagged({ assessed_here: ["Pararge xiphioides (part of)"] })).toBe(false);
+    expect(matchesMatchFilter({ assessed_here: ["Pararge xiphioides (part of)"] }, new Set(["ne_assessed_here"]))).toBe(true);
   });
 });
