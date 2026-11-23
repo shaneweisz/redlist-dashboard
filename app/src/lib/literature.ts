@@ -46,19 +46,12 @@ export const LITERATURE_SOURCE_HINT: Record<LiteratureSource, string> = {
 /** A species' literature counts as the lists carry them. */
 export interface LiteratureCounts {
   openalex_works?: number | null;
-  openalex_works_since_assessment?: number | null;
   bhl_works?: number | null;
-  bhl_works_since_assessment?: number | null;
 }
 
 /** Works mentioning the species in this source. */
 export function literatureWorks(s: LiteratureCounts, source: LiteratureSource): number | null {
   return (source === "bhl" ? s.bhl_works : s.openalex_works) ?? null;
-}
-
-/** Works published after the assessment date in this source; null when there is no window. */
-export function literatureWorksSinceAssessment(s: LiteratureCounts, source: LiteratureSource): number | null {
-  return (source === "bhl" ? s.bhl_works_since_assessment : s.openalex_works_since_assessment) ?? null;
 }
 
 /**

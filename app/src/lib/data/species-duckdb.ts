@@ -147,7 +147,7 @@ const ASSESSED_SELECT = `
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
-  openalex_works, openalex_works_since_assessment, bhl_works, bhl_works_since_assessment,
+  openalex_works, bhl_works,
   match_reason, match_decided_by, match_counts, match_other_names, match_records, match_treatment, redlist_authority, redlist_synonyms,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
@@ -202,9 +202,7 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     count_note: isCountNote(r.count_note) ? r.count_note : null,
     // Literature works mentioning it (the sync's paper_counts): OpenAlex and BHL.
     openalex_works: num(r.openalex_works),
-    openalex_works_since_assessment: num(r.openalex_works_since_assessment),
     bhl_works: num(r.bhl_works),
-    bhl_works_since_assessment: num(r.bhl_works_since_assessment),
     // How its count was matched (src/lib/gbif-match.ts): one key, plus what else it counts.
     match: matchKey(r),
     match_counts_keys: countsKeys(r),

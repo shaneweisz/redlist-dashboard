@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { literatureLinkHref, literatureSearchUrl, literatureWorks, literatureWorksSinceAssessment, openAlexWorksUrl, parseLiteratureSource } from "../literature";
+import { literatureLinkHref, literatureSearchUrl, literatureWorks, openAlexWorksUrl, parseLiteratureSource } from "../literature";
 
-const species = { openalex_works: 42, openalex_works_since_assessment: 7, bhl_works: 0, bhl_works_since_assessment: null };
+const species = { openalex_works: 42, bhl_works: 0 };
 
 describe("literature source", () => {
   it("defaults to OpenAlex for anything but bhl", () => {
@@ -13,8 +13,6 @@ describe("literature source", () => {
   it("reads each source's counts", () => {
     expect(literatureWorks(species, "openalex")).toBe(42);
     expect(literatureWorks(species, "bhl")).toBe(0);
-    expect(literatureWorksSinceAssessment(species, "openalex")).toBe(7);
-    expect(literatureWorksSinceAssessment(species, "bhl")).toBeNull();
   });
 });
 

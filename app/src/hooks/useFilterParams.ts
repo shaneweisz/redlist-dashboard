@@ -105,12 +105,12 @@ export const OWN_PARAM_NAMES = [
 export type ThreatsScope = "threatened" | "all";
 
 /** Columns the species table can be sorted by. */
-// totalWorks/newWorks sort on the literature source the table shows (lit=).
+// totalWorks sorts on the literature source the table shows (lit=).
 export type SortField = "year" | "category" | "totalGbif" | "newGbif" | "pctNewGbif" | "describedYear"
-  | "totalWorks" | "newWorks";
+  | "totalWorks";
 
 const SORT_FIELDS: SortField[] = ["year", "category", "totalGbif", "newGbif", "pctNewGbif", "describedYear",
-  "totalWorks", "newWorks"];
+  "totalWorks"];
 
 /** Narrow a raw `sort=`/`sort2=` param to a SortField, or null if unrecognised. */
 function parseSortField(raw: string | null): SortField | null {
