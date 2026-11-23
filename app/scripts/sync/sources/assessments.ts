@@ -20,7 +20,8 @@
  *   kingdom_name … family
  *                       IUCN's lineage, lowercase
  *   taxon_group         the Table 1a group, from IUCN's lineage
- *   synonyms            IUCN's synonyms: [{name, status}]
+ *   synonyms            IUCN's synonyms: [{name, status, authors}], authors the
+ *                       distinct non-empty species_author of the rows with that name
  *
  * Decisions:
  *   - Global assessments only, not suppressed, of the species' current taxon
@@ -174,7 +175,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
   // status is never read for meaning.
   await conn.run(`CREATE OR REPLACE TEMP TABLE synonyms AS
     WITH raw AS (SELECT * FROM ${pg(`
-      SELECT t.sis_id, ts.genus_name AS g, ts.species_name AS s, ts.status
+      SELECT t.sis_id, ts.genus_name AS g, ts.species_name AS s, ts.status, ts.species_author AS author
       FROM taxon_synonyms ts JOIN taxons t ON t.id = ts.taxon_id
       WHERE ${CURRENT_TAXON} AND ts.genus_name IS NOT NULL AND ts.species_name IS NOT NULL
         AND ts.infra_name IS NULL AND ts.status NOT IN ('DELETE', 'D')`)}),
@@ -185,9 +186,11 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
       FROM taxons t WHERE ${CURRENT_TAXON} AND scientific_name !~ ' [x×] ' AND position('(' in scientific_name) = 0`)}),
     claims AS (SELECT g, s, count(DISTINCT sis_id) AS n FROM (
                  SELECT sis_id, g, s FROM raw UNION ALL SELECT sis_id, g, s FROM canon) GROUP BY g, s),
-    one AS (SELECT r.sis_id, r.g || ' ' || r.s AS name, min(r.status) AS status
+    one AS (SELECT r.sis_id, r.g || ' ' || r.s AS name, min(r.status) AS status,
+                   list(DISTINCT regexp_replace(trim(r.author), '\\s+', ' ', 'g') ORDER BY regexp_replace(trim(r.author), '\\s+', ' ', 'g'))
+                     FILTER (trim(coalesce(r.author, '')) <> '') AS authors
             FROM raw r JOIN claims c ON c.g = r.g AND c.s = r.s WHERE c.n = 1 GROUP BY 1, 2)
-    SELECT o.sis_id AS sis_taxon_id, list({'name': o.name, 'status': o.status} ORDER BY o.name) AS synonyms
+    SELECT o.sis_id AS sis_taxon_id, list({'name': o.name, 'status': o.status, 'authors': coalesce(o.authors, [])} ORDER BY o.name) AS synonyms
     FROM one o JOIN species sp ON sp.sis_taxon_id = o.sis_id WHERE o.name <> sp.scientific_name GROUP BY 1`);
 
   await conn.run(`ALTER TABLE species ADD COLUMN taxon_group VARCHAR; UPDATE species SET taxon_group = ${caseSql}`);

@@ -37,7 +37,8 @@ import {
   type NoMatchDetail,
 } from "../../../src/lib/data/col-breakdown";
 import { SPLIT_REASON, UNFLAGGED_REASONS, GENUS_DIFFERS_REASON, RENAMED_REASON } from "../../../src/lib/col-revision";
-import { orthographicallySame, speciesNameParts, canonicalEpithet } from "../link/name-variants";
+import { orthographicallySame, canonicalEpithet } from "../link/name-rules";
+import { speciesNameParts } from "../../../src/lib/name-parts";
 import { output } from "../paths";
 import { openDuckDB } from "../sql";
 import { loadColDifferences, type ColDifferenceFiles } from "./col-differences";

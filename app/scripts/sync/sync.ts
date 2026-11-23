@@ -131,8 +131,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done = step("2 link");
     const asked = await askMatcher({ assessments: T.assessments, matcher }, T.matches);
     console.log(`   ${asked.asked.toLocaleString()} names asked, ${asked.cached.toLocaleString()} from cache (matching-ws ${matcher.version}, XR ${matcher.datasetKey})`);
-    const link = await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link: T.link });
-    manifest.link_rules = link.rules;
+    await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches, occurrences: T.occurrences }, { link: T.link });
     done();
   }
 
@@ -225,18 +224,38 @@ async function describeBuild(T: ReturnType<typeof tables>, matcher: { version: s
   const conn = await openDuckDB();
   const [rl] = await rows<{ species: number; newest: string }>(conn, `SELECT count(*) FILTER (is_latest)::INT AS species, max(year_published) AS newest
     FROM ${parquet(T.assessments)}`);
-  const [link] = await rows<{ matcher: number; decision: number; unlinked: number }>(conn, `
-    SELECT count(*) FILTER (basis = 'matcher')::INT AS matcher, count(*) FILTER (basis = 'decision')::INT AS decision,
-           count(*) FILTER (basis IS NULL)::INT AS unlinked FROM ${parquet(T.link)} WHERE role = 'primary'`);
-  // The queue: the links that need a person, by kind and reason.
-  const queue = Object.fromEntries((await rows<{ k: string; n: number }>(conn, `
-    SELECT regexp_replace(to_review, ' \\(.*\\)$', '') AS k, count(*)::INT AS n FROM ${parquet(T.link)}
-    WHERE role = 'primary' AND to_review IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1`)).map((r) => [r.k, r.n]));
+  // How each species' records were found (docs/specs/matching.md): by basis, step and doubt.
+  const tally = async (sql: string) => Object.fromEntries((await rows<{ k: string; n: number }>(conn, sql)).map((r) => [r.k, r.n]));
+  const link = parquet(T.link);
+  const byBasis = await tally(`SELECT coalesce(basis, 'none') AS k, count(*)::INT AS n FROM ${link} WHERE role = 'primary' GROUP BY 1 ORDER BY 2 DESC`);
+  const steps = await tally(`SELECT step::VARCHAR AS k, count(*)::INT AS n FROM ${link} WHERE role = 'primary' GROUP BY 1 ORDER BY 1`);
+  const doubts = await tally(`SELECT d AS k, count(*)::INT AS n FROM (SELECT unnest(string_split(doubts, ';')) AS d FROM ${link} WHERE role = 'primary') GROUP BY 1 ORDER BY 2 DESC`);
+  // The queue: the species listed for review, by kind.
+  const queue = await tally(`SELECT regexp_replace(to_review, ' \\(.*\\)$', '') AS k, count(*)::INT AS n FROM ${link}
+    WHERE role = 'primary' AND to_review IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1`);
+  // Occurrences counted for no one: filed outside the release's species.
+  const [unowned] = await rows<{ n: number }>(conn, `SELECT coalesce(sum(o.n), 0)::BIGINT AS n FROM ${parquet(T.occurrences)} o
+    ANTI JOIN ${parquet(T.usageOwner)} w ON w.usage_key = o.usage_key`);
+  // Every described species is counted whole by an assessed species or keeps its
+  // own record (it is on the NE list): none may count for no one.
+  const hidden = await rows<{ name: string }>(conn, `SELECT s.scientific_name AS name FROM ${parquet(T.species)} s
+    WHERE s.described AND s.col_id NOT IN (SELECT col_species_id FROM ${link} WHERE relation IN ('is', 'split into'))
+      AND NOT EXISTS (SELECT 1 FROM ${parquet(T.usageOwner)} w WHERE w.usage_key = s.col_id AND w.col_id = s.col_id) ORDER BY 1`);
+  if (hidden.length > 0) throw new Error(`sync: ${hidden.length} described species are neither counted whole nor own their record: ${hidden.slice(0, 5).map((h) => h.name).join(", ")}`);
   return {
     redlist: { database: REDLIST_DB, assessed_species: rl.species, newest_published: rl.newest },
-    matching: { matcher: matcher.version, xr: matcher.datasetKey, by_matcher: link.matcher, by_decision: link.decision,
-      unlinked: link.unlinked, queue },
+    matching: { matcher: matcher.version, xr: matcher.datasetKey, gbif_matcher: await gbifMatcherSha(), by_basis: byBasis, steps, doubts,
+      unowned: Number(unowned.n), queue },
   };
+}
+
+/** GBIF's live matcher commit (recorded, not checked), or "unknown". */
+async function gbifMatcherSha(): Promise<string> {
+  try {
+    const res = await fetch("https://api.gbif.org/v2/species/match/metadata?checklistKey=xcol", { signal: AbortSignal.timeout(15_000) });
+    const body = res.ok ? await res.json() as { buildInfo?: { sha?: string } } : null;
+    return body?.buildInfo?.sha ?? "unknown";
+  } catch { return "unknown"; }
 }
 
 function writeManifest(file: string, manifest: Record<string, unknown>): void {

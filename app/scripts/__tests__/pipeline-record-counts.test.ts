@@ -36,8 +36,10 @@ beforeAll(async () => {
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'the whole CoL species' AS counts, 'primary' AS role, true AS counted,
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
       'matcher' AS basis, NULL::VARCHAR AS decided_by,
-      CASE WHEN col_taxon_id IS NULL THEN 'waiting' WHEN sis = 2 THEN 'flagged: lower confidence' ELSE 'exact, unique' END AS match_reason,
-      CASE WHEN sis = 2 THEN 'GBIF''s matcher is only 94% sure.' END AS match_note,
+      CASE WHEN col_taxon_id IS NULL THEN 'no candidate' ELSE 'exact, unique' END AS match_reason,
+      CASE WHEN col_taxon_id IS NULL THEN 'none' ELSE 'is' END AS relation, CASE WHEN sis = 2 THEN 'placed elsewhere' END AS doubts,
+      NULL::BOOLEAN AS reviewed,
+      CASE WHEN sis = 2 THEN 'The matcher places a record taken in a different part of the tree.' END AS match_note,
       CASE WHEN sis = 2 THEN '[{"id":"S2","name":"Astur two","authorship":null,"status":"synonym","species":"Accipiter two","role":"counted"},'
         || '{"id":"Z9","name":"Astur two","authorship":"Other","status":"synonym","species":"Accipiter nine","role":"not"}]' END AS match_records,
       CASE WHEN col_taxon_id IS NOT NULL THEN 'accepted' END AS col_treatment
@@ -110,11 +112,11 @@ describe("GBIF counts in the lists", () => {
     expect(Number(rows["1"].gbif_all_records_since_assessment)).toBe(24);
   });
 
-  it("flags a count that rests on a flagged match", () => {
+  it("flags a count whose match has doubts", () => {
     expect(rows["2"].count_note).toBe("flagged");
     expect(rows["1"].count_note).toBeNull();
-    expect(rows["2"].match_reason).toBe("flagged: lower confidence");
-    expect(rows["2"].match_note).toBe("GBIF's matcher is only 94% sure.");
+    expect(rows["2"].match_doubts).toBe("placed elsewhere");
+    expect(rows["2"].match_note).toBe("The matcher places a record taken in a different part of the tree.");
   });
   it("splits the count among the match records, and names the CoL species holding the rest", () => {
     expect(Number(rows["2"].gbif_all_records_count)).toBe(13);

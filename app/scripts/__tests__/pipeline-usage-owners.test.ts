@@ -31,10 +31,11 @@ async function counts(links: Link[] = []) {
       t(usage_key, year, georef, n)`.replace("SELECT * FROM", "SELECT usage_key, year, NULL::TINYINT AS month, NULL::DATE AS event_date, georef, n FROM"), T.occurrences);
   // What assessment-link.ts writes for each verdict: counts, from the verdict and whether the row counts.
   const countsOf = (l: Link) => !(l.counted ?? true) ? "nothing" : l.verdict === "own" ? "the whole CoL species" : "only records under its own name";
-  const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${countsOf(l)}', ${l.counted ?? true}, '${l.usage}', 'accepted')`);
+  const relationOf = (l: Link) => ({ own: "is", lumped: "part of", refused: "refused" } as Record<string, string>)[l.verdict] ?? l.verdict;
+  const values = links.map((l) => `(${l.sis}::BIGINT, '${l.usage}', '${countsOf(l)}', ${l.counted ?? true}, '${l.usage}', 'accepted', '${relationOf(l)}')`);
   await copy(links.length
-    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, col_taxon_id, counts, counted, col_species_id, method)`
-    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_taxon_id, NULL::VARCHAR AS counts, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_species_id, NULL::VARCHAR AS method WHERE false`, T.link);
+    ? `SELECT * FROM (VALUES ${values.join(", ")}) t(sis_taxon_id, col_taxon_id, counts, counted, col_species_id, method, relation)`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS col_taxon_id, NULL::VARCHAR AS counts, NULL::BOOLEAN AS counted, NULL::VARCHAR AS col_species_id, NULL::VARCHAR AS method, NULL::VARCHAR AS relation WHERE false`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, true AS is_latest, DATE '2015-01-01' AS assessment_date
     FROM (VALUES (1), (2)) t(sis)`, T.assessments);
 
@@ -69,10 +70,15 @@ describe("usage_owner and record_counts", { timeout: 60_000 }, () => {
     expect(r["2"]).toEqual({ georef: 31, all: 31 });
     expect(r.OAK).toBeUndefined();
   });
-  it("counts a species linked only by a row that doesn't count for no one", async () => {
+  it("counts a species linked only by a row that doesn't count it whole for itself (docs/specs/matching.md)", async () => {
     const r = await counts([{ sis: 2, usage: "OAK", verdict: "refused", counted: false }]);
     expect(r["2"]).toBeUndefined();
-    expect(r.OAK).toBeUndefined();
+    expect(r.OAK).toEqual({ georef: 31, all: 31 });
+  });
+  it("a part-of row never takes the rest of its species (Pararge xiphioides / P. aegeria)", async () => {
+    const r = await counts([{ sis: 1, usage: "SYN", verdict: "lumped" }]);
+    expect(r["1"]).toEqual({ georef: 7, all: 7 });
+    expect(r.LEO).toEqual({ georef: 165, all: 170 });
   });
   it("credits nothing above species rank", async () => {
     expect(Object.keys(await counts()).sort()).toEqual(["LEO", "OAK"]);

@@ -3,11 +3,10 @@
  * of, read from a build. The whole chain, in the order the sync makes it:
  *
  *   1. the name: GBIF's matcher's answer for the Red List name, with the points
- *      it gave each candidate, and why the sync took that answer, took an
- *      override's instead, or left the species waiting (match-overrides.tsv,
- *      to_review)
- *   2. the concept: each link row, the CoL taxon and species it names, its
- *      match_reason, col_treatment, what it counts, and its description
+ *      it gave each candidate, and a decision if there is one (decisions.tsv)
+ *   2. the selection (link/select.ts, docs/specs/matching.md): the step, the
+ *      doubts, and each record taken with its relation, basis, match_reason,
+ *      col_treatment, what it counts, and its description
  *   3. the count: every CoL record whose GBIF records count for it, and the
  *      totals the app shows
  *
@@ -18,7 +17,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { BUILD_DIR, tables } from "./paths";
 import { openDuckDB, rows, lit } from "./sql";
-import { readOverrides } from "./link/match-overrides";
+import { readDecisions } from "./link/decisions";
 import { syncPath } from "../../src/lib/data/sync-layout";
 
 type Score = { name: number | null; authorship: number | null; classification: number | null; rank: number | null; status: number | null; total: number | null } | null;
@@ -78,27 +77,32 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
       if (alts.length > 8) say(`    … and ${alts.length - 8} more`);
     }
   }
-  const o = readOverrides().get(s.sis);
-  if (o) say(`  Override (match-overrides.tsv): ${o.colName ?? "not in CoL"} ${o.colAuthorship ?? ""}, by ${o.by}${o.reviewed ? ", reviewed" : ""}, against ${o.redlistVersion ?? "?"} × ${o.colVersion ?? "?"}: ${o.note}`);
+  const o = readDecisions().get(s.sis);
+  if (o) {
+    say(`  Decision (decisions.tsv), by ${o.by}${o.reviewed ? ", reviewed" : ""}, ${o.date}: ${o.evidence}`);
+    for (const r of o.rows) say(`    ${r.relation}: ${r.name} ${r.authorship ?? ""} [${r.id}, ${r.status}, of ${r.species}]`);
+    if (o.rows.length === 0) say(`    not in CoL`);
+  }
 
-  // ── 2. The concept
-  say(); say("2. The concept");
-  const links = await rows<{ role: string; counts: string; method: string; basis: string | null; match_reason: string | null;
+  // ── 2. The selection
+  say(); say("2. The selection");
+  const links = await rows<{ role: string; counts: string; method: string; basis: string | null; match_reason: string | null; relation: string; step: number | null; doubts: string | null;
     col_treatment: string | null; match_description: string | null; counted: boolean;
     taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null;
     to_review: string | null }>(conn, `
-    SELECT l.role, l.counts, l.method, l.basis, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
+    SELECT l.role, l.counts, l.method, l.basis, l.match_reason, l.relation, l.step, l.doubts, l.col_treatment, l.match_description, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
            t.scientific_name || coalesce(' ' || t.authorship, '') AS taxon, t.rank AS taxon_rank, t.status AS taxon_status,
            c.scientific_name || coalesce(' ' || c.authorship, '') AS species
     FROM ${pq(T.link)} l LEFT JOIN ${pq(T.taxa)} t ON t.col_id = l.col_taxon_id LEFT JOIN ${pq(T.taxa)} c ON c.col_id = l.col_species_id
     WHERE l.sis_taxon_id = ${s.sis} ORDER BY l.role DESC, l.counted DESC, l.col_species_id`);
   for (const l of links) {
+    if (l.role === "primary") say(`  Step ${l.step ?? "?"}; doubts: ${l.doubts?.replace(/;/g, ", ") ?? "none"}`);
     if (l.role === "primary" && l.to_review) say(`  To review: ${l.to_review}`);
     const where = !l.col_species_id ? "no CoL species"
       : l.col_taxon_id && l.col_taxon_id !== l.col_species_id ? `CoL taxon ${l.taxon} [${l.col_taxon_id}, ${l.taxon_status} ${l.taxon_rank}], in species ${l.species} [${l.col_species_id}]`
       : `CoL species ${l.species} [${l.col_species_id}]`;
     say(`  ${l.role.padEnd(8)} ${where}`);
-    say(`           ${l.match_reason ?? "–"} · ${l.col_treatment ?? "–"} · counts ${l.counts} (${l.method}${l.basis ? `, by ${l.basis}` : ""})`);
+    say(`           ${l.relation} · ${l.match_reason ?? "–"} · ${l.col_treatment ?? "–"} · counts ${l.counts} (${l.method}${l.basis ? `, by ${l.basis}` : ""})`);
     if (l.match_description) say(`           ${l.match_description}`);
   }
 

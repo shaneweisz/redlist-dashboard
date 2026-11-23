@@ -13,19 +13,20 @@
  *   col_id          the unassessed CoL species its records count for, else NULL
  *
  * Decisions, in order (the first that applies decides):
- *   1. A lumped species owns its own usage and everything under it (three levels
+ * The rule is docs/specs/matching.md's "Counting and the NE list".
+ *
+ *   1. A part-of row owns its own usage and everything under it (three levels
  *      down: the deepest case in the current release is three). Roots can nest:
  *      Zosterops simplex owns both the subspecies Z. japonicus simplex and the
  *      synonym Z. simplex filed under it, so a usage goes to the nearest root
  *      claiming it, and of two lumped species reaching it, the one whose own
  *      name it is.
  *   2. Otherwise a usage counts for its species (taxa.species_id): its own name,
- *      its synonyms, its subspecies, their BINs. If an assessed species' counted
- *      "own" link row is that species, for the assessed species.
- *   3. Otherwise, if no link row names that species at all (a candidate row,
- *      what a flagged or waiting species might be, doesn't count), for the
- *      species itself, unassessed. A species linked only by rows that don't count
- *      (counts nothing) counts for no one.
+ *      its synonyms, its subspecies, their BINs: for the assessed species whose
+ *      is or split-into row counts it whole, if one does.
+ *   3. Otherwise for the species itself, unassessed. A part-of or refused row
+ *      never takes the rest of its species (Pararge aegeria keeps what isn't
+ *      filed under P. xiphioides).
  *
  * Checks: each usage has at most one owner. A violation means a number
  * somewhere is inflated, so the sync stops.
@@ -57,4 +58,4 @@ SELECT t.col_id, NULL, NULL, t.species_id
 FROM taxa t
 WHERE t.species_id IS NOT NULL
   AND t.col_id NOT IN (SELECT usage_key FROM lumped)
-  AND t.species_id NOT IN (SELECT col_species_id FROM link WHERE col_species_id IS NOT NULL AND method <> 'undecided_candidate')
+  AND t.species_id NOT IN (SELECT col_species_id FROM link WHERE relation IN ('is', 'split into'))
