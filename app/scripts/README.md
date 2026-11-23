@@ -37,8 +37,8 @@ The monthly data release. `sync.ts` is the whole sync, read top to bottom: one s
 | `common-names.ts` | every common name CoL and iNaturalist give, and the one each would show |
 | **`link/`** | 2: which CoL species each assessed species is |
 | `matches.ts` | GBIF's matcher's answer for every Red List name |
-| `accept-match.ts`, `decisions.ts` | when the matcher's answer is taken without review; people's decisions otherwise |
-| `assessment-link.ts`, `species-key.ts`, `name-variants.ts` | the link table and its concept rules |
+| `select.ts`, `select-inputs.ts`, `name-rules.ts` | the selection rule of docs/specs/matching.md, the build it reads, and its one name library |
+| `decisions.ts`, `assessment-link.ts`, `rules.ts` | seeds/decisions.tsv; the link table, one row per record; one owner per record |
 | **`count/`** | 3: whose records each GBIF usage's are |
 | `usage-owners.ts` | `usage_owner`: the counting rule, as a table |
 | `record-counts.ts` | each species' totals, in both record modes and since its assessment |

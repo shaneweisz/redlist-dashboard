@@ -16,6 +16,8 @@
     "sync:lineage": "npx tsx scripts/sync/lineage.ts",
     "sync:trace": "npx tsx scripts/sync/trace.ts",
     "sync:select": "npx tsx scripts/sync/link/select-inputs.ts",
+    "sync:rebuild-check": "npx tsx scripts/sync/checks/rebuild-check.ts",
+    "sync:judge": "npx tsx scripts/sync/checks/judge.ts",
     "sync:compare": "npx tsx scripts/sync/checks/compare.ts",
     "upload-data-to-r2": "npx tsx scripts/sync/upload-data-to-r2.ts",
     "fetch-data-from-r2": "npx tsx scripts/build/fetch-data-from-r2.ts",

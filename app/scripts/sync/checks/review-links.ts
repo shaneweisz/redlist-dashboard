@@ -55,6 +55,8 @@
  *   - Sorted primary rows first, those to review first among them, then by
  *     match_reason.
  */
+import * as fs from "fs";
+import * as path from "path";
 import { lit, openDuckDB } from "../sql";
 import { output, parquet, type Tables } from "../paths";
 
@@ -66,6 +68,10 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
   const sameRank = (rank: string, a: string, b: string) => `(${a} = ${b} OR EXISTS (SELECT 1 FROM aliases x WHERE x.rank = '${rank}'
      AND ((x.name = ${a} AND x.alias = ${b}) OR (x.name = ${b} AND x.alias = ${a}))))`;
   const year = (s: string) => `regexp_extract(${s}, '(1[7-9]\\d\\d|20\\d\\d)')`;
+  // The judge's verdicts (checks/judge.ts), where it has run: shown, never read by the sync.
+  const judgements = path.join(path.dirname(T.reviewLinks), "judgements.parquet");
+  const verdicts = fs.existsSync(judgements) ? `SELECT sis_taxon_id, verdict AS judge_verdict, answer AS judge_answer, reason AS judge_reason, sources AS judge_sources FROM ${parquet(judgements)}`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS judge_verdict, NULL::VARCHAR AS judge_answer, NULL::VARCHAR AS judge_reason, NULL::VARCHAR AS judge_sources WHERE false`;
   await conn.run(`COPY (
     WITH latest AS (
       SELECT * FROM ${parquet(T.assessments)} WHERE is_latest
@@ -87,7 +93,9 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
              l.role, ${lit(releases.colXr)} AS col_xr,
              l.col_taxon_id, tx.scientific_name AS col_taxon_name, tx.authorship AS col_taxon_authorship, tx.rank AS col_taxon_rank, tx.status AS col_taxon_status,
              l.col_species_id, sp.scientific_name AS col_species_name, sp.authorship AS col_species_authorship, sp.described_year AS col_described_year,
-             l.counts, l.method, l.basis, l.decided_by, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted,
+             l.counts, l.relation, l.step, l.doubts, l.method, l.basis, l.decided_by, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted,
+             CASE WHEN l.role = 'primary' THEN j.judge_verdict END AS judge_verdict, CASE WHEN l.role = 'primary' THEN j.judge_answer END AS judge_answer,
+             CASE WHEN l.role = 'primary' THEN j.judge_reason END AS judge_reason, CASE WHEN l.role = 'primary' THEN j.judge_sources END AS judge_sources,
              CASE WHEN l.counted THEN c.records END AS records, CASE WHEN l.counted THEN c.georeferenced_records END AS georeferenced_records,
              CASE WHEN l.role = 'primary' THEN m.matcher_version END AS matcher_version,
              CASE WHEN l.role = 'primary' THEN m.matcher_col_id END AS matcher_col_id,
@@ -114,6 +122,7 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
       LEFT JOIN ${parquet(T.matches)} m ON m.sis_taxon_id = l.sis_taxon_id
       LEFT JOIN counts c ON c.sis_taxon_id = l.sis_taxon_id AND c.link_usage_id = l.col_taxon_id
       LEFT JOIN lumps k ON k.col_species_id = l.col_species_id
+      LEFT JOIN (${verdicts}) j ON j.sis_taxon_id = l.sis_taxon_id
     ),
     evidence AS (
       SELECT *,
@@ -138,13 +147,14 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     )
     SELECT
            -- 1. at a glance: what each side calls it, and why the link is what it is
-           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, match_reason, col_treatment, counts, match_description, to_review,
+           redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, relation, doubts, match_reason, col_treatment, counts, match_description, to_review,
+           judge_verdict, judge_answer, judge_reason, judge_sources,
            -- 2. the Red List
            sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date, redlist_synonyms,
            -- 3. CoL
            role, col_xr, col_taxon_id, col_taxon_rank, col_taxon_status, col_species_id, col_species_name, col_species_authorship, col_described_year,
            -- 4. the decision
-           records, georeferenced_records, method, basis, decided_by,
+           records, georeferenced_records, step, method, basis, decided_by,
            -- 5. the matcher
            matcher_version, matcher_col_id, matcher_name, matcher_authorship, matcher_status,
            matcher_accepted_col_id, matcher_accepted_name, matcher_accepted_authorship, matcher_lineage,

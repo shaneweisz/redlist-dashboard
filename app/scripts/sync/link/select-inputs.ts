@@ -35,7 +35,9 @@ export interface Inputs {
 }
 
 /** Everything select() reads, from the build's tables. */
-export async function loadInputs(t = tables(), decisions = readDecisions(), conn?: DuckDBConnection): Promise<Inputs> {
+export async function loadInputs(t = tables(), decisions = readDecisions(), conn?: DuckDBConnection,
+  /** Further names whose CoL records to load (the judge's facts: the Red List names and the answers'). */
+  extraNames: string[] = []): Promise<Inputs> {
   conn ??= await openDuckDB();
   const taxa = parquet(t.taxa);
 
@@ -64,6 +66,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
   const want = (n: string) => { wanted.add(sameNameKey(n)); const k = orthographicKey(n); if (k) wantedKeys.add(k); };
   for (const s of parsed) for (const y of s.synonyms) want(y.name);
   for (const d of decisions.values()) for (const r of d.rows) if (r.name) want(r.name);
+  for (const n of extraNames) want(n);
   // Names whose orthographic key is wanted: every species-rank name, keyed here, as the key is name-rules.ts's.
   const names = new Set<string>(wanted);
   const nameKeys = await rows<{ name: string }>(conn, `SELECT DISTINCT scientific_name AS name FROM ${taxa} WHERE rank = 'species'`);
