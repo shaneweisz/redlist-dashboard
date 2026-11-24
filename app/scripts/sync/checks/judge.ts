@@ -11,7 +11,8 @@
  *
  * Before a run it answers the fixture cases, prints its score and the number of
  * calls the run needs, and asks before going on (--yes doesn't ask). Answers are
- * cached by the SHA-256 of a batch's facts and the prompt, so a rerun asks only
+ * cached in ~/.cache/redlist-dashboard/judge-cache (a sync clears .sync/review/)
+ * by the SHA-256 of a batch's facts, the prompt and the model, so a rerun asks only
  * what changed. Output: .sync/review/judgements.parquet and a report by doubt and
  * by group.
  *
@@ -24,7 +25,7 @@ import * as os from "os";
 import * as path from "path";
 import * as readline from "readline";
 import { loadEnvFiles } from "../../lib/utils";
-import { REVIEW_DIR, parquet, tables } from "../paths";
+import { CACHE_ROOT, REVIEW_DIR, parquet, tables } from "../paths";
 import { openDuckDB, rows, writeTable, lit } from "../sql";
 import { loadInputs, type Inputs } from "../link/select-inputs";
 import { selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
@@ -195,7 +196,8 @@ if (require.main === module) {
       .map((r) => [r.sis, { kingdom: r.kingdom, phylum: r.phylum, class: r.class_name, order: r.order_name, family: r.family }]));
     const groupOf = new Map([...lineage].map(([sis, l]) => [sis, /plantae|fungi/i.test(l.kingdom ?? "") ? (l.kingdom ?? "?") : (l.class ?? "?")]));
     const factsOf = (sis: number) => facts(bySis.get(sis)!, lineage.get(sis), inputs);
-    const cacheDir = path.join(REVIEW_DIR, "judge-cache");
+    // Outside the build, which a sync clears: answers cost money.
+    const cacheDir = path.join(CACHE_ROOT, "judge-cache");
     const model = opt("model");
 
     // Which species.
