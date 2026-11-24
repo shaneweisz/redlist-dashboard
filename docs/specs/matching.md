@@ -1,7 +1,7 @@
 # Matching and counting: which CoL records and GBIF occurrences represent a Red List species
 
 *   **Author:** shaneweisz
-*   **Status:** Implemented (2026-11-23); the judge's first pass is pending
+*   **Status:** Implemented (2026-11-23); rebuilt from the spec alone (2026-11-24); the judge's first pass is pending
 *   **Date:** 2026-11-20
 
 --------------------------------------------------------------------------------
@@ -237,14 +237,19 @@ For a species at steps 3 to 6 (not informal, no holding decision), each Red
 List synonym, in order, adds the CoL records at species rank with its name
 (or `orthographicallySame`), not `MISAPPLIED`, accepted and provisional
 first, then by `id`, that agree with the lineage, aren't taken, don't lead to a species already
-counted whole (by the steps or an earlier synonym record), and whose
+counted whole, and whose
 authorship one of the synonym's unqualified authors doesn't compare `other`
 with (or it has none). If one of those records compares `same`, only such
 records and their copies (as in *Candidates and groups*) are added, as the
 steps prefer matching records (*Pogostemon crassicaulis*'s synonym *Mentha
 verticillata* D.Don takes the D.Don record, not the hybrid *Mentha ×
 verticillata* L.; *Muscicapa tessmanni* (Reichenow, 1907) keeps CoL's
-provisional copy with no authorship). A synonym whose every author is
+provisional copy with no authorship). "Counted whole" is checked again
+for each record as it is added: by the steps, or by any record added
+before it, of this synonym or an earlier one. So a record under a species
+an earlier record already counts adds nothing (*Mycteroperca radiatus*'s
+synonym *Epinephelus doderleinii* adds *E. doederleinii*, which is
+*E. radiatus*, and not its copy *E. döderleinii*). A synonym whose every author is
 qualified adds
 nothing: it names part of a taxon or a misapplied name (*Alchemilla
 vulgaris* "auct."; *Goggia rupicola* "[pro parte]"). A synonym the Red List
@@ -293,7 +298,7 @@ rows on synonym records:
 | `ambiguous synonym` | a taken record is `AMBIGUOUS_SYNONYM` | 538 |
 | `placed elsewhere` | a taken record's `classification` is below 0 | 155 |
 | `counts nothing` | every taken record is *refused* | 55 |
-| `split, authors unclear` | a split-into record none of its synonym's unqualified authors compares `same` with | 68 |
+| `split, authors unclear` | a *split into* record (not one made *refused*) none of its synonym's unqualified authors compares `same` with | 68 |
 | `synonym filed elsewhere` | a relation-3 record with the doubt, with occurrences under it | 498 |
 
 A species with a reason, or doubts and no holding decision, is **listed for
@@ -512,8 +517,13 @@ One PR, then the data PR. Paths are under `app/scripts/sync/` (`link/`,
      `--strict-mcp-config`, `--output-format stream-json --verbose`, `HOME`
      set to the folder); compares its output with `sync:select` species by
      species; and keeps the agent's log, from which it lists every file it
-     read and every command it ran. Run after
-     every change to the rules and every release move.
+     read and every command it ran (`TMPDIR` is the folder's `tmp/`). Run after
+     every change to the rules and every release move. First run (2026-11-24,
+     one agent session, 3 minutes): 175,811 of 175,909 species agreed. The
+     98 differences were two gaps in this spec, both since stated: whether
+     "counted whole" is checked record by record within one synonym, and
+     whether a *split into* record made *refused* raises `split, authors
+     unclear`. A second run on the clarified spec agreed on every species.
 2. **The sync writes it.**
    - `link/assessment-link.ts` calls `select.ts` and writes *Output*;
      `decideKey` and its tests go.

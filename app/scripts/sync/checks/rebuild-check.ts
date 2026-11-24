@@ -49,7 +49,7 @@ const PROMPT = `This folder holds a specification (spec.md) and the inputs it de
 Implement the spec's selection: for every species in inputs/species.jsonl, its step, reason, doubts, and selected records with
 their relation, relation_step and basis, as the spec's implementation plan describes for sync:select. Write the result to
 out.json in this folder, matching output.schema.json. The only library you may use is name-rules.mjs (import it from node).
-inputs/README.md says what each file holds. Work only inside this folder. When you are done, say how many species you wrote.`;
+inputs/README.md says what each file holds. Work only inside this folder (scratch files go in tmp/). When you are done, say how many species you wrote.`;
 
 type Out = ReturnType<typeof selectionJson>;
 
@@ -57,6 +57,7 @@ type Out = ReturnType<typeof selectionJson>;
 export async function prepare(dir: string): Promise<{ dir: string; species: Out[] }> {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "inputs"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tmp"));
   fs.copyFileSync(SPEC, path.join(dir, "spec.md"));
   // rolldown, Vite's bundler, resolves the two src/lib imports into the one file.
   execFileSync(path.join(__dirname, "..", "..", "..", "node_modules", ".bin", "rolldown"),
@@ -127,10 +128,10 @@ if (require.main === module) {
     const { species: ours } = await prepare(work);
     console.log(`rebuild-check: sealed folder ${work} (${ours.length.toLocaleString()} species)`);
     if (opt("compare")) return report(ours, JSON.parse(fs.readFileSync(path.resolve(opt("compare")!), "utf-8")), work);
-    const r: ClaudeRun = { prompt: PROMPT, cwd: work, home: work, tools: ["Read", "Write", "Edit", "Bash"], allowed: ["Read", "Write", "Edit", "Bash"],
+    const r: ClaudeRun = { prompt: PROMPT, cwd: work, home: work, tmpdir: path.join(work, "tmp"), tools: ["Read", "Write", "Edit", "Bash"], allowed: ["Read", "Write", "Edit", "Bash"],
       outputFormat: "stream-json", model: opt("model") };
     if (a.includes("--prepare")) {
-      console.log(`Run it with: (cd ${work} && HOME=${work} claude ${claudeArgs(r).map((x) => JSON.stringify(x)).join(" ")})`);
+      console.log(`Run it with: (cd ${work} && HOME=${work} TMPDIR=${work}/tmp claude ${claudeArgs(r).map((x) => JSON.stringify(x)).join(" ")})`);
       return;
     }
     if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error("rebuild-check: CLAUDE_CODE_OAUTH_TOKEN isn't set (app/.env.local, from `claude setup-token`)");
@@ -138,9 +139,9 @@ if (require.main === module) {
     fs.writeFileSync(path.join(root, "transcript.jsonl"), res.stdout);
     const used = toolUse(res.stdout);
     // Paths it touched outside the folder: by Read, Write or Edit, or named in a command.
-    const inCommands = used.commands.flatMap((c) => c.match(/(?<![\w.])\/[^\s'"`;|&)]+/g) ?? []);
-    const outside = [...new Set([...used.reads, ...used.writes, ...inCommands].filter((p) => p && !path.resolve(work, p).startsWith(work)
-      && !/^\/(dev\/null|usr\/|bin\/|opt\/homebrew\/)/.test(p)))];
+    // Absolute paths under the roots a file could be read from (a bare /x/ in a command is more often a regex).
+    const inCommands = used.commands.flatMap((c) => c.match(/(?<![\w.])\/(?:Users|home|tmp|private|var|etc|Volumes)(?:\/[^\s'"`;|&)]*)?/g) ?? []);
+    const outside = [...new Set([...used.reads, ...used.writes, ...inCommands].filter((p) => p && !path.resolve(work, p).startsWith(work)))];
     fs.writeFileSync(path.join(root, "tool-use.json"), JSON.stringify({ ...used, outside, claude: execSync("claude --version").toString().trim() }, null, 1));
     console.log(`rebuild-check: the agent read ${used.reads.length} files, wrote ${used.writes.length}, ran ${used.commands.length} commands` +
       (outside.length ? `; OUTSIDE the folder: ${outside.join(", ")}` : ""));

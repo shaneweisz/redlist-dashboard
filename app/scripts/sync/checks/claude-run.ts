@@ -23,6 +23,8 @@ export interface ClaudeRun {
   outputFormat: "json" | "stream-json";
   /** HOME for the run: the folder itself, so nothing of the maintainer's leaks in. */
   home?: string;
+  /** TMPDIR for the run, so scratch files stay in its folder. */
+  tmpdir?: string;
   model?: string;
 }
 
@@ -40,7 +42,7 @@ export function claudeArgs(r: ClaudeRun): string[] {
 }
 
 export const runClaude: Runner = (r) => new Promise((resolve, reject) => {
-  const env = { ...process.env, ...(r.home ? { HOME: r.home } : {}) };
+  const env = { ...process.env, ...(r.home ? { HOME: r.home } : {}), ...(r.tmpdir ? { TMPDIR: r.tmpdir } : {}) };
   const p = spawn("claude", claudeArgs(r), { cwd: r.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   p.stdout.on("data", (d) => (stdout += d));
