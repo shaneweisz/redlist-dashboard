@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { select, selectEvery, type ColRecord, type ColSpecies, type Release, type SpeciesInput } from "../sync/link/select";
 import { sameNameKey } from "../sync/link/name-rules";
-import type { Decision } from "../sync/link/decisions";
+import { verdictBasis, type Decision } from "../sync/link/decisions";
 
 const sp = (id: string, name: string, authorship: string | null, cls = "aves"): ColSpecies =>
   ({ id, name, authorship, class: cls, kingdom: "animalia", phylum: "chordata" });
@@ -309,8 +309,9 @@ describe("selectEvery", () => {
     const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
     const a = species("Panthera leo", "(Gray, 1867)", acc(leo));  // other authors: listed
     const r = release() as Omit<Release, "wholeBySteps">;
-    const c = (answer: string, verdict: "confirmed" | "undecided" = "confirmed") =>
-      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [], context: "" }]]);
+    const basis = verdictBasis(a, selectEvery([a], r, new Map())[0]);
+    const c = (answer: string, verdict: "confirmed" | "undecided" = "confirmed", b = basis) =>
+      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, basis: b, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [], context: "" }]]);
     const L = "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", X = "Panthera leo linnaeus 1758 [synonym, of Panthera leo]: is";
     expect(selectEvery([a], r, new Map())[0].toReview).toMatch(/^other authors/);
     expect(selectEvery([a], r, new Map(), c(L))[0].toReview).toBeNull();
@@ -323,5 +324,9 @@ describe("selectEvery", () => {
     // A release that renumbers the record keeps the verdict.
     const moved = species("Panthera leo", "(Gray, 1867)", acc({ ...leo, id: "L2" }));
     expect(selectEvery([moved], r, new Map(), c(L))[0].toReview).toBeNull();
+    // A new synonym, candidate or doubt changes what it was given: the verdict no longer applies.
+    const synonym = { ...a, synonyms: [{ name: "Felis leo", authors: ["Linnaeus, 1758"] }] };
+    expect(selectEvery([synonym], r, new Map(), c(L))[0].toReview).toMatch(/^other authors/);
+    expect(selectEvery([a], r, new Map(), c(L, "confirmed", "something else"))[0].toReview).toMatch(/^other authors/);
   });
 });

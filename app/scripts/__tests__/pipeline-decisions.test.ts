@@ -66,8 +66,8 @@ describe("readDecisions / writeDecisions", () => {
     const r = (name: string, relation: string) => ({ name, authorship: "(Gray, 1867)", status: "ACCEPTED", species: name, relation });
     const answer = answerKey([r("Bb", "part of"), r("Aa", "is"), r("Cc", "refused")]);
     expect(answer).toBe("Aa gray 1867 [accepted, of Aa]: is; Bb gray 1867 [accepted, of Bb]: part of");
-    writeVerdicts([{ sis: 5, redlistName: "N", verdict: "undecided", answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: ["t1", "t2"], context: "c" }], f);
-    expect(readVerdicts(f).get(5)).toMatchObject({ verdict: "undecided", answer, context: "c", votes: "3/5 rules; 2/5 other", transcripts: ["t1", "t2"] });
+    writeVerdicts([{ sis: 5, redlistName: "N", verdict: "undecided", answer, basis: "abc123", votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: ["t1", "t2"], context: "c" }], f);
+    expect(readVerdicts(f).get(5)).toMatchObject({ verdict: "undecided", answer, basis: "abc123", context: "c", votes: "3/5 rules; 2/5 other", transcripts: ["t1", "t2"] });
     fs.writeFileSync(f, fs.readFileSync(f, "utf-8").replace("undecided", "maybe"));
     expect(() => readVerdicts(f)).toThrow(/maybe/);
   });

@@ -16,7 +16,7 @@
 import {
   compareAuthors, orthographicallySame, sameName, sameNameKey, sameOrganism, isCoLRespelling, type TaxonName,
 } from "./name-rules";
-import { answerKey, decisionHolds, type JudgeVerdict, type Decision, type DecidedRelation, type Lapse } from "./decisions";
+import { answerKey, decisionHolds, verdictBasis, type JudgeVerdict, type Decision, type DecidedRelation, type Lapse } from "./decisions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -364,7 +364,7 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
   return species.map((sp) => {
     const s = select(sp, full, decisions.get(sp.sis));
     const v = verdicts.get(sp.sis);
-    const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer;
+    const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer && verdictBasis(sp, s) === v.basis;
     if (applies && v.verdict === "confirmed") s.toReview = null;
     if (applies && v.verdict === "undecided") { s.doubts.push("judge undecided"); s.toReview = `judge undecided (${v.votes})`; }
     return s;

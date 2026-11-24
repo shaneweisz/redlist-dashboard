@@ -77,28 +77,36 @@ describe("outcome (decide)", () => {
   const ans = (records: Answer["records"]): Answer => ({ sis_taxon_id: 1, records, reason: "r", sources: ["https://x"] });
   const ours = [{ id: "S", relation: "is" }];
   it("confirms when every run counts what the rules count, even naming other records of the same species", () => {
-    expect(outcome([ans([{ id: "S", relation: "is" }]), ans([{ id: "S2", relation: "is" }])], ours, look, known)).toEqual({ kind: "confirm", votes: "2/2 rules" });
+    expect(outcome([ans([{ id: "S", relation: "is" }]), ans([{ id: "S2", relation: "is" }])], ours, look, known)).toMatchObject({ kind: "confirm", votes: "2/2 rules", best: 2 });
   });
   it("decides when every run agrees and the rules don't", () => {
     const o = outcome([ans([{ id: "P", relation: "part of" }]), ans([{ id: "P", relation: "part of" }])], ours, look, known);
     expect(o).toMatchObject({ kind: "decide", answer: { records: [{ id: "P", relation: "part of" }] } });
   });
-  it("splits when runs differ, one can't tell or is missing, or a record isn't in the facts", () => {
+  it("splits when two runs answered and differ; is unsure when one can't tell, is missing, or names a record not in the facts", () => {
     expect(outcome([ans([{ id: "P", relation: "part of" }]), ans([{ id: "S", relation: "is" }])], ours, look, known).kind).toBe("split");
-    expect(outcome([ans([{ id: "P", relation: "part of" }]), ans("can't tell")], ours, look, known).kind).toBe("split");
-    expect(outcome([ans([{ id: "P", relation: "part of" }]), undefined], ours, look, known).kind).toBe("split");
-    expect(outcome([ans([{ id: "NOPE", relation: "is" }]), ans([{ id: "NOPE", relation: "is" }])], ours, look, known).kind).toBe("split");
+    expect(outcome([ans([{ id: "P", relation: "part of" }]), ans("can't tell")], ours, look, known)).toMatchObject({ kind: "unsure", best: 1 });
+    expect(outcome([ans([{ id: "P", relation: "part of" }]), undefined], ours, look, known)).toMatchObject({ kind: "unsure", votes: "1/2 other; 1/2 missing" });
+    expect(outcome([ans([{ id: "NOPE", relation: "is" }]), ans([{ id: "NOPE", relation: "is" }])], ours, look, known).kind).toBe("unsure");
+  });
+  it("counts a CoL species counted whole even with no records: naming it hides it from the Not Evaluated list", () => {
+    const lk = { speciesOf: (id: string) => ({ S: "S", X: "X" } as Record<string, string>)[id], under: (id: string) => (id === "X" ? 0 : 10) };
+    expect(counted([{ id: "S", relation: "is" }], lk)).not.toBe(counted([{ id: "S", relation: "is" }, { id: "X", relation: "split into" }], lk));
   });
   it("with need, decides on 4 of 5 and leaves 3 of 5 undecided, counting can't tell and unknown records as agreeing with nothing", () => {
     const p = ans([{ id: "P", relation: "part of" }]), s = ans([{ id: "S", relation: "is" }]);
     expect(outcome([p, p, p, p, s], ours, look, known, 4)).toMatchObject({ kind: "decide", votes: "4/5 other; 1/5 rules" });
     expect(outcome([s, s, s, ans("can't tell"), p], ours, look, known, 4)).toMatchObject({ kind: "split", votes: "3/5 rules; 1/5 can't tell; 1/5 other" });
     expect(outcome([s, s, s, s, ans([{ id: "NOPE", relation: "is" }])], ours, look, known, 4)).toMatchObject({ kind: "confirm" });
-    expect(outcome([ans("can't tell"), ans("can't tell")], ours, look, known).kind).toBe("split");
+    expect(outcome([ans("can't tell"), ans("can't tell")], ours, look, known).kind).toBe("unsure");
+    // The answer written is one the agreeing runs gave, with them all.
+    const o = outcome([s, p, p, p, p], ours, look, known, 4);
+    expect(o).toMatchObject({ kind: "decide", best: 4 });
+    expect(o.agreeing).toHaveLength(4);
   });
   it("an answer that changes the count without a source agrees with nothing", () => {
     const p = { ...ans([{ id: "P", relation: "part of" }]), sources: [] };
-    expect(outcome([p, p], ours, look, known)).toMatchObject({ kind: "split", votes: "2/2 unsourced" });
+    expect(outcome([p, p], ours, look, known)).toMatchObject({ kind: "unsure", votes: "2/2 unsourced" });
     expect(outcome([{ ...ans([{ id: "S", relation: "is" }]), sources: [] }, ans([{ id: "S", relation: "is" }])], ours, look, known).kind).toBe("confirm");
   });
   it("reads relations as counting does: part of on a record that is its species is is, anything on a record leading nowhere is part of", () => {
@@ -141,6 +149,14 @@ describe("judge", () => {
     expect(calls[3].stdin).not.toBe(calls[0].stdin);
     await judge(many, { cacheDir, runner, run: 2 });
     expect(calls).toHaveLength(6);
+    // Each species is cached apart: one more species is one more call, and new counts ask nothing again.
+    await judge([...many, { sis_taxon_id: 99 }] as never[], { cacheDir, runner });
+    expect(calls).toHaveLength(7);
+    expect(JSON.parse(calls[6].stdin!).map((f: { sis_taxon_id: number }) => f.sis_taxon_id)).toEqual([99]);
+    await judge(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 5 }] })).slice(0, 1) as never[], { cacheDir, runner });
+    expect(calls).toHaveLength(8);
+    await judge(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 9 }] })).slice(0, 1) as never[], { cacheDir, runner });
+    expect(calls).toHaveLength(8);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 

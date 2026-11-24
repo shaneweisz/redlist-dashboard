@@ -27,6 +27,7 @@
  * is decisionHolds, below; select.ts applies it.
  */
 
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { SEEDS_DIR } from "../seeds/seeds";
@@ -173,6 +174,9 @@ export function decisionHolds<R extends DecidableRecord>(
  *   verdict  confirmed | undecided
  *   answer   the rules' answer it was given, as answerKey writes it: by the records'
  *            names, authorship, status and species, not their ids, which move
+ *   basis    what else it was given, hashed (verdictBasis): the Red List name,
+ *            citation and synonyms, the candidates' species and the doubts; a
+ *            verdict applies only while that is unchanged
  *   votes    how the runs answered, e.g. "3/5 rules; 1/5 other; 1/5 can't tell"
  *   by       judge:<model>
  *   date     YYYY-MM-DD
@@ -180,9 +184,22 @@ export function decisionHolds<R extends DecidableRecord>(
  *   context  as in decisions.tsv
  */
 export const VERDICTS_FILE = path.join(SEEDS_DIR, "judge-verdicts.tsv");
-const VERDICT_COLUMNS = ["sis_taxon_id", "redlist_name", "verdict", "answer", "votes", "by", "date", "transcripts", "context"] as const;
+const VERDICT_COLUMNS = ["sis_taxon_id", "redlist_name", "verdict", "answer", "basis", "votes", "by", "date", "transcripts", "context"] as const;
 export type VerdictKind = "confirmed" | "undecided";
-export interface JudgeVerdict { sis: number; redlistName: string; verdict: VerdictKind; answer: string; votes: string; by: string; date: string; transcripts: string[]; context: string }
+export interface JudgeVerdict { sis: number; redlistName: string; verdict: VerdictKind; answer: string; basis: string; votes: string; by: string; date: string; transcripts: string[]; context: string }
+
+/**
+ * What a verdict was given besides the answer, as a short hash: the Red List
+ * name, citation and synonyms, the candidates' species, and the rules' doubts
+ * (not the judge's own). A new homonym, candidate or synonym changes it, so the
+ * species is listed and asked again.
+ */
+export function verdictBasis(sp: { name: string; authority: string | null; synonyms: { name: string; authors?: string[] }[] },
+  s: { candidateSpecies: string[]; doubts: string[] }): string {
+  const syn = sp.synonyms.map((y) => `${y.name} ${(y.authors ?? []).join(",")}`).sort();
+  const doubts = s.doubts.filter((d) => d !== "judge undecided").sort();
+  return crypto.createHash("sha256").update(JSON.stringify([sp.name, sp.authority, syn, [...s.candidateSpecies].sort(), doubts])).digest("hex").slice(0, 12);
+}
 
 /**
  * A selection's answer as a verdict keeps it: each taken record (refused left
@@ -219,12 +236,12 @@ function writeTsv<C extends readonly string[]>(file: string, columns: C, rowsOut
 export function readVerdicts(file = VERDICTS_FILE): Map<number, JudgeVerdict> {
   return new Map(readTsv(file, VERDICT_COLUMNS).map((r) => {
     if (r.verdict !== "confirmed" && r.verdict !== "undecided") throw new Error(`${path.basename(file)}: verdict "${r.verdict}" for ${r.sis_taxon_id} isn't confirmed or undecided`);
-    return [Number(r.sis_taxon_id), { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, verdict: r.verdict, answer: r.answer, votes: r.votes,
+    return [Number(r.sis_taxon_id), { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, verdict: r.verdict, answer: r.answer, basis: r.basis, votes: r.votes,
       by: r.by, date: r.date, transcripts: r.transcripts.split(/\s+/).filter(Boolean), context: r.context }];
   }));
 }
 export function writeVerdicts(vs: Iterable<JudgeVerdict>, file = VERDICTS_FILE): void {
-  writeTsv(file, VERDICT_COLUMNS, [...vs].sort((a, b) => a.sis - b.sis).map((v) => [String(v.sis), v.redlistName, v.verdict, v.answer, v.votes, v.by, v.date, v.transcripts.join(" "), v.context]));
+  writeTsv(file, VERDICT_COLUMNS, [...vs].sort((a, b) => a.sis - b.sis).map((v) => [String(v.sis), v.redlistName, v.verdict, v.answer, v.basis, v.votes, v.by, v.date, v.transcripts.join(" "), v.context]));
 }
 export function readNotes(file = NOTES_FILE): Map<number, Note[]> {
   const out = new Map<number, Note[]>();

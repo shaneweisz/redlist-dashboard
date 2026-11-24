@@ -316,32 +316,47 @@ until the judge asks again. One that doesn't hold is ignored, and the species
 listed for review with why. One that holds is still listed when its
 candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
 
-The judge asks each species twice; where the two differ, three more times,
-and then four of the five must agree (an answer naming a record it wasn't
-given, or *can't tell*, agrees with nothing). It writes a **verdict** to
-`seeds/judge-verdicts.tsv` (the rules' answer as records and relations, and
-the votes) when the agreed answer is the rules' (`confirmed`: the species
-leaves the review list and keeps its doubts) or when nothing reaches
-agreement (`undecided`: the doubt `judge undecided`). A verdict keeps the
-answer by its records' names, authorship, status and species, as a decision
-does, and applies only while the rules still give that answer and no decision
-holds. The judge's answers are read as counting reads them (a *part of* on a
-record that is itself its CoL species is *is*; any relation on a record
-leading to no species is *part of*), and one that would change the count
-agrees with nothing unless it cites a source. A lapsed
-decision the runs agree with gives way to a verdict. The judge writes a
-decision only if it would hold; one that wouldn't leaves the species listed.
-It never replaces a person's override, and doesn't ask again a species whose
-verdict applies unless a note was added.
+The judge asks each species twice; where the two don't agree and four of
+five still could, three more times, and then four of the five must agree. Its
+answers are read as counting reads them (a *part of* on a record that is
+itself its CoL species is *is*; any relation on a record leading to no species
+is *part of*); two answers agree when they count the same CoL species whole
+(with records or not) and the same *part of* records with records. An answer
+that is missing, *can't tell*, names a record it wasn't given, or would change
+the count without citing a source agrees with nothing.
 
-**Over time.** A release, a Red List update or a matcher version asks again
-only what it moves: a decision that lapses, a verdict whose answer the rules
-no longer give, a species newly listed for review. Each run is cached apart,
-so more runs can be added later at the cost of the new runs only. A new model
-or prompt asks nothing by itself. It is to be applied by a run that re-asks
-chosen rows (by `context`), reports how often it agrees with them, and
-replaces them only after that is read, never an override; that run isn't
-built yet, and `context` is what makes it possible.
+It writes a **verdict** to `seeds/judge-verdicts.tsv` when the agreed answer
+is the rules' (`confirmed`: the species leaves the review list and keeps its
+doubts), or when at least two runs answered and no answer reaches agreement
+(`undecided`: the doubt `judge undecided`). When the runs mostly can't tell,
+it writes nothing and the species stays listed as it was. A verdict keeps the
+rules' answer by its records' names, authorship, status and species, as a
+decision does, and a hash of what else the judge was given (the Red List
+name, citation and synonyms, the candidates' species, the rules' doubts); it
+applies only while both are unchanged and no decision holds, so a new
+homonym, candidate or synonym lists the species again.
+
+It writes a decision (the agreeing runs' answer, less *part of* records that
+count nothing, with their sources) only if it would hold and takes no CoL
+species another assessed species counts whole by the rules; else the species
+stays listed. A lapsed decision the runs agree with gives way to a verdict; a
+decision they confirm takes the current candidates. The judge never replaces a
+person's override, and doesn't ask again a species whose verdict applies
+unless a note newer than it was added.
+
+**Over time.** Each species' answer is cached by run, keyed by its facts
+without the occurrence counts, the prompt and the model, so a run pays only
+for species whose facts changed, whatever else it asks. A release, a Red List
+update or a matcher version lists again only what it moves: a decision that
+lapses, a verdict whose answer or basis changed, a species newly listed for
+review; a new snapshot changes counts, not answers. More runs can be added
+later at the cost of the new runs, for the species a run chooses. A new model
+or prompt asks nothing by itself; settled rows are to be re-asked by a run
+that chooses them (by `context`), reports how often it agrees with them, and
+replaces them only after that is read, never an override. That run isn't
+built yet, and `context` is what makes it possible. The taxonomic notes are
+facts the judge reads but not part of a verdict's basis, so a re-assessment
+that changes only its notes doesn't list a species again.
 
 Example: a decision takes *Centropogon australis* (White, 1790), the
 waspfish, for the Red List's *C. australis* (Shaw, 1790), with no doubts,
