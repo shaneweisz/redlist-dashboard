@@ -9,7 +9,7 @@ import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
 import { taxonRankName } from "@/lib/taxon-rank-name";
 import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import LiteratureTimeline from "../LiteratureTimeline";
-import { LITERATURE_SOURCE_HINT, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE } from "@/lib/literature";
+import { literatureColumnNote, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE } from "@/lib/literature";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
@@ -6545,6 +6545,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={SPECIES_TH_NOWRAP}>Total</span>
+                    {DATA_VERSIONS.gbifSnapshot && (
+                    <HoverTooltip text={`Records in GBIF's ${DATA_VERSIONS.gbifSnapshot} snapshot.`}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    )}
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6590,7 +6598,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={SPECIES_TH_NOWRAP}>OpenAlex</span>
-                    <HoverTooltip text={LITERATURE_SOURCE_HINT.openalex}>
+                    <HoverTooltip text={literatureColumnNote("openalex", DATA_VERSIONS.openalex)}>
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />
@@ -6605,7 +6613,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={SPECIES_TH_NOWRAP}>BHL</span>
-                    <HoverTooltip text={LITERATURE_SOURCE_HINT.bhl}>
+                    <HoverTooltip text={literatureColumnNote("bhl", DATA_VERSIONS.bhl)}>
                       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <path d="M12 16v-4M12 8h.01" />

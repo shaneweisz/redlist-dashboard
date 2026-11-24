@@ -22,10 +22,16 @@ export type LiteratureSource = "openalex" | "bhl";
 export const OPENALEX_LITERATURE_TYPES = ["article", "review", "book", "book-chapter", "dissertation", "preprint", "report",
   "conference-paper", "letter", "data-paper"] as const;
 
-export const LITERATURE_SOURCE_HINT: Record<LiteratureSource, string> = {
-  openalex: "OpenAlex: papers whose title or abstract names the species (or a synonym CoL lists for it).",
-  bhl: "Biodiversity Heritage Library: articles, or whole volumes where BHL hasn't split out articles, whose scanned pages name the species (or a synonym CoL lists for it). Mostly historical literature.",
-};
+/**
+ * What a Literature column counts, and from which release: its header's tooltip.
+ * `version` is the release in words (DATA_VERSIONS), left out when unknown.
+ */
+export function literatureColumnNote(source: LiteratureSource, version?: string): string {
+  if (source === "bhl") {
+    return `Works in the Biodiversity Heritage Library${version ? `'s ${version} export` : ""} whose scanned pages name the species or a synonym CoL lists for it. BHL's own site may list more, found since.`;
+  }
+  return `Papers in OpenAlex${version ? `'s ${version} snapshot` : ""} whose title or abstract names the species or a synonym CoL lists for it. Records with the same title count as one paper.`;
+}
 
 /**
  * Where a count links to: the source's own search for the species' name.
