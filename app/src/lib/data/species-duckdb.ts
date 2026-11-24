@@ -147,6 +147,7 @@ const ASSESSED_SELECT = `
   assessment_date, year_published, population_trend, countries, class_name, order_name,
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
+  openalex_works, bhl_works,
   match_reason, match_decided_by, match_counts, match_other_names, match_records, match_treatment, redlist_authority, redlist_synonyms,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
@@ -199,6 +200,9 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     gbif_all_records_count: num(r.gbif_all_records_count),
     gbif_all_records_since_assessment: num(r.gbif_all_records_since_assessment),
     count_note: isCountNote(r.count_note) ? r.count_note : null,
+    // Literature works mentioning it (the sync's paper_counts): OpenAlex and BHL.
+    openalex_works: num(r.openalex_works),
+    bhl_works: num(r.bhl_works),
     // How its count was matched (src/lib/gbif-match.ts): one key, plus what else it counts.
     match: matchKey(r),
     match_counts_keys: countsKeys(r),
@@ -351,9 +355,10 @@ export async function querySpecies(opts: {
       const univSql = `
         SELECT u.col_id, u.scientific_name, u.class_name, u.order_name, u.family, u.taxon_group, u.described_year, u.specialist_group,
                g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
-               g.countries, g.gbif_all_records_countries, g.common_name, g.may_be_assessed
+               g.countries, g.gbif_all_records_countries, g.common_name, g.may_be_assessed, u.openalex_works, u.bhl_works
         FROM (
-          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group
+          SELECT col_id, scientific_name, class_name, order_name, family, taxon_group, described_year, specialist_group,
+                 openalex_works, bhl_works
           FROM read_parquet('${speciesUri}', hive_partitioning=true) ${univFilter}
         ) u
         LEFT JOIN ne_gbif_by_col g ON g.col_id = u.col_id`;
@@ -401,6 +406,8 @@ export async function querySpecies(opts: {
           gbif_georeferenced_records_count: num(r.gbif_georeferenced_records_count),
           gbif_all_records_count: num(r.gbif_all_records_count),
           gbif_all_records_countries: splitList(r.gbif_all_records_countries),
+          openalex_works: num(r.openalex_works),
+          bhl_works: num(r.bhl_works),
           // Only on the few it applies to (src/lib/gbif-match.ts), to keep the row slim.
           ...(r.may_be_assessed ? { may_be_assessed: splitList(r.may_be_assessed) } : {}),
         } as unknown as ReturnType<typeof toSpeciesRow>);

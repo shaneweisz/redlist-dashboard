@@ -535,6 +535,9 @@ export const COL_SOURCE_URL = "https://www.catalogueoflife.org/";
 // generic, dateless homepage link that says nothing about which release produced the
 // numbers on screen.
 export const COL_RELEASE_LABEL = `Catalogue of Life (${COL_RELEASE.alias})`;
+/** The release in words, from the month CoL issued it: "the Catalogue of Life's June 2026 XR release". */
+export const COL_RELEASE_PLAIN = `the Catalogue of Life's ${new Date(`${COL_RELEASE.issued}T00:00:00Z`)
+  .toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })} ${COL_RELEASE.alias.endsWith("XR") ? "XR " : ""}release`;
 export const COL_RELEASE_URL = COL_RELEASE.doi ? `https://doi.org/${COL_RELEASE.doi}` : COL_SOURCE_URL;
 
 const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);

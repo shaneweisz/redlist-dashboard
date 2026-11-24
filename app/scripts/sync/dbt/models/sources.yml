@@ -21,6 +21,8 @@ sources:
         description: sources/specialist-groups.ts (each SSC Specialist Group's remit)
       - name: rank_aliases
         description: sources/specialist-groups.ts (IUCN/CoL class and order aliases)
+      - name: literature_mentions
+        description: sources/literature.ts (each OpenAlex or BHL work's CoL binomials)
   - name: link
     description: The link stage's table (app/scripts/sync/link/)
     config:

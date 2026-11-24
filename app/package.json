@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "sync": "npx tsx scripts/sync/sync.ts",
     "sync:publish": "npx tsx scripts/sync/publish.ts",
+    "sync:openalex": "npx tsx scripts/sync/inputs/openalex-snapshot.ts ../.sync/working/sources/taxa.parquet",
     "sync:lineage": "npx tsx scripts/sync/lineage.ts",
     "sync:trace": "npx tsx scripts/sync/trace.ts",
     "sync:compare": "npx tsx scripts/sync/checks/compare.ts",

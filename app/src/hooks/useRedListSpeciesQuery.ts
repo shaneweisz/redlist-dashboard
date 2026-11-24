@@ -44,6 +44,13 @@ export interface RedListSpecies {
   gbif_all_records_since_assessment?: number | null;
   /** NE rows: the countries any of its records are from (countries holds the georeferenced ones). */
   gbif_all_records_countries?: string[];
+  /**
+   * Literature works mentioning it (the sync's paper_counts), from OpenAlex and
+   * the Biodiversity Heritage Library. The table shows them for Not Evaluated
+   * species only, for now.
+   */
+  openalex_works?: number | null;
+  bhl_works?: number | null;
   /** Why its count needs a caveat (src/lib/count-note.ts): linked to no CoL species yet, or a flagged match. */
   count_note?: CountNote | null;
   /** How its count was matched, and what else it counts (src/lib/gbif-match.ts). */

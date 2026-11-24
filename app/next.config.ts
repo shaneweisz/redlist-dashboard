@@ -33,7 +33,8 @@ const SPECIES_LISTS_SYNC = fs.readFileSync(path.join(process.cwd(), "latest-sync
 function dataVersions(): string {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(process.cwd(), "data", "sync", "sync.json"), "utf-8"));
-    return JSON.stringify({ redlist: s.redlist?.database, gbifSnapshot: s.gbif?.snapshot, col: s.col?.xr?.alias });
+    return JSON.stringify({ redlist: s.redlist?.database, gbifSnapshot: s.gbif?.snapshot, col: s.col?.xr?.alias,
+      openalex: s.literature?.openalex, bhl: s.literature?.bhl });
   } catch {
     return "{}";
   }
@@ -137,6 +138,7 @@ const nextConfig: NextConfig = {
     // Applies to every DuckDB-backed route: species list + history + search.
     "/api/redlist/species": DUCKDB_TRACE,
     "/api/redlist/species/history": DUCKDB_TRACE,
+    "/api/literature-link": DUCKDB_TRACE,
     "/api/search": DUCKDB_TRACE,
     "/api/search/warm": DUCKDB_TRACE,
     "/api/taxa/species": DUCKDB_TRACE,
@@ -200,6 +202,8 @@ const nextConfig: NextConfig = {
     // taxa-summary.json for the instant tooLarge check.
     "/api/redlist/species": ONLY_SMALL_SUMMARIES,
     "/api/redlist/species/history": ["**/data/**"],
+    // Reads literature-works.parquet in R2 (httpfs) — no local data.
+    "/api/literature-link": ["**/data/**"],
     // Queries taxa.parquet + assessment_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning

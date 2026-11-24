@@ -9,6 +9,7 @@ import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
 import { taxonRankName } from "@/lib/taxon-rank-name";
 import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import LiteratureTimeline from "../LiteratureTimeline";
+import { literatureColumnNote, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE } from "@/lib/literature";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
@@ -27,7 +28,7 @@ import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
-import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
+import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_PLAIN } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
@@ -394,6 +395,10 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     }
     case "describedYear":
       return (a.described_year ?? -1) - (b.described_year ?? -1);
+    case "openalexWorks":
+      return (a.openalex_works ?? -1) - (b.openalex_works ?? -1);
+    case "bhlWorks":
+      return (a.bhl_works ?? -1) - (b.bhl_works ?? -1);
   }
 }
 
@@ -1268,6 +1273,18 @@ function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: 
   );
 }
 
+/** A literature count, linked to the source's own search for the name when there is one (and something to find). */
+function LiteratureCount({ n, href, title }: { n: number | null | undefined; href: string | null; title: string }) {
+  if (n == null) return <>—</>;
+  if (!href || n === 0) return <>{n.toLocaleString()}</>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={TABLE_NUMBER_LINK} title={title}
+      onClick={(e) => e.stopPropagation()}>
+      {n.toLocaleString()}
+    </a>
+  );
+}
+
 function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChange: (mode: GbifRecordMode) => void }) {
   return (
     <div role="radiogroup" aria-label="Which GBIF records to count"
@@ -1301,7 +1318,7 @@ interface RedListViewProps {
 }
 
 // Info note on the toggle's Not Evaluated count.
-const NE_COUNT_NOTE = `According to ${COL_RELEASE_LABEL}. The count could differ under another taxonomy.`;
+const NE_COUNT_NOTE = `Counted according to the taxonomy of ${COL_RELEASE_PLAIN}.`;
 
 export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
@@ -4044,6 +4061,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the Country / Assessors row below Charts row 1 (reassessments mode).
   // First Assessments: Not Evaluated species have no assessed range, so
   // their countries come from GBIF records alone.
+  // Which GBIF snapshot the counts are as of, beside the GBIF Records chart's title
+  // (the species table's Total header says the same).
+  const gbifSnapshotInfo = DATA_VERSIONS.gbifSnapshot ? (
+    <HoverTooltip text={`Counts as of GBIF's ${DATA_VERSIONS.gbifSnapshot} snapshot.`}>
+      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4M12 8h.01" />
+      </svg>
+    </HoverTooltip>
+  ) : null;
   const countryGbifInfo = (
     <HoverTooltip text="Based on GBIF records: a species only counts in a country once GBIF has a record of it there, so species that occur in a country but haven't been recorded there in GBIF yet are left out.">
       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -5507,7 +5534,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
@@ -5592,7 +5619,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
@@ -6528,6 +6555,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 >
                   <span className="flex items-center justify-end gap-1">
                     <span className={SPECIES_TH_NOWRAP}>Total</span>
+                    {DATA_VERSIONS.gbifSnapshot && (
+                    <HoverTooltip text={`Counts as of GBIF's ${DATA_VERSIONS.gbifSnapshot} snapshot.`}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    )}
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
@@ -6564,6 +6599,40 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <SortIndicator field="pctNewGbif" />
                   </span>
                 </th>
+                )}
+                {isNewAssessments && (
+                <>
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} border-l border-zinc-200 dark:border-zinc-700`}
+                  onClick={(e) => handleSort("openalexWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>OpenAlex</span>
+                    <HoverTooltip text={literatureColumnNote("openalex", DATA_VERSIONS.openalex)}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    <SortIndicator field="openalexWorks" />
+                  </span>
+                </th>
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
+                  onClick={(e) => handleSort("bhlWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>BHL</span>
+                    <HoverTooltip text={literatureColumnNote("bhl", DATA_VERSIONS.bhl)}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    <SortIndicator field="bhlWorks" />
+                  </span>
+                </th>
+                </>
                 )}
                                 </>
                 );
@@ -6619,6 +6688,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
                   </span>
                 </th>
+                {/* Literature, for Not Evaluated species only for now: the
+                    assessed table stays as assessors know it. */}
+                {isNewAssessments && (
+                <th colSpan={2} className="px-2 md:px-4 pt-2 pb-1 border-b border-l border-zinc-200 dark:border-zinc-700 text-right text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                  Literature
+                </th>
+                )}
               </tr>
               <tr className="border-b border-zinc-200 dark:border-zinc-700">{gbifColumns}</tr>
                   </>
@@ -6918,10 +6994,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       })()}
                     </td>
                     )}
+                    {/* Literature (Not Evaluated): works in each source, never summed */}
+                    {isNewAssessments && (
+                    <>
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap border-l border-zinc-200 dark:border-zinc-800">
+                      <LiteratureCount n={s.openalex_works} title={LITERATURE_LINK_NOTE.openalex} href={literatureLinkHref(s)} />
+                    </td>
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
+                      <LiteratureCount n={s.bhl_works} title={LITERATURE_LINK_NOTE.bhl} href={literatureSearchUrl("bhl", s.scientific_name)} />
+                    </td>
+                    </>
+                    )}
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 4 : 8} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 6 : 7} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -7029,6 +7116,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 assessmentDate={s.assessment_date ?? null}
                                 assessmentId={s.assessment_id ? String(s.assessment_id) : null}
                                 assessmentYear={assessmentYear}
+                                syncedCounts={isNewAssessments ? { openalex: s.openalex_works ?? null, bhl: s.bhl_works ?? null } : undefined}
                               />
                             </div>
                           )}
@@ -7128,7 +7216,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 4 : 8} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 6 : 7} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>
