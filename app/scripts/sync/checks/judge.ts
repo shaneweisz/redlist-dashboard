@@ -80,11 +80,28 @@ export function facts(sp: SpeciesInput, lineage: Record<string, string | null> |
 /** Our answer, as the judge's is written: refused records count as not taken. */
 export const ourAnswer = (s: Selection) => s.selected.filter((x) => x.relation !== "refused").map((x) => ({ id: x.record.id, relation: x.relation }));
 
-export function score(ours: { id: string; relation: string }[], theirs: Answer["records"]): Verdict {
+/** Where a record leads and how many occurrences sit under a record or species: from the release. */
+export interface Lookup { speciesOf: (id: string) => string | null | undefined; under: (id: string) => number }
+
+/**
+ * Right when both answers count the same occurrences: the same CoL species counted
+ * whole (is or split into), and the same part-of records outside those. Listing a
+ * record under a species already counted whole, or one with no occurrences, changes
+ * nothing, so it isn't scored.
+ */
+export function score(ours: { id: string; relation: string }[], theirs: Answer["records"], look: Lookup): Verdict {
   if (theirs === "can't tell") return "can't tell";
-  const key = (xs: { id: string; relation: string }[]) => xs.map((x) => `${x.id}:${x.relation}`).sort().join(",");
-  return key(ours) === key(theirs) ? "right" : "wrong";
+  const counted = (xs: { id: string; relation: string }[]) => {
+    const whole = new Set(xs.filter((x) => x.relation === "is" || x.relation === "split into")
+      .map((x) => look.speciesOf(x.id) ?? x.id).filter((sp) => look.under(sp) > 0));
+    const parts = xs.filter((x) => x.relation === "part of" && !whole.has(look.speciesOf(x.id) ?? "") && look.under(x.id) > 0).map((x) => x.id);
+    return [...[...whole].map((w) => `whole:${w}`), ...parts.map((p) => `part:${p}`)].sort().join(",");
+  };
+  return counted(ours) === counted(theirs) ? "right" : "wrong";
 }
+
+/** What this process's calls have cost, from each result's total_cost_usd. */
+export const spent = { usd: 0, calls: 0 };
 
 const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -105,6 +122,8 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
       fs.rmSync(cwd, { recursive: true, force: true });
       if (res.code !== 0) throw new Error(`judge: claude exited ${res.code}: ${res.stderr.slice(0, 500)}`);
       const o = JSON.parse(res.stdout);
+      spent.usd += o.total_cost_usd ?? 0; spent.calls++;
+      console.log(`judge: call ${spent.calls}, ${batch.length} species, $${(o.total_cost_usd ?? 0).toFixed(3)} (run so far $${spent.usd.toFixed(2)})`);
       const structured = o.structured_output ?? (typeof o.result === "string" ? JSON.parse(o.result) : o.result);
       answers = (structured?.answers ?? []) as Answer[];
       fs.writeFileSync(cache, JSON.stringify(answers));
@@ -115,14 +134,14 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
 }
 
 /** The judgements, and a report by doubt and by group (the CoL class, or kingdom for plants and fungi). */
-export function report(sel: Selection[], answers: Map<number, Answer>, groupOf: Map<number, string>) {
+export function report(sel: Selection[], answers: Map<number, Answer>, groupOf: Map<number, string>, look: Lookup) {
   const rowsOut: { sis_taxon_id: number; answer: string; sources: string; verdict: Verdict; reason: string }[] = [];
   const by = (k: string, v: Verdict, t: Record<string, Record<Verdict, number>>) => { (t[k] ??= { right: 0, wrong: 0, "can't tell": 0 })[v]++; };
   const byDoubt: Record<string, Record<Verdict, number>> = {}, byGroup: Record<string, Record<Verdict, number>> = {};
   for (const s of sel) {
     const a = answers.get(s.sis);
     if (!a) continue;
-    const v = score(ourAnswer(s), a.records);
+    const v = score(ourAnswer(s), a.records, look);
     rowsOut.push({ sis_taxon_id: s.sis, answer: JSON.stringify(a.records), sources: a.sources.join(" "), verdict: v, reason: a.reason });
     for (const d of s.doubts.length ? s.doubts : [isEasy(s) ? "(easy)" : "(no doubt)"]) by(d, v, byDoubt);
     by(groupOf.get(s.sis) ?? "?", v, byGroup);
@@ -131,15 +150,15 @@ export function report(sel: Selection[], answers: Map<number, Answer>, groupOf: 
 }
 
 /** Per group, among the species changed: how many the old rules and the new have right. */
-export function goal2(chosen: Selection[], old: Map<number, { id: string; relation: string }[]>, answers: Map<number, Answer>, groupOf: Map<number, string>) {
+export function goal2(chosen: Selection[], old: Map<number, { id: string; relation: string }[]>, answers: Map<number, Answer>, groupOf: Map<number, string>, look: Lookup) {
   const out: Record<string, { old: number; new: number; species: number }> = {};
   for (const s of chosen) {
     const a = answers.get(s.sis);
     if (!a) continue;
     const g = (out[groupOf.get(s.sis) ?? "?"] ??= { old: 0, new: 0, species: 0 });
     g.species++;
-    if (score(old.get(s.sis) ?? [], a.records) === "right") g.old++;
-    if (score(ourAnswer(s), a.records) === "right") g.new++;
+    if (score(old.get(s.sis) ?? [], a.records, look) === "right") g.old++;
+    if (score(ourAnswer(s), a.records, look) === "right") g.new++;
   }
   return out;
 }
@@ -165,6 +184,11 @@ if (require.main === module) {
     const extra = pre.species.flatMap((s) => [s.name, ...(s.match?.answerName ? [s.match.answerName] : [])]);
     const inputs = await loadInputs(T, pre.decisions, conn, extra);
     const sel = selectEvery(inputs.species, inputs.release, inputs.decisions);
+    // Where a record leads: from the records named in the facts (the release's byId holds only the matcher's records).
+    const leadsTo = new Map<string, string | undefined>();
+    for (const sp of inputs.species) for (const n of [sp.name, sp.match?.answerName, ...sp.synonyms.map((y) => y.name)])
+      if (n) for (const r of inputs.release.recordsNamed(n)) leadsTo.set(r.id, r.species?.id);
+    const look: Lookup = { speciesOf: (id) => leadsTo.get(id) ?? inputs.release.byId(id)?.species?.id, under: (id) => inputs.release.occurrencesUnder(id) };
     const bySis = new Map(inputs.species.map((s) => [s.sis, s]));
     const lineage = new Map((await rows<{ sis: number; class_name: string | null; order_name: string | null; family: string | null; kingdom: string | null; phylum: string | null }>(conn, `
       SELECT sis_taxon_id::INTEGER AS sis, kingdom_name AS kingdom, phylum_name AS phylum, class_name, order_name, family FROM ${parquet(T.assessments)} WHERE is_latest`))
@@ -195,7 +219,7 @@ if (require.main === module) {
     const fixtureSis = new Set(inputs.species.filter((s) => MATCHING_CASES.some((c) => sameName(c.name, s.name))).map((s) => s.sis));
     const fixtures = sel.filter((s) => fixtureSis.has(s.sis));
     const fx = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model });
-    const fr = report(fixtures, fx, groupOf);
+    const fr = report(fixtures, fx, groupOf, look);
     const tally = (rs: { verdict: Verdict }[]) => ({ right: rs.filter((r) => r.verdict === "right").length, wrong: rs.filter((r) => r.verdict === "wrong").length,
       cant: rs.filter((r) => r.verdict === "can't tell").length });
     const t = tally(fr.rows);
@@ -207,7 +231,7 @@ if (require.main === module) {
     if (!a.includes("--yes") && !(await ask("Go on? [y/N] "))) return;
 
     const answers = await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model });
-    const r = report(chosen, answers, groupOf);
+    const r = report(chosen, answers, groupOf, look);
     await writeTable(conn, "judgements", { sis_taxon_id: "BIGINT", answer: "VARCHAR", sources: "VARCHAR", verdict: "VARCHAR", reason: "VARCHAR", model: "VARCHAR" },
       r.rows.map((x) => ({ ...x, model: model ?? "default" })));
     const out = path.join(REVIEW_DIR, "judgements.parquet");
@@ -218,7 +242,7 @@ if (require.main === module) {
     for (const [d, v] of Object.entries(r.byDoubt).sort()) console.log(`  ${d.padEnd(26)} ${v.right} right, ${v.wrong} wrong, ${v["can't tell"]} can't tell`);
     if (old) {
       // Goal 2: among the species changed, no group has fewer judged right under the new rules.
-      const goal = goal2(chosen, old, answers, groupOf);
+      const goal = goal2(chosen, old, answers, groupOf, look);
       fs.writeFileSync(path.join(REVIEW_DIR, "judgements-goal2.json"), JSON.stringify(goal, null, 1));
       const worse = Object.entries(goal).filter(([, g]) => g.new < g.old);
       console.log(worse.length === 0 ? "judge: Goal 2 holds: no group has fewer right" :

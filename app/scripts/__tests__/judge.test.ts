@@ -28,12 +28,22 @@ describe("isEasy", () => {
 });
 
 describe("score", () => {
+  // S is the species; S2 a synonym record under it; P a record under another species O; Z a record with no occurrences.
+  const look = { speciesOf: (id: string) => ({ S: "S", S2: "S", P: "O", Z: "O", O: "O" } as Record<string, string>)[id], under: (id: string) => (id === "Z" ? 0 : 10) };
   it("right: the same records and relations, refused counting as not taken", () => {
     const s = sel({ selected: [...sel().selected, { record: rec("R"), relation: "refused", relationStep: 5, basis: "citation" }] });
-    expect(score(ourAnswer(s), [{ id: "S", relation: "is" }])).toBe("right");
-    expect(score(ourAnswer(s), [{ id: "S", relation: "part of" }])).toBe("wrong");
-    expect(score(ourAnswer(s), [])).toBe("wrong");
-    expect(score(ourAnswer(s), "can't tell")).toBe("can't tell");
+    expect(score(ourAnswer(s), [{ id: "S", relation: "is" }], look)).toBe("right");
+    expect(score(ourAnswer(s), [{ id: "S", relation: "part of" }], look)).toBe("wrong");
+    expect(score(ourAnswer(s), [], look)).toBe("wrong");
+    expect(score(ourAnswer(s), "can't tell", look)).toBe("can't tell");
+  });
+  it("right when the answers count the same occurrences: a record under a species counted whole, or with none, changes nothing", () => {
+    const ours = [{ id: "S", relation: "is" }];
+    expect(score(ours, [{ id: "S", relation: "is" }, { id: "S2", relation: "is" }], look)).toBe("right");
+    expect(score(ours, [{ id: "S", relation: "is" }, { id: "S2", relation: "part of" }], look)).toBe("right");
+    expect(score(ours, [{ id: "S", relation: "is" }, { id: "Z", relation: "part of" }], look)).toBe("right");
+    expect(score(ours, [{ id: "S", relation: "is" }, { id: "P", relation: "part of" }], look)).toBe("wrong");
+    expect(score(ours, [{ id: "S", relation: "is" }, { id: "P", relation: "split into" }], look)).toBe("wrong");
   });
 });
 
@@ -75,7 +85,8 @@ describe("judge", () => {
 describe("goal2", () => {
   it("counts, per group, the species the old and the new rules have right", () => {
     const answers = new Map([[1, { sis_taxon_id: 1, records: [{ id: "S", relation: "is" }], reason: "", sources: [] }]]);
-    const g = goal2([sel()], new Map([[1, [{ id: "X", relation: "is" }]]]), answers, new Map([[1, "mammalia"]]));
+    const g = goal2([sel()], new Map([[1, [{ id: "X", relation: "is" }]]]), answers, new Map([[1, "mammalia"]]),
+      { speciesOf: (id) => id, under: () => 10 });
     expect(g).toEqual({ mammalia: { old: 0, new: 1, species: 1 } });
   });
 });
