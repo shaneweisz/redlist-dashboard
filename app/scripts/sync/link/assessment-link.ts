@@ -76,15 +76,8 @@ export async function buildLink(
   const orphaned = [...loaded.decisions.keys()].filter((k) => !species.has(k));
   if (orphaned.length > 0) console.log(`   ${orphaned.length} decisions name species no longer assessed; delete them (SIS ${orphaned.slice(0, 5).join(", ")})`);
 
-  // Where a part-of record's records start: the record, or the non-nominate
-  // infraspecific CoL files the synonym under (Fringilla polatzeki → F. teydea polatzeki).
   const partOf = [...new Set(selections.flatMap((s) => s.selected.filter((x) => x.relation === "part of").map((x) => x.record.id)))];
-  await writeTable(conn, "part_of", { id: "VARCHAR" }, partOf.map((id) => ({ id })));
-  const root = new Map((await rows<{ id: string; root: string }>(conn, `
-    SELECT r.col_id AS id, CASE WHEN r.status = 'synonym' AND p.col_id IS NOT NULL AND p.rank <> 'species' AND p.col_id <> r.species_id
-        AND NOT (len(string_split(lower(p.scientific_name), ' ')) > 2 AND string_split(lower(p.scientific_name), ' ')[-1] = string_split(lower(p.scientific_name), ' ')[2])
-      THEN p.col_id ELSE r.col_id END AS root
-    FROM part_of x JOIN ${parquet(T.taxa)} r ON r.col_id = x.id LEFT JOIN ${parquet(T.taxa)} p ON p.col_id = r.parent_id`)).map((r) => [r.id, r.root]));
+  const root = await partOfRoots(conn, T.taxa, partOf);
 
   const links: LinkRow[] = [];
   const notes = new Map<number, { note: string; records: NoteRecord[] }>();
@@ -142,6 +135,20 @@ export async function buildLink(
 }
 
 /** One species' rows: its records (the first the primary row), then candidate rows. */
+/**
+ * Where each part-of record's records start: the record, or the non-nominate
+ * infraspecific CoL files the synonym under (Fringilla polatzeki → F. teydea
+ * polatzeki). The judge uses it too, to count an answer as the sync would.
+ */
+export async function partOfRoots(conn: Awaited<ReturnType<typeof openDuckDB>>, taxa: string, ids: string[]): Promise<Map<string, string>> {
+  await writeTable(conn, "part_of", { id: "VARCHAR" }, ids.map((id) => ({ id })));
+  return new Map((await rows<{ id: string; root: string }>(conn, `
+    SELECT r.col_id AS id, CASE WHEN r.status = 'synonym' AND p.col_id IS NOT NULL AND p.rank <> 'species' AND p.col_id <> r.species_id
+        AND NOT (len(string_split(lower(p.scientific_name), ' ')) > 2 AND string_split(lower(p.scientific_name), ' ')[-1] = string_split(lower(p.scientific_name), ' ')[2])
+      THEN p.col_id ELSE r.col_id END AS root
+    FROM part_of x JOIN ${parquet(taxa)} r ON r.col_id = x.id LEFT JOIN ${parquet(taxa)} p ON p.col_id = r.parent_id`)).map((r) => [r.id, r.root]));
+}
+
 export function speciesRows(sel: Selection, sp: SpeciesInput, root: Map<string, string>): LinkRow[] {
   const out: LinkRow[] = [];
   const seen = new Set<string>();
