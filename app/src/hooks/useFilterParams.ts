@@ -8,7 +8,6 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
-import { DEFAULT_LITERATURE_SOURCE, LITERATURE_PARAM, parseLiteratureSource, type LiteratureSource } from "@/lib/literature";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
@@ -92,7 +91,7 @@ export const OWN_PARAM_NAMES = [
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
   "search", "outdated",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
-  GBIF_RECORDS_PARAM, GBIF_CHART_PARAM, LITERATURE_PARAM,
+  GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
   ...Object.values(GBIF_RANGE_PARAM),
 ];
 
@@ -105,12 +104,12 @@ export const OWN_PARAM_NAMES = [
 export type ThreatsScope = "threatened" | "all";
 
 /** Columns the species table can be sorted by. */
-// totalWorks sorts on the literature source the table shows (lit=).
+// openalexWorks/bhlWorks: the Not Evaluated table's Literature columns.
 export type SortField = "year" | "category" | "totalGbif" | "newGbif" | "pctNewGbif" | "describedYear"
-  | "totalWorks";
+  | "openalexWorks" | "bhlWorks";
 
 const SORT_FIELDS: SortField[] = ["year", "category", "totalGbif", "newGbif", "pctNewGbif", "describedYear",
-  "totalWorks"];
+  "openalexWorks", "bhlWorks"];
 
 /** Narrow a raw `sort=`/`sort2=` param to a SortField, or null if unrecognised. */
 function parseSortField(raw: string | null): SortField | null {
@@ -356,8 +355,6 @@ export function parseParams(search: string) {
     // Which GBIF records every count counts (georeferenced, the default, or all).
     // A measure rather than a filter, so clearing filters leaves it alone.
     gbifRecordMode: parseGbifRecordMode(p.get(GBIF_RECORDS_PARAM)),
-    // Which source the table's Literature columns count (a measure, like the GBIF mode).
-    literatureSource: parseLiteratureSource(p.get(LITERATURE_PARAM)),
     // Which of the six the GBIF Records chart shows (a display choice, like mapview).
     gbifChartKey: parseGbifChartKey(p.get(GBIF_CHART_PARAM)),
     mapSortKey: (
@@ -446,7 +443,6 @@ export function buildQs(state: {
   sortDirection2: "asc" | "desc";
   mapViewMode?: MapViewMode;
   gbifRecordMode?: GbifRecordMode;
-  literatureSource?: LiteratureSource;
   gbifChartKey?: GbifRangeKey;
   mapSortKey?: MapSortKey;
   mapSortDirection?: "asc" | "desc";
@@ -517,7 +513,6 @@ export function buildQs(state: {
   }
   if (state.mapViewMode === "list") p.set("mapview", "list");
   if (state.gbifRecordMode && state.gbifRecordMode !== DEFAULT_GBIF_RECORD_MODE) p.set(GBIF_RECORDS_PARAM, state.gbifRecordMode);
-  if (state.literatureSource && state.literatureSource !== DEFAULT_LITERATURE_SOURCE) p.set(LITERATURE_PARAM, state.literatureSource);
   if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(GBIF_CHART_PARAM, state.gbifChartKey);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set("mapsort", state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set("mapdir", "asc");
@@ -1188,17 +1183,6 @@ export function useFilterParams() {
     [syncUrl]
   );
 
-  const setLiteratureSource = useCallback(
-    (source: LiteratureSource) => {
-      setState(prev => {
-        const next = { ...prev, literatureSource: source };
-        queueMicrotask(() => syncUrl(next, false));
-        return next;
-      });
-    },
-    [syncUrl]
-  );
-
   const setMapSort = useCallback(
     (key: MapSortKey, direction: "asc" | "desc") => {
       setState(prev => {
@@ -1378,7 +1362,6 @@ export function useFilterParams() {
     sortDirection2: state.sortDirection2,
     mapViewMode: state.mapViewMode,
     gbifRecordMode: state.gbifRecordMode,
-    literatureSource: state.literatureSource,
     mapSortKey: state.mapSortKey,
     mapSortDirection: state.mapSortDirection,
 
@@ -1425,7 +1408,6 @@ export function useFilterParams() {
     setSort2,
     setMapViewMode,
     setGbifRecordMode,
-    setLiteratureSource,
     setMapSort,
     fromPopstateRef,
     clearAllFilters,

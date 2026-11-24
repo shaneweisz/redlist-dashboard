@@ -9,7 +9,7 @@ import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
 import { taxonRankName } from "@/lib/taxon-rank-name";
 import { parseDynamicNodeId } from "@/lib/dynamic-taxon";
 import LiteratureTimeline from "../LiteratureTimeline";
-import { DEFAULT_LITERATURE_SOURCE, LITERATURE_SOURCES, LITERATURE_SOURCE_HINT, LITERATURE_SOURCE_LABEL, literatureWorks, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE, type LiteratureSource } from "@/lib/literature";
+import { LITERATURE_SOURCE_HINT, literatureSearchUrl, literatureLinkHref, LITERATURE_LINK_NOTE } from "@/lib/literature";
 import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
@@ -140,11 +140,9 @@ type Species = RedListSpecies;
  * species' Red List range). The cached rows are left as they arrived, so
  * switching mode re-derives from them.
  */
-function inGbifMode(s: Species, mode: GbifRecordMode, literature: LiteratureSource = DEFAULT_LITERATURE_SOURCE): Species {
+function inGbifMode(s: Species, mode: GbifRecordMode): Species {
   return {
     ...s,
-    // The Literature column's source (lit=), derived here for the same reason.
-    literature_works: literatureWorks(s, literature),
     gbif_records: gbifRecordCount(s, mode),
     gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
     countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
@@ -397,8 +395,10 @@ function compareBy(field: SortField, a: Species, b: Species): number {
     }
     case "describedYear":
       return (a.described_year ?? -1) - (b.described_year ?? -1);
-    case "totalWorks":
-      return (a.literature_works ?? -1) - (b.literature_works ?? -1);
+    case "openalexWorks":
+      return (a.openalex_works ?? -1) - (b.openalex_works ?? -1);
+    case "bhlWorks":
+      return (a.bhl_works ?? -1) - (b.bhl_works ?? -1);
   }
 }
 
@@ -1285,26 +1285,6 @@ function LiteratureCount({ n, href, title }: { n: number | null | undefined; hre
   );
 }
 
-function LiteratureSourceToggle({ source, onChange }: { source: LiteratureSource; onChange: (source: LiteratureSource) => void }) {
-  return (
-    <div role="radiogroup" aria-label="Which literature source to count" className={CHART_SEGMENTED_CLASS}>
-      {LITERATURE_SOURCES.map((src) => (
-        <button
-          key={src}
-          type="button"
-          role="radio"
-          aria-checked={source === src}
-          onClick={() => onChange(src)}
-          className={chartSegmentClass(source === src)}
-          title={LITERATURE_SOURCE_HINT[src]}
-        >
-          {LITERATURE_SOURCE_LABEL[src]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function GbifRecordModeToggle({ mode, onChange }: { mode: GbifRecordMode; onChange: (mode: GbifRecordMode) => void }) {
   return (
     <div role="radiogroup" aria-label="Which GBIF records to count"
@@ -1338,7 +1318,7 @@ interface RedListViewProps {
 }
 
 // Info note on the toggle's Not Evaluated count.
-const NE_COUNT_NOTE = `According to ${COL_RELEASE_LABEL}. The count could differ under another taxonomy.`;
+const NE_COUNT_NOTE = `Counted according to the taxonomy of the ${COL_RELEASE_LABEL}.`;
 
 export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
@@ -1409,7 +1389,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedCountries, setSelectedCountries,
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
-    literatureSource = DEFAULT_LITERATURE_SOURCE, setLiteratureSource,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
     selectedPopulationTrends, setSelectedPopulationTrends,
@@ -1905,7 +1884,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
   // Every memo below reads the GBIF counts of the record mode in force.
-  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode, literatureSource)), [assessedSpecies, gbifRecordMode, literatureSource]);
+  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
@@ -2428,7 +2407,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     if (taxaFilteredSpeciesNoPreview.some(s => s.species_key === singleSpeciesPreview.species_key)) {
       return taxaFilteredSpeciesNoPreview;
     }
-    return [inGbifMode(singleSpeciesPreview, gbifRecordMode, literatureSource), ...taxaFilteredSpeciesNoPreview];
+    return [inGbifMode(singleSpeciesPreview, gbifRecordMode), ...taxaFilteredSpeciesNoPreview];
   }, [taxaFilteredSpeciesNoPreview, singleSpeciesPreview, gbifRecordMode]);
 
   const [mounted, setMounted] = useState(false);
@@ -6604,15 +6583,38 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </th>
                 )}
                 {isNewAssessments && (
+                <>
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE} border-l border-zinc-200 dark:border-zinc-700`}
-                  onClick={(e) => handleSort("totalWorks", e)}
+                  onClick={(e) => handleSort("openalexWorks", e)}
                 >
                   <span className="flex items-center justify-end gap-1">
-                    <span className={SPECIES_TH_NOWRAP}>Total</span>
-                    <SortIndicator field="totalWorks" />
+                    <span className={SPECIES_TH_NOWRAP}>OpenAlex</span>
+                    <HoverTooltip text={LITERATURE_SOURCE_HINT.openalex}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    <SortIndicator field="openalexWorks" />
                   </span>
                 </th>
+                <th
+                  className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
+                  onClick={(e) => handleSort("bhlWorks", e)}
+                >
+                  <span className="flex items-center justify-end gap-1">
+                    <span className={SPECIES_TH_NOWRAP}>BHL</span>
+                    <HoverTooltip text={LITERATURE_SOURCE_HINT.bhl}>
+                      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4M12 8h.01" />
+                      </svg>
+                    </HoverTooltip>
+                    <SortIndicator field="bhlWorks" />
+                  </span>
+                </th>
+                </>
                 )}
                                 </>
                 );
@@ -6671,19 +6673,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 {/* Literature, for Not Evaluated species only for now: the
                     assessed table stays as assessors know it. */}
                 {isNewAssessments && (
-                <th className="px-2 md:px-4 pt-2 pb-1 border-b border-l border-zinc-200 dark:border-zinc-700">
-                  <span className="flex items-center justify-end gap-2">
-                    <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
-                      Literature
-                      <HoverTooltip text={LITERATURE_SOURCE_HINT[literatureSource]}>
-                        <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <path d="M12 16v-4M12 8h.01" />
-                        </svg>
-                      </HoverTooltip>
-                    </span>
-                    {setLiteratureSource && <LiteratureSourceToggle source={literatureSource} onChange={setLiteratureSource} />}
-                  </span>
+                <th colSpan={2} className="px-2 md:px-4 pt-2 pb-1 border-b border-l border-zinc-200 dark:border-zinc-700 text-right text-sm font-bold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                  Literature
                 </th>
                 )}
               </tr>
@@ -6985,17 +6976,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       })()}
                     </td>
                     )}
-                    {/* Literature (Not Evaluated), in the source the heading's toggle chose */}
+                    {/* Literature (Not Evaluated): works in each source, never summed */}
                     {isNewAssessments && (
+                    <>
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap border-l border-zinc-200 dark:border-zinc-800">
-                      <LiteratureCount n={s.literature_works} title={LITERATURE_LINK_NOTE[literatureSource]}
-                        href={literatureSource === "openalex" ? literatureLinkHref(s) : literatureSearchUrl("bhl", s.scientific_name)} />
+                      <LiteratureCount n={s.openalex_works} title={LITERATURE_LINK_NOTE.openalex} href={literatureLinkHref(s)} />
                     </td>
+                    <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
+                      <LiteratureCount n={s.bhl_works} title={LITERATURE_LINK_NOTE.bhl} href={literatureSearchUrl("bhl", s.scientific_name)} />
+                    </td>
+                    </>
                     )}
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 5 : 7} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 6 : 7} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -7203,7 +7198,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 5 : 7} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 6 : 7} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>

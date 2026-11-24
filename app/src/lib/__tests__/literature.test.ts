@@ -1,20 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { literatureLinkHref, literatureSearchUrl, literatureWorks, openAlexWorksUrl, parseLiteratureSource } from "../literature";
-
-const species = { openalex_works: 42, bhl_works: 0 };
-
-describe("literature source", () => {
-  it("defaults to OpenAlex for anything but bhl", () => {
-    expect(parseLiteratureSource(null)).toBe("openalex");
-    expect(parseLiteratureSource("nonsense")).toBe("openalex");
-    expect(parseLiteratureSource("bhl")).toBe("bhl");
-  });
-
-  it("reads each source's counts", () => {
-    expect(literatureWorks(species, "openalex")).toBe(42);
-    expect(literatureWorks(species, "bhl")).toBe(0);
-  });
-});
+import { literatureLinkHref, literatureSearchUrl, openAlexWorksUrl } from "../literature";
 
 describe("literature search links", () => {
   it("searches OpenAlex titles and abstracts for the counted types, from a date for New", () => {
