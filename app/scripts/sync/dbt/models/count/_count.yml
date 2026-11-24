@@ -9,3 +9,97 @@ models:
           - unique
   - name: record_counts
     description: GBIF record counts per species (see the header in record_counts.sql).
+  - name: paper_credits
+    description: Which species each literature mention counts for (see the header in paper_credits.sql).
+  - name: paper_works
+    description: The OpenAlex works behind each species' count, for the app's links (see the header in paper_works.sql).
+  - name: paper_counts
+    description: Literature papers per species and source (see the header in paper_counts.sql).
+    columns:
+      - name: source
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['openalex', 'bhl']
+
+unit_tests:
+  - name: paper_credits_rules
+    description: >
+      Who a mention counts for. Species 1 is named by its own name and by a
+      synonym it owns. A name two species own ("Cus dus") counts for neither,
+      while a misapplied usage of "Aus bus" doesn't make it ambiguous. An
+      unassessed species is credited by its col_id, per source.
+    model: paper_credits
+    given:
+      - input: source('sources', 'taxa')
+        format: sql
+        rows: |
+          SELECT *, 'species' AS rank FROM (VALUES
+            ('U1', 'Aus bus', 'accepted'), ('U2', 'Aus oldus', 'synonym'), ('U9', 'Aus bus', 'misapplied'),
+            ('U3', 'Cus dus', 'accepted'), ('U4', 'Cus dus', 'accepted'), ('C6', 'Eus fus', 'accepted')
+          ) t(col_id, scientific_name, status)
+      - input: ref('usage_owner')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('U1', 1::BIGINT, 'U1', NULL), ('U2', 1, 'U1', NULL), ('U9', 9, 'U9', NULL),
+            ('U3', 2, 'U3', NULL), ('U4', NULL, NULL, 'C5'), ('C6', NULL, NULL, 'C6')
+          ) t(usage_key, sis_taxon_id, link_usage_id, col_id)
+      - input: source('sources', 'literature_mentions')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('openalex', 'W1', DATE '2019-01-01', 2019, 'p1', 'Aus bus'),
+            ('openalex', 'W2', DATE '2021-03-01', 2021, 'p2', 'Aus oldus'),
+            ('openalex', 'W2', DATE '2021-03-01', 2021, 'p2', 'Aus bus'),
+            ('openalex', 'W7', DATE '2022-01-01', 2022, 'p7', 'Cus dus'),
+            ('openalex', 'W8', DATE '2022-01-01', 2022, 'p8', 'Eus fus'),
+            ('bhl', 'item:8', NULL, 1890, 'item:8', 'Eus fus')
+          ) t(source, work_id, publication_date, publication_year, paper, name)
+    expect:
+      rows:
+        - {source: openalex, sis_taxon_id: 1, col_id: null, paper: p1, work_id: W1}
+        - {source: openalex, sis_taxon_id: 1, col_id: null, paper: p2, work_id: W2}
+        - {source: openalex, sis_taxon_id: null, col_id: C6, paper: p8, work_id: W8}
+        - {source: bhl, sis_taxon_id: null, col_id: C6, paper: "item:8", work_id: "item:8"}
+
+  - name: paper_counts_rules
+    description: >
+      How credited papers are counted. Species 1 (assessed 2020-06-15): a paper
+      held as two records (p3: W3 and W3b, one undated) counts once, by its
+      earliest date. New is by date where a paper has one, else by year, and a
+      paper dated only to the assessment's year, or after the sync date, isn't
+      new. An unassessed species, and one assessed after the sync date, have no
+      window.
+    model: paper_counts
+    overrides:
+      vars: {sync_date: "2026-11-01"}
+    given:
+      - input: ref('paper_credits')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            ('openalex', 1::BIGINT, NULL, 'p1', 'W1', DATE '2019-01-01', 2019),
+            ('openalex', 1, NULL, 'p2', 'W2', DATE '2021-03-01', 2021),
+            ('openalex', 1, NULL, 'p3', 'W3', DATE '2022-05-01', 2022),
+            ('openalex', 1, NULL, 'p3', 'W3b', NULL, 2022),
+            ('openalex', 1, NULL, 'p4', 'W4', NULL, 2020),
+            ('openalex', 1, NULL, 'p5', 'W5', NULL, 2023),
+            ('openalex', 1, NULL, 'p6', 'W6', DATE '2027-01-01', 2027),
+            ('openalex', 3, NULL, 'p9', 'W9', DATE '2022-01-01', 2022),
+            ('openalex', NULL, 'C6', 'p8', 'W8', DATE '2022-01-01', 2022),
+            ('bhl', NULL, 'C6', 'item:8', 'item:8', NULL, 1890)
+          ) t(source, sis_taxon_id, col_id, paper, work_id, publication_date, publication_year)
+      - input: source('sources', 'assessments')
+        format: sql
+        rows: |
+          SELECT * FROM (VALUES
+            (1::BIGINT, '2020-06-15', true), (3, '2027-01-01', true)
+          ) t(sis_taxon_id, assessment_date, is_latest)
+    expect:
+      rows:
+        - {source: openalex, sis_taxon_id: 1, col_id: null, works: 6, works_since_assessment: 3}
+        - {source: openalex, sis_taxon_id: 3, col_id: null, works: 1, works_since_assessment: null}
+        - {source: openalex, sis_taxon_id: null, col_id: C6, works: 1, works_since_assessment: null}
+        - {source: bhl, sis_taxon_id: null, col_id: C6, works: 1, works_since_assessment: null}

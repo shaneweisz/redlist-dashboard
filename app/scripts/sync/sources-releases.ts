@@ -1,6 +1,7 @@
 /**
  * The releases the sources stage built its tables from: the CoL XR and curated
- * checklist, and the GBIF snapshot. Written beside the tables, so a run that
+ * checklist, the GBIF snapshot, and the literature (the OpenAlex release read,
+ * and the BHL export's Last-Modified). Written beside the tables, so a run that
  * starts later (`--from link`) can tell whether the tables it reuses came from
  * the releases it is about to use.
  *
@@ -18,6 +19,8 @@ export interface SourcesReleases {
   xr: string;
   checklist: string;
   snapshot: string;
+  openalex: string;
+  bhl: string;
 }
 
 export function writeSourcesReleases(file: string, r: SourcesReleases): void {
@@ -27,9 +30,9 @@ export function writeSourcesReleases(file: string, r: SourcesReleases): void {
 /** Why the tables in the build can't be reused with these releases, or null when they can. */
 export function sourcesMismatch(recorded: SourcesReleases | null, now: SourcesReleases): string | null {
   if (!recorded) return "the build has no record of the releases its sources were built from";
-  const diffs = (["xr", "checklist", "snapshot"] as const)
+  const diffs = (["xr", "checklist", "snapshot", "openalex", "bhl"] as const)
     .filter((k) => recorded[k] !== now[k])
-    .map((k) => `${k} ${recorded[k]} in the build, ${now[k]} now`);
+    .map((k) => `${k} ${recorded[k] ?? "unrecorded"} in the build, ${now[k]} now`);
   return diffs.length ? diffs.join("; ") : null;
 }
 

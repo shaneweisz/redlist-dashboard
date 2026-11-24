@@ -112,7 +112,7 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
   for (let i = 0; i < batchFacts.length; i += BATCH) {
     const batch = batchFacts.slice(i, i + BATCH);
     const stdin = JSON.stringify(batch, null, 1);
-    const cache = path.join(opts.cacheDir, `${sha(stdin + PROMPT)}.json`);
+    const cache = path.join(opts.cacheDir, `${sha(stdin + PROMPT + (opts.model ?? ""))}.json`);
     let answers: Answer[];
     if (fs.existsSync(cache)) answers = JSON.parse(fs.readFileSync(cache, "utf-8"));
     else {

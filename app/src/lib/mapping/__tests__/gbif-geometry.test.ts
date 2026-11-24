@@ -5,6 +5,7 @@
  * GBIF still agrees with them.
  */
 import { describe, it, expect } from "vitest";
+import { gbifJson } from "@/lib/gbif-fetch";
 import { geometryForGbif, isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import { esriRingsToMultiPolygon } from "@/lib/mapping/protected-areas";
 
@@ -269,11 +270,12 @@ describe("live GBIF", () => {
           });
           const url = `https://api.gbif.org/v1/occurrence/search?${params}`;
           expect(url.length).toBeLessThan(3860);
-          const response = await fetch(url);
-          const body = await response.text();
-          expect(`${result.attributes?.NAME}: ${response.status} ${body.slice(0, 200)}`).toContain(" 200 ");
+          // Through the app's GBIF client: identified, and backing off a 429
+          // (CI's shared runners get throttled) rather than failing on it. Any
+          // other refusal, or a 429 that outlasts the retries, still fails.
+          const body = await gbifJson(url).catch((e: Error) => { throw new Error(`${result.attributes?.NAME}: ${e.message}`); });
           // Counter-clockwise or the count is the whole world minus the park.
-          expect(JSON.parse(body).count).toBeLessThan(5_000_000);
+          expect((body as { count: number }).count).toBeLessThan(5_000_000);
         }
         // And somewhere this well protected, at least one designation has to be
         // searchable, or the feature does nothing where it matters most.

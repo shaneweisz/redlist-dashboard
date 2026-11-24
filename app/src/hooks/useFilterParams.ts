@@ -104,9 +104,12 @@ export const OWN_PARAM_NAMES = [
 export type ThreatsScope = "threatened" | "all";
 
 /** Columns the species table can be sorted by. */
-export type SortField = "year" | "category" | "totalGbif" | "newGbif" | "pctNewGbif" | "describedYear";
+// openalexWorks/bhlWorks: the Not Evaluated table's Literature columns.
+export type SortField = "year" | "category" | "totalGbif" | "newGbif" | "pctNewGbif" | "describedYear"
+  | "openalexWorks" | "bhlWorks";
 
-const SORT_FIELDS: SortField[] = ["year", "category", "totalGbif", "newGbif", "pctNewGbif", "describedYear"];
+const SORT_FIELDS: SortField[] = ["year", "category", "totalGbif", "newGbif", "pctNewGbif", "describedYear",
+  "openalexWorks", "bhlWorks"];
 
 /** Narrow a raw `sort=`/`sort2=` param to a SortField, or null if unrecognised. */
 function parseSortField(raw: string | null): SortField | null {
