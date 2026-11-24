@@ -444,9 +444,15 @@ Each is a fixture case. "Taken" is the records and the step.
   judge decides a fixture species otherwise, the fixture is updated.
 - **Rebuild check** (`npm run sync:rebuild-check`): an agent given only this
   spec, `name-rules.ts` and the inputs rewrites the rule in a sealed folder,
-  and its output is compared with `select.ts` species by species. Run after a
+  and its output is compared with `select.ts` species by species. With
+  `--counting` it is given select.ts's selection, the CoL taxa and the GBIF
+  records under each usage instead, and writes every species' record count
+  from *Counting and the NE list*, compared with the sync's. Run after a
   change to these rules or a release move; a disagreement is a gap here, a
   bug there, or an unstated rule.
+- **One counting rule** (`npm run sync:owners-check`): the judge counts with
+  `count/owners.ts`, a copy of `usage_owner.sql`'s rule, so the two are
+  compared on a whole build and must give every CoL usage the same owner.
 - **The judge** (`npm run sync:judge`, `checks/judge.ts`): an agent with web
   search says which records it would take for each species, from the facts
   alone (and any notes), and code scores it against ours. It runs by hand, and
