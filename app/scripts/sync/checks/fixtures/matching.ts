@@ -184,6 +184,14 @@ export const MATCHING_CASES: MatchCase[] = [
     expect: { doubts: ["synonym filed elsewhere"], selected: [{ name: "Elymus junceiformis", relation: "part of" }], rules: ["Red List synonym, filed elsewhere"] },
   },
   {
+    name: "Stagnicola utahensis",
+    authority: "(Call, 1884)",
+    why: "The AI jury couldn't agree (3 of 5 independent runs with the rules, 2 with another answer): an undecided verdict adds the doubt and leaves the rules' records.",
+    source: "seeds/judge-verdicts.tsv; docs/specs/matching.md, Decisions",
+    confirmed: MATCHING_SPEC,
+    expect: { doubts: ["synonym filed elsewhere", "judge undecided"] },
+  },
+  {
     name: "Melanopsis chlorotica",
     authority: "Pallary, 1921",
     why: "A Red List synonym CoL holds as its own species counts whole, but its authors don't compare the same, so the split is doubted.",

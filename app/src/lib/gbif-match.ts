@@ -16,7 +16,7 @@
  */
 
 export type MatchKey =
-  | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided"
+  | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided" | "decided_jury"
   | DoubtKey | "f_synonyms_only" | "agent"
   | "none" | "ne_candidate" | "ne_assessed_here";
 
@@ -71,6 +71,7 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "author", label: "Homonym settled by author", group: "resolved" },
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
+  { key: "decided_jury", label: "Decided by the AI jury", group: "resolved" },
   { key: "decided", label: "Decided by a person", group: "resolved" },
   { key: "other_names", label: "Also counts other CoL names", group: "includes" },
   { key: "own_name", label: "Only its own name counts", group: "includes" },
@@ -93,7 +94,11 @@ export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown
   const doubts = doubtKeys(r);
   if (doubts.length > 0) return doubts[0];
   // An AI's decision is flagged until a person has reviewed it.
-  if (reason === "decision") return String(r.match_decided_by ?? "").startsWith("agent:") && r.match_reviewed !== true ? "agent" : "decided";
+  if (reason === "decision") {
+    const by = String(r.match_decided_by ?? "");
+    if (by.startsWith("judge:")) return "decided_jury";
+    return by.startsWith("agent:") && r.match_reviewed !== true ? "agent" : "decided";
+  }
   if (r.count_note === "flagged") return "f_synonyms_only";
   if (r.count_note === "unlinked" || !reason || reason.startsWith("decision,") || reason === "no candidate" || reason === "informal or qualified name") return "none";
   if (reason.includes("homonym, author decides")) return "author";
