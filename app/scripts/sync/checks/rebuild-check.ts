@@ -16,18 +16,26 @@
  * select.ts species by species, and its log kept, with every file it read and
  * every command it ran listed, and any path outside the folder called out.
  *
+ * --counting checks the spec's "Counting and the NE list" the same way, apart
+ * from selection: the folder holds the spec, select.ts's selection for every
+ * species (so counting is tested alone), the CoL taxa (id, parent, species,
+ * rank, status, name) and the GBIF records under each usage; the agent writes
+ * every assessed species' and every unassessed CoL species' record count, and
+ * they are compared with the build's (count/usage_owner.sql's owners).
+ *
  * Run after every change to the rules and every release move. A run costs an
  * agent session: --prepare builds the folder and prints the command without
  * running it; --compare <out.json> compares an existing answer.
  *
- * Usage: npm run sync:rebuild-check [-- --prepare] [-- --compare <out.json>] [-- --model <m>]
+ * Usage: npm run sync:rebuild-check [-- --counting] [-- --prepare] [-- --compare <out.json>] [-- --model <m>]
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync, execSync } from "child_process";
 import { loadEnvFiles } from "../../lib/utils";
-import { REVIEW_DIR } from "../paths";
+import { REVIEW_DIR, parquet, tables } from "../paths";
+import { openDuckDB, rows, lit } from "../sql";
 import { loadInputs, selectionJson } from "../link/select-inputs";
 import { selectEvery } from "../link/select";
 import { DECISIONS_FILE } from "../link/decisions";
@@ -117,18 +125,92 @@ function report(ours: Out[], theirs: Out[], dir: string): void {
   if (differ.length > 0) process.exitCode = 1;
 }
 
+const COUNT_SCHEMA = {
+  type: "object", required: ["assessed", "unassessed"], properties: {
+    assessed: { type: "object", additionalProperties: { type: "integer" }, description: "SIS id → the GBIF records it counts" },
+    unassessed: { type: "object", additionalProperties: { type: "integer" }, description: "CoL species id → the GBIF records it counts, for each species no assessed species counts whole" } },
+};
+
+const COUNT_PROMPT = `This folder holds a specification (spec.md) and inputs (inputs/). Implement the spec's "Counting and the NE list"
+(what each assessed species' rows are, which row wins a clash, and who owns each CoL usage's GBIF records), taking the selection in
+inputs/selection.jsonl as given. Write out.json in this folder, matching output.schema.json: for every assessed species the GBIF records
+it counts (0 included), and for every CoL species no assessed species counts whole, the GBIF records it counts (only those above 0).
+inputs/README.md says what each file holds. The only library you may use is name-rules.mjs (import it from node). Work only inside
+this folder (scratch files go in tmp/). When you are done, say how many species of each kind you wrote.`;
+
+/** The counting check's sealed folder, and the build's counts to compare with. */
+export async function prepareCounting(dir: string): Promise<{ dir: string; ours: { assessed: Record<string, number>; unassessed: Record<string, number> } }> {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "inputs"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tmp"));
+  fs.copyFileSync(SPEC, path.join(dir, "spec.md"));
+  execFileSync(path.join(__dirname, "..", "..", "..", "node_modules", ".bin", "rolldown"),
+    [NAME_RULES, "--format", "esm", "--platform", "node", "--file", path.join(dir, "name-rules.mjs")], { stdio: "ignore" });
+  fs.writeFileSync(path.join(dir, "output.schema.json"), JSON.stringify(COUNT_SCHEMA, null, 1));
+  const inputs = await loadInputs();
+  const sel = selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.verdicts).map(selectionJson);
+  const lines = (f: string, xs: unknown[]) => fs.writeFileSync(path.join(dir, "inputs", f), xs.map((x) => JSON.stringify(x)).join("\n") + "\n");
+  lines("species.jsonl", inputs.species.map((sp) => ({ sis: sp.sis, name: sp.name })));
+  lines("selection.jsonl", sel);
+  const T = tables(), conn = await openDuckDB();
+  await conn.run(`COPY (SELECT col_id, parent_id, species_id, rank, status, scientific_name FROM ${parquet(T.taxa)} ORDER BY col_id)
+    TO ${lit(path.join(dir, "inputs", "taxa.tsv"))} (FORMAT csv, DELIMITER '\t', HEADER true, QUOTE '')`);
+  await conn.run(`COPY (SELECT usage_key, sum(n)::BIGINT AS records FROM ${parquet(T.occurrences)} GROUP BY 1 ORDER BY 1)
+    TO ${lit(path.join(dir, "inputs", "occurrences.tsv"))} (FORMAT csv, DELIMITER '\t', HEADER true, QUOTE '')`);
+  fs.writeFileSync(path.join(dir, "inputs", "README.md"), `# Inputs
+
+- species.jsonl: every assessed species: sis, name (its Red List name as written).
+- selection.jsonl: each species' selection, as the spec's Output section describes (sis_taxon_id, step, reason, doubts, selected
+  [{id, relation, relation_step, basis}], in order). Take it as given.
+- taxa.tsv: every CoL usage: col_id, parent_id, species_id (the accepted species it leads to; empty for none), rank, status
+  (lower-case), scientific_name. Tab-separated with a header; empty fields are empty.
+- occurrences.tsv: usage_key (a col_id), records: the GBIF records filed directly under that usage (not those below it).
+`);
+  const sum = async (col: string) => Object.fromEntries((await rows<{ k: string; n: number }>(conn, `
+    SELECT o.${col}::VARCHAR AS k, sum(c.n)::BIGINT AS n FROM ${parquet(T.usageOwner)} o JOIN ${parquet(T.occurrences)} c ON c.usage_key = o.usage_key
+    WHERE o.${col} IS NOT NULL GROUP BY 1`)).map((r) => [r.k, Number(r.n)]));
+  const assessed = Object.fromEntries(inputs.species.map((sp) => [String(sp.sis), 0]));
+  Object.assign(assessed, await sum("sis_taxon_id"));
+  return { dir, ours: { assessed, unassessed: await sum("col_id") } };
+}
+
+/** Where the agent's counts differ from the build's. */
+export function compareCounts(ours: Record<string, Record<string, number>>, theirs: Record<string, Record<string, number>>) {
+  const differ: { kind: string; id: string; ours: number; theirs: number }[] = [];
+  let agree = 0;
+  for (const kind of ["assessed", "unassessed"]) {
+    const a = ours[kind] ?? {}, b = theirs[kind] ?? {};
+    for (const id of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      const x = a[id] ?? 0, y = b[id] ?? 0;
+      if (x === y) agree++; else differ.push({ kind, id, ours: x, theirs: y });
+    }
+  }
+  return { agree, differ };
+}
+
 if (require.main === module) {
   (async () => {
     loadEnvFiles();
     const a = process.argv.slice(2);
     const opt = (k: string) => { const i = a.indexOf(`--${k}`); return i >= 0 ? a[i + 1] : undefined; };
     const run = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19) + "Z";
-    const root = path.join(REVIEW_DIR, "rebuild-check", run);
+    const counting = a.includes("--counting");
+    const root = path.join(REVIEW_DIR, counting ? "rebuild-check-counting" : "rebuild-check", run);
     const work = path.join(root, "work");
-    const { species: ours } = await prepare(work);
-    console.log(`rebuild-check: sealed folder ${work} (${ours.length.toLocaleString()} species)`);
-    if (opt("compare")) return report(ours, JSON.parse(fs.readFileSync(path.resolve(opt("compare")!), "utf-8")), work);
-    const r: ClaudeRun = { prompt: PROMPT, cwd: work, home: work, tmpdir: path.join(work, "tmp"), tools: ["Read", "Write", "Edit", "Bash"], allowed: ["Read", "Write", "Edit", "Bash"],
+    let ours: Out[] = [], oursCounts: Awaited<ReturnType<typeof prepareCounting>>["ours"] | null = null;
+    if (counting) oursCounts = (await prepareCounting(work)).ours;
+    else ours = (await prepare(work)).species;
+    console.log(`rebuild-check: sealed folder ${work}`);
+    const reportAny = (theirs: unknown) => {
+      if (!oursCounts) return report(ours, theirs as Out[], work);
+      const { agree, differ } = compareCounts(oursCounts, theirs as Record<string, Record<string, number>>);
+      console.log(`rebuild-check --counting: ${agree.toLocaleString()} species' counts agree, ${differ.length.toLocaleString()} differ`);
+      fs.writeFileSync(path.join(work, "..", "differences.json"), JSON.stringify(differ, null, 1));
+      for (const d of differ.slice(0, 20)) console.log(`  ${d.kind} ${d.id}: ours ${d.ours}, theirs ${d.theirs}`);
+      if (differ.length > 0) process.exitCode = 1;
+    };
+    if (opt("compare")) return reportAny(JSON.parse(fs.readFileSync(path.resolve(opt("compare")!), "utf-8")));
+    const r: ClaudeRun = { prompt: counting ? COUNT_PROMPT : PROMPT, cwd: work, home: work, tmpdir: path.join(work, "tmp"), tools: ["Read", "Write", "Edit", "Bash"], allowed: ["Read", "Write", "Edit", "Bash"],
       outputFormat: "stream-json", model: opt("model") };
     if (a.includes("--prepare")) {
       console.log(`Run it with: (cd ${work} && HOME=${work} TMPDIR=${work}/tmp claude ${claudeArgs(r).map((x) => JSON.stringify(x)).join(" ")})`);
@@ -148,6 +230,6 @@ if (require.main === module) {
     if (outside.length) process.exitCode = 1;
     const out = path.join(work, "out.json");
     if (!fs.existsSync(out)) throw new Error(`rebuild-check: the agent wrote no out.json (exit ${res.code}); its log is in ${root}`);
-    report(ours, JSON.parse(fs.readFileSync(out, "utf-8")), work);
+    reportAny(JSON.parse(fs.readFileSync(out, "utf-8")));
   })().catch((e) => { console.error(e); process.exit(1); });
 }

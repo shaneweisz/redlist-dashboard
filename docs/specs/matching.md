@@ -247,10 +247,13 @@ A CoL species is **counted whole** by an assessed species with an *is* or
 owner (`count/usage_owner.sql`), the first that applies:
 
 1. **Part of**: a *part of* record owns its occurrences and those of the
-   records below it. Roots can nest; a record goes to the nearest root
-   claiming it, and between two species' roots, the one whose own name it is
-   (*Zosterops simplex* owns the synonym *Z. simplex* filed under *Z.
-   japonicus simplex*).
+   records CoL files beneath it (by parent), down to three levels. Its count
+   starts at the record, except a synonym CoL files under a non-nominate
+   infraspecific of another species, which starts at that infraspecific
+   (*Fringilla polatzeki* → *F. teydea polatzeki*). Roots can nest; a record
+   goes to the nearest root claiming it, then the lower SIS id, then the
+   lower root id (*Zosterops simplex* owns the synonym *Z. simplex* filed
+   under *Z. japonicus simplex*: its root is the nearer).
 2. **Whole species**: otherwise a record counts for the assessed species that
    counts its CoL species whole, if one does.
 3. **Unassessed**: otherwise, for the CoL species itself.
@@ -260,8 +263,11 @@ owner (`count/usage_owner.sql`), the first that applies:
 *P. aegeria*, which no assessed species counts whole, keeps the rest (3.5M)
 and is on the NE list.
 
-Where two assessed species claim one record under the same rule, the
-stronger claim wins, first by: primary row before covered; no doubts before
+Each species claims records through rows: one per CoL taxon it counts from
+(the CoL species for *is* and *split into*, the root above for *part of*),
+the first taken step record's being its **primary** row and the rest
+**covered**. Where two assessed species claim one CoL taxon, the stronger
+claim wins, first by: primary row before covered; no doubts before
 doubts; *is*, *split into*, *part of*; decision before matcher; the species
 whose CoL name is its Red List name as written; the lower SIS id. The
 loser's row counts nothing. (This is the one place a doubt affects
