@@ -82,8 +82,18 @@ describe("decisionHolds", () => {
     expect(decisionHolds(decision(), { ...own, citation: "(Smith, 1900)" }, release([record("OLD")]))).toEqual({ holds: false, lapse: "citation" });
     expect(decisionHolds(decision(), { ...own, citation: "(Gray 1867)" }, release([record("OLD")])).holds).toBe(true);
   });
-  it("lapses: a record's name or species is another assessed name", () => {
+  it("lapses: a record's name is another assessed name, or the species of an is or split into record", () => {
     expect(decisionHolds(decision(), own, release([record("OLD")], ["Ochotona pallasii"]))).toEqual({ holds: false, lapse: "assessed name" });
+    const elsewhere = { name: "Ochotona minor", speciesName: "Ochotona pallasii" };
+    const row = { ...decision().rows[0], name: "Ochotona minor", species: "Ochotona pallasii" };
+    expect(decisionHolds(decision({ rows: [row] }), own, release([record("OLD", elsewhere)], ["Ochotona pallasii"]))).toEqual({ holds: false, lapse: "assessed name" });
+    expect(decisionHolds(decision({ rows: [{ ...row, relation: "split into" }] }), own, release([record("OLD", elsewhere)], ["Ochotona pallasii"])).holds).toBe(false);
+  });
+  it("holds: a part of record filed under another assessed species (it takes only its own occurrences)", () => {
+    const row = { ...decision().rows[0], name: "Ochotona minor", status: "synonym", species: "Ochotona pallasii", relation: "part of" as const };
+    const r = record("OLD", { name: "Ochotona minor", status: "synonym", speciesName: "Ochotona pallasii" });
+    expect(decisionHolds(decision({ rows: [row] }), own, release([r], ["Ochotona pallasii"])).holds).toBe(true);
+    expect(decisionHolds(decision({ rows: [row] }), own, release([r], ["Ochotona minor"]))).toEqual({ holds: false, lapse: "assessed name" });
   });
   it("lapses: the record is gone, moved species, or changed status", () => {
     expect(decisionHolds(decision(), own, release([]))).toEqual({ holds: false, lapse: "record not found" });

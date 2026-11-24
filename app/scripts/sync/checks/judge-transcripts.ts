@@ -8,8 +8,8 @@
  * it fetched; deletable, should one hold something it shouldn't.
  *
  * Before upload each is scanned for this machine's secrets (the values of
- * environment variables named like a token, key, secret or password), its home
- * folder and the git user's email; a match stops the upload.
+ * environment variables named like a token, key, secret or password, and any
+ * email in one), its home folder and the git user's email; a match stops the upload.
  *
  * `npm run sync:trace -- "<species>"` shows a decision's runs (summarise, below).
  */
@@ -40,9 +40,11 @@ function bucket(): { client: S3Client; name: string } | null {
 /** What must never leave this machine: the values of secret-named variables, the home folder, the git email. */
 export function secretsToScanFor(env: Record<string, string | undefined> = process.env): string[] {
   const out = Object.entries(env).filter(([k, v]) => /TOKEN|KEY|SECRET|PASSWORD|AUTH|CREDENTIAL/i.test(k) && v && v.length >= 12).map(([, v]) => v!);
+  out.push(...Object.entries(env).filter(([k, v]) => /EMAIL/i.test(k) && v?.includes("@")).map(([, v]) => v!));
   out.push(os.homedir());
   try { const e = execSync("git config user.email", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); if (e) out.push(e); } catch { /* no git */ }
-  return [...new Set(out)];
+  // As written, and as it appears inside a JSON string (a transcript is JSON lines).
+  return [...new Set(out.flatMap((v) => [v, JSON.stringify(v).slice(1, -1)]))];
 }
 
 /** Which of the secrets a transcript contains (by index, so the report names none of them). */

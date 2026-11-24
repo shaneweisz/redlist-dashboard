@@ -303,8 +303,10 @@ species' only row, with empty record columns; it gives step 1, no records,
 and the reason `decision: not in CoL`.
 
 A decision **holds** while: `name` is still the decided name, the citation
-doesn't compare `other` with the decided one, no record's name or species is
-another assessed name, and every record is still found (by `id` with the
+doesn't compare `other` with the decided one, no record's name is another
+assessed name, nor the species of an *is* or *split into* record (a *part of*
+record takes only its own occurrences, so its species may be assessed: see
+Counting), and every record is still found (by `id` with the
 recorded name, status and species; else as the one record with that name and
 the same `normaliseAuthorship`). *Why*: a decision is about names and
 records, so it lapses when a release moves them, and the rules apply again
@@ -315,6 +317,9 @@ candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
 Where the judge's runs agree with the rules, it **confirms** instead
 (`seeds/judge-confirmed.tsv`, the answer's records and relations): the species
 leaves the review list while the rules give that answer, and keeps its doubts.
+A lapsed decision the runs agree with gives way to a confirmation. The judge
+writes a decision only if it would hold; one that wouldn't leaves the species
+listed. It never replaces a person's override.
 
 Example: a decision takes *Centropogon australis* (White, 1790), the
 waspfish, for the Red List's *C. australis* (Shaw, 1790), with no doubts,

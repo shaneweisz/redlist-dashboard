@@ -38,7 +38,7 @@ import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, REVIEW_DIR, parquet, tables } from "../paths";
 import { openDuckDB, rows, writeTable, lit } from "../sql";
 import { loadInputs, type Inputs } from "../link/select-inputs";
-import { selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
+import { select, selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
 import { sameName, sameNameKey } from "../link/name-rules";
 import { MATCHING_CASES } from "./fixtures/matching";
 import { answerKey, isOverride, readConfirmations, readDecisions, readNotes, writeConfirmations, writeDecisions,
@@ -167,11 +167,18 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
       if (res.code !== 0) throw new Error(`judge: claude exited ${res.code}: ${res.stderr.slice(0, 500)}`);
       // The whole conversation (each search, each page and its answer), kept so a decision can be audited.
       saveTranscript(opts.cacheDir, key, res.stdout);
-      const o = resultOf(res.stdout) as { total_cost_usd?: number; structured_output?: { answers?: Answer[] }; result?: unknown };
+      const o = resultOf(res.stdout) as { total_cost_usd?: number; is_error?: boolean; structured_output?: { answers?: Answer[] }; result?: unknown };
       spent.usd += o.total_cost_usd ?? 0; spent.calls++;
       console.log(`judge: run ${run}, call ${spent.calls}, ${batch.length} species, $${(o.total_cost_usd ?? 0).toFixed(3)} (so far $${spent.usd.toFixed(2)})`);
-      const structured = (o.structured_output ?? (typeof o.result === "string" ? JSON.parse(o.result) : o.result)) as { answers?: Answer[] } | undefined;
-      answers = (structured?.answers ?? []) as Answer[];
+      if (o.is_error) throw new Error(`judge: the call failed (${String(o.result ?? "").slice(0, 300)}); nothing cached, so a rerun asks again`);
+      let structured: { answers?: Answer[] } | undefined;
+      try { structured = (o.structured_output ?? (typeof o.result === "string" ? JSON.parse(o.result) : o.result)) as typeof structured; }
+      catch { structured = undefined; }
+      // Only this batch's species: a mistyped id mustn't overwrite another batch's answer.
+      const ids = new Set(batch.map((b) => b.sis_taxon_id));
+      answers = (structured?.answers ?? []).filter((a) => ids.has(a.sis_taxon_id));
+      if (answers.length === 0) throw new Error(`judge: the call answered none of its ${batch.length} species; nothing cached, so a rerun asks again`);
+      if (answers.length < batch.length) console.log(`judge: ${batch.length - answers.length} of the batch unanswered, left for review`);
       fs.writeFileSync(cache, JSON.stringify(answers));
     }
     const transcript = fs.existsSync(transcriptPath(opts.cacheDir, key)) ? key : undefined;
@@ -246,7 +253,8 @@ if (require.main === module) {
     // Outside the build, which a sync clears: answers cost money.
     const cacheDir = path.join(CACHE_ROOT, "judge-cache");
     const model = opt("model") ?? (mode === "decide" ? "claude-opus-5-5" : undefined);
-    const runs = Math.max(1, Number(opt("runs") ?? 2));
+    const runs = Number(opt("runs") ?? 2);
+    if (!Number.isInteger(runs) || runs < 1) throw new Error(`judge: --runs must be a whole number from 1, not ${opt("runs")}`);
 
     /** decide: ask each species in `runs` runs, then write what they agree on. */
     async function decide(chosen: Selection[], runs: number) {
@@ -256,6 +264,11 @@ if (require.main === module) {
       const decisions = readDecisions(), confirmations = readConfirmations();
       const tally = { confirm: 0, decide: 0, split: 0 };
       const transcriptsOf = (sis: number) => asked.map((m) => m.get(sis)?.transcript).filter((t): t is string => !!t);
+      const sourcesOf = (sis: number) => [...new Set(asked.flatMap((m) => m.get(sis)?.sources ?? []))];
+      const runs1 = (sis: number) => asked[0]?.get(sis);
+      // What this run writes, and what it holds back: a decision that would lapse, or a species a person overrode meanwhile.
+      const written = new Set<number>(), wouldLapse: string[] = [];
+      let overridden = 0;
       const patterns = new Map<string, string[]>();
       const fixtureNames = new Set(MATCHING_CASES.map((c) => c.name.toLowerCase()));
       const fixturesToUpdate: string[] = [];
@@ -268,31 +281,45 @@ if (require.main === module) {
         tally[o.kind]++;
         if (o.kind === "split") continue;
         if (o.kind === "confirm") {
-          // The rules' answer, without a decision: the confirmation stands for it. A decision the judge agrees with is kept, now its own.
-          const held = inputs.decisions.get(s.sis);
-          if (held) decisions.set(s.sis, { ...held, by, reviewed: true, date, transcripts: transcriptsOf(s.sis) });
-          else confirmations.set(s.sis, { sis: s.sis, redlistName: sp.name, answer: answerKey(ours), by, date, transcripts: transcriptsOf(s.sis) } satisfies Confirmation);
+          // The rules' answer: a decision that holds is kept, now the judge's (its reason and sources); a lapsed one gives way to a confirmation.
+          if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
+          if (s.decision && !s.decision.lapse) {
+            const held = decisions.get(s.sis)!;
+            decisions.set(s.sis, { ...held, by, reviewed: true, date, evidence: runs1(s.sis)?.reason ?? held.evidence, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis) });
+            written.add(s.sis);
+          } else {
+            decisions.delete(s.sis);
+            confirmations.set(s.sis, { sis: s.sis, redlistName: sp.name, answer: answerKey(ours), by, date, transcripts: transcriptsOf(s.sis) } satisfies Confirmation);
+            written.add(s.sis);
+          }
           continue;
         }
         const answer = o.answer.records as { id: string; relation: "is" | "part of" | "split into" }[];
         const d: Decision = {
           sis: s.sis, redlistName: sp.name, redlistAuthority: sp.authority, candidates: s.candidateSpecies, by, reviewed: true, date,
-          evidence: o.answer.reason, sources: [...new Set(asked.flatMap((m) => m.get(s.sis)?.sources ?? []))], transcripts: transcriptsOf(s.sis),
+          evidence: o.answer.reason, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis),
           rows: answer.map((x) => { const r = recs.get(x.id)!;
             return { id: r.id, name: r.name, authorship: r.authorship, status: r.status.toLowerCase().replace(/_/g, " "), species: r.col_species?.name ?? null, relation: x.relation }; }),
         };
+        // Only a decision that would hold on the next sync (select() applies it the same way); else it stays listed.
+        const check = select(sp, { ...inputs.release, wholeBySteps: new Map() }, d);
+        if (!check.decision || check.decision.lapse) { wouldLapse.push(`${sp.name} (${check.decision?.lapse ?? "?"})`); tally.decide--; tally.split++; continue; }
+        if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
         decisions.set(s.sis, d);
         confirmations.delete(s.sis);
+        written.add(s.sis);
         const k = `${s.doubts[0] ?? s.reason ?? "(no doubt)"}: ${change(ours, answer, look)}`;
         (patterns.get(k) ?? patterns.set(k, []).get(k)!).push(sp.name);
         if (fixtureNames.has(sp.name.toLowerCase())) fixturesToUpdate.push(sp.name);
       }
       // The transcripts behind what was written go to the private bucket first: a row must lead to its evidence.
-      const behind = new Set([...decisions.values(), ...confirmations.values()].flatMap((x) => x.transcripts));
+      const behind = new Set([...written].flatMap((sis) => (decisions.get(sis) ?? confirmations.get(sis))?.transcripts ?? []));
       await uploadTranscripts([...behind], cacheDir);
       writeDecisions(decisions.values());
       writeConfirmations(confirmations.values());
-      console.log(`judge decide: ${tally.confirm} confirmed, ${tally.decide} decided, ${tally.split} split or can't tell (left listed); $${spent.usd.toFixed(2)}`);
+      console.log(`judge decide: ${tally.confirm} confirmed, ${tally.decide} decided, ${tally.split} split, can't tell or would lapse (left listed); $${spent.usd.toFixed(2)}`);
+      if (wouldLapse.length) console.log(`Agreed answers not written, as the decision wouldn't hold (${wouldLapse.length}): ${wouldLapse.slice(0, 20).join(", ")}${wouldLapse.length > 20 ? ", ..." : ""}`);
+      if (overridden) console.log(`${overridden} species overridden by a person during the run, left as they are`);
       console.log("Patterns among the decisions (first doubt: what changes), candidate rule changes:");
       for (const [k, names] of [...patterns].sort((x, y) => y[1].length - x[1].length).slice(0, 15))
         console.log(`  ${String(names.length).padStart(5)}  ${k}  (${names.slice(0, 3).join(", ")}${names.length > 3 ? ", ..." : ""})`);

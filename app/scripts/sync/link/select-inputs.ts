@@ -95,8 +95,10 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
     return [...out.values()];
   };
 
-  // Occurrences under each pool record: its own and three levels below it.
-  await writeTable(conn, "pool_ids", { id: "VARCHAR" }, pool.map((r) => ({ id: r.col_id })));
+  // Occurrences under each pool record, and under the species each leads to: its own and three levels below it.
+  // (The species' counts are for the judge, which compares what answers count; the rules read only records'.)
+  const rootIds = new Set(pool.flatMap((r) => (r.sp_id ? [r.col_id, r.sp_id] : [r.col_id])));
+  await writeTable(conn, "pool_ids", { id: "VARCHAR" }, [...rootIds].map((id) => ({ id })));
   const occurrences = new Map((await rows<{ id: string; n: number }>(conn, `
     WITH RECURSIVE down(root, id, depth) AS (
       SELECT id, id, 0 FROM pool_ids

@@ -119,6 +119,20 @@ describe("judge", () => {
     expect(calls).toHaveLength(4);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
+
+  it("caches nothing from a failed call or one that answers none of its batch, and keeps only the batch's own ids", async () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
+    const say = (o: unknown) => async () => ({ code: 0, stderr: "", stdout: JSON.stringify(o) });
+    const answer = (sis: number) => ({ sis_taxon_id: sis, records: "can't tell", reason: "r", sources: [] });
+    await expect(judge(two, { cacheDir, runner: say({ is_error: true, result: "usage limit" }) })).rejects.toThrow(/failed/);
+    await expect(judge(two, { cacheDir, runner: say({ result: "not json" }) })).rejects.toThrow(/none of its 2/);
+    await expect(judge(two, { cacheDir, runner: say({ structured_output: { answers: [answer(99)] } }) })).rejects.toThrow(/none of its 2/);
+    expect(fs.readdirSync(cacheDir).filter((f) => f.endsWith(".json"))).toEqual([]);
+    const a = await judge(two, { cacheDir, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
+    expect([...a.keys()]).toEqual([1]);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
 });
 
 describe("goal2", () => {
@@ -165,5 +179,9 @@ describe("transcripts", () => {
     expect(secrets).toContain(os.homedir());
     expect(leaks("a page mentioning tok_abcdefghijklmnop", secrets)).toEqual([secrets.indexOf("tok_abcdefghijklmnop")]);
     expect(leaks(stream, secrets)).toEqual([]);
+    // An email in any variable, and a value as it reads inside a JSON string.
+    expect(secretsToScanFor({ GBIF_EMAIL: "someone@example.org" })).toContain("someone@example.org");
+    const quoted = secretsToScanFor({ A_SECRET: 'abc"defghijklmn' });
+    expect(leaks(JSON.stringify({ text: 'abc"defghijklmn' }), quoted).length).toBeGreaterThan(0);
   });
 });

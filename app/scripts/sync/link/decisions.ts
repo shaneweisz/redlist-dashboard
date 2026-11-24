@@ -121,8 +121,10 @@ export type Lapse = "name" | "citation" | "assessed name" | "record not found";
 /**
  * Whether a decision holds, and the records it means in this release. It holds
  * while the Red List still calls the species `redlist_name`, its citation
- * doesn't compare `other` with `redlist_authority`, no record's name or species
- * is another assessed name, and each record is found: by `id` with the recorded
+ * doesn't compare `other` with `redlist_authority`, no record's name is another
+ * assessed name, nor the species of an *is* or *split into* record (a *part of*
+ * record takes only its own occurrences, so its species may be assessed), and
+ * each record is found: by `id` with the recorded
  * name, status and species, else as the one record with those and an equal
  * authorship. It holds only if every row does.
  *
@@ -137,7 +139,8 @@ export function decisionHolds<R extends DecidableRecord>(
   if (compareAuthors(species.citation, d.redlistAuthority) === "other") return { holds: false, lapse: "citation" };
   const records: { record: R; relation: DecidedRelation }[] = [];
   for (const r of d.rows) {
-    if ((r.name && release.isAnotherAssessedName(r.name)) || (r.species && release.isAnotherAssessedName(r.species))) return { holds: false, lapse: "assessed name" };
+    const whole = r.relation === "is" || r.relation === "split into";
+    if ((r.name && release.isAnotherAssessedName(r.name)) || (whole && r.species && release.isAnotherAssessedName(r.species))) return { holds: false, lapse: "assessed name" };
     const matches = (x: R | undefined): x is R => !!x && sameName(x.name, r.name ?? "") && x.status === r.status
       && sameNameKey(x.speciesName ?? "") === sameNameKey(r.species ?? "");
     const byId = r.id ? release.byId(r.id) : undefined;
