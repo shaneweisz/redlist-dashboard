@@ -42,7 +42,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 | inputs | `inputs/` | fetch and cache each input: CoL, iNaturalist names, the GBIF snapshot (reduced once to per-usage counts), the matcher, BHL's names |
 | 1 sources | `sources/` | each input as one clean table: `taxa`, `assessments`, `occurrences`, `occurrence_countries`, `common_names`, `literature_mentions`, the Specialist Groups' remits |
 | 2 link | `link/` | which CoL species each assessed species is: `matches`, then `assessment_link` |
-| 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts`, and its literature works in `paper_counts` (credited by the same rule) |
+| 3 count | `dbt/models/count/` | whose records each GBIF usage's are: `usage_owner`, then each species' totals in `record_counts`, and its literature works in `paper_counts` (credited through the same ownership; a bare name in a paper goes to the species CoL accepts under it, so another author's synonym of that name filed elsewhere doesn't make it ambiguous) |
 | 4 lists | `dbt/models/lists/` | what the app reads, joins only: `assessed`, assessment history, `species/`, `ne`, the app's `taxa`, `specialist_group_species` |
 | 5 precomputed | `dbt/models/precomputed/`, `precomputed/` | the app's own queries run ahead of time: the CoL-differences tables and search indexes (SQL), then the summaries and CoL revision flags with the app's own code, so a precomputed number is the one its live view computes |
 | 6 checks | `checks/` | fixtures and data tests (either stops the sync), the comparison with production |

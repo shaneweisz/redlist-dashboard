@@ -14,7 +14,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, type S3Client } from "@aws-sdk/client-s3";
 import { loadEnvFiles, DATA_DIR, mapConcurrent } from "../lib/utils";
 import { r2Client, dataBucket } from "../lib/r2";
 
@@ -40,6 +40,28 @@ function contentTypeFor(filePath: string): string {
   if (filePath.endsWith(".json")) return "application/json";
   if (filePath.endsWith(".log")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
+}
+
+/** Files larger than this go up in parts: one 170 MB request timed out (EPIPE) on a slow link. */
+const MULTIPART_BYTES = 64 * 1024 * 1024;
+const PART_BYTES = 16 * 1024 * 1024;
+
+/** A multipart upload, each part retried on its own. */
+async function putMultipart(client: S3Client, bucket: string, key: string, body: Buffer, contentType: string): Promise<void> {
+  const { UploadId } = await client.send(new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: contentType }));
+  const parts: { ETag: string; PartNumber: number }[] = [];
+  for (let off = 0, n = 1; off < body.length; off += PART_BYTES, n++) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const r = await client.send(new UploadPartCommand({ Bucket: bucket, Key: key, UploadId, PartNumber: n, Body: body.subarray(off, off + PART_BYTES) }));
+        parts.push({ ETag: r.ETag!, PartNumber: n });
+        break;
+      } catch (e) {
+        if (attempt >= 4) throw e;
+      }
+    }
+  }
+  await client.send(new CompleteMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId, MultipartUpload: { Parts: parts } }));
 }
 
 /** Upload app/data/sync as a new sync and point latest-sync.txt at it. Returns the sync's name. */
@@ -90,14 +112,8 @@ export async function uploadSync(): Promise<string> {
     const relPath = path.relative(DATA_DIR, localPath);
     const key = syncPrefix + relPath.split(path.sep).join("/");
     const body = fs.readFileSync(localPath);
-    await client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentTypeFor(localPath),
-      })
-    );
+    if (body.length > MULTIPART_BYTES) await putMultipart(client, bucket, key, body, contentTypeFor(localPath));
+    else await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentTypeFor(localPath) }));
     completed++;
     process.stdout.write(`\r  ${completed}/${localPaths.length}`);
   });
