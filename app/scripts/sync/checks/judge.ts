@@ -46,7 +46,7 @@ import { MATCHING_CASES } from "./fixtures/matching";
 import { answerKey, isOverride, readVerdicts, readDecisions, readNotes, verdictBasis, writeVerdicts, writeDecisions,
   type JudgeVerdict, type Decision, type Note } from "../link/decisions";
 import { resultOf, runClaude, type Runner } from "./claude-run";
-import { saveTranscript, transcriptPath, uploadTranscripts } from "./judge-transcripts";
+import { saveTranscript, uploadTranscripts } from "./judge-transcripts";
 import { readSourcesReleases } from "../sources-releases";
 import { plainText } from "../../narratives/build-narratives";
 import { MATCHER_VERSION } from "../inputs/matcher";
