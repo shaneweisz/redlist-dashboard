@@ -12,7 +12,7 @@ import { readDecisions, writeDecisions, decisionHolds, isOverride, answerKey, re
 
 const decision = (over: Partial<Decision> = {}): Decision => ({
   sis: 1, redlistName: "Ochotona pallasi", redlistAuthority: "(Gray, 1867)", candidates: ["Ochotona pallasii"], by: "someone", reviewed: true,
-  date: "2026-11-05", evidence: "a Latin ending", sources: ["https://example.org/a"], transcripts: ["abc"],
+  date: "2026-11-05", evidence: "a Latin ending", sources: ["https://example.org/a"], transcripts: ["abc"], context: "xr 1; snapshot 2026-11-01; matcher v1; prompt 12345678",
   rows: [{ id: "OLD", name: "Ochotona pallasii", authorship: "(Gray, 1867)", status: "accepted", species: "Ochotona pallasii", relation: "is" }], ...over,
 });
 const record = (id: string, over: Partial<DecidableRecord> = {}): DecidableRecord => ({
@@ -41,7 +41,7 @@ describe("readDecisions / writeDecisions", () => {
   it("refuses rows that disagree on the species, a bad relation, or a missing by", () => {
     const f = tmp();
     const line = (sis: number, by: string, relation = "is", evidence = "x") =>
-      [sis, "N", "", "ID", "N", "", "accepted", "N", relation, "", by, "yes", "2026-11-05", evidence, "", ""].join("\t");
+      [sis, "N", "", "ID", "N", "", "accepted", "N", relation, "", by, "yes", "2026-11-05", evidence, "", "", ""].join("\t");
     fs.writeFileSync(f, [COLUMNS.join("\t"), line(1, "a"), line(1, "a", "is", "other")].join("\n"));
     expect(() => readDecisions(f)).toThrow(/disagree/);
     fs.writeFileSync(f, [COLUMNS.join("\t"), line(1, "a", "refused")].join("\n"));
@@ -63,10 +63,11 @@ describe("readDecisions / writeDecisions", () => {
 
   it("verdicts round-trip, keyed by the answer without refused records, and refuse an unknown verdict", () => {
     const f = tmp();
-    const answer = answerKey([{ id: "B", relation: "part of" }, { id: "A", relation: "is" }, { id: "C", relation: "refused" }]);
-    expect(answer).toBe("A:is,B:part of");
-    writeVerdicts([{ sis: 5, redlistName: "N", verdict: "undecided", answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: ["t1", "t2"] }], f);
-    expect(readVerdicts(f).get(5)).toMatchObject({ verdict: "undecided", answer: "A:is,B:part of", votes: "3/5 rules; 2/5 other", transcripts: ["t1", "t2"] });
+    const r = (name: string, relation: string) => ({ name, authorship: "(Gray, 1867)", status: "ACCEPTED", species: name, relation });
+    const answer = answerKey([r("Bb", "part of"), r("Aa", "is"), r("Cc", "refused")]);
+    expect(answer).toBe("Aa gray 1867 [accepted, of Aa]: is; Bb gray 1867 [accepted, of Bb]: part of");
+    writeVerdicts([{ sis: 5, redlistName: "N", verdict: "undecided", answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: ["t1", "t2"], context: "c" }], f);
+    expect(readVerdicts(f).get(5)).toMatchObject({ verdict: "undecided", answer, context: "c", votes: "3/5 rules; 2/5 other", transcripts: ["t1", "t2"] });
     fs.writeFileSync(f, fs.readFileSync(f, "utf-8").replace("undecided", "maybe"));
     expect(() => readVerdicts(f)).toThrow(/maybe/);
   });

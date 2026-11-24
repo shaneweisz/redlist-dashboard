@@ -40,29 +40,33 @@ import { loadEnvFiles } from "../../lib/utils";
 import { CACHE_ROOT, REVIEW_DIR, parquet, tables } from "../paths";
 import { openDuckDB, rows, writeTable, lit } from "../sql";
 import { loadInputs, type Inputs } from "../link/select-inputs";
-import { select, selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
+import { answerRecords, select, selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
 import { sameName, sameNameKey } from "../link/name-rules";
 import { MATCHING_CASES } from "./fixtures/matching";
 import { answerKey, isOverride, readVerdicts, readDecisions, readNotes, writeVerdicts, writeDecisions,
   type JudgeVerdict, type Decision, type Note } from "../link/decisions";
 import { resultOf, runClaude, type Runner } from "./claude-run";
 import { saveTranscript, transcriptPath, uploadTranscripts } from "./judge-transcripts";
+import { readSourcesReleases } from "../sources-releases";
+import { plainText } from "../../narratives/build-narratives";
+import { MATCHER_VERSION } from "../inputs/matcher";
 
 export const PROMPT = fs.readFileSync(path.join(__dirname, "judge-prompt.md"), "utf-8");
-const BATCH = 20;
+// Ten a call: a call's context grows with each page it reads, and the last species in a long batch get less of it.
+const BATCH = 10;
 /** Its own domains are the one thing the judge may not read: it would see our answer. */
 const OWN_DOMAINS = ["dashforlife.org", "vercel.app"];
 
 export const ANSWER_SCHEMA = {
   type: "object", required: ["answers"], properties: { answers: { type: "array", items: {
-    type: "object", required: ["sis_taxon_id", "records", "reason", "sources"], properties: {
-      sis_taxon_id: { type: "integer" },
-      records: { oneOf: [{ const: "can't tell" }, { type: "array", items: { type: "object", required: ["id", "relation"],
-        properties: { id: { type: "string" }, relation: { enum: ["is", "part of", "split into"] } } } }] },
+    type: "object", required: ["sis_taxon_id", "name", "records", "reason", "sources"], properties: {
+      sis_taxon_id: { type: "integer" }, name: { type: "string" },
+      records: { oneOf: [{ const: "can't tell" }, { type: "array", items: { type: "object", required: ["id", "name", "relation"],
+        properties: { id: { type: "string" }, name: { type: "string" }, relation: { enum: ["is", "part of", "split into"] } } } }] },
       reason: { type: "string" }, sources: { type: "array", items: { type: "string" } } } } } },
 };
 
-export interface Answer { sis_taxon_id: number; records: { id: string; relation: string }[] | "can't tell"; reason: string; sources: string[];
+export interface Answer { sis_taxon_id: number; name?: string; records: { id: string; name?: string; relation: string }[] | "can't tell"; reason: string; sources: string[];
   /** The call it came from: its transcript is <cacheDir>/transcripts/<this>.jsonl.gz (checks/judge-transcripts.ts). */
   transcript?: string }
 export type Verdict = "right" | "wrong" | "can't tell";
@@ -72,8 +76,11 @@ export const isEasy = (s: Selection) => s.groups <= 1 && s.doubts.length === 0 &
   && s.selected.filter((x) => x.basis !== "synonym").every((x) => x.relation === "is")
   && s.selected.filter((x) => x.basis === "synonym").every((x) => x.relation === "refused");
 
+/** What facts() adds from outside the inputs: the assessment's taxonomic notes, and which assessed species file their own name under each CoL species. */
+export interface FactsExtra { taxonomicNotes?: string | null; holders?: Map<string, string[]> }
+
 /** A species' facts, independent of the rules being judged: not our selection. */
-export function facts(sp: SpeciesInput, lineage: Record<string, string | null> | undefined, inputs: Inputs, notes: Note[] = []) {
+export function facts(sp: SpeciesInput, lineage: Record<string, string | null> | undefined, inputs: Inputs, notes: Note[] = [], extra: FactsExtra = {}) {
   const own = new Map<string, ColRecord>();
   const add = (r: ColRecord) => { if (r.rank === "SPECIES") own.set(r.id, r); };
   for (const r of [...(sp.match?.answer ? [sp.match.answer] : []), ...(sp.match?.alternatives ?? [])]) {
@@ -81,16 +88,20 @@ export function facts(sp: SpeciesInput, lineage: Record<string, string | null> |
   }
   for (const n of [sp.name, sp.match?.answerName, ...sp.synonyms.map((y) => y.name)]) if (n) for (const r of inputs.release.recordsNamed(n)) add(r);
   const assessedElsewhere = (n: string | undefined) => !!n && !sameName(n, sp.name) && inputs.release.assessedNames.has(sameNameKey(n));
+  const notesText = extra.taxonomicNotes ? (extra.taxonomicNotes.length > 2000 ? `${extra.taxonomicNotes.slice(0, 2000)}…` : extra.taxonomicNotes) : null;
   const said = (r: ColRecord | null | undefined) => r ? { id: r.id, name: r.name, authorship: r.authorship, rank: r.rank, status: r.status, classification: r.classification ?? null } : null;
   return {
     sis_taxon_id: sp.sis,
-    red_list: { name: sp.name, citation: sp.authority, ...lineage, synonyms: sp.synonyms },
+    red_list: { name: sp.name, citation: sp.authority, ...lineage, synonyms: sp.synonyms, ...(notesText ? { taxonomic_notes: notesText } : {}) },
     matcher: sp.match ? { match_type: sp.match.matchType, answer: said(sp.match.answer), alternatives: sp.match.alternatives.map(said) } : null,
     col_records: [...own.values()].sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => ({
       id: r.id, name: r.name, authorship: r.authorship, status: r.status,
-      col_species: r.species ? { id: r.species.id, name: r.species.name, authorship: r.species.authorship, class: r.species.class } : null,
+      col_species: r.species ? { id: r.species.id, name: r.species.name, authorship: r.species.authorship, class: r.species.class,
+        gbif_records: inputs.release.occurrencesUnder(r.species.id) } : null,
       gbif_records_under: inputs.release.occurrencesUnder(r.id),
-      col_species_assessed_separately: assessedElsewhere(r.species?.name),
+      name_assessed_separately: assessedElsewhere(r.name),
+      col_species_assessed_as: assessedElsewhere(r.species?.name) ? r.species!.name : null,
+      col_species_holds_assessed: (r.species ? extra.holders?.get(r.species.id) ?? [] : []).filter((n) => !sameName(n, sp.name)),
     })),
     ...(notes.length ? { notes_from_people: notes.map((n) => ({ note: n.note, by: n.by, date: n.date })) } : {}),
   };
@@ -113,8 +124,20 @@ export function score(ours: { id: string; relation: string }[], theirs: Answer["
   return counted(ours, look) === counted(theirs, look) ? "right" : "wrong";
 }
 
+/**
+ * A relation as counting reads it (count/usage_owner.sql): a record that is
+ * itself its CoL species takes that species whatever it's called, so *part of*
+ * there is *is*; a record leading to no species takes only what is filed under
+ * it, so any relation there is *part of*.
+ */
+export function asCounted<T extends { id: string; relation: string }>(xs: T[], look: Lookup): T[] {
+  return xs.map((x) => { const sp = look.speciesOf(x.id);
+    return !sp ? { ...x, relation: "part of" } : x.relation === "part of" && sp === x.id ? { ...x, relation: "is" } : x; });
+}
+
 /** What an answer counts: the CoL species it counts whole and the part-of records outside them, with occurrences. */
-export function counted(xs: { id: string; relation: string }[], look: Lookup): string {
+export function counted(given: { id: string; relation: string }[], look: Lookup): string {
+  const xs = asCounted(given, look);
   const whole = new Set(xs.filter((x) => x.relation === "is" || x.relation === "split into")
     .map((x) => look.speciesOf(x.id) ?? x.id).filter((sp) => look.under(sp) > 0));
   const parts = xs.filter((x) => x.relation === "part of" && !whole.has(look.speciesOf(x.id) ?? "") && look.under(x.id) > 0).map((x) => x.id);
@@ -131,16 +154,19 @@ export function counted(xs: { id: string; relation: string }[], look: Lookup): s
 export function outcome(runs: (Answer | undefined)[], ours: { id: string; relation: string }[], look: Lookup, known: Set<string>, need = runs.length):
   ({ kind: "confirm" } | { kind: "split" } | { kind: "decide"; answer: Answer }) & { votes: string } {
   const mine = counted(ours, look);
-  const keyOf = (a: Answer | undefined) => !a || a.records === "can't tell" ? "can't tell"
-    : a.records.some((x) => !known.has(x.id)) ? "unknown record" : counted(a.records, look);
+  // An answer that would change the count must rest on a source it read.
+  const keyOf = (a: Answer | undefined) => { if (!a || a.records === "can't tell") return "can't tell";
+    if (a.records.some((x) => !known.has(x.id))) return "unknown record";
+    const k = counted(a.records, look);
+    return k !== mine && a.sources.length === 0 ? "unsourced" : k; };
   const keys = runs.map(keyOf);
   const n = new Map<string, number>();
   for (const k of keys) n.set(k, (n.get(k) ?? 0) + 1);
-  const label = (k: string) => k === mine ? "rules" : k === "can't tell" || k === "unknown record" ? k : "other";
+  const label = (k: string) => k === mine ? "rules" : k === "can't tell" || k === "unknown record" || k === "unsourced" ? k : "other";
   const tally = new Map<string, number>();
   for (const [k, c] of n) tally.set(label(k), (tally.get(label(k)) ?? 0) + c);
   const votes = [...tally].sort((x, y) => y[1] - x[1]).map(([l, c]) => `${c}/${runs.length} ${l}`).join("; ");
-  const [best, count] = [...n].filter(([k]) => k !== "can't tell" && k !== "unknown record").sort((x, y) => y[1] - x[1])[0] ?? ["", 0];
+  const [best, count] = [...n].filter(([k]) => k !== "can't tell" && k !== "unknown record" && k !== "unsourced").sort((x, y) => y[1] - x[1])[0] ?? ["", 0];
   if (runs.length === 0 || count < need) return { kind: "split", votes };
   return best === mine ? { kind: "confirm", votes } : { kind: "decide", answer: runs[keys.indexOf(best)]!, votes };
 }
@@ -186,9 +212,14 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
       let structured: { answers?: Answer[] } | undefined;
       try { structured = (o.structured_output ?? (typeof o.result === "string" ? JSON.parse(o.result) : o.result)) as typeof structured; }
       catch { structured = undefined; }
-      // Only this batch's species: a mistyped id mustn't overwrite another batch's answer.
-      const ids = new Set(batch.map((b) => b.sis_taxon_id));
-      answers = (structured?.answers ?? []).filter((a) => ids.has(a.sis_taxon_id));
+      // Only this batch's species, each once and under its own name; a record named otherwise than its id's is an unknown record.
+      const byId = new Map(batch.map((b) => [b.sis_taxon_id, b]));
+      const all = structured?.answers ?? [];
+      const twice = new Set(all.map((a) => a.sis_taxon_id).filter((id, i, xs) => xs.indexOf(id) !== i));
+      answers = all.filter((a) => byId.has(a.sis_taxon_id) && !twice.has(a.sis_taxon_id) && (!a.name || sameName(a.name, byId.get(a.sis_taxon_id)!.red_list.name)))
+        .map((a) => { if (a.records === "can't tell") return a;
+          const named = new Map(byId.get(a.sis_taxon_id)!.col_records.map((r) => [r.id, r.name]));
+          return { ...a, records: a.records.map((x) => (x.name && named.has(x.id) && !sameName(x.name, named.get(x.id)!) ? { ...x, id: `${x.id}?named ${x.name}` } : x)) }; });
       if (answers.length === 0) throw new Error(`judge: the call answered none of its ${batch.length} species; nothing cached, so a rerun asks again`);
       if (answers.length < batch.length) console.log(`judge: ${batch.length - answers.length} of the batch unanswered, left for review`);
       fs.writeFileSync(cache, JSON.stringify(answers));
@@ -197,6 +228,20 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
     for (const a of answers) out.set(a.sis_taxon_id, { ...a, transcript });
   }
   return out;
+}
+
+/** The facts' outside parts: the assessments' taxonomic notes (the narratives build, joined by assessment), and which assessed species file their own name under each CoL species. */
+export async function loadFactsExtra(conn: Awaited<ReturnType<typeof openDuckDB>>, T: ReturnType<typeof tables>, inputs: Inputs) {
+  const narratives = path.join(__dirname, "..", "..", "..", "data", "narratives", "narratives.parquet");
+  if (!fs.existsSync(narratives)) throw new Error(`judge: ${narratives} is missing (npm run fetch-data-from-r2): the judge needs the taxonomic notes`);
+  const taxNotes = new Map((await rows<{ sis: number; notes: string }>(conn, `
+    SELECT a.sis_taxon_id::INTEGER AS sis, n.taxonomic_notes AS notes FROM ${parquet(T.assessments)} a
+    JOIN ${lit(narratives)} n ON n.assessment_id = a.assessment_id WHERE a.is_latest AND coalesce(n.taxonomic_notes, '') <> ''`))
+    .map((r) => [r.sis, plainText(r.notes).replace(/\s+/g, " ").trim()]));
+  const holders = new Map<string, string[]>();
+  for (const sp of inputs.species) for (const r of inputs.release.recordsNamed(sp.name))
+    if (r.species && sameName(r.name, sp.name)) { const h = holders.get(r.species.id) ?? holders.set(r.species.id, []).get(r.species.id)!; if (!h.includes(sp.name)) h.push(sp.name); }
+  return { taxNotes, holders };
 }
 
 /** The judgements, and a report by doubt and by group (the CoL class, or kingdom for plants and fungi). */
@@ -261,7 +306,8 @@ if (require.main === module) {
       .map((r) => [r.sis, { kingdom: r.kingdom, phylum: r.phylum, class: r.class_name, order: r.order_name, family: r.family }]));
     const groupOf = new Map([...lineage].map(([sis, l]) => [sis, /plantae|fungi/i.test(l.kingdom ?? "") ? (l.kingdom ?? "?") : (l.class ?? "?")]));
     const notes = readNotes();
-    const factsOf = (sis: number) => facts(bySis.get(sis)!, lineage.get(sis), inputs, notes.get(sis));
+    const { taxNotes, holders } = await loadFactsExtra(conn, T, inputs);
+    const factsOf = (sis: number) => facts(bySis.get(sis)!, lineage.get(sis), inputs, notes.get(sis), { taxonomicNotes: taxNotes.get(sis), holders });
     // Outside the build, which a sync clears: answers cost money.
     const cacheDir = path.join(CACHE_ROOT, "judge-cache");
     const model = opt("model") ?? (mode === "decide" ? "claude-opus-5-5" : undefined);
@@ -280,6 +326,9 @@ if (require.main === module) {
       for (let k = runs + 1; k <= runs + more && disputed.length; k++) asked.push(await judge(disputed.map((s) => factsOf(s.sis)), { cacheDir, model, run: k }));
       const isDisputed = new Set(disputed.map((s) => s.sis));
       const by = `judge:${model}`, date = new Date().toISOString().slice(0, 10);
+      // What these rows were decided on, so a later model, prompt, release or matcher can find them.
+      const rel = readSourcesReleases(tables().sourcesReleases);
+      const context = `xr ${rel?.xr ?? "?"}; snapshot ${rel?.snapshot ?? "?"}; matcher ${MATCHER_VERSION}; prompt ${sha(PROMPT).slice(0, 8)}`;
       const decisions = readDecisions(), verdicts = readVerdicts();
       const tally = { confirm: 0, decide: 0, split: 0 };
       const transcriptsOf = (sis: number) => asked.map((m) => m.get(sis)?.transcript).filter((t): t is string => !!t);
@@ -300,7 +349,7 @@ if (require.main === module) {
         const o = outcome(mine, ours, look, new Set(recs.keys()), isDisputed.has(s.sis) ? need : runs);
         tally[o.kind]++;
         const verdict = (v: JudgeVerdict["verdict"]): JudgeVerdict =>
-          ({ sis: s.sis, redlistName: sp.name, verdict: v, answer: answerKey(ours), votes: o.votes, by, date, transcripts: transcriptsOf(s.sis) });
+          ({ sis: s.sis, redlistName: sp.name, verdict: v, answer: answerKey(answerRecords(s)), votes: o.votes, by, date, transcripts: transcriptsOf(s.sis), context });
         if (o.kind === "split") {
           // No agreement: the rules' count stands, flagged on the dashboard, and the species isn't asked again while this holds.
           if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
@@ -313,7 +362,7 @@ if (require.main === module) {
           if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
           if (s.decision && !s.decision.lapse) {
             const held = decisions.get(s.sis)!;
-            decisions.set(s.sis, { ...held, by, reviewed: true, date, evidence: runs1(s.sis)?.reason ?? held.evidence, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis) });
+            decisions.set(s.sis, { ...held, by, reviewed: true, date, evidence: runs1(s.sis)?.reason ?? held.evidence, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis), context });
             written.add(s.sis);
           } else {
             decisions.delete(s.sis);
@@ -322,10 +371,10 @@ if (require.main === module) {
           }
           continue;
         }
-        const answer = o.answer.records as { id: string; relation: "is" | "part of" | "split into" }[];
+        const answer = asCounted(o.answer.records as { id: string; relation: string }[], look) as { id: string; relation: "is" | "part of" | "split into" }[];
         const d: Decision = {
           sis: s.sis, redlistName: sp.name, redlistAuthority: sp.authority, candidates: s.candidateSpecies, by, reviewed: true, date,
-          evidence: o.answer.reason, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis),
+          evidence: o.answer.reason, sources: sourcesOf(s.sis), transcripts: transcriptsOf(s.sis), context,
           rows: answer.map((x) => { const r = recs.get(x.id)!;
             return { id: r.id, name: r.name, authorship: r.authorship, status: r.status.toLowerCase().replace(/_/g, " "), species: r.col_species?.name ?? null, relation: x.relation }; }),
         };

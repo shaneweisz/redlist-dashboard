@@ -297,16 +297,17 @@ of* or *split into*), the Red List name and citation it was made for, the
 record's id, name, authorship, status and species, the candidates' species
 when decided, who decided (`by`: `judge:<model>`, a person, or the older
 `agent:` and `fixture`), whether reviewed (by a person, or the judge's runs
-agreeing), the date, the evidence, its sources, and the judge's
+agreeing), the date, the evidence, its sources, the judge's
 transcripts behind it (each run's whole conversation, kept so the decision can
-be audited). "Not in CoL" is a
+be audited), and its `context`: the CoL XR, GBIF snapshot, matcher version and
+prompt it was decided on. "Not in CoL" is a
 species' only row, with empty record columns; it gives step 1, no records,
 and the reason `decision: not in CoL`.
 
 A decision **holds** while: `name` is still the decided name, the citation
 doesn't compare `other` with the decided one, no record's name is another
 assessed name, nor the species of an *is* or *split into* record (a *part of*
-record takes only its own occurrences, so its species may be assessed: see
+record takes only what is filed under it, so its species may be assessed: see
 Counting), and every record is still found (by `id` with the
 recorded name, status and species; else as the one record with that name and
 the same `normaliseAuthorship`). *Why*: a decision is about names and
@@ -321,12 +322,26 @@ given, or *can't tell*, agrees with nothing). It writes a **verdict** to
 `seeds/judge-verdicts.tsv` (the rules' answer as records and relations, and
 the votes) when the agreed answer is the rules' (`confirmed`: the species
 leaves the review list and keeps its doubts) or when nothing reaches
-agreement (`undecided`: the doubt `judge undecided`). A verdict applies only
-while the rules still give its answer and no decision holds. A lapsed
+agreement (`undecided`: the doubt `judge undecided`). A verdict keeps the
+answer by its records' names, authorship, status and species, as a decision
+does, and applies only while the rules still give that answer and no decision
+holds. The judge's answers are read as counting reads them (a *part of* on a
+record that is itself its CoL species is *is*; any relation on a record
+leading to no species is *part of*), and one that would change the count
+agrees with nothing unless it cites a source. A lapsed
 decision the runs agree with gives way to a verdict. The judge writes a
 decision only if it would hold; one that wouldn't leaves the species listed.
 It never replaces a person's override, and doesn't ask again a species whose
 verdict applies unless a note was added.
+
+**Over time.** A release, a Red List update or a matcher version asks again
+only what it moves: a decision that lapses, a verdict whose answer the rules
+no longer give, a species newly listed for review. Each run is cached apart,
+so more runs can be added later at the cost of the new runs only. A new model
+or prompt asks nothing by itself. It is to be applied by a run that re-asks
+chosen rows (by `context`), reports how often it agrees with them, and
+replaces them only after that is read, never an override; that run isn't
+built yet, and `context` is what makes it possible.
 
 Example: a decision takes *Centropogon australis* (White, 1790), the
 waspfish, for the Red List's *C. australis* (Shaw, 1790), with no doubts,

@@ -19,6 +19,9 @@
  *   sources        the pages or papers it rests on, space-separated
  *   transcripts    the judge's calls it came from, one per run, space-separated: each
  *                  conversation, kept in a private bucket (checks/judge-transcripts.ts)
+ *   context        what it was decided on: the CoL XR, GBIF snapshot, matcher version
+ *                  and prompt (its SHA-256's first 8), e.g. "xr 315557; snapshot
+ *                  2026-11-01; matcher v1.0.12; prompt 1a2b3c4d" (empty before these)
  *
  * A species' rows agree on the species-level columns. Whether a decision holds
  * is decisionHolds, below; select.ts applies it.
@@ -31,7 +34,7 @@ import { compareAuthors, normaliseAuthorship, sameName, sameNameKey } from "./na
 
 export const DECISIONS_FILE = path.join(SEEDS_DIR, "decisions.tsv");
 export const COLUMNS = ["sis_taxon_id", "redlist_name", "redlist_authority", "id", "name", "authorship", "status", "species",
-  "relation", "candidates", "by", "reviewed", "date", "evidence", "sources", "transcripts"] as const;
+  "relation", "candidates", "by", "reviewed", "date", "evidence", "sources", "transcripts", "context"] as const;
 
 export type DecidedRelation = "is" | "part of" | "split into";
 
@@ -59,6 +62,7 @@ export interface Decision {
   evidence: string;
   sources: string[];
   transcripts: string[];
+  context: string;
 }
 
 /** A decision a person made: the judge never replaces it. */
@@ -88,6 +92,7 @@ export function readDecisions(file = DECISIONS_FILE): Map<number, Decision> {
       candidates: get("candidates") ? get("candidates").split(";").map((s) => s.trim()).filter(Boolean) : [],
       by: get("by"), reviewed: get("reviewed").toLowerCase() === "yes", date: get("date"), evidence: get("evidence"),
       sources: get("sources").split(/\s+/).filter(Boolean), transcripts: get("transcripts").split(/\s+/).filter(Boolean),
+      context: get("context"),
     };
     const prev = out.get(sis);
     if (prev) {
@@ -106,7 +111,7 @@ export function writeDecisions(decisions: Iterable<Decision>, file = DECISIONS_F
   for (const d of [...decisions].sort((a, b) => a.sis - b.sis)) {
     for (const r of d.rows.length ? d.rows : [null]) {
       lines.push([String(d.sis), d.redlistName, d.redlistAuthority, r?.id, r?.name, r?.authorship, r?.status, r?.species, r?.relation,
-        [...d.candidates].sort().join(";"), d.by, d.reviewed ? "yes" : "no", d.date, d.evidence, d.sources.join(" "), d.transcripts.join(" ")].map(clean).join("\t"));
+        [...d.candidates].sort().join(";"), d.by, d.reviewed ? "yes" : "no", d.date, d.evidence, d.sources.join(" "), d.transcripts.join(" "), d.context].map(clean).join("\t"));
     }
   }
   fs.writeFileSync(file, [COLUMNS.join("\t"), ...lines].join("\n") + "\n");
@@ -166,20 +171,27 @@ export function decisionHolds<R extends DecidableRecord>(
  *
  *   sis_taxon_id, redlist_name
  *   verdict  confirmed | undecided
- *   answer   the rules' answer it was given, as answerKey writes it
+ *   answer   the rules' answer it was given, as answerKey writes it: by the records'
+ *            names, authorship, status and species, not their ids, which move
  *   votes    how the runs answered, e.g. "3/5 rules; 1/5 other; 1/5 can't tell"
  *   by       judge:<model>
  *   date     YYYY-MM-DD
  *   transcripts  the judge's calls, as in decisions.tsv
+ *   context  as in decisions.tsv
  */
 export const VERDICTS_FILE = path.join(SEEDS_DIR, "judge-verdicts.tsv");
-const VERDICT_COLUMNS = ["sis_taxon_id", "redlist_name", "verdict", "answer", "votes", "by", "date", "transcripts"] as const;
+const VERDICT_COLUMNS = ["sis_taxon_id", "redlist_name", "verdict", "answer", "votes", "by", "date", "transcripts", "context"] as const;
 export type VerdictKind = "confirmed" | "undecided";
-export interface JudgeVerdict { sis: number; redlistName: string; verdict: VerdictKind; answer: string; votes: string; by: string; date: string; transcripts: string[] }
+export interface JudgeVerdict { sis: number; redlistName: string; verdict: VerdictKind; answer: string; votes: string; by: string; date: string; transcripts: string[]; context: string }
 
-/** A selection's answer as a verdict keeps it: its taken records and relations, refused left out, sorted. */
-export const answerKey = (selected: { id: string; relation: string }[]) =>
-  selected.filter((x) => x.relation !== "refused").map((x) => `${x.id}:${x.relation}`).sort().join(",");
+/**
+ * A selection's answer as a verdict keeps it: each taken record (refused left
+ * out) by its name, authorship, status and species, with its relation, sorted;
+ * by names, like a decision, so a release that renumbers records keeps it.
+ */
+export const answerKey = (selected: { name: string; authorship: string | null; status: string; species: string | null; relation: string }[]) =>
+  [...new Set(selected.filter((x) => x.relation !== "refused").map((x) =>
+    `${x.name} ${normaliseAuthorship(x.authorship ?? undefined)} [${x.status.toLowerCase().replace(/_/g, " ")}, of ${x.species ?? "-"}]: ${x.relation}`))].sort().join("; ");
 
 /**
  * seeds/judge-notes.tsv: a person's notes to the judge about one species, which
@@ -208,11 +220,11 @@ export function readVerdicts(file = VERDICTS_FILE): Map<number, JudgeVerdict> {
   return new Map(readTsv(file, VERDICT_COLUMNS).map((r) => {
     if (r.verdict !== "confirmed" && r.verdict !== "undecided") throw new Error(`${path.basename(file)}: verdict "${r.verdict}" for ${r.sis_taxon_id} isn't confirmed or undecided`);
     return [Number(r.sis_taxon_id), { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, verdict: r.verdict, answer: r.answer, votes: r.votes,
-      by: r.by, date: r.date, transcripts: r.transcripts.split(/\s+/).filter(Boolean) }];
+      by: r.by, date: r.date, transcripts: r.transcripts.split(/\s+/).filter(Boolean), context: r.context }];
   }));
 }
 export function writeVerdicts(vs: Iterable<JudgeVerdict>, file = VERDICTS_FILE): void {
-  writeTsv(file, VERDICT_COLUMNS, [...vs].sort((a, b) => a.sis - b.sis).map((v) => [String(v.sis), v.redlistName, v.verdict, v.answer, v.votes, v.by, v.date, v.transcripts.join(" ")]));
+  writeTsv(file, VERDICT_COLUMNS, [...vs].sort((a, b) => a.sis - b.sis).map((v) => [String(v.sis), v.redlistName, v.verdict, v.answer, v.votes, v.by, v.date, v.transcripts.join(" "), v.context]));
 }
 export function readNotes(file = NOTES_FILE): Map<number, Note[]> {
   const out = new Map<number, Note[]>();

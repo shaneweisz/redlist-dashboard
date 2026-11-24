@@ -338,6 +338,10 @@ function synonymRecords(sp: SpeciesInput, res: Selection, taken: ColRecord[], re
   if (filedElsewhere) res.doubts.push("synonym filed elsewhere");
 }
 
+/** A selection's records as answerKey reads them. */
+export const answerRecords = (s: Selection) => s.selected.map((x) => ({ name: x.record.name, authorship: x.record.authorship, status: x.record.status,
+  species: x.record.species?.name ?? null, relation: x.relation }));
+
 /** The CoL species a selection counts whole: its *is* and *split into* records' species. */
 export const countedWhole = (s: Selection) => s.selected.filter((x) => x.relation === "is" || x.relation === "split into").map((x) => x.record.species!.id);
 
@@ -360,7 +364,7 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
   return species.map((sp) => {
     const s = select(sp, full, decisions.get(sp.sis));
     const v = verdicts.get(sp.sis);
-    const applies = v && (!s.decision || s.decision.lapse) && answerKey(s.selected.map((x) => ({ id: x.record.id, relation: x.relation }))) === v.answer;
+    const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer;
     if (applies && v.verdict === "confirmed") s.toReview = null;
     if (applies && v.verdict === "undecided") { s.doubts.push("judge undecided"); s.toReview = `judge undecided (${v.votes})`; }
     return s;

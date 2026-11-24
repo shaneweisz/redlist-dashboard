@@ -254,7 +254,7 @@ describe("decisions", () => {
   const input = species("Centropogon australis", "(Shaw, 1790)", acc(waspfish), [], { kingdom: "Animalia", phylum: "Chordata" });
   const decision = (over: Partial<Decision> = {}): Decision => ({
     sis: 1, redlistName: "Centropogon australis", redlistAuthority: "(Shaw, 1790)", candidates: ["Centropogon australis"], by: "fixture", reviewed: true,
-    date: "2026-11-10", evidence: "the waspfish", sources: [], transcripts: [],
+    date: "2026-11-10", evidence: "the waspfish", sources: [], transcripts: [], context: "",
     rows: [{ id: "5XHD2", name: "Centropogon australis", authorship: "(White, 1790)", status: "accepted", species: "Centropogon australis", relation: "is" }], ...over });
   const rel = release([acc(waspfish), acc(plant)]);
 
@@ -310,14 +310,18 @@ describe("selectEvery", () => {
     const a = species("Panthera leo", "(Gray, 1867)", acc(leo));  // other authors: listed
     const r = release() as Omit<Release, "wholeBySteps">;
     const c = (answer: string, verdict: "confirmed" | "undecided" = "confirmed") =>
-      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [] }]]);
+      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [], context: "" }]]);
+    const L = "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", X = "Panthera leo linnaeus 1758 [synonym, of Panthera leo]: is";
     expect(selectEvery([a], r, new Map())[0].toReview).toMatch(/^other authors/);
-    expect(selectEvery([a], r, new Map(), c("L:is"))[0].toReview).toBeNull();
-    expect(selectEvery([a], r, new Map(), c("X:is"))[0].toReview).toMatch(/^other authors/);
-    const u = selectEvery([a], r, new Map(), c("L:is", "undecided"))[0];
+    expect(selectEvery([a], r, new Map(), c(L))[0].toReview).toBeNull();
+    expect(selectEvery([a], r, new Map(), c(X))[0].toReview).toMatch(/^other authors/);
+    const u = selectEvery([a], r, new Map(), c(L, "undecided"))[0];
     expect(u.doubts).toEqual(["other authors", "judge undecided"]);
     expect(u.toReview).toBe("judge undecided (3/5 rules; 2/5 other)");
     expect(u.selected.map((x) => x.record.id)).toEqual(["L"]);
-    expect(selectEvery([a], r, new Map(), c("X:is", "undecided"))[0].doubts).toEqual(["other authors"]);
+    expect(selectEvery([a], r, new Map(), c(X, "undecided"))[0].doubts).toEqual(["other authors"]);
+    // A release that renumbers the record keeps the verdict.
+    const moved = species("Panthera leo", "(Gray, 1867)", acc({ ...leo, id: "L2" }));
+    expect(selectEvery([moved], r, new Map(), c(L))[0].toReview).toBeNull();
   });
 });

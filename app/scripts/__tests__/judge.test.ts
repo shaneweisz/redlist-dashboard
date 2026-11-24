@@ -6,7 +6,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, it, expect } from "vitest";
-import { isEasy, score, ourAnswer, judge, goal2, outcome, change, ANSWER_SCHEMA, PROMPT, facts, type Answer } from "../sync/checks/judge";
+import { isEasy, score, ourAnswer, judge, goal2, outcome, change, asCounted, counted, ANSWER_SCHEMA, PROMPT, facts, type Answer } from "../sync/checks/judge";
 import { claudeArgs, resultOf, toolUse, type ClaudeRun } from "../sync/checks/claude-run";
 import { leaks, secretsToScanFor, summarise, transcriptPath } from "../sync/checks/judge-transcripts";
 import type { ColRecord, ColSpecies, Selection, SpeciesInput } from "../sync/link/select";
@@ -34,7 +34,9 @@ describe("score", () => {
   it("right: the same records and relations, refused counting as not taken", () => {
     const s = sel({ selected: [...sel().selected, { record: rec("R"), relation: "refused", relationStep: 5, basis: "citation" }] });
     expect(score(ourAnswer(s), [{ id: "S", relation: "is" }], look)).toBe("right");
-    expect(score(ourAnswer(s), [{ id: "S", relation: "part of" }], look)).toBe("wrong");
+    // part of on the species' own record counts as is (count/usage_owner.sql); on a synonym record, only that record.
+    expect(score(ourAnswer(s), [{ id: "S", relation: "part of" }], look)).toBe("right");
+    expect(score(ourAnswer(s), [{ id: "S2", relation: "part of" }], look)).toBe("wrong");
     expect(score(ourAnswer(s), [], look)).toBe("wrong");
     expect(score(ourAnswer(s), "can't tell", look)).toBe("can't tell");
   });
@@ -57,7 +59,11 @@ describe("facts", () => {
       assessedNames: new Set(["panthera leo", "panthera tigris"]), byId: () => undefined, occurrencesUnder: (id: string) => (id === "FL" ? 7 : 0),
       recordsNamed: (n: string) => (n === "Felis leo" ? [rec("FL", { name: "Felis leo", status: "SYNONYM", species: tigris })] : []) } };
     const f = facts(sp, { class: "Mammalia" }, inputs);
-    expect(f.col_records.map((r) => [r.id, r.gbif_records_under, r.col_species_assessed_separately])).toEqual([["FL", 7, true], ["S", 0, false]]);
+    expect(f.col_records.map((r) => [r.id, r.gbif_records_under, r.col_species_assessed_as, r.name_assessed_separately])).toEqual([["FL", 7, "Panthera tigris", false], ["S", 0, null, false]]);
+    expect(f.red_list).not.toHaveProperty("taxonomic_notes");
+    const extra = facts(sp, { class: "Mammalia" }, inputs, [], { taxonomicNotes: "x".repeat(2500), holders: new Map([["T", ["Panthera tigris", "Panthera leo"]]]) });
+    expect(extra.red_list.taxonomic_notes).toHaveLength(2001);
+    expect(extra.col_records[0].col_species_holds_assessed).toEqual(["Panthera tigris"]);
     expect(JSON.stringify(f)).not.toMatch(/relation|doubt|step/);
     expect(f).not.toHaveProperty("notes_from_people");
     const noted = facts(sp, { class: "Mammalia" }, inputs, [{ sis: 1, redlistName: "Panthera leo", note: "Felis leo is meant only in part", by: "someone", date: "2026-11-24" }]);
@@ -90,6 +96,17 @@ describe("outcome (decide)", () => {
     expect(outcome([s, s, s, s, ans([{ id: "NOPE", relation: "is" }])], ours, look, known, 4)).toMatchObject({ kind: "confirm" });
     expect(outcome([ans("can't tell"), ans("can't tell")], ours, look, known).kind).toBe("split");
   });
+  it("an answer that changes the count without a source agrees with nothing", () => {
+    const p = { ...ans([{ id: "P", relation: "part of" }]), sources: [] };
+    expect(outcome([p, p], ours, look, known)).toMatchObject({ kind: "split", votes: "2/2 unsourced" });
+    expect(outcome([{ ...ans([{ id: "S", relation: "is" }]), sources: [] }, ans([{ id: "S", relation: "is" }])], ours, look, known).kind).toBe("confirm");
+  });
+  it("reads relations as counting does: part of on a record that is its species is is, anything on a record leading nowhere is part of", () => {
+    const lk = { speciesOf: (id: string) => ({ S: "S", P: "O" } as Record<string, string>)[id], under: () => 10 };
+    expect(asCounted([{ id: "S", relation: "part of" }, { id: "N", relation: "is" }, { id: "P", relation: "part of" }], lk))
+      .toEqual([{ id: "S", relation: "is" }, { id: "N", relation: "part of" }, { id: "P", relation: "part of" }]);
+    expect(counted([{ id: "S", relation: "part of" }], lk)).toBe(counted([{ id: "S", relation: "is" }], lk));
+  });
   it("says how a decision changes the counts", () => {
     expect(change(ours, [{ id: "P", relation: "part of" }], look)).toBe("adds part + drops whole");
     expect(change(ours, [...ours, { id: "O", relation: "split into" }], look)).toBe("adds whole");
@@ -111,19 +128,19 @@ describe("judge", () => {
     // Each call's transcript is kept, and each answer names the call it came from.
     const t = a.get(1)!.transcript!;
     expect(fs.existsSync(transcriptPath(cacheDir, t))).toBe(true);
-    expect(a.get(21)!.transcript).not.toBe(t);
-    expect(calls).toHaveLength(2);
+    expect(a.get(11)!.transcript).not.toBe(t);
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toMatchObject({ tools: ["WebSearch", "WebFetch"], outputFormat: "stream-json", schema: ANSWER_SCHEMA, prompt: PROMPT });
     expect(calls[0].disallowed).toEqual(["WebFetch(domain:dashforlife.org)", "WebFetch(domain:vercel.app)"]);
     await judge(many, { cacheDir, runner });
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     // A second run asks again, in another order (other batch-mates), and is cached apart.
     const b = await judge(many, { cacheDir, runner, run: 2 });
     expect(b.size).toBe(25);
-    expect(calls).toHaveLength(4);
-    expect(calls[2].stdin).not.toBe(calls[0].stdin);
+    expect(calls).toHaveLength(6);
+    expect(calls[3].stdin).not.toBe(calls[0].stdin);
     await judge(many, { cacheDir, runner, run: 2 });
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(6);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
@@ -138,6 +155,15 @@ describe("judge", () => {
     expect(fs.readdirSync(cacheDir).filter((f) => f.endsWith(".json"))).toEqual([]);
     const a = await judge(two, { cacheDir, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
     expect([...a.keys()]).toEqual([1]);
+    fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
+    // An id answered twice, or under another name, is dropped; a record named otherwise than its id's becomes an unknown record.
+    const named = [{ sis_taxon_id: 1, red_list: { name: "Aa" }, col_records: [{ id: "R", name: "Aa" }] }, { sis_taxon_id: 2, red_list: { name: "Bb" }, col_records: [] }] as never[];
+    const b = await judge(named, { cacheDir, runner: say({ structured_output: { answers: [
+      { ...answer(1), name: "Aa", records: [{ id: "R", name: "Zz", relation: "is" }] }, { ...answer(2), name: "Cc" }] } }) });
+    expect([...b.keys()]).toEqual([1]);
+    expect(b.get(1)!.records).toEqual([{ id: "R?named Zz", name: "Zz", relation: "is" }]);
+    fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
+    await expect(judge(named, { cacheDir, runner: say({ structured_output: { answers: [answer(1), answer(1)] } }) })).rejects.toThrow(/none of its 2/);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 });
