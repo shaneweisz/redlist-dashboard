@@ -137,13 +137,15 @@ export async function buildLink(
 /** One species' rows: its records (the first the primary row), then candidate rows. */
 /**
  * Where each part-of record's records start: the record, or the non-nominate
- * infraspecific CoL files the synonym under (Fringilla polatzeki → F. teydea
- * polatzeki). The judge uses it too, to count an answer as the sync would.
+ * infraspecific of the same species that CoL files the synonym under
+ * (Fringilla polatzeki → F. teydea polatzeki); never a genus or family, nor
+ * anything for a synonym leading to no species. The judge uses it too, to
+ * count an answer as the sync would.
  */
 export async function partOfRoots(conn: Awaited<ReturnType<typeof openDuckDB>>, taxa: string, ids: string[]): Promise<Map<string, string>> {
   await writeTable(conn, "part_of", { id: "VARCHAR" }, ids.map((id) => ({ id })));
   return new Map((await rows<{ id: string; root: string }>(conn, `
-    SELECT r.col_id AS id, CASE WHEN r.status = 'synonym' AND p.col_id IS NOT NULL AND p.rank <> 'species' AND p.col_id <> r.species_id
+    SELECT r.col_id AS id, CASE WHEN r.status = 'synonym' AND p.col_id IS NOT NULL AND p.rank <> 'species' AND p.species_id = r.species_id AND p.col_id <> r.species_id
         AND NOT (len(string_split(lower(p.scientific_name), ' ')) > 2 AND string_split(lower(p.scientific_name), ' ')[-1] = string_split(lower(p.scientific_name), ' ')[2])
       THEN p.col_id ELSE r.col_id END AS root
     FROM part_of x JOIN ${parquet(taxa)} r ON r.col_id = x.id LEFT JOIN ${parquet(taxa)} p ON p.col_id = r.parent_id`)).map((r) => [r.id, r.root]));

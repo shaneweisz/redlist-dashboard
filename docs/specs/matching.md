@@ -249,10 +249,12 @@ owner (`count/usage_owner.sql`), the first that applies:
 1. **Part of**: a *part of* record owns its occurrences and those of the
    records CoL files beneath it (by parent), down to three levels. Its count
    starts at the record, except a record of status `synonym` (not an
-   ambiguous one) whose parent is a non-nominate infraspecific (any rank but
-   species, not the species record itself, and not named with its species'
-   epithet repeated), which starts at that parent (*Fringilla polatzeki* →
-   *F. teydea polatzeki*). Roots can nest; a record
+   ambiguous one) whose parent is a non-nominate infraspecific of the same
+   CoL species (the parent leads to the species the synonym leads to, is not
+   that species' record, is not of rank species, and its own name's last word
+   is not its second, as in *F. teydea teydea*), which starts at that parent
+   (*Fringilla polatzeki* → *F. teydea polatzeki*). A synonym leading to no
+   species starts at itself. Roots can nest; a record
    goes to the nearest root claiming it, then the lower SIS id, then the
    lower root id (*Zosterops simplex* owns the synonym *Z. simplex* filed
    under *Z. japonicus simplex*: its root is the nearer).
