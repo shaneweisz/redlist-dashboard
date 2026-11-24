@@ -270,6 +270,12 @@ describe("live GBIF", () => {
           const url = `https://api.gbif.org/v1/occurrence/search?${params}`;
           expect(url.length).toBeLessThan(3860);
           const response = await fetch(url);
+          // GBIF throttling CI's shared runners (429) says nothing about the
+          // geometry: skip, as for an unreachable WDPA above.
+          if (response.status === 429) {
+            skip();
+            return;
+          }
           const body = await response.text();
           expect(`${result.attributes?.NAME}: ${response.status} ${body.slice(0, 200)}`).toContain(" 200 ");
           // Counter-clockwise or the count is the whole world minus the park.
