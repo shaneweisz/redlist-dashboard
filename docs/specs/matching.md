@@ -248,9 +248,11 @@ owner (`count/usage_owner.sql`), the first that applies:
 
 1. **Part of**: a *part of* record owns its occurrences and those of the
    records CoL files beneath it (by parent), down to three levels. Its count
-   starts at the record, except a synonym CoL files under a non-nominate
-   infraspecific of another species, which starts at that infraspecific
-   (*Fringilla polatzeki* → *F. teydea polatzeki*). Roots can nest; a record
+   starts at the record, except a record of status `synonym` (not an
+   ambiguous one) whose parent is a non-nominate infraspecific (any rank but
+   species, not the species record itself, and not named with its species'
+   epithet repeated), which starts at that parent (*Fringilla polatzeki* →
+   *F. teydea polatzeki*). Roots can nest; a record
    goes to the nearest root claiming it, then the lower SIS id, then the
    lower root id (*Zosterops simplex* owns the synonym *Z. simplex* filed
    under *Z. japonicus simplex*: its root is the nearer).
@@ -263,13 +265,18 @@ owner (`count/usage_owner.sql`), the first that applies:
 *P. aegeria*, which no assessed species counts whole, keeps the rest (3.5M)
 and is on the NE list.
 
-Each species claims records through rows: one per CoL taxon it counts from
-(the CoL species for *is* and *split into*, the root above for *part of*),
-the first taken step record's being its **primary** row and the rest
-**covered**. Where two assessed species claim one CoL taxon, the stronger
+Each species claims records through rows, made from its selected records in
+order: one per CoL taxon it counts from (the CoL species for *is* and *split
+into*, or the record itself where it leads to none; the root above for
+*part of*), from the first record that names that taxon, with that record's
+relation; a *refused* record claims nothing. The row of its first step record
+(never a synonym record) is its **primary** row, and the rest are
+**covered**; a species with no step record has no primary row. Decisions'
+records are taken as written (the judge reads its own answers as counting
+would before it writes them). Where two assessed species claim one CoL taxon, the stronger
 claim wins, first by: primary row before covered; no doubts before
 doubts; *is*, *split into*, *part of*; decision before matcher; the species
-whose CoL name is its Red List name as written; the lower SIS id. The
+whose primary row's record has its Red List name as written; the lower SIS id. The
 loser's row counts nothing. (This is the one place a doubt affects
 counting.)
 
@@ -324,10 +331,11 @@ candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
 
 The judge asks each species twice; where the two don't agree and four of
 five still could, three more times, and then four of the five must agree. Its
-answers are read as counting reads them (a *part of* on a record that is
-itself its CoL species is *is*; any relation on a record leading to no species
-is *part of*); two answers agree when they count the same CoL species whole
-(with records or not) and the same *part of* records with records. An answer
+answers are rewritten as counting would read them before they are compared
+or written (a *part of* on a record that is itself its CoL species is *is*;
+any relation on a record leading to no species is *part of*); two answers
+agree when the sync would count the same for them (the same records owned,
+the same CoL species counted whole). An answer
 that is missing, *can't tell*, names a record it wasn't given, or would change
 the count without citing a source agrees with nothing.
 

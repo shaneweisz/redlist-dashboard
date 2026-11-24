@@ -21,7 +21,8 @@
  * species (so counting is tested alone), the CoL taxa (id, parent, species,
  * rank, status, name) and the GBIF records under each usage; the agent writes
  * every assessed species' and every unassessed CoL species' record count, and
- * they are compared with the build's (count/usage_owner.sql's owners).
+ * they are compared with ours: the same selection's link rows through count/owners.ts
+ * (kept equal to count/usage_owner.sql by checks/owners-check.ts).
  *
  * Run after every change to the rules and every release move. A run costs an
  * agent session: --prepare builds the folder and prints the command without
@@ -36,6 +37,8 @@ import { execFileSync, execSync } from "child_process";
 import { loadEnvFiles } from "../../lib/utils";
 import { REVIEW_DIR, parquet, tables } from "../paths";
 import { openDuckDB, rows, lit } from "../sql";
+import { buildLink } from "../link/assessment-link";
+import { usageOwners, type OwnerClaim, type OwnerTaxon } from "../count/owners";
 import { loadInputs, selectionJson } from "../link/select-inputs";
 import { selectEvery } from "../link/select";
 import { DECISIONS_FILE } from "../link/decisions";
@@ -166,12 +169,24 @@ export async function prepareCounting(dir: string): Promise<{ dir: string; ours:
   (lower-case), scientific_name. Tab-separated with a header; empty fields are empty.
 - occurrences.tsv: usage_key (a col_id), records: the GBIF records filed directly under that usage (not those below it).
 `);
-  const sum = async (col: string) => Object.fromEntries((await rows<{ k: string; n: number }>(conn, `
-    SELECT o.${col}::VARCHAR AS k, sum(c.n)::BIGINT AS n FROM ${parquet(T.usageOwner)} o JOIN ${parquet(T.occurrences)} c ON c.usage_key = o.usage_key
-    WHERE o.${col} IS NOT NULL GROUP BY 1`)).map((r) => [r.k, Number(r.n)]));
-  const assessed = Object.fromEntries(inputs.species.map((sp) => [String(sp.sis), 0]));
-  Object.assign(assessed, await sum("sis_taxon_id"));
-  return { dir, ours: { assessed, unassessed: await sum("col_id") } };
+  // Ours: this selection's link rows (as the sync builds them, from the same seeds) through count/owners.ts, which
+  // checks/owners-check.ts keeps equal to usage_owner.sql; so a build older than the seeds can't skew it.
+  const link = path.join(dir, "..", "assessment_link.parquet");
+  await buildLink({ taxa: T.taxa, assessments: T.assessments, matches: T.matches }, { link });
+  const claims = (await rows<OwnerClaim>(conn, `SELECT sis_taxon_id::INTEGER AS sis_taxon_id, relation, counts, col_taxon_id, col_species_id FROM ${parquet(link)}`))
+    .map((c) => ({ ...c, sis_taxon_id: Number(c.sis_taxon_id) }));
+  const taxa = await rows<OwnerTaxon>(conn, `SELECT col_id, parent_id, species_id FROM ${parquet(T.taxa)}`);
+  const occ = new Map((await rows<{ k: string; n: number }>(conn, `SELECT usage_key AS k, sum(n)::BIGINT AS n FROM ${parquet(T.occurrences)} GROUP BY 1`))
+    .map((r) => [r.k, Number(r.n)]));
+  const assessed: Record<string, number> = Object.fromEntries(inputs.species.map((sp) => [String(sp.sis), 0]));
+  const unassessed: Record<string, number> = {};
+  for (const [u, o] of usageOwners(claims, taxa)) {
+    const n = occ.get(u) ?? 0;
+    if (!n) continue;
+    if (o.sis !== undefined) assessed[String(o.sis)] = (assessed[String(o.sis)] ?? 0) + n;
+    else unassessed[o.col_id] = (unassessed[o.col_id] ?? 0) + n;
+  }
+  return { dir, ours: { assessed, unassessed } };
 }
 
 /** Where the agent's counts differ from the build's. */
