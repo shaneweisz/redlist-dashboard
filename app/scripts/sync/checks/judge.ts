@@ -28,7 +28,7 @@
  * by group.
  *
  * Usage: npm run sync:judge -- first | changed --baseline <old.json> | decide [--runs N]
- *          [--more N] [--need N] [--yes] [--fixtures-only] [--limit N] [--model m]
+ *          [--more N] [--need N] [--parallel N (calls at once, default 4)] [--yes] [--fixtures-only] [--limit N] [--model m]
  */
 
 import * as crypto from "crypto";
@@ -202,7 +202,7 @@ export const stableFacts = (f: ReturnType<typeof facts>) =>
  * species has other batch-mates. A species a call leaves unanswered is asked
  * once more, then left out (not cached, so a rerun asks it).
  */
-export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cacheDir: string; runner?: Runner; model?: string; run?: number }): Promise<Map<number, Answer>> {
+export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cacheDir: string; runner?: Runner; model?: string; run?: number; parallel?: number }): Promise<Map<number, Answer>> {
   const dir = path.join(opts.cacheDir, "answers");
   fs.mkdirSync(dir, { recursive: true });
   const run = opts.run ?? 1;
@@ -211,8 +211,10 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
   let todo = batchFacts.filter((f) => { const c = cacheOf(f); if (!fs.existsSync(c)) return true; out.set(f.sis_taxon_id, JSON.parse(fs.readFileSync(c, "utf-8"))); return false; });
   for (let attempt = 1; attempt <= 2 && todo.length; attempt++) {
     const ordered = run === 1 ? todo : [...todo].sort((a, b) => sha(`run ${run} ${a.sis_taxon_id}`).localeCompare(sha(`run ${run} ${b.sis_taxon_id}`)));
-    for (let i = 0; i < ordered.length; i += BATCH) {
-      const batch = ordered.slice(i, i + BATCH);
+    const batches: ReturnType<typeof facts>[][] = [];
+    for (let i = 0; i < ordered.length; i += BATCH) batches.push(ordered.slice(i, i + BATCH));
+    // Up to `parallel` calls at once; each writes its own answers to the cache as it ends.
+    const ask = async (batch: ReturnType<typeof facts>[]) => {
       const stdin = JSON.stringify(batch, null, 1);
       const call = sha(stdin + PROMPT + (opts.model ?? "") + `run ${run} attempt ${attempt}`);
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "judge-"));
@@ -240,7 +242,10 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
       // A first call that answers none of its batch is something wrong with every call (a limit, the schema); a retry that doesn't is one species, left out.
       if (answers.length === 0 && attempt === 1) throw new Error(`judge: the call answered none of its ${batch.length} species; nothing cached for them, so a rerun asks again`);
       for (const a of answers) { const ans = { ...a, transcript: call }; fs.writeFileSync(cacheOf(byId.get(a.sis_taxon_id)!), JSON.stringify(ans)); out.set(a.sis_taxon_id, ans); }
-    }
+    };
+    let next = 0;
+    const worker = async () => { while (next < batches.length) await ask(batches[next++]); };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.parallel ?? 1, batches.length)) }, worker));
     todo = todo.filter((f) => !out.has(f.sis_taxon_id));
     if (todo.length) console.log(`judge: run ${run}: ${todo.length} species unanswered${attempt === 1 ? ", asking them once more" : ", left out (a rerun asks them)"}`);
   }
@@ -333,19 +338,19 @@ if (require.main === module) {
     const model = opt("model") ?? (mode === "decide" ? "claude-opus-5-5" : undefined);
     const whole = (k: string, d: number, min: number) => { const v = Number(opt(k) ?? d);
       if (!Number.isInteger(v) || v < min) throw new Error(`judge: --${k} must be a whole number from ${min}, not ${opt(k)}`); return v; };
-    const runs = whole("runs", 2, 1), more = whole("more", 3, 0), need = whole("need", 4, 1);
+    const runs = whole("runs", 2, 1), more = whole("more", 3, 0), need = whole("need", 4, 1), parallel = whole("parallel", 4, 1);
     if (more > 0 && need > runs + more) throw new Error(`judge: --need ${need} is more than the ${runs + more} runs`);
 
     /** decide: ask each species in `runs` runs, and those they don't agree on in `more`; then write the verdicts and decisions. */
     async function decide(chosen: Selection[]) {
       const asked: Map<number, Answer>[] = [];
-      for (let k = 1; k <= runs; k++) asked.push(await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model, run: k }));
+      for (let k = 1; k <= runs; k++) asked.push(await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel }));
       const known = (s: Selection) => new Set(factsOf(s.sis).col_records.map((r) => r.id));
       // Asked again only where the first runs didn't agree and `need` of all the runs still can.
       const disputed = more ? chosen.filter((s) => { const o = outcome(asked.map((m) => m.get(s.sis)), ourAnswer(s), look, known(s));
         return o.kind !== "confirm" && o.kind !== "decide" && o.best + more >= need; }) : [];
       if (disputed.length) console.log(`judge: the runs don't agree on ${disputed.length} species that ${need} of ${runs + more} still could; asking those ${more} more times`);
-      for (let k = runs + 1; k <= runs + more && disputed.length; k++) asked.push(await judge(disputed.map((s) => factsOf(s.sis)), { cacheDir, model, run: k }));
+      for (let k = runs + 1; k <= runs + more && disputed.length; k++) asked.push(await judge(disputed.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel }));
       const isDisputed = new Set(disputed.map((s) => s.sis));
       const by = `judge:${model}`, date = new Date().toISOString().slice(0, 10);
       // What these rows were decided on, so a later model, prompt, release or matcher can find them.
@@ -466,7 +471,7 @@ if (require.main === module) {
     // The fixture cases first: their answers are known.
     const fixtureSis = new Set(inputs.species.filter((s) => MATCHING_CASES.some((c) => sameName(c.name, s.name))).map((s) => s.sis));
     const fixtures = sel.filter((s) => fixtureSis.has(s.sis));
-    const fx = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model });
+    const fx = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model, parallel });
     const fr = report(fixtures, fx, groupOf, look);
     const tally = (rs: { verdict: Verdict }[]) => ({ right: rs.filter((r) => r.verdict === "right").length, wrong: rs.filter((r) => r.verdict === "wrong").length,
       cant: rs.filter((r) => r.verdict === "can't tell").length });
@@ -477,7 +482,7 @@ if (require.main === module) {
     const fxAgain: Map<number, Answer>[] = [];
     if (mode === "decide") {
       for (let k = 2; k <= runs; k++) {
-        const again = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model, run: k });
+        const again = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel });
         fxAgain.push(again);
         const same = fixtures.filter((s) => { const x = fx.get(s.sis), y = again.get(s.sis);
           return x && y && x.records !== "can't tell" && y.records !== "can't tell" && counted(x.records, look) === counted(y.records, look); }).length;
@@ -495,7 +500,7 @@ if (require.main === module) {
 
     if (mode === "decide") return decide(chosen);
 
-    const answers = await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model });
+    const answers = await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model, parallel });
     const r = report(chosen, answers, groupOf, look);
     await writeTable(conn, "judgements", { sis_taxon_id: "BIGINT", answer: "VARCHAR", sources: "VARCHAR", verdict: "VARCHAR", reason: "VARCHAR", model: "VARCHAR" },
       r.rows.map((x) => ({ ...x, model: model ?? "default" })));

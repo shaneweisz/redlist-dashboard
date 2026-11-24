@@ -160,6 +160,20 @@ describe("judge", () => {
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
+  it("runs up to `parallel` calls at once", async () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    let now = 0, most = 0;
+    const runner = async (r: ClaudeRun) => {
+      now++; most = Math.max(most, now); await new Promise((res) => setTimeout(res, 20)); now--;
+      const batch = JSON.parse(r.stdin!) as { sis_taxon_id: number }[];
+      return { code: 0, stderr: "", stdout: JSON.stringify({ structured_output: { answers: batch.map((b) => ({ sis_taxon_id: b.sis_taxon_id, records: "can't tell", reason: "r", sources: [] })) } }) };
+    };
+    const many = Array.from({ length: 55 }, (_, i) => ({ sis_taxon_id: i + 1 })) as never[];
+    expect((await judge(many, { cacheDir, runner, parallel: 3 })).size).toBe(55);
+    expect(most).toBe(3);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
   it("caches nothing from a failed call or one that answers none of its batch, and keeps only the batch's own ids", async () => {
     const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
     const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
