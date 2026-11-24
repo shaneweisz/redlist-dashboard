@@ -34,6 +34,8 @@
  *   match_description  the row in a sentence, with names, authors and ids
  *   to_review      why a person needs to look (the queue), on the primary row
  *   match_note, match_records  for a match that isn't plain: why, in sentences, and the CoL records named
+ *   match_jury     what the AI jury found, for a species it checked: JSON {kind: decided |
+ *                  confirmed | undecided, by, date, votes, transcripts (its runs' keys)}
  */
 
 import { sameName } from "./name-rules";
@@ -94,6 +96,14 @@ export async function buildLink(
     if (n) notes.set(sel.sis, n);
   }
 
+  // What the AI jury found, for the species it checked: a judge's decision that holds, or a verdict that applies.
+  const jury = new Map<number, string>();
+  for (const sel of selections) {
+    const d = loaded.decisions.get(sel.sis);
+    if (sel.step === 1 && d?.by.startsWith("judge:")) jury.set(sel.sis, JSON.stringify({ kind: "decided", by: d.by.slice(6), date: d.date, votes: null, transcripts: d.transcripts }));
+    else if (sel.jury) jury.set(sel.sis, JSON.stringify({ kind: sel.jury.verdict, by: loaded.verdicts.get(sel.sis)?.by.replace(/^judge:/, "") ?? null,
+      date: sel.jury.date, votes: juryVotes(sel.jury.votes), transcripts: sel.jury.transcripts }));
+  }
   const flagged = new Set(selections.filter((s) => s.doubts.length > 0).map((s) => s.sis));
   const exactName = new Set(selections.filter((s) => s.selected[0] && sameName(s.selected[0].record.name, species.get(s.sis)!.name)
     && s.selected[0].record.name.trim() === species.get(s.sis)!.name.trim()).map((s) => s.sis));
@@ -109,10 +119,11 @@ export async function buildLink(
   await writeTable(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", relation: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
     counts: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", reviewed: "BOOLEAN", step: "INTEGER", doubts: "VARCHAR",
     match_reason: "VARCHAR", col_treatment: "VARCHAR", match_description: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN",
-    match_note: "VARCHAR", match_records: "VARCHAR" },
+    match_note: "VARCHAR", match_records: "VARCHAR", match_jury: "VARCHAR" },
     links.map((l) => {
       const n = l.role === "primary" ? notes.get(l.sis_taxon_id) : undefined;
-      return { ...l, counts: l.counted ? counts(l.relation) : "nothing", match_note: n?.note ?? null, match_records: n ? JSON.stringify(n.records) : null };
+      return { ...l, counts: l.counted ? counts(l.relation) : "nothing", match_note: n?.note ?? null, match_records: n ? JSON.stringify(n.records) : null,
+        match_jury: l.role === "primary" ? jury.get(l.sis_taxon_id) ?? null : null };
     }));
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
 
@@ -259,14 +270,14 @@ const DOUBT_SENTENCE: Record<string, (sp: SpeciesInput, sel: Selection) => strin
   "judge undecided": (_sp, sel) => `Checked by an AI jury${sel.jury ? ` on ${sel.jury.date}` : ""}, which couldn't agree which CoL records are this species${sel.jury ? ` (${juryVotes(sel.jury.votes)})` : ""}; the count follows the rules until a person decides.`,
 };
 
-/** A verdict's votes in words: "4/5 rules; 1/5 can't tell" → "4 of 5 runs agreed with the rules, 1 couldn't tell". */
+/** A verdict's votes in words: "2/2 rules" → "2 independent runs agreed with the rules"; "4/5 rules; 1/5 can't tell" → "4 of 5 independent runs agreed with the rules, 1 couldn't tell". */
 export function juryVotes(votes: string): string {
   const say: Record<string, (n: string) => string> = { rules: (n) => `${n} agreed with the rules`, other: (n) => `${n} gave another answer`,
     "can't tell": (n) => `${n} couldn't tell`, missing: (n) => `${n} gave no answer`, "unknown record": (n) => `${n} named a record it wasn't given`,
     unsourced: (n) => `${n} cited no source` };
   const parts = votes.split(";").map((p) => p.trim().match(/^(\d+)\/(\d+) (.+)$/)).filter((m): m is RegExpMatchArray => !!m);
   if (!parts.length) return votes;
-  return parts.map((m, i) => (i === 0 ? `${m[1]} of ${m[2]} runs ` : "") + (say[m[3]] ?? ((n: string) => `${n} ${m[3]}`))(i === 0 ? "" : m[1]).trim()).join(", ");
+  return parts.map((m, i) => (i === 0 ? `${m[1] === m[2] ? m[1] : `${m[1]} of ${m[2]}`} independent runs ` : "") + (say[m[3]] ?? ((n: string) => `${n} ${m[3]}`))(i === 0 ? "" : m[1]).trim()).join(", ");
 }
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */

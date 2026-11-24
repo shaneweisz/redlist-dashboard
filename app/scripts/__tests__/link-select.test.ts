@@ -334,8 +334,8 @@ describe("selectEvery", () => {
 describe("jury notes", () => {
   it("say what an AI jury's check found, in words", async () => {
     const { juryVotes } = await import("../sync/link/assessment-link");
-    expect(juryVotes("2/2 rules")).toBe("2 of 2 runs agreed with the rules");
-    expect(juryVotes("3/5 rules; 1/5 can't tell; 1/5 other")).toBe("3 of 5 runs agreed with the rules, 1 couldn't tell, 1 gave another answer");
+    expect(juryVotes("2/2 rules")).toBe("2 independent runs agreed with the rules");
+    expect(juryVotes("3/5 rules; 1/5 can't tell; 1/5 other")).toBe("3 of 5 independent runs agreed with the rules, 1 couldn't tell, 1 gave another answer");
   });
   it("a confirmed or undecided verdict keeps the species' doubts and adds the check to its note", async () => {
     const { matchNote } = await import("../sync/link/assessment-link");
@@ -347,8 +347,8 @@ describe("jury notes", () => {
       answer: "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", basis: verdictBasis(a, s0), votes, by: "judge:m", date: "2026-11-25", transcripts: [], context: "" }]]);
     const c = selectEvery([a], r, new Map(), v("confirmed", "2/2 rules"))[0];
     expect(c.doubts).toEqual(["other authors"]);
-    expect(matchNote(c, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25: 2 of 2 runs agreed with the rules; the doubt stands/);
+    expect(matchNote(c, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25: 2 independent runs agreed with the rules; the doubt stands/);
     const u = selectEvery([a], r, new Map(), v("undecided", "3/5 rules; 2/5 other"))[0];
-    expect(matchNote(u, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25, which couldn't agree .* \(3 of 5 runs agreed with the rules, 2 gave another answer\)/);
+    expect(matchNote(u, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25, which couldn't agree .* \(3 of 5 independent runs agreed with the rules, 2 gave another answer\)/);
   });
 });

@@ -128,6 +128,18 @@ export interface NoteRecord {
   records?: number | null;
 }
 
+/** What the AI jury found for a species it checked (the sync's match_jury; docs/specs/matching.md, "Decisions"). */
+export interface MatchJury {
+  kind: "decided" | "confirmed" | "undecided";
+  /** The model, e.g. claude-opus-5-5. */
+  by: string | null;
+  date: string;
+  /** How the runs voted, in words; null for a decision. */
+  votes: string | null;
+  /** Each run's transcript key: /jury/<key>?sis=<id>. */
+  transcripts: string[];
+}
+
 /** The species' match facts as the list carries them. */
 export interface SpeciesMatch {
   match?: MatchKey | null;
@@ -144,6 +156,7 @@ export interface SpeciesMatch {
   assessed_here?: string[];
   /** A match that isn't plain: the CoL records it is about. */
   match_records?: NoteRecord[];
+  match_jury?: MatchJury;
   /** A decision: who made it (a GitHub handle, agent:<model>). */
   match_decided_by?: string | null;
 }

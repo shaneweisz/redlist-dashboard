@@ -14,7 +14,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchJury } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -803,7 +803,7 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
               </span>
             );
           })}
-          {s.match_decided_by && <span className="px-1.5 py-px text-[11px] text-zinc-400">Decided by {s.match_decided_by}</span>}
+          {s.match_decided_by && !s.match_jury && <span className="px-1.5 py-px text-[11px] text-zinc-400">Decided by {s.match_decided_by}</span>}
         </div>
         {/* The Red List side. */}
         <div className="py-1.5">
@@ -836,6 +836,20 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
             </div>
           </div>
         )}
+        {/* What the AI jury found, with each run's transcript. */}
+        {s.match_jury && (
+          <div className="pt-1.5">
+            <div className={section}>AI jury{s.match_jury.by ? ` (${s.match_jury.by})` : ""}</div>
+            <div className="text-[11px] text-zinc-300">{juryLine(s.match_jury)}</div>
+            {s.match_jury.transcripts.length > 0 && (
+              <div className="text-[11px] text-zinc-400">
+                Transcripts: {s.match_jury.transcripts.map((k, i) => (
+                  <span key={k}>{i > 0 ? " · " : ""}<a className={link} href={`/jury/${k}${s.sis_taxon_id ? `?sis=${s.sis_taxon_id}` : ""}`} target="_blank" rel="noopener noreferrer">run {i + 1} ↗</a></span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -846,6 +860,13 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
         : <span className="ml-1 text-[10px] text-zinc-300 group-hover:text-zinc-500 dark:text-zinc-600 dark:group-hover:text-zinc-400 cursor-help" aria-label="How this count is made">ⓘ</span>}
     </SelectableHoverTooltip>
   );
+}
+
+/** The AI jury's finding in a sentence, for the match tooltip. */
+function juryLine(j: MatchJury): string {
+  if (j.kind === "decided") return `Decided on ${j.date}: independent runs agreed on these records, which replace the rules' answer.`;
+  if (j.kind === "confirmed") return `Checked on ${j.date}: ${j.votes ?? "its runs agreed with the rules"}. The doubt stands, but the records match.`;
+  return `Checked on ${j.date}, but couldn't agree${j.votes ? `: ${j.votes}` : ""}. The count follows the rules until a person decides.`;
 }
 
 // A HoverTooltip you can move the pointer INTO — so its content can be read at

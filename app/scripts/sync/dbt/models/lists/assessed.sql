@@ -24,6 +24,7 @@
  *   match_counts             what its link counts: the whole CoL species | only
  *                            records under its own name | nothing
  *   match_note, match_records  for a match that isn't plain: how it was matched or why
+ *   match_jury      what the AI jury found, for a species it checked (link/assessment-link.ts)
  *                            it is in doubt, in sentences, and the CoL
  *                            records it is about (JSON: id, name, authorship, status,
  *                            species, role), from assessment_link, plus each counted
@@ -113,7 +114,7 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
             WHEN link.col_species_id IS NULL OR link.doubts IS NOT NULL THEN 'flagged' END AS count_note,
        link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
        link.doubts AS match_doubts, link.reviewed AS match_reviewed,
-       link.match_note, mr.records AS match_records,
+       link.match_note, mr.records AS match_records, link.match_jury,
        -- Shown beside a match note (the panel's Red List line); not needed otherwise.
        CASE WHEN link.match_note IS NOT NULL THEN latest.authority END AS redlist_authority,
        CASE WHEN link.match_note IS NOT NULL THEN array_to_string([regexp_replace(trim(x.name), '\s+', ' ', 'g') FOR x IN latest.synonyms], ';') END AS redlist_synonyms,
