@@ -279,12 +279,26 @@ const DOUBT_SENTENCE: Record<string, (sp: SpeciesInput, sel: Selection) => strin
 
 /** A verdict's votes in words: "2/2 rules" → "2 independent runs agreed with the rules"; "4/5 rules; 1/5 can't tell" → "4 of 5 independent runs agreed with the rules, 1 couldn't tell". */
 export function juryVotes(votes: string): string {
-  const say: Record<string, (n: string) => string> = { rules: (n) => `${n} agreed with the rules`, other: (n) => `${n} gave another answer`,
-    "can't tell": (n) => `${n} couldn't tell`, missing: (n) => `${n} gave no answer`, "unknown record": (n) => `${n} named a record it wasn't given`,
-    unsourced: (n) => `${n} cited no source` };
   const parts = votes.split(";").map((p) => p.trim().match(/^(\d+)\/(\d+) (.+)$/)).filter((m): m is RegExpMatchArray => !!m);
   if (!parts.length) return votes;
-  return parts.map((m, i) => (i === 0 ? `${m[1] === m[2] ? m[1] : `${m[1]} of ${m[2]}`} independent runs ` : "") + (say[m[3]] ?? ((n: string) => `${n} ${m[3]}`))(i === 0 ? "" : m[1]).trim()).join(", ");
+  const total = Number(parts[0][2]);
+  // Answers other than the rules' ("other", "other 1", "other 2", ...) as one phrase: how many runs gave them, and how many different ones.
+  const others = parts.filter((m) => /^other( \d+)?$/.test(m[3]));
+  const nOther = others.reduce((a, m) => a + Number(m[1]), 0);
+  const otherPhrase = (n: number) => (others.length > 1 ? `${n} gave ${others.length} different other answers` : `${n} gave another answer`);
+  const say: Record<string, (n: number) => string> = { rules: (n) => `${n} agreed with the rules`,
+    "can't tell": (n) => `${n} couldn't tell`, missing: (n) => `${n} gave no answer`, "unknown record": (n) => `${n} named a record it wasn't given`,
+    unsourced: (n) => `${n} cited no source` };
+  const items: [number, string][] = [];
+  for (const m of parts) {
+    if (/^other( \d+)?$/.test(m[3])) { if (m === others[0]) items.push([nOther, "other"]); continue; }
+    items.push([Number(m[1]), m[3]]);
+  }
+  items.sort((a, b) => b[0] - a[0]);
+  return items.map(([n, k], i) => {
+    const phrase = k === "other" ? otherPhrase(n) : (say[k] ?? ((x: number) => `${x} ${k}`))(n);
+    return i === 0 ? `${n === total ? n : `${n} of ${total}`} independent runs ${phrase.replace(/^\d+ /, "")}` : phrase;
+  }).join(", ");
 }
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */

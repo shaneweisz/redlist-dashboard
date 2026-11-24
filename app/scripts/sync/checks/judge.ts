@@ -173,7 +173,9 @@ export function outcome(runs: (Answer | undefined)[], ours: { id: string; relati
   const keys = runs.map(keyOf);
   const n = new Map<string, number>();
   for (const k of keys) n.set(k, (n.get(k) ?? 0) + 1);
-  const label = (k: string) => (k === mine ? "rules" : NOT.has(k) ? k : "other");
+  // Each answer other than the rules' is told apart: "other 1" is the commonest, "other 2" the next.
+  const others = [...n].filter(([k]) => k !== mine && !NOT.has(k)).sort((x, y) => y[1] - x[1]).map(([k]) => k);
+  const label = (k: string) => (k === mine ? "rules" : NOT.has(k) ? k : others.length > 1 ? `other ${others.indexOf(k) + 1}` : "other");
   const tally = new Map<string, number>();
   for (const [k, c] of n) tally.set(label(k), (tally.get(label(k)) ?? 0) + c);
   const votes = [...tally].sort((x, y) => y[1] - x[1]).map(([l, c]) => `${c}/${runs.length} ${l}`).join("; ");

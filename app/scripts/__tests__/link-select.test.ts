@@ -336,6 +336,8 @@ describe("jury notes", () => {
     const { juryVotes } = await import("../sync/link/assessment-link");
     expect(juryVotes("2/2 rules")).toBe("2 independent runs agreed with the rules");
     expect(juryVotes("3/5 rules; 1/5 can't tell; 1/5 other")).toBe("3 of 5 independent runs agreed with the rules, 1 couldn't tell, 1 gave another answer");
+    expect(juryVotes("2/5 other 1; 2/5 other 2; 1/5 other 3")).toBe("5 independent runs gave 3 different other answers");
+    expect(juryVotes("2/5 rules; 2/5 other 1; 1/5 other 2")).toBe("3 of 5 independent runs gave 2 different other answers, 2 agreed with the rules");
   });
   it("a confirmed or undecided verdict keeps the species' doubts and adds the check to its note", async () => {
     const { matchNote } = await import("../sync/link/assessment-link");
