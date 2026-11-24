@@ -28,7 +28,7 @@ import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
 import { CATEGORY_COLORS, TAXA, TAXA_BY_ID, THREATENED_CATEGORIES } from "@/config/taxa";
-import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_LABEL } from "@/lib/taxonomy-utils";
+import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBreakdownName, breakdownDisplayName, COL_RELEASE_PLAIN } from "@/lib/taxonomy-utils";
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
@@ -1318,7 +1318,7 @@ interface RedListViewProps {
 }
 
 // Info note on the toggle's Not Evaluated count.
-const NE_COUNT_NOTE = `Counted according to the taxonomy of the ${COL_RELEASE_LABEL}.`;
+const NE_COUNT_NOTE = `Counted according to the taxonomy of ${COL_RELEASE_PLAIN}.`;
 
 export default function RedListView({ viewMode = "reassessments", onViewModeChange, sharedTaxa, sharedSubgroups, onTaxaChange, onSubgroupsChange }: RedListViewProps = {}) {
   const isNewAssessments = viewMode === "new-assessments";
