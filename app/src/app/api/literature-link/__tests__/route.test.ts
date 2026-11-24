@@ -11,7 +11,7 @@ const call = (qs: string) => GET(new NextRequest(`http://localhost/api/literatur
 
 describe("/api/literature-link", () => {
   it("redirects to OpenAlex filtered to the species' works", async () => {
-    getLiteratureWorks.mockResolvedValue({ works: [BigInt(7), BigInt(3)], total: 2 });
+    getLiteratureWorks.mockResolvedValue({ works: [BigInt(7), BigInt(3)] });
     const res = await call("sis=42&name=Panthera%20leo&since=2016-09-12");
     expect(res.status).toBe(302);
     expect(decodeURIComponent(res.headers.get("location")!)).toBe("https://openalex.org/works?filter=openalex:W7|W3");
@@ -19,7 +19,7 @@ describe("/api/literature-link", () => {
   });
 
   it("looks an unassessed species up by its col id", async () => {
-    getLiteratureWorks.mockResolvedValue({ works: [BigInt(5)], total: 1 });
+    getLiteratureWorks.mockResolvedValue({ works: [BigInt(5)] });
     await call("col=ABC12&name=Eumops%20chiribaya");
     expect(getLiteratureWorks).toHaveBeenCalledWith({ sisTaxonId: undefined, colId: "ABC12", since: undefined, limit: 100 });
   });

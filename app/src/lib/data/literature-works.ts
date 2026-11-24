@@ -18,7 +18,7 @@ export interface LiteratureWorksQuery {
  * in all. "Since" is decided as the count decides it: by date where a work has
  * one, else by year (a work dated only to the assessment's year isn't new).
  */
-export async function getLiteratureWorks(q: LiteratureWorksQuery): Promise<{ works: bigint[]; total: number }> {
+export async function getLiteratureWorks(q: LiteratureWorksQuery): Promise<{ works: bigint[] }> {
   const conn = await getConn();
   const where = [q.sisTaxonId != null ? "sis_taxon_id = $sis" : "col_id = $col"];
   const params: Record<string, string | number> = q.sisTaxonId != null ? { sis: q.sisTaxonId } : { col: q.colId! };
@@ -29,9 +29,9 @@ export async function getLiteratureWorks(q: LiteratureWorksQuery): Promise<{ wor
     params.since = q.since;
   }
   const rows = (await conn.runAndReadAll(`
-    SELECT work, publication_date, publication_year, count(*) OVER () AS total
+    SELECT work, publication_date, publication_year
     FROM (SELECT DISTINCT work, publication_date, publication_year FROM '${parquetUri("literature-works.parquet")}' WHERE ${where.join(" AND ")})
     ORDER BY publication_date DESC NULLS LAST, publication_year DESC, work DESC
     LIMIT ${Math.max(1, Math.floor(q.limit))}`, params)).getRowObjects();
-  return { works: rows.map((r) => BigInt(r.work as bigint)), total: Number(rows[0]?.total ?? 0) };
+  return { works: rows.map((r) => BigInt(r.work as bigint)) };
 }

@@ -6,8 +6,8 @@
  * (https://www.biodiversitylibrary.org/Data/TSV/data.zip, about 2.5 GB),
  * including every scientific name its name-finding found on each scanned page
  * (pagename.txt). The export is downloaded to ~/Data/bhl/ (again whenever BHL
- * publishes a new one) and reduced once per export, named by the month BHL
- * published it, to ~/.cache/redlist-dashboard/bhl/<month>/mentions.parquet:
+ * publishes a new one) and reduced once per export, named by when BHL
+ * published it, to ~/.cache/redlist-dashboard/bhl/<Last-Modified>/mentions.parquet:
  *
  *   work_id            'part:<id>' for an article BHL has segmented, else
  *                      'item:<id>' for the volume the page is in
@@ -52,7 +52,7 @@ function remoteVersion(): ExportVersion | null {
  * differ from the ones recorded beside it, data.json), and its tables
  * re-extracted. Offline, the last download is used.
  */
-export async function ensureBhlMentions(): Promise<{ month: string; mentions: string }> {
+export async function ensureBhlMentions(): Promise<{ month: string; version: string; mentions: string }> {
   const zip = path.join(DOWNLOADS, "data.zip");
   const recorded = path.join(DOWNLOADS, "data.json");
   const dir = path.join(DOWNLOADS, "Data");
@@ -78,10 +78,18 @@ export async function ensureBhlMentions(): Promise<{ month: string; mentions: st
   if (!version) throw new Error("bhl: the export's version is unknown; delete ~/Data/bhl/data.zip to download it again");
   fs.writeFileSync(recorded, JSON.stringify(version, null, 2) + "\n");
   const month = version.lastModified.slice(0, 7);
-  const out = path.join(CACHE_ROOT, "bhl", month, "mentions.parquet");
-  if (fs.existsSync(out)) return { month, mentions: out };
-  if (!TABLES.every((t) => fs.existsSync(path.join(dir, `${t}.txt`)))) {
+  // Keyed by the full Last-Modified, so a second export in the same month is reduced again.
+  const stamp = version.lastModified.slice(0, 19).replace(/:/g, "-");
+  const result = { month, version: version.lastModified, mentions: path.join(CACHE_ROOT, "bhl", stamp, "mentions.parquet") };
+  const out = result.mentions;
+  if (fs.existsSync(out)) return result;
+  // The tables are extracted whole or not at all: an unzip cut short would
+  // leave a truncated pagename.txt that reads without error, and undercount.
+  const extracted = path.join(dir, ".complete");
+  if (!fs.existsSync(extracted)) {
+    fs.rmSync(dir, { recursive: true, force: true });
     execFileSync("unzip", ["-oq", zip, ...TABLES.map((t) => `Data/${t}.txt`), "-d", DOWNLOADS], { stdio: "inherit" });
+    fs.writeFileSync(extracted, "");
   }
   const f = (t: string) => tsv(path.join(dir, `${t}.txt`));
   const conn = await openDuckDB();
@@ -105,7 +113,7 @@ export async function ensureBhlMentions(): Promise<{ month: string; mentions: st
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(DISTINCT work_id) AS works, count(DISTINCT name) AS names
     FROM read_parquet(${lit(out)})`)).getRowObjects();
   console.log(`   BHL ${month}: ${Number(s.n).toLocaleString()} mentions of ${Number(s.names).toLocaleString()} binomials in ${Number(s.works).toLocaleString()} works`);
-  return { month, mentions: out };
+  return result;
 }
 
 const isDirectRun = process.argv[1]?.endsWith("inputs/bhl.ts");

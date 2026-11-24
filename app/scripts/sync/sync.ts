@@ -101,7 +101,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   // works already read in full, never a new release (npm run sync:openalex).
   const bhl = await ensureBhlMentions();
   const openalex = localOpenAlexWorks();
-  if (!openalex) throw new Error("sync: no OpenAlex works read yet; run npm run sync:openalex once (days, bandwidth-bound)");
+  if (!openalex) throw new Error("sync: no OpenAlex release read yet. Run npm run sync:openalex once (it builds the CoL taxa it needs; days, bandwidth-bound), then sync again");
   // OpenAlex publishes a release quarterly: say when a newer one is waiting to be read.
   const newestOpenAlex = await listOpenAlexWorks().then((r) => r.release).catch(() => null);
   if (newestOpenAlex && newestOpenAlex > openalex.release) {
@@ -111,7 +111,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
   manifest.col = { xr: col.xr, checklist: col.checklist };
   manifest.gbif = { snapshot: snapshot.snapshot, citation: snapshot.citation, sourceRows: snapshot.sourceRows };
   manifest.inat = path.basename(path.dirname(inat));
-  const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot };
+  const releases = { xr: col.xr.key, checklist: col.checklist.key, snapshot: snapshot.snapshot, openalex: openalex.release, bhl: bhl.version };
   if (from > 0) {
     const why = sourcesMismatch(readSourcesReleases(T.sourcesReleases), releases);
     if (why) throw new Error(`sync: --from ${opts.from} would reuse tables built from other releases (${why}). ` +

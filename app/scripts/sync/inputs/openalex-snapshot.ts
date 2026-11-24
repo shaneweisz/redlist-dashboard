@@ -24,7 +24,8 @@
  * openAlexMentions() then finds the binomials: consecutive words of the title
  * or the abstract, leading and trailing punctuation stripped ("(Panthera",
  * "leo,"), kept where the pair is a CoL species name's genus and epithet.
- * Which species a name counts for is decided later (count/paper-counts.ts).
+ * Which species a name counts for is decided later (the dbt model
+ * count/paper_credits.sql).
  *
  * Environment:
  *   OPENALEX_CONCURRENCY   files downloaded and reduced at once (default 8)
@@ -39,14 +40,14 @@ import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { CACHE_ROOT, DUCKDB_TMP, parquet } from "../paths";
 import { lit } from "../sql";
 import { OPENALEX_LITERATURE_TYPES } from "../../../src/lib/literature";
+import { ensureColInputs } from "./col";
+import { buildTaxa } from "../sources/taxa";
 
 const run = promisify(execFile);
 const BUCKET = "https://openalex.s3.amazonaws.com";
 const PREFIX = "data/parquet/works/";
 /** What the reduced files hold; a change here rebuilds them rather than reusing them. */
 const GRAIN = "works-v1";
-/** The OpenAlex work types that count as literature (shared with the app, which links to the same search). */
-const LITERATURE_TYPES = OPENALEX_LITERATURE_TYPES;
 /** OpenAlex fields a work is kept for whatever its text says. */
 const KEPT_FIELDS = ["Agricultural and Biological Sciences", "Environmental Science"];
 
@@ -155,7 +156,7 @@ export async function openAlexMentions(inputs: { works: string[]; taxa: string }
           SELECT work_id, publication_date, publication_year, doi, title,
                  string_split(coalesce(title, ''), ' ') AS t, string_split(coalesce(abstract, ''), ' ') AS a
           FROM read_parquet(${lit(file)})
-          WHERE type IN (${LITERATURE_TYPES.map(lit).join(", ")}) AND NOT coalesce(is_retracted, false)),
+          WHERE type IN (${OPENALEX_LITERATURE_TYPES.map(lit).join(", ")}) AND NOT coalesce(is_retracted, false)),
         raw AS (
           SELECT work_id, 'title' AS part, unnest(${pairs("t")}) AS pr FROM w
           UNION ALL
@@ -217,7 +218,9 @@ export async function ensureOpenAlexWorks(inputs: { taxa: string }): Promise<{ r
   const setup = await instance.connect();
   await createBinomials(setup, inputs.taxa);
 
-  const todo = snap.files.map((f, i) => ({ ...f, tag: String(i).padStart(5, "0") }))
+  // Each file is tagged by its key, not its place in the listing, so a resumed
+  // read can't mistake one file for another if the listing changes.
+  const todo = snap.files.map((f) => ({ ...f, tag: createHash("sha1").update(f.key).digest("hex").slice(0, 16) }))
     .filter((f) => !fs.existsSync(path.join(works, `${f.tag}.done`)))
     // A fixed shuffle, so a run stopped part-way has read a fair sample of the
     // snapshot (the files are sorted by update date, oldest first).
@@ -262,7 +265,14 @@ const isDirectRun = process.argv[1]?.endsWith("inputs/openalex-snapshot.ts");
 if (isDirectRun) {
   const taxa = process.argv[2];
   if (!taxa) throw new Error("usage: npx tsx scripts/sync/inputs/openalex-snapshot.ts <taxa.parquet>");
-  ensureOpenAlexWorks({ taxa })
+  // On a machine that has never synced, build the CoL taxa it needs first
+  // (the sync's own sources stage writes the same file).
+  const ready = fs.existsSync(taxa) ? Promise.resolve() : (async () => {
+    console.log(`   no ${taxa} yet: building it from CoL`);
+    fs.mkdirSync(path.dirname(taxa), { recursive: true });
+    await buildTaxa(await ensureColInputs(), taxa);
+  })();
+  ready.then(() => ensureOpenAlexWorks({ taxa }))
     .then((r) => console.log(`Done: ${r.files} files → ${r.dir}`))
     .catch((e) => { console.error(e); process.exit(1); });
 }
