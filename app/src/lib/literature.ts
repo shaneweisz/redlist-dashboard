@@ -28,9 +28,9 @@ export const OPENALEX_LITERATURE_TYPES = ["article", "review", "book", "book-cha
  */
 export function literatureColumnNote(source: LiteratureSource, version?: string): string {
   if (source === "bhl") {
-    return `Works in the Biodiversity Heritage Library${version ? `'s ${version} export` : ""} whose scanned pages name the species or a synonym CoL lists for it. BHL's own site may list more, found since.`;
+    return `${version ? `Counts as of BHL's ${version} export: works` : "Works in the Biodiversity Heritage Library"} whose scanned pages name the species or a synonym CoL lists for it. BHL's live site has been updated since.`;
   }
-  return `Papers in OpenAlex${version ? `'s ${version} snapshot` : ""} whose title or abstract names the species or a synonym CoL lists for it. Records with the same title count as one paper.`;
+  return `${version ? `Counts as of OpenAlex's ${version} snapshot: papers` : "Papers in OpenAlex"} whose title or abstract names the species or a synonym CoL lists for it, records with the same title counted once. OpenAlex's live site has been updated since.`;
 }
 
 /**
