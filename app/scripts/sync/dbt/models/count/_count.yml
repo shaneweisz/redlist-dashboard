@@ -28,8 +28,11 @@ unit_tests:
     description: >
       Who a mention counts for. Species 1 is named by its own name and by a
       synonym it owns. A name two species own ("Cus dus") counts for neither,
-      while a misapplied usage of "Aus bus" doesn't make it ambiguous. An
-      unassessed species is credited by its col_id, per source.
+      while a misapplied usage of "Aus bus" doesn't make it ambiguous, nor does
+      another author's synonym "Gus hus" filed under another species when the
+      name is accepted for species 3. Two synonyms "Hus ius" under two species
+      count for neither. An unassessed species is credited by its col_id, per
+      source.
     model: paper_credits
     given:
       - input: source('sources', 'taxa')
@@ -37,14 +40,16 @@ unit_tests:
         rows: |
           SELECT *, 'species' AS rank FROM (VALUES
             ('U1', 'Aus bus', 'accepted'), ('U2', 'Aus oldus', 'synonym'), ('U9', 'Aus bus', 'misapplied'),
-            ('U3', 'Cus dus', 'accepted'), ('U4', 'Cus dus', 'accepted'), ('C6', 'Eus fus', 'accepted')
+            ('U3', 'Cus dus', 'accepted'), ('U4', 'Cus dus', 'accepted'), ('C6', 'Eus fus', 'accepted'),
+            ('G1', 'Gus hus', 'accepted'), ('G2', 'Gus hus', 'synonym'), ('H1', 'Hus ius', 'synonym'), ('H2', 'Hus ius', 'synonym')
           ) t(col_id, scientific_name, status)
       - input: ref('usage_owner')
         format: sql
         rows: |
           SELECT * FROM (VALUES
             ('U1', 1::BIGINT, 'U1', NULL), ('U2', 1, 'U1', NULL), ('U9', 9, 'U9', NULL),
-            ('U3', 2, 'U3', NULL), ('U4', NULL, NULL, 'C5'), ('C6', NULL, NULL, 'C6')
+            ('U3', 2, 'U3', NULL), ('U4', NULL, NULL, 'C5'), ('C6', NULL, NULL, 'C6'),
+            ('G1', 3, 'G1', NULL), ('G2', NULL, NULL, 'C7'), ('H1', 4, 'H1', NULL), ('H2', NULL, NULL, 'C8')
           ) t(usage_key, sis_taxon_id, link_usage_id, col_id)
       - input: source('sources', 'literature_mentions')
         format: sql
@@ -55,10 +60,13 @@ unit_tests:
             ('openalex', 'W2', DATE '2021-03-01', 2021, 'p2', 'Aus bus'),
             ('openalex', 'W7', DATE '2022-01-01', 2022, 'p7', 'Cus dus'),
             ('openalex', 'W8', DATE '2022-01-01', 2022, 'p8', 'Eus fus'),
-            ('bhl', 'item:8', NULL, 1890, 'item:8', 'Eus fus')
+            ('bhl', 'item:8', NULL, 1890, 'item:8', 'Eus fus'),
+            ('openalex', 'W9', DATE '2023-01-01', 2023, 'p9', 'Gus hus'),
+            ('openalex', 'W10', DATE '2023-01-01', 2023, 'p10', 'Hus ius')
           ) t(source, work_id, publication_date, publication_year, paper, name)
     expect:
       rows:
+        - {source: openalex, sis_taxon_id: 3, col_id: null, paper: p9, work_id: W9}
         - {source: openalex, sis_taxon_id: 1, col_id: null, paper: p1, work_id: W1}
         - {source: openalex, sis_taxon_id: 1, col_id: null, paper: p2, work_id: W2}
         - {source: openalex, sis_taxon_id: null, col_id: C6, paper: p8, work_id: W8}
