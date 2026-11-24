@@ -256,8 +256,18 @@ const DOUBT_SENTENCE: Record<string, (sp: SpeciesInput, sel: Selection) => strin
   "counts nothing": () => "Every record taken leads to a species the Red List assesses separately, so nothing counts.",
   "split, authors unclear": () => "A Red List synonym CoL holds as its own species counts whole, but its authors can't be told apart from another species'.",
   "synonym filed elsewhere": () => "A Red List synonym is filed in CoL under a species that isn't this one; only the records under that name count.",
-  "judge undecided": () => "Asked five times, the AI judge couldn't agree which CoL records are this species; the count follows the rules until a person decides.",
+  "judge undecided": (_sp, sel) => `Checked by an AI jury${sel.jury ? ` on ${sel.jury.date}` : ""}, which couldn't agree which CoL records are this species${sel.jury ? ` (${juryVotes(sel.jury.votes)})` : ""}; the count follows the rules until a person decides.`,
 };
+
+/** A verdict's votes in words: "4/5 rules; 1/5 can't tell" → "4 of 5 runs agreed with the rules, 1 couldn't tell". */
+export function juryVotes(votes: string): string {
+  const say: Record<string, (n: string) => string> = { rules: (n) => `${n} agreed with the rules`, other: (n) => `${n} gave another answer`,
+    "can't tell": (n) => `${n} couldn't tell`, missing: (n) => `${n} gave no answer`, "unknown record": (n) => `${n} named a record it wasn't given`,
+    unsourced: (n) => `${n} cited no source` };
+  const parts = votes.split(";").map((p) => p.trim().match(/^(\d+)\/(\d+) (.+)$/)).filter((m): m is RegExpMatchArray => !!m);
+  if (!parts.length) return votes;
+  return parts.map((m, i) => (i === 0 ? `${m[1]} of ${m[2]} runs ` : "") + (say[m[3]] ?? ((n: string) => `${n} ${m[3]}`))(i === 0 ? "" : m[1]).trim()).join(", ");
+}
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */
 export function matchNote(sel: Selection, sp: SpeciesInput): { note: string; records: NoteRecord[] } | null {
@@ -268,8 +278,10 @@ export function matchNote(sel: Selection, sp: SpeciesInput): { note: string; rec
   for (const [i, x] of sel.selected.entries()) records.push(rec(x.record, x.relation === "refused" ? "not" : i === 0 ? "counted" : "also"));
   for (const r of sel.decision && sel.step === 1 ? [] : candidatesNotTaken(sel, sp)) records.push(rec(r, "not"));
 
-  if (sel.step === 1) sentences.push(`Decided by ${sel.decision?.by ?? "?"}${sel.reason ? ": not in CoL." : "."}`);
+  const by = sel.decision?.by ?? "?";
+  if (sel.step === 1) sentences.push(`Decided by ${by.startsWith("judge:") ? `an AI jury (${by.slice(6)}), its runs agreeing` : by}${sel.reason ? ": not in CoL." : "."}`);
   for (const d of sel.doubts) sentences.push(DOUBT_SENTENCE[d](sp, sel));
+  if (sel.jury?.verdict === "confirmed") sentences.push(`Checked by an AI jury on ${sel.jury.date}: ${juryVotes(sel.jury.votes)}; the doubt stands, but the records match.`);
   const first = sel.selected[0];
   if (sentences.length === 0 && first && first.basis !== "synonym") {
     if (!sameName(first.record.name, sp.name)) sentences.push(`CoL spells it ${first.record.name}, not ${sp.name}: the naming codes treat the two as one name.`);

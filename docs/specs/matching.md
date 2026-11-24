@@ -326,9 +326,11 @@ that is missing, *can't tell*, names a record it wasn't given, or would change
 the count without citing a source agrees with nothing.
 
 It writes a **verdict** to `seeds/judge-verdicts.tsv` when the agreed answer
-is the rules' (`confirmed`: the species leaves the review list and keeps its
-doubts), or when at least two runs answered and no answer reaches agreement
-(`undecided`: the doubt `judge undecided`). When the runs mostly can't tell,
+is the rules' (`confirmed`: the species leaves the review list but keeps its
+doubts and its flag), or when at least two runs answered and no answer reaches
+agreement (`undecided`: the doubt `judge undecided`). Either way the species'
+match note says it was checked, when, and how the runs voted, so the
+dashboard shows the checks done. When the runs mostly can't tell,
 it writes nothing and the species stays listed as it was. A verdict keeps the
 rules' answer by its records' names, authorship, status and species, as a
 decision does, and a hash of what else the judge was given (the Red List

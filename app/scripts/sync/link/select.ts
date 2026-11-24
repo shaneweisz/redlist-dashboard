@@ -91,6 +91,8 @@ export interface Selection {
   candidateSpecies: string[];
   /** Listed for review: to_review's text, or null. */
   toReview: string | null;
+  /** The judge's verdict, where one applies: the species keeps its doubts, and its note says what the check found. */
+  jury?: { verdict: "confirmed" | "undecided"; votes: string; date: string } | null;
 }
 
 // ── Definitions ───────────────────────────────────────────────────────────────
@@ -365,6 +367,7 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
     const s = select(sp, full, decisions.get(sp.sis));
     const v = verdicts.get(sp.sis);
     const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer && verdictBasis(sp, s) === v.basis;
+    if (applies) s.jury = { verdict: v.verdict, votes: v.votes, date: v.date };
     if (applies && v.verdict === "confirmed") s.toReview = null;
     if (applies && v.verdict === "undecided") { s.doubts.push("judge undecided"); s.toReview = `judge undecided (${v.votes})`; }
     return s;
