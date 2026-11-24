@@ -19,18 +19,34 @@
  *     which species that usage counts for. A paper naming a synonym counts for
  *     the species that owns it, and a lump or split is handled by the same
  *     ownership as occurrences. Misapplied usages are left out.
- *   - A name CoL holds for more than one species (a homonym across kingdoms, a
- *     name two species' records both claim) can't say which it means, and counts
- *     for neither.
+ *   - A bare name in a paper means the species CoL accepts under it. Where a
+ *     name has accepted (or provisionally accepted) records, only those decide
+ *     its owner; a synonym of the same name filed under another species (another
+ *     author's homonym: "Medicago sativa Urb.", "Formica rufa Wood") doesn't make
+ *     it ambiguous. A name with no accepted record is decided by its synonyms.
+ *   - A name whose deciding records count for more than one species (a homonym
+ *     across kingdoms, a name two species' records both claim) can't say which
+ *     it means, and counts for neither.
  */
 
-WITH name_owner AS (
-  SELECT t.scientific_name AS name, any_value(o.sis_taxon_id) AS sis_taxon_id, any_value(o.col_id) AS col_id
+WITH usages AS (
+  SELECT t.scientific_name AS name, o.sis_taxon_id, o.col_id,
+         coalesce(CAST(o.sis_taxon_id AS VARCHAR), 'col:' || o.col_id) AS owner,
+         t.status IN ('accepted', 'provisionally accepted') AS accepted
   FROM {{ source('sources', 'taxa') }} t
   JOIN {{ ref('usage_owner') }} o ON o.usage_key = t.col_id
   WHERE t.rank = 'species' AND t.status <> 'misapplied'
-  GROUP BY t.scientific_name
-  HAVING count(DISTINCT coalesce(CAST(o.sis_taxon_id AS VARCHAR), 'col:' || o.col_id)) = 1
+),
+deciding AS (
+  -- The accepted records where a name has any, else all its records.
+  SELECT * FROM usages u
+  WHERE accepted OR NOT EXISTS (SELECT 1 FROM usages a WHERE a.name = u.name AND a.accepted)
+),
+name_owner AS (
+  SELECT name, any_value(sis_taxon_id) AS sis_taxon_id, any_value(col_id) AS col_id
+  FROM deciding
+  GROUP BY name
+  HAVING count(DISTINCT owner) = 1
 )
 
 SELECT DISTINCT m.source, n.sis_taxon_id, n.col_id, m.paper, m.work_id, m.publication_date, m.publication_year
