@@ -4061,6 +4061,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the Country / Assessors row below Charts row 1 (reassessments mode).
   // First Assessments: Not Evaluated species have no assessed range, so
   // their countries come from GBIF records alone.
+  // Which GBIF snapshot the counts are as of, beside the GBIF Records chart's title
+  // (the species table's Total header says the same).
+  const gbifSnapshotInfo = DATA_VERSIONS.gbifSnapshot ? (
+    <HoverTooltip text={`Counts as of GBIF's ${DATA_VERSIONS.gbifSnapshot} snapshot.`}>
+      <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4M12 8h.01" />
+      </svg>
+    </HoverTooltip>
+  ) : null;
   const countryGbifInfo = (
     <HoverTooltip text="Based on GBIF records: a species only counts in a country once GBIF has a record of it there, so species that occur in a country but haven't been recorded there in GBIF yet are left out.">
       <svg className="w-3 h-3 text-zinc-400 dark:text-zinc-500 cursor-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -5524,7 +5534,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
@@ -5609,7 +5619,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {/* GBIF Records */}
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records</span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
                 <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
