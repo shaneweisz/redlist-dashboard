@@ -69,7 +69,7 @@ export async function buildLink(
   const conn = await openDuckDB();
   const T = { ...tables(), taxa: inputs.taxa, assessments: inputs.assessments, matches: inputs.matches, ...(inputs.occurrences ? { occurrences: inputs.occurrences } : {}) };
   const loaded = await loadInputs(T, inputs.decisions ?? readDecisions(), conn);
-  const selections = selectEvery(loaded.species, loaded.release, loaded.decisions);
+  const selections = selectEvery(loaded.species, loaded.release, loaded.decisions, loaded.confirmations);
   const species = new Map(loaded.species.map((s) => [s.sis, s]));
   const orphaned = [...loaded.decisions.keys()].filter((k) => !species.has(k));
   if (orphaned.length > 0) console.log(`   ${orphaned.length} decisions name species no longer assessed; delete them (SIS ${orphaned.slice(0, 5).join(", ")})`);

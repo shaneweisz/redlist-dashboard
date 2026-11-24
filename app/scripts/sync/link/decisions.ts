@@ -1,5 +1,5 @@
 /**
- * seeds/decisions.tsv: a person's (or an agent's) answer for a species the
+ * seeds/decisions.tsv: the judge's (or a person's) answer for a species the
  * rules can't settle (docs/specs/matching.md, "Decisions"). One row per decided
  * CoL record, tab-separated so it opens in a spreadsheet and diffs line by line:
  *
@@ -10,10 +10,15 @@
  *                  the accepted species it led to; all empty for "not in CoL"
  *   relation       is | part of | split into
  *   candidates     the candidates' species names when decided, sorted, ;-separated
- *   by             a GitHub handle, agent:<model>, or fixture
- *   reviewed       yes once a person has checked it
+ *   by             judge:<model> (written by `sync:judge -- decide`), a GitHub
+ *                  handle (an override: the judge never replaces it), agent:<model>,
+ *                  or fixture
+ *   reviewed       yes once a person has checked it, or the judge's runs agreed
  *   date           YYYY-MM-DD
  *   evidence       why, in a sentence
+ *   sources        the pages or papers it rests on, space-separated
+ *   transcripts    the judge's calls it came from, one per run, space-separated: each
+ *                  conversation, kept in a private bucket (checks/judge-transcripts.ts)
  *
  * A species' rows agree on the species-level columns. Whether a decision holds
  * is decisionHolds, below; select.ts applies it.
@@ -26,7 +31,7 @@ import { compareAuthors, normaliseAuthorship, sameName, sameNameKey } from "./na
 
 export const DECISIONS_FILE = path.join(SEEDS_DIR, "decisions.tsv");
 export const COLUMNS = ["sis_taxon_id", "redlist_name", "redlist_authority", "id", "name", "authorship", "status", "species",
-  "relation", "candidates", "by", "reviewed", "date", "evidence"] as const;
+  "relation", "candidates", "by", "reviewed", "date", "evidence", "sources", "transcripts"] as const;
 
 export type DecidedRelation = "is" | "part of" | "split into";
 
@@ -52,7 +57,12 @@ export interface Decision {
   reviewed: boolean;
   date: string;
   evidence: string;
+  sources: string[];
+  transcripts: string[];
 }
+
+/** A decision a person made: the judge never replaces it. */
+export const isOverride = (d: Pick<Decision, "by">) => !/^(judge|agent):|^fixture$/.test(d.by);
 
 const RELATIONS = new Set<string>(["is", "part of", "split into"]);
 
@@ -77,6 +87,7 @@ export function readDecisions(file = DECISIONS_FILE): Map<number, Decision> {
       sis, redlistName: get("redlist_name"), redlistAuthority: get("redlist_authority") || null,
       candidates: get("candidates") ? get("candidates").split(";").map((s) => s.trim()).filter(Boolean) : [],
       by: get("by"), reviewed: get("reviewed").toLowerCase() === "yes", date: get("date"), evidence: get("evidence"),
+      sources: get("sources").split(/\s+/).filter(Boolean), transcripts: get("transcripts").split(/\s+/).filter(Boolean),
     };
     const prev = out.get(sis);
     if (prev) {
@@ -95,7 +106,7 @@ export function writeDecisions(decisions: Iterable<Decision>, file = DECISIONS_F
   for (const d of [...decisions].sort((a, b) => a.sis - b.sis)) {
     for (const r of d.rows.length ? d.rows : [null]) {
       lines.push([String(d.sis), d.redlistName, d.redlistAuthority, r?.id, r?.name, r?.authorship, r?.status, r?.species, r?.relation,
-        [...d.candidates].sort().join(";"), d.by, d.reviewed ? "yes" : "no", d.date, d.evidence].map(clean).join("\t"));
+        [...d.candidates].sort().join(";"), d.by, d.reviewed ? "yes" : "no", d.date, d.evidence, d.sources.join(" "), d.transcripts.join(" ")].map(clean).join("\t"));
     }
   }
   fs.writeFileSync(file, [COLUMNS.join("\t"), ...lines].join("\n") + "\n");
@@ -139,4 +150,65 @@ export function decisionHolds<R extends DecidableRecord>(
     records.push({ record: found, relation: r.relation! });
   }
   return { holds: true, records };
+}
+
+// ── The judge's other files ───────────────────────────────────────────────────
+
+/**
+ * seeds/judge-confirmed.tsv: species whose rules' answer the judge's runs agreed
+ * with, so they leave the review list while the answer stays the same.
+ *
+ *   sis_taxon_id, redlist_name
+ *   answer   the records it confirmed, as answerKey writes them
+ *   by       judge:<model>
+ *   date     YYYY-MM-DD
+ *   transcripts  the judge's calls, as in decisions.tsv
+ */
+export const CONFIRMED_FILE = path.join(SEEDS_DIR, "judge-confirmed.tsv");
+const CONFIRMED_COLUMNS = ["sis_taxon_id", "redlist_name", "answer", "by", "date", "transcripts"] as const;
+export interface Confirmation { sis: number; redlistName: string; answer: string; by: string; date: string; transcripts: string[] }
+
+/** A selection's answer as a confirmation keeps it: its taken records and relations, refused left out, sorted. */
+export const answerKey = (selected: { id: string; relation: string }[]) =>
+  selected.filter((x) => x.relation !== "refused").map((x) => `${x.id}:${x.relation}`).sort().join(",");
+
+/**
+ * seeds/judge-notes.tsv: a person's notes to the judge about one species, which
+ * it is given with the species' facts, weighed as evidence. A note puts the
+ * species in the next `decide` run, and a changed note asks again.
+ *
+ *   sis_taxon_id, redlist_name, note, by (a GitHub handle), date
+ */
+export const NOTES_FILE = path.join(SEEDS_DIR, "judge-notes.tsv");
+const NOTES_COLUMNS = ["sis_taxon_id", "redlist_name", "note", "by", "date"] as const;
+export interface Note { sis: number; redlistName: string; note: string; by: string; date: string }
+
+function readTsv<C extends readonly string[]>(file: string, columns: C): Record<C[number], string>[] {
+  if (!fs.existsSync(file)) return [];
+  const lines = fs.readFileSync(file, "utf-8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+  const header = lines.shift()?.split("\t") ?? [];
+  if (columns.some((c, i) => header[i] !== c)) throw new Error(`${path.basename(file)}: expected columns ${columns.join(", ")}`);
+  return lines.map((l) => { const f = l.split("\t"); return Object.fromEntries(columns.map((c, i) => [c, (f[i] ?? "").trim()])) as Record<C[number], string>; });
+}
+function writeTsv<C extends readonly string[]>(file: string, columns: C, rowsOut: string[][]): void {
+  const clean = (s: string) => s.replace(/[\t\n]/g, " ");
+  fs.writeFileSync(file, [columns.join("\t"), ...rowsOut.map((r) => r.map(clean).join("\t"))].join("\n") + "\n");
+}
+
+export function readConfirmations(file = CONFIRMED_FILE): Map<number, Confirmation> {
+  return new Map(readTsv(file, CONFIRMED_COLUMNS).map((r) => [Number(r.sis_taxon_id),
+    { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, answer: r.answer, by: r.by, date: r.date,
+      transcripts: r.transcripts.split(/\s+/).filter(Boolean) }]));
+}
+export function writeConfirmations(cs: Iterable<Confirmation>, file = CONFIRMED_FILE): void {
+  writeTsv(file, CONFIRMED_COLUMNS, [...cs].sort((a, b) => a.sis - b.sis).map((c) => [String(c.sis), c.redlistName, c.answer, c.by, c.date, c.transcripts.join(" ")]));
+}
+export function readNotes(file = NOTES_FILE): Map<number, Note[]> {
+  const out = new Map<number, Note[]>();
+  for (const r of readTsv(file, NOTES_COLUMNS)) {
+    const sis = Number(r.sis_taxon_id);
+    if (!Number.isInteger(sis) || sis <= 0 || !r.note) throw new Error(`${path.basename(file)}: a row needs a sis_taxon_id and a note`);
+    (out.get(sis) ?? out.set(sis, []).get(sis)!).push({ sis, redlistName: r.redlist_name, note: r.note, by: r.by, date: r.date });
+  }
+  return out;
 }

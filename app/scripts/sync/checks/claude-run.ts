@@ -70,3 +70,14 @@ export function toolUse(transcript: string): { reads: string[]; writes: string[]
   }
   return out;
 }
+
+/** The final result of a run: the whole output for json, the last `result` line for stream-json. */
+export function resultOf(stdout: string): { total_cost_usd?: number; structured_output?: unknown; result?: unknown } {
+  const t = stdout.trim();
+  if (t.startsWith("{") && !t.includes("\n{")) return JSON.parse(t);
+  const lines = t.split("\n").filter((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try { const d = JSON.parse(lines[i]); if (d.type === "result") return d; } catch { /* a partial line */ }
+  }
+  throw new Error("claude: no result in its output");
+}

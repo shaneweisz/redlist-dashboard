@@ -1,6 +1,6 @@
 /**
  * rebuild-check: can the selection be rebuilt from docs/specs/matching.md alone?
- * (The spec's implementation plan, step 1.) An agent gets a sealed folder:
+ * (The spec's "How it's checked".) An agent gets a sealed folder:
  *
  *   spec.md          the spec
  *   name-rules.mjs   link/name-rules.ts bundled into one file, the only library it may use
@@ -47,7 +47,7 @@ const OUTPUT_SCHEMA = {
 
 const PROMPT = `This folder holds a specification (spec.md) and the inputs it describes (inputs/).
 Implement the spec's selection: for every species in inputs/species.jsonl, its step, reason, doubts, and selected records with
-their relation, relation_step and basis, as the spec's implementation plan describes for sync:select. Write the result to
+their relation, relation_step and basis, as the spec's Output section describes. Write the result to
 out.json in this folder, matching output.schema.json. The only library you may use is name-rules.mjs (import it from node).
 inputs/README.md says what each file holds. Work only inside this folder (scratch files go in tmp/). When you are done, say how many species you wrote.`;
 

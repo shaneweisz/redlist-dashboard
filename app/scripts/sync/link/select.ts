@@ -1,8 +1,9 @@
 /**
  * The selection rule of docs/specs/matching.md: for one assessed species, the
  * CoL records that represent it, each with its relation, and the species'
- * doubts or the reason nothing was taken. The spec is the source of truth;
- * section names below are its headings.
+ * doubts or the reason nothing was taken. This code is what the rule does and
+ * the spec is what it is meant to do: the rebuild check and the tests keep the
+ * two in step. Section names below are the spec's headings.
  *
  * select() is pure: a species, the release's lookups, and its decision.
  * selectAll() reads a build (sources/ and link/matches.parquet) and runs every
@@ -15,7 +16,7 @@
 import {
   compareAuthors, orthographicallySame, sameName, sameNameKey, sameOrganism, isCoLRespelling, type TaxonName,
 } from "./name-rules";
-import { decisionHolds, type Decision, type DecidedRelation, type Lapse } from "./decisions";
+import { answerKey, decisionHolds, type Confirmation, type Decision, type DecidedRelation, type Lapse } from "./decisions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -345,7 +346,9 @@ export const countedWhole = (s: Selection) => s.selected.filter((x) => x.relatio
  * which CoL species each assessed species' steps count whole, then each
  * species in full.
  */
-export function selectEvery(species: SpeciesInput[], release: Omit<Release, "wholeBySteps">, decisions: Map<number, Decision>): Selection[] {
+export function selectEvery(species: SpeciesInput[], release: Omit<Release, "wholeBySteps">, decisions: Map<number, Decision>,
+  /** The judge's confirmations: a species whose answer the judge confirmed leaves the review list while the answer stays the same. */
+  confirmations: Map<number, Confirmation> = new Map()): Selection[] {
   const wholeBySteps = new Map<string, Set<number>>();
   const firstPass: Release = { ...release, wholeBySteps: new Map() };
   for (const sp of species) {
@@ -354,7 +357,12 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
     }
   }
   const full: Release = { ...release, wholeBySteps };
-  return species.map((sp) => select(sp, full, decisions.get(sp.sis)));
+  return species.map((sp) => {
+    const s = select(sp, full, decisions.get(sp.sis));
+    const c = confirmations.get(sp.sis);
+    if (c && !s.decision && answerKey(s.selected.map((x) => ({ id: x.record.id, relation: x.relation }))) === c.answer) s.toReview = null;
+    return s;
+  });
 }
 
 export type { DecidedRelation };

@@ -254,7 +254,7 @@ describe("decisions", () => {
   const input = species("Centropogon australis", "(Shaw, 1790)", acc(waspfish), [], { kingdom: "Animalia", phylum: "Chordata" });
   const decision = (over: Partial<Decision> = {}): Decision => ({
     sis: 1, redlistName: "Centropogon australis", redlistAuthority: "(Shaw, 1790)", candidates: ["Centropogon australis"], by: "fixture", reviewed: true,
-    date: "2026-11-10", evidence: "the waspfish",
+    date: "2026-11-10", evidence: "the waspfish", sources: [], transcripts: [],
     rows: [{ id: "5XHD2", name: "Centropogon australis", authorship: "(White, 1790)", status: "accepted", species: "Centropogon australis", relation: "is" }], ...over });
   const rel = release([acc(waspfish), acc(plant)]);
 
@@ -303,5 +303,15 @@ describe("selectEvery", () => {
     const [sa] = selectEvery([a, b], r, new Map());
     // Panthera tigris is another assessed name too; either way the record isn't added.
     expect(ids(sa)).toEqual(["L:is"]);
+  });
+
+  it("a judge's confirmation takes a species off the review list only while its answer is the confirmed one", () => {
+    const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
+    const a = species("Panthera leo", "(Gray, 1867)", acc(leo));  // other authors: listed
+    const r = release() as Omit<Release, "wholeBySteps">;
+    const c = (answer: string) => new Map([[1, { sis: 1, redlistName: "Panthera leo", answer, by: "judge:m", date: "2026-11-24", transcripts: [] }]]);
+    expect(selectEvery([a], r, new Map())[0].toReview).toMatch(/^other authors/);
+    expect(selectEvery([a], r, new Map(), c("L:is"))[0].toReview).toBeNull();
+    expect(selectEvery([a], r, new Map(), c("X:is"))[0].toReview).toMatch(/^other authors/);
   });
 });

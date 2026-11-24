@@ -4,8 +4,11 @@
  * that "what did a person decide, and why" is a list you can read in one place.
  *
  *   decisions.tsv            the CoL records a Red List species is, where the
- *                            rules can't settle it, one row per record
- *                            (link/decisions.ts, docs/specs/matching.md)
+ *                            rules can't settle it, one row per record, mostly
+ *                            written by the judge (link/decisions.ts,
+ *                            docs/specs/matching.md)
+ *   judge-confirmed.tsv      species whose rules' answer the judge confirmed
+ *   judge-notes.tsv          a person's notes to the judge about a species
  *   domesticated-and-humans.tsv
  *                            species never listed as Not Evaluated: domestic
  *                            forms, whose wild relatives are what IUCN assesses,

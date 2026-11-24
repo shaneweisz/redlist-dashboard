@@ -15,10 +15,12 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { BUILD_DIR, tables } from "./paths";
+import { BUILD_DIR, CACHE_ROOT, tables } from "./paths";
+import { readTranscript, summarise } from "./checks/judge-transcripts";
 import { openDuckDB, rows, lit } from "./sql";
-import { readDecisions } from "./link/decisions";
+import { readConfirmations, readDecisions } from "./link/decisions";
 import { syncPath } from "../../src/lib/data/sync-layout";
+import { loadEnvFiles } from "../lib/utils";
 
 type Score = { name: number | null; authorship: number | null; classification: number | null; rank: number | null; status: number | null; total: number | null } | null;
 
@@ -83,6 +85,17 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
     for (const r of o.rows) say(`    ${r.relation}: ${r.name} ${r.authorship ?? ""} [${r.id}, ${r.status}, of ${r.species}]`);
     if (o.rows.length === 0) say(`    not in CoL`);
   }
+  const confirmed = readConfirmations().get(s.sis);
+  if (confirmed) say(`  Confirmed by ${confirmed.by}, ${confirmed.date}: the rules' answer (${confirmed.answer})`);
+  for (const [i, key] of (o?.transcripts ?? confirmed?.transcripts ?? []).entries()) {
+    const t = await readTranscript(key, path.join(CACHE_ROOT, "judge-cache"));
+    if (!t) { say(`  Run ${i + 1} (${key}): transcript not found locally or in the bucket`); continue; }
+    const r = summarise(t, s.sis, s.name);
+    say(`  Run ${i + 1} (${key}): ${r.searches.length} searches and ${r.fetches.length} pages for it (${r.others} for the batch's other species)`);
+    for (const q of r.searches) say(`    searched: ${q}`);
+    for (const u of r.fetches) say(`    read: ${u}`);
+    if (r.answer) say(`    answered: ${JSON.stringify(r.answer).slice(0, 600)}`);
+  }
 
   // ── 2. The selection
   say(); say("2. The selection");
@@ -125,6 +138,7 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
 
 const isDirectRun = process.argv[1]?.endsWith("sync/trace.ts") || process.argv[1]?.endsWith("sync/trace.js");
 if (isDirectRun) {
+  loadEnvFiles(); // the transcripts bucket, for a transcript not cached here
   const q = process.argv.slice(2).join(" ").trim();
   if (!q) { console.error('Usage: npm run sync:trace -- "<Red List name or SIS id>"'); process.exit(1); }
   trace(q).then((s) => console.log(s)).catch((e) => { console.error(e.message ?? e); process.exit(1); });

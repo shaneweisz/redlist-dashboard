@@ -11,3 +11,5 @@ For each species, say which of the listed CoL records hold this Red List species
 Leave out any record whose records are not this species'.
 
 The facts settle the plain cases: one record of the same name and authority that leads to itself, or a synonym CoL files under that same species. For every other species, look it up before you answer: search the web for the current treatment in an authoritative source for its group (for example Plants of the World Online or World Flora Online for plants, the Catalog of Fishes, Amphibian Species of the World, the Reptile Database, the Mammal Diversity Database, the IOC World Bird List or Avibase, WoRMS or MolluscaBase, or the taxon's latest revision), and give the pages you used as URLs in its sources. If what you find doesn't let you decide, answer "can't tell" for that species. Give a short reason for each answer.
+
+Some species carry notes_from_people: what someone who has looked at the species thinks. Take a note as evidence to check, not as the answer, and say in your reason whether what you found agrees with it.
