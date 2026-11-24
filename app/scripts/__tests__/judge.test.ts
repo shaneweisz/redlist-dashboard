@@ -53,7 +53,7 @@ describe("facts", () => {
     const tigris = { ...spc, id: "T", name: "Panthera tigris" };
     const sp: SpeciesInput = { sis: 1, name: "Panthera leo", authority: "(Linnaeus, 1758)", kingdom: "Animalia", phylum: "Chordata",
       synonyms: [{ name: "Felis leo", authors: ["Linnaeus, 1758"] }], match: { matchType: "EXACT", answerName: "Panthera leo", answer: rec("S"), alternatives: [] } };
-    const inputs = { species: [sp], decisions: new Map(), confirmations: new Map(), release: {
+    const inputs = { species: [sp], decisions: new Map(), verdicts: new Map(), release: {
       assessedNames: new Set(["panthera leo", "panthera tigris"]), byId: () => undefined, occurrencesUnder: (id: string) => (id === "FL" ? 7 : 0),
       recordsNamed: (n: string) => (n === "Felis leo" ? [rec("FL", { name: "Felis leo", status: "SYNONYM", species: tigris })] : []) } };
     const f = facts(sp, { class: "Mammalia" }, inputs);
@@ -71,7 +71,7 @@ describe("outcome (decide)", () => {
   const ans = (records: Answer["records"]): Answer => ({ sis_taxon_id: 1, records, reason: "r", sources: ["https://x"] });
   const ours = [{ id: "S", relation: "is" }];
   it("confirms when every run counts what the rules count, even naming other records of the same species", () => {
-    expect(outcome([ans([{ id: "S", relation: "is" }]), ans([{ id: "S2", relation: "is" }])], ours, look, known)).toEqual({ kind: "confirm" });
+    expect(outcome([ans([{ id: "S", relation: "is" }]), ans([{ id: "S2", relation: "is" }])], ours, look, known)).toEqual({ kind: "confirm", votes: "2/2 rules" });
   });
   it("decides when every run agrees and the rules don't", () => {
     const o = outcome([ans([{ id: "P", relation: "part of" }]), ans([{ id: "P", relation: "part of" }])], ours, look, known);
@@ -82,6 +82,13 @@ describe("outcome (decide)", () => {
     expect(outcome([ans([{ id: "P", relation: "part of" }]), ans("can't tell")], ours, look, known).kind).toBe("split");
     expect(outcome([ans([{ id: "P", relation: "part of" }]), undefined], ours, look, known).kind).toBe("split");
     expect(outcome([ans([{ id: "NOPE", relation: "is" }]), ans([{ id: "NOPE", relation: "is" }])], ours, look, known).kind).toBe("split");
+  });
+  it("with need, decides on 4 of 5 and leaves 3 of 5 undecided, counting can't tell and unknown records as agreeing with nothing", () => {
+    const p = ans([{ id: "P", relation: "part of" }]), s = ans([{ id: "S", relation: "is" }]);
+    expect(outcome([p, p, p, p, s], ours, look, known, 4)).toMatchObject({ kind: "decide", votes: "4/5 other; 1/5 rules" });
+    expect(outcome([s, s, s, ans("can't tell"), p], ours, look, known, 4)).toMatchObject({ kind: "split", votes: "3/5 rules; 1/5 can't tell; 1/5 other" });
+    expect(outcome([s, s, s, s, ans([{ id: "NOPE", relation: "is" }])], ours, look, known, 4)).toMatchObject({ kind: "confirm" });
+    expect(outcome([ans("can't tell"), ans("can't tell")], ours, look, known).kind).toBe("split");
   });
   it("says how a decision changes the counts", () => {
     expect(change(ours, [{ id: "P", relation: "part of" }], look)).toBe("adds part + drops whole");

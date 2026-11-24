@@ -69,7 +69,7 @@ export async function buildLink(
   const conn = await openDuckDB();
   const T = { ...tables(), taxa: inputs.taxa, assessments: inputs.assessments, matches: inputs.matches, ...(inputs.occurrences ? { occurrences: inputs.occurrences } : {}) };
   const loaded = await loadInputs(T, inputs.decisions ?? readDecisions(), conn);
-  const selections = selectEvery(loaded.species, loaded.release, loaded.decisions, loaded.confirmations);
+  const selections = selectEvery(loaded.species, loaded.release, loaded.decisions, loaded.verdicts);
   const species = new Map(loaded.species.map((s) => [s.sis, s]));
   const orphaned = [...loaded.decisions.keys()].filter((k) => !species.has(k));
   if (orphaned.length > 0) console.log(`   ${orphaned.length} decisions name species no longer assessed; delete them (SIS ${orphaned.slice(0, 5).join(", ")})`);
@@ -256,6 +256,7 @@ const DOUBT_SENTENCE: Record<string, (sp: SpeciesInput, sel: Selection) => strin
   "counts nothing": () => "Every record taken leads to a species the Red List assesses separately, so nothing counts.",
   "split, authors unclear": () => "A Red List synonym CoL holds as its own species counts whole, but its authors can't be told apart from another species'.",
   "synonym filed elsewhere": () => "A Red List synonym is filed in CoL under a species that isn't this one; only the records under that name count.",
+  "judge undecided": () => "Asked five times, the AI judge couldn't agree which CoL records are this species; the count follows the rules until a person decides.",
 };
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */

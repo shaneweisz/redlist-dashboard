@@ -18,7 +18,7 @@ import * as path from "path";
 import { BUILD_DIR, CACHE_ROOT, tables } from "./paths";
 import { readTranscript, summarise } from "./checks/judge-transcripts";
 import { openDuckDB, rows, lit } from "./sql";
-import { readConfirmations, readDecisions } from "./link/decisions";
+import { readVerdicts, readDecisions } from "./link/decisions";
 import { syncPath } from "../../src/lib/data/sync-layout";
 import { loadEnvFiles } from "../lib/utils";
 
@@ -85,9 +85,9 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
     for (const r of o.rows) say(`    ${r.relation}: ${r.name} ${r.authorship ?? ""} [${r.id}, ${r.status}, of ${r.species}]`);
     if (o.rows.length === 0) say(`    not in CoL`);
   }
-  const confirmed = readConfirmations().get(s.sis);
-  if (confirmed) say(`  Confirmed by ${confirmed.by}, ${confirmed.date}: the rules' answer (${confirmed.answer})`);
-  for (const [i, key] of (o?.transcripts ?? confirmed?.transcripts ?? []).entries()) {
+  const v = readVerdicts().get(s.sis);
+  if (v) say(`  Verdict (judge-verdicts.tsv): ${v.verdict} by ${v.by}, ${v.date}, on the rules' answer (${v.answer}); votes ${v.votes}`);
+  for (const [i, key] of (o?.transcripts ?? v?.transcripts ?? []).entries()) {
     const t = await readTranscript(key, path.join(CACHE_ROOT, "judge-cache"));
     if (!t) { say(`  Run ${i + 1} (${key}): transcript not found locally or in the bucket`); continue; }
     const r = summarise(t, s.sis, s.name);

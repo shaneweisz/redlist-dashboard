@@ -305,13 +305,19 @@ describe("selectEvery", () => {
     expect(ids(sa)).toEqual(["L:is"]);
   });
 
-  it("a judge's confirmation takes a species off the review list only while its answer is the confirmed one", () => {
+  it("a judge's verdict applies only while its answer is the rules': confirmed takes the species off the review list, undecided adds the doubt", () => {
     const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
     const a = species("Panthera leo", "(Gray, 1867)", acc(leo));  // other authors: listed
     const r = release() as Omit<Release, "wholeBySteps">;
-    const c = (answer: string) => new Map([[1, { sis: 1, redlistName: "Panthera leo", answer, by: "judge:m", date: "2026-11-24", transcripts: [] }]]);
+    const c = (answer: string, verdict: "confirmed" | "undecided" = "confirmed") =>
+      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [] }]]);
     expect(selectEvery([a], r, new Map())[0].toReview).toMatch(/^other authors/);
     expect(selectEvery([a], r, new Map(), c("L:is"))[0].toReview).toBeNull();
     expect(selectEvery([a], r, new Map(), c("X:is"))[0].toReview).toMatch(/^other authors/);
+    const u = selectEvery([a], r, new Map(), c("L:is", "undecided"))[0];
+    expect(u.doubts).toEqual(["other authors", "judge undecided"]);
+    expect(u.toReview).toBe("judge undecided (3/5 rules; 2/5 other)");
+    expect(u.selected.map((x) => x.record.id)).toEqual(["L"]);
+    expect(selectEvery([a], r, new Map(), c("X:is", "undecided"))[0].doubts).toEqual(["other authors"]);
   });
 });

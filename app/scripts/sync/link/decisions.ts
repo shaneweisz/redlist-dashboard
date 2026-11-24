@@ -158,20 +158,26 @@ export function decisionHolds<R extends DecidableRecord>(
 // ── The judge's other files ───────────────────────────────────────────────────
 
 /**
- * seeds/judge-confirmed.tsv: species whose rules' answer the judge's runs agreed
- * with, so they leave the review list while the answer stays the same.
+ * seeds/judge-verdicts.tsv: the judge's verdict on a species whose rules' answer
+ * it was asked about, applied while the rules still give that answer and no
+ * decision holds: `confirmed` (its runs agreed with the rules; the species
+ * leaves the review list) or `undecided` (they didn't agree; the doubt
+ * `judge undecided`).
  *
  *   sis_taxon_id, redlist_name
- *   answer   the records it confirmed, as answerKey writes them
+ *   verdict  confirmed | undecided
+ *   answer   the rules' answer it was given, as answerKey writes it
+ *   votes    how the runs answered, e.g. "3/5 rules; 1/5 other; 1/5 can't tell"
  *   by       judge:<model>
  *   date     YYYY-MM-DD
  *   transcripts  the judge's calls, as in decisions.tsv
  */
-export const CONFIRMED_FILE = path.join(SEEDS_DIR, "judge-confirmed.tsv");
-const CONFIRMED_COLUMNS = ["sis_taxon_id", "redlist_name", "answer", "by", "date", "transcripts"] as const;
-export interface Confirmation { sis: number; redlistName: string; answer: string; by: string; date: string; transcripts: string[] }
+export const VERDICTS_FILE = path.join(SEEDS_DIR, "judge-verdicts.tsv");
+const VERDICT_COLUMNS = ["sis_taxon_id", "redlist_name", "verdict", "answer", "votes", "by", "date", "transcripts"] as const;
+export type VerdictKind = "confirmed" | "undecided";
+export interface JudgeVerdict { sis: number; redlistName: string; verdict: VerdictKind; answer: string; votes: string; by: string; date: string; transcripts: string[] }
 
-/** A selection's answer as a confirmation keeps it: its taken records and relations, refused left out, sorted. */
+/** A selection's answer as a verdict keeps it: its taken records and relations, refused left out, sorted. */
 export const answerKey = (selected: { id: string; relation: string }[]) =>
   selected.filter((x) => x.relation !== "refused").map((x) => `${x.id}:${x.relation}`).sort().join(",");
 
@@ -198,13 +204,15 @@ function writeTsv<C extends readonly string[]>(file: string, columns: C, rowsOut
   fs.writeFileSync(file, [columns.join("\t"), ...rowsOut.map((r) => r.map(clean).join("\t"))].join("\n") + "\n");
 }
 
-export function readConfirmations(file = CONFIRMED_FILE): Map<number, Confirmation> {
-  return new Map(readTsv(file, CONFIRMED_COLUMNS).map((r) => [Number(r.sis_taxon_id),
-    { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, answer: r.answer, by: r.by, date: r.date,
-      transcripts: r.transcripts.split(/\s+/).filter(Boolean) }]));
+export function readVerdicts(file = VERDICTS_FILE): Map<number, JudgeVerdict> {
+  return new Map(readTsv(file, VERDICT_COLUMNS).map((r) => {
+    if (r.verdict !== "confirmed" && r.verdict !== "undecided") throw new Error(`${path.basename(file)}: verdict "${r.verdict}" for ${r.sis_taxon_id} isn't confirmed or undecided`);
+    return [Number(r.sis_taxon_id), { sis: Number(r.sis_taxon_id), redlistName: r.redlist_name, verdict: r.verdict, answer: r.answer, votes: r.votes,
+      by: r.by, date: r.date, transcripts: r.transcripts.split(/\s+/).filter(Boolean) }];
+  }));
 }
-export function writeConfirmations(cs: Iterable<Confirmation>, file = CONFIRMED_FILE): void {
-  writeTsv(file, CONFIRMED_COLUMNS, [...cs].sort((a, b) => a.sis - b.sis).map((c) => [String(c.sis), c.redlistName, c.answer, c.by, c.date, c.transcripts.join(" ")]));
+export function writeVerdicts(vs: Iterable<JudgeVerdict>, file = VERDICTS_FILE): void {
+  writeTsv(file, VERDICT_COLUMNS, [...vs].sort((a, b) => a.sis - b.sis).map((v) => [String(v.sis), v.redlistName, v.verdict, v.answer, v.votes, v.by, v.date, v.transcripts.join(" ")]));
 }
 export function readNotes(file = NOTES_FILE): Map<number, Note[]> {
   const out = new Map<number, Note[]>();

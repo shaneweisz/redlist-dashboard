@@ -7,7 +7,7 @@
  *                            rules can't settle it, one row per record, mostly
  *                            written by the judge (link/decisions.ts,
  *                            docs/specs/matching.md)
- *   judge-confirmed.tsv      species whose rules' answer the judge confirmed
+ *   judge-verdicts.tsv       the judge's verdicts: the rules' answer confirmed, or undecided
  *   judge-notes.tsv          a person's notes to the judge about a species
  *   domesticated-and-humans.tsv
  *                            species never listed as Not Evaluated: domestic

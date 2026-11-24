@@ -11,7 +11,7 @@ import { type DuckDBConnection } from "@duckdb/node-api";
 import { lit, openDuckDB, rows, writeTable } from "../sql";
 import { tables, parquet, BUILD_DIR } from "../paths";
 import { orthographicKey, sameNameKey } from "./name-rules";
-import { readConfirmations, readDecisions, type Confirmation, type Decision } from "./decisions";
+import { readVerdicts, readDecisions, type JudgeVerdict, type Decision } from "./decisions";
 import { selectEvery, type ColRecord, type ColSpecies, type Release, type Selection, type SpeciesInput } from "./select";
 
 /** taxa's status and rank in the matcher's forms (synonym → SYNONYM, provisionally accepted → PROVISIONALLY_ACCEPTED). */
@@ -32,8 +32,8 @@ export interface Inputs {
   species: SpeciesInput[];
   release: Omit<Release, "wholeBySteps">;
   decisions: Map<number, Decision>;
-  /** seeds/judge-confirmed.tsv. */
-  confirmations: Map<number, Confirmation>;
+  /** seeds/judge-verdicts.tsv. */
+  verdicts: Map<number, JudgeVerdict>;
 }
 
 /** Everything select() reads, from the build's tables. */
@@ -137,7 +137,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
 
   const assessedNames = new Set(species.map((s) => sameNameKey(s.name)));
   return {
-    species: input, decisions, confirmations: readConfirmations(),
+    species: input, decisions, verdicts: readVerdicts(),
     release: {
       assessedNames, recordsNamed,
       occurrencesUnder: (id) => occurrences.get(id) ?? 0,
@@ -149,7 +149,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
 /** Every species' selection, from the build in `buildDir`. */
 export async function selectAll(buildDir = BUILD_DIR): Promise<{ selections: Selection[]; inputs: Inputs }> {
   const inputs = await loadInputs(tables(buildDir));
-  return { selections: selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.confirmations), inputs };
+  return { selections: selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.verdicts), inputs };
 }
 
 /** What `npm run sync:select` prints for one species. */

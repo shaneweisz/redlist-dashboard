@@ -9,14 +9,16 @@
  *             rules' `npm run sync:select` on this build. Reports Goal 2: per group,
  *             how many the old and the new rules have right, among the species changed
  *   decide    the species listed for review, those with a note (seeds/judge-notes.tsv),
- *             and those whose decision is a fixture's or an unrecorded agent's: each is
- *             asked in --runs independent runs (default 2; other batch-mates, other
- *             order). Where every run gives the same answer, it is written: to
- *             seeds/judge-confirmed.tsv when it is the rules' answer, else to
- *             seeds/decisions.tsv as a decision by judge:<model>. Where runs split or
- *             can't tell, nothing is written and the species stays listed. A person's
- *             decision (a GitHub handle in `by`) is never replaced. Prints the patterns
- *             among its decisions, which are candidate rule changes.
+ *             and those whose decision is a fixture's or an unrecorded agent's, less
+ *             those an undecided verdict still covers: each is asked in --runs
+ *             independent runs (default 2; other batch-mates, other order), and where
+ *             they differ, --more runs (default 3), after which --need of them (default
+ *             4) must agree. An agreed answer is written: as a `confirmed` verdict
+ *             (seeds/judge-verdicts.tsv) when it is the rules' answer, else to
+ *             seeds/decisions.tsv as a decision by judge:<model>, if it would hold.
+ *             No agreement is an `undecided` verdict (the doubt `judge undecided`). A
+ *             person's decision (a GitHub handle in `by`) is never replaced. Prints the
+ *             patterns among its decisions, which are candidate rule changes.
  *
  * Before a run it answers the fixture cases, prints its score and the number of
  * calls the run needs, and asks before going on (--yes doesn't ask). Answers are
@@ -26,7 +28,7 @@
  * by group.
  *
  * Usage: npm run sync:judge -- first | changed --baseline <old.json> | decide [--runs N]
- *          [--yes] [--fixtures-only] [--limit N] [--model m]
+ *          [--more N] [--need N] [--yes] [--fixtures-only] [--limit N] [--model m]
  */
 
 import * as crypto from "crypto";
@@ -41,8 +43,8 @@ import { loadInputs, type Inputs } from "../link/select-inputs";
 import { select, selectEvery, type ColRecord, type Selection, type SpeciesInput } from "../link/select";
 import { sameName, sameNameKey } from "../link/name-rules";
 import { MATCHING_CASES } from "./fixtures/matching";
-import { answerKey, isOverride, readConfirmations, readDecisions, readNotes, writeConfirmations, writeDecisions,
-  type Confirmation, type Decision, type Note } from "../link/decisions";
+import { answerKey, isOverride, readVerdicts, readDecisions, readNotes, writeVerdicts, writeDecisions,
+  type JudgeVerdict, type Decision, type Note } from "../link/decisions";
 import { resultOf, runClaude, type Runner } from "./claude-run";
 import { saveTranscript, transcriptPath, uploadTranscripts } from "./judge-transcripts";
 
@@ -120,17 +122,27 @@ export function counted(xs: { id: string; relation: string }[], look: Lookup): s
 }
 
 /**
- * What the decide mode does with one species' runs: `confirm` when every run counts
- * what the rules count, `decide` when every run counts the same and the rules
- * don't, `split` when a run is missing, can't tell, names a record not in its
- * facts, or the runs differ.
+ * What the decide mode does with one species' runs, of which `need` (default:
+ * all) must count the same: `confirm` when that is what the rules count,
+ * `decide` when it isn't, `split` when no answer has `need` runs. A run that is
+ * missing, can't tell, or names a record not in its facts agrees with nothing.
+ * `votes` says how the runs answered, for the verdict.
  */
-export function outcome(runs: (Answer | undefined)[], ours: { id: string; relation: string }[], look: Lookup, known: Set<string>):
-  { kind: "confirm" } | { kind: "split" } | { kind: "decide"; answer: Answer } {
-  if (runs.length === 0 || runs.some((a) => !a || a.records === "can't tell" || a.records.some((x) => !known.has(x.id)))) return { kind: "split" };
-  const keys = new Set(runs.map((a) => counted(a!.records as { id: string; relation: string }[], look)));
-  if (keys.size !== 1) return { kind: "split" };
-  return [...keys][0] === counted(ours, look) ? { kind: "confirm" } : { kind: "decide", answer: runs[0]! };
+export function outcome(runs: (Answer | undefined)[], ours: { id: string; relation: string }[], look: Lookup, known: Set<string>, need = runs.length):
+  ({ kind: "confirm" } | { kind: "split" } | { kind: "decide"; answer: Answer }) & { votes: string } {
+  const mine = counted(ours, look);
+  const keyOf = (a: Answer | undefined) => !a || a.records === "can't tell" ? "can't tell"
+    : a.records.some((x) => !known.has(x.id)) ? "unknown record" : counted(a.records, look);
+  const keys = runs.map(keyOf);
+  const n = new Map<string, number>();
+  for (const k of keys) n.set(k, (n.get(k) ?? 0) + 1);
+  const label = (k: string) => k === mine ? "rules" : k === "can't tell" || k === "unknown record" ? k : "other";
+  const tally = new Map<string, number>();
+  for (const [k, c] of n) tally.set(label(k), (tally.get(label(k)) ?? 0) + c);
+  const votes = [...tally].sort((x, y) => y[1] - x[1]).map(([l, c]) => `${c}/${runs.length} ${l}`).join("; ");
+  const [best, count] = [...n].filter(([k]) => k !== "can't tell" && k !== "unknown record").sort((x, y) => y[1] - x[1])[0] ?? ["", 0];
+  if (runs.length === 0 || count < need) return { kind: "split", votes };
+  return best === mine ? { kind: "confirm", votes } : { kind: "decide", answer: runs[keys.indexOf(best)]!, votes };
 }
 
 /** How a decision changes what is counted, for the patterns report. */
@@ -237,7 +249,7 @@ if (require.main === module) {
     const pre = await loadInputs();
     const extra = pre.species.flatMap((s) => [s.name, ...(s.match?.answerName ? [s.match.answerName] : [])]);
     const inputs = await loadInputs(T, pre.decisions, conn, extra);
-    const sel = selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.confirmations);
+    const sel = selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.verdicts);
     // Where a record leads: from the records named in the facts (the release's byId holds only the matcher's records).
     const leadsTo = new Map<string, string | undefined>();
     for (const sp of inputs.species) for (const n of [sp.name, sp.match?.answerName, ...sp.synonyms.map((y) => y.name)])
@@ -253,15 +265,22 @@ if (require.main === module) {
     // Outside the build, which a sync clears: answers cost money.
     const cacheDir = path.join(CACHE_ROOT, "judge-cache");
     const model = opt("model") ?? (mode === "decide" ? "claude-opus-5-5" : undefined);
-    const runs = Number(opt("runs") ?? 2);
-    if (!Number.isInteger(runs) || runs < 1) throw new Error(`judge: --runs must be a whole number from 1, not ${opt("runs")}`);
+    const whole = (k: string, d: number, min: number) => { const v = Number(opt(k) ?? d);
+      if (!Number.isInteger(v) || v < min) throw new Error(`judge: --${k} must be a whole number from ${min}, not ${opt(k)}`); return v; };
+    const runs = whole("runs", 2, 1), more = whole("more", 3, 0), need = whole("need", 4, 1);
+    if (more > 0 && need > runs + more) throw new Error(`judge: --need ${need} is more than the ${runs + more} runs`);
 
-    /** decide: ask each species in `runs` runs, then write what they agree on. */
-    async function decide(chosen: Selection[], runs: number) {
+    /** decide: ask each species in `runs` runs, and those they don't agree on in `more`; then write the verdicts and decisions. */
+    async function decide(chosen: Selection[]) {
       const asked: Map<number, Answer>[] = [];
       for (let k = 1; k <= runs; k++) asked.push(await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model, run: k }));
+      const known = (s: Selection) => new Set(factsOf(s.sis).col_records.map((r) => r.id));
+      const disputed = more ? chosen.filter((s) => outcome(asked.map((m) => m.get(s.sis)), ourAnswer(s), look, known(s)).kind === "split") : [];
+      if (disputed.length) console.log(`judge: the runs differ on ${disputed.length} species; asking those ${more} more times`);
+      for (let k = runs + 1; k <= runs + more && disputed.length; k++) asked.push(await judge(disputed.map((s) => factsOf(s.sis)), { cacheDir, model, run: k }));
+      const isDisputed = new Set(disputed.map((s) => s.sis));
       const by = `judge:${model}`, date = new Date().toISOString().slice(0, 10);
-      const decisions = readDecisions(), confirmations = readConfirmations();
+      const decisions = readDecisions(), verdicts = readVerdicts();
       const tally = { confirm: 0, decide: 0, split: 0 };
       const transcriptsOf = (sis: number) => asked.map((m) => m.get(sis)?.transcript).filter((t): t is string => !!t);
       const sourcesOf = (sis: number) => [...new Set(asked.flatMap((m) => m.get(sis)?.sources ?? []))];
@@ -277,11 +296,20 @@ if (require.main === module) {
         const f = factsOf(s.sis);
         const recs = new Map(f.col_records.map((r) => [r.id, r]));
         const ours = ourAnswer(s);
-        const o = outcome(asked.map((m) => m.get(s.sis)), ours, look, new Set(recs.keys()));
+        const mine = isDisputed.has(s.sis) ? asked.map((m) => m.get(s.sis)) : asked.slice(0, runs).map((m) => m.get(s.sis));
+        const o = outcome(mine, ours, look, new Set(recs.keys()), isDisputed.has(s.sis) ? need : runs);
         tally[o.kind]++;
-        if (o.kind === "split") continue;
+        const verdict = (v: JudgeVerdict["verdict"]): JudgeVerdict =>
+          ({ sis: s.sis, redlistName: sp.name, verdict: v, answer: answerKey(ours), votes: o.votes, by, date, transcripts: transcriptsOf(s.sis) });
+        if (o.kind === "split") {
+          // No agreement: the rules' count stands, flagged on the dashboard, and the species isn't asked again while this holds.
+          if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
+          verdicts.set(s.sis, verdict("undecided"));
+          written.add(s.sis);
+          continue;
+        }
         if (o.kind === "confirm") {
-          // The rules' answer: a decision that holds is kept, now the judge's (its reason and sources); a lapsed one gives way to a confirmation.
+          // The rules' answer: a decision that holds is kept, now the judge's (its reason and sources); a lapsed one gives way to a verdict.
           if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
           if (s.decision && !s.decision.lapse) {
             const held = decisions.get(s.sis)!;
@@ -289,7 +317,7 @@ if (require.main === module) {
             written.add(s.sis);
           } else {
             decisions.delete(s.sis);
-            confirmations.set(s.sis, { sis: s.sis, redlistName: sp.name, answer: answerKey(ours), by, date, transcripts: transcriptsOf(s.sis) } satisfies Confirmation);
+            verdicts.set(s.sis, verdict("confirmed"));
             written.add(s.sis);
           }
           continue;
@@ -306,18 +334,18 @@ if (require.main === module) {
         if (!check.decision || check.decision.lapse) { wouldLapse.push(`${sp.name} (${check.decision?.lapse ?? "?"})`); tally.decide--; tally.split++; continue; }
         if (isOverride(decisions.get(s.sis) ?? { by: "judge:" })) { overridden++; continue; }
         decisions.set(s.sis, d);
-        confirmations.delete(s.sis);
+        verdicts.delete(s.sis);
         written.add(s.sis);
         const k = `${s.doubts[0] ?? s.reason ?? "(no doubt)"}: ${change(ours, answer, look)}`;
         (patterns.get(k) ?? patterns.set(k, []).get(k)!).push(sp.name);
         if (fixtureNames.has(sp.name.toLowerCase())) fixturesToUpdate.push(sp.name);
       }
       // The transcripts behind what was written go to the private bucket first: a row must lead to its evidence.
-      const behind = new Set([...written].flatMap((sis) => (decisions.get(sis) ?? confirmations.get(sis))?.transcripts ?? []));
+      const behind = new Set([...written].flatMap((sis) => (decisions.get(sis) ?? verdicts.get(sis))?.transcripts ?? []));
       await uploadTranscripts([...behind], cacheDir);
       writeDecisions(decisions.values());
-      writeConfirmations(confirmations.values());
-      console.log(`judge decide: ${tally.confirm} confirmed, ${tally.decide} decided, ${tally.split} split, can't tell or would lapse (left listed); $${spent.usd.toFixed(2)}`);
+      writeVerdicts(verdicts.values());
+      console.log(`judge decide: ${tally.confirm} confirmed, ${tally.decide} decided, ${tally.split} undecided or would lapse (left listed); $${spent.usd.toFixed(2)}`);
       if (wouldLapse.length) console.log(`Agreed answers not written, as the decision wouldn't hold (${wouldLapse.length}): ${wouldLapse.slice(0, 20).join(", ")}${wouldLapse.length > 20 ? ", ..." : ""}`);
       if (overridden) console.log(`${overridden} species overridden by a person during the run, left as they are`);
       console.log("Patterns among the decisions (first doubt: what changes), candidate rule changes:");
@@ -333,7 +361,10 @@ if (require.main === module) {
       chosen = sel.filter((s) => {
         const d = inputs.decisions.get(s.sis);
         if (d && isOverride(d)) return false;
-        return s.toReview !== null || notes.has(s.sis) || (d !== undefined && !d.by.startsWith("judge:"));
+        if (notes.has(s.sis)) return true;
+        // An undecided verdict that still applies: asking again would get the same split.
+        if (s.doubts.includes("judge undecided")) return false;
+        return s.toReview !== null || (d !== undefined && !d.by.startsWith("judge:"));
       });
     } else if (mode === "first") {
       const easy = sel.filter(isEasy).sort((x, y) => sha(`easy ${x.sis}`).localeCompare(sha(`easy ${y.sis}`))).slice(0, 1000);
@@ -360,21 +391,26 @@ if (require.main === module) {
     console.log(`judge: on the ${fixtures.length} fixture species, ${t.right} right, ${t.wrong} wrong, ${t.cant} can't tell`);
     for (const r of fr.rows.filter((x) => x.verdict !== "right")) console.log(`  ${bySis.get(r.sis_taxon_id)?.name}: ${r.verdict}: ${r.answer} (${r.reason.slice(0, 160)})`);
     const perCall = spent.calls ? spent.usd / spent.calls : null;
+    const fxAgain: Map<number, Answer>[] = [];
     if (mode === "decide") {
       for (let k = 2; k <= runs; k++) {
         const again = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model, run: k });
+        fxAgain.push(again);
         const same = fixtures.filter((s) => { const x = fx.get(s.sis), y = again.get(s.sis);
           return x && y && x.records !== "can't tell" && y.records !== "can't tell" && counted(x.records, look) === counted(y.records, look); }).length;
         console.log(`judge: run ${k} on the fixtures agrees with run 1 on ${same} of ${fixtures.length}`);
       }
     }
-    const calls = Math.ceil(chosen.length / BATCH) * (mode === "decide" ? runs : 1);
+    // decide: and for the species the first runs differ on (as many as the fixtures', proportionally), `more` runs.
+    const fxSplit = mode === "decide" && runs > 1 ? fixtures.filter((s) => outcome([fx.get(s.sis), ...fxAgain.map((m) => m.get(s.sis))], ourAnswer(s), look,
+      new Set(factsOf(s.sis).col_records.map((r) => r.id))).kind === "split").length / Math.max(1, fixtures.length) : 0;
+    const calls = Math.ceil(chosen.length / BATCH) * (mode === "decide" ? runs : 1) + (mode === "decide" ? Math.ceil(chosen.length * fxSplit / BATCH) * more : 0);
     console.log(`judge ${mode}: ${chosen.length.toLocaleString()} species, ${calls.toLocaleString()} calls of ${BATCH} (before the cache)` +
       (perCall ? `, about $${(perCall * calls).toFixed(0)} at the fixtures' $${perCall.toFixed(2)} a call` : ""));
     if (a.includes("--fixtures-only")) return;
     if (!a.includes("--yes") && !(await ask("Go on? [y/N] "))) return;
 
-    if (mode === "decide") return decide(chosen, runs);
+    if (mode === "decide") return decide(chosen);
 
     const answers = await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model });
     const r = report(chosen, answers, groupOf, look);

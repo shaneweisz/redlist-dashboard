@@ -16,7 +16,7 @@
 import {
   compareAuthors, orthographicallySame, sameName, sameNameKey, sameOrganism, isCoLRespelling, type TaxonName,
 } from "./name-rules";
-import { answerKey, decisionHolds, type Confirmation, type Decision, type DecidedRelation, type Lapse } from "./decisions";
+import { answerKey, decisionHolds, type JudgeVerdict, type Decision, type DecidedRelation, type Lapse } from "./decisions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -68,9 +68,9 @@ export interface Selected { record: ColRecord; relation: Relation; relationStep:
 
 export type Doubt =
   | "chosen by the citation" | "homonym" | "other authors" | "other spelling" | "ambiguous synonym" | "placed elsewhere"
-  | "counts nothing" | "split, authors unclear" | "synonym filed elsewhere";
+  | "counts nothing" | "split, authors unclear" | "synonym filed elsewhere" | "judge undecided";
 export const DOUBTS: Doubt[] = ["chosen by the citation", "homonym", "other authors", "other spelling", "ambiguous synonym",
-  "placed elsewhere", "counts nothing", "split, authors unclear", "synonym filed elsewhere"];
+  "placed elsewhere", "counts nothing", "split, authors unclear", "synonym filed elsewhere", "judge undecided"];
 
 export type Reason = "informal or qualified name" | "no candidate" | "decision: not in CoL";
 
@@ -347,8 +347,8 @@ export const countedWhole = (s: Selection) => s.selected.filter((x) => x.relatio
  * species in full.
  */
 export function selectEvery(species: SpeciesInput[], release: Omit<Release, "wholeBySteps">, decisions: Map<number, Decision>,
-  /** The judge's confirmations: a species whose answer the judge confirmed leaves the review list while the answer stays the same. */
-  confirmations: Map<number, Confirmation> = new Map()): Selection[] {
+  /** The judge's verdicts, applied while the rules give the answer it was asked about and no decision holds (decisions.ts). */
+  verdicts: Map<number, JudgeVerdict> = new Map()): Selection[] {
   const wholeBySteps = new Map<string, Set<number>>();
   const firstPass: Release = { ...release, wholeBySteps: new Map() };
   for (const sp of species) {
@@ -359,8 +359,10 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
   const full: Release = { ...release, wholeBySteps };
   return species.map((sp) => {
     const s = select(sp, full, decisions.get(sp.sis));
-    const c = confirmations.get(sp.sis);
-    if (c && !s.decision && answerKey(s.selected.map((x) => ({ id: x.record.id, relation: x.relation }))) === c.answer) s.toReview = null;
+    const v = verdicts.get(sp.sis);
+    const applies = v && (!s.decision || s.decision.lapse) && answerKey(s.selected.map((x) => ({ id: x.record.id, relation: x.relation }))) === v.answer;
+    if (applies && v.verdict === "confirmed") s.toReview = null;
+    if (applies && v.verdict === "undecided") { s.doubts.push("judge undecided"); s.toReview = `judge undecided (${v.votes})`; }
     return s;
   });
 }

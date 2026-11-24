@@ -22,7 +22,7 @@ export type MatchKey =
 
 /** One bar per doubt the sync can give (docs/specs/matching.md, "Doubts"). */
 export type DoubtKey = "f_author_pick" | "f_homonym" | "f_other_authors" | "f_spelling" | "f_ambiguous" | "f_confidence"
-  | "f_counts_nothing" | "f_split_unclear" | "f_filed_elsewhere";
+  | "f_counts_nothing" | "f_split_unclear" | "f_filed_elsewhere" | "f_judge_undecided";
 
 /** The sync's doubt → its bar. */
 const DOUBT_KEY: Record<string, DoubtKey> = {
@@ -35,6 +35,7 @@ const DOUBT_KEY: Record<string, DoubtKey> = {
   "counts nothing": "f_counts_nothing",
   "split, authors unclear": "f_split_unclear",
   "synonym filed elsewhere": "f_filed_elsewhere",
+  "judge undecided": "f_judge_undecided",
 };
 
 /** A species' doubts, from assessed.parquet's match_doubts (';'-joined), as bar keys. */
@@ -62,6 +63,7 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "f_counts_nothing", label: "No records counted", group: "flagged" },
   { key: "f_split_unclear", label: "Split, authors unclear", group: "flagged" },
   { key: "f_filed_elsewhere", label: "Synonym filed elsewhere", group: "flagged" },
+  { key: "f_judge_undecided", label: "Judge couldn't agree", group: "flagged" },
   { key: "f_synonyms_only", label: "Only its synonyms matched", group: "flagged" },
   { key: "agent", label: "Proposed by AI, not yet checked", group: "flagged" },
   { key: "ne_candidate", label: "Not Evaluated, may be assessed", group: "flagged" },

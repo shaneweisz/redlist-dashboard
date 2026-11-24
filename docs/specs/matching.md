@@ -218,8 +218,8 @@ In 1 and 2, *s* being another assessed name makes the record **refused**.
 
 A doubt marks a species whose records may be wrong; it never changes which
 records are taken. The first seven are computed on the steps' records (steps
-4 to 6), and the last two on synonym records (steps 3 to 6), listed in this
-order:
+4 to 6), the next two on synonym records (steps 3 to 6), and the last from
+the judge's verdicts (*Decisions*), listed in this order:
 
 | Doubt | Holds when | Why it's a doubt |
 |---|---|---|
@@ -232,6 +232,7 @@ order:
 | `counts nothing` | every one of the steps' records is *refused* (synonym records may still count) | the Red List's own name counts nothing |
 | `split, authors unclear` | a *split into* record (not made *refused*) that no unqualified author of its synonym compares `same` with | a bare "L." can't rule out another author's species (*Vicia sepium* would count *V. dumetorum* L. for the Red List's *V. dumetorum* Thuill.) |
 | `synonym filed elsewhere` | a relation-3 synonym record with occurrences | part of another species' records count here |
+| `judge undecided` | an `undecided` verdict whose answer is the rules' answer | asked five times, the judge couldn't settle the records; the count follows the rules |
 
 A species is **listed for review** when it has doubts or a reason, or its
 decision lapsed, its candidates changed since the decision, or the decision
@@ -314,12 +315,18 @@ until the judge asks again. One that doesn't hold is ignored, and the species
 listed for review with why. One that holds is still listed when its
 candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
 
-Where the judge's runs agree with the rules, it **confirms** instead
-(`seeds/judge-confirmed.tsv`, the answer's records and relations): the species
-leaves the review list while the rules give that answer, and keeps its doubts.
-A lapsed decision the runs agree with gives way to a confirmation. The judge
-writes a decision only if it would hold; one that wouldn't leaves the species
-listed. It never replaces a person's override.
+The judge asks each species twice; where the two differ, three more times,
+and then four of the five must agree (an answer naming a record it wasn't
+given, or *can't tell*, agrees with nothing). It writes a **verdict** to
+`seeds/judge-verdicts.tsv` (the rules' answer as records and relations, and
+the votes) when the agreed answer is the rules' (`confirmed`: the species
+leaves the review list and keeps its doubts) or when nothing reaches
+agreement (`undecided`: the doubt `judge undecided`). A verdict applies only
+while the rules still give its answer and no decision holds. A lapsed
+decision the runs agree with gives way to a verdict. The judge writes a
+decision only if it would hold; one that wouldn't leaves the species listed.
+It never replaces a person's override, and doesn't ask again a species whose
+verdict applies unless a note was added.
 
 Example: a decision takes *Centropogon australis* (White, 1790), the
 waspfish, for the Red List's *C. australis* (Shaw, 1790), with no doubts,
@@ -395,10 +402,9 @@ Each is a fixture case. "Taken" is the records and the step.
 - **The judge** (`npm run sync:judge`, `checks/judge.ts`): an agent with web
   search says which records it would take for each species, from the facts
   alone (and any notes), and code scores it against ours. It runs by hand, and
-  the sync reads it only through committed decisions and confirmations. In
+  the sync reads it only through committed decisions and verdicts. In
   `decide`, each species listed for review is asked in independent runs
-  (other batch-mates, other order); only an answer every run gives is written,
-  and the rest stay listed. It reports the patterns among its decisions: many
+  (other batch-mates, other order), as *Decisions* says. It reports the patterns among its decisions: many
   decisions of one kind are a rule to change, not decisions to keep. A rule change merges only if, among the species it changes, no
   taxonomic group has fewer judged right, unless each species lost becomes a
   fixture with its correct answer. Release moves are judged and reported,
