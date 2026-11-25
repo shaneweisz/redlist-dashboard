@@ -841,6 +841,7 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
           <div className="pt-1.5">
             <div className={section}>AI jury{s.match_jury.by ? ` (${s.match_jury.by})` : ""}</div>
             <div className="text-[11px] text-zinc-300">{juryLine(s.match_jury)}</div>
+            {s.match_jury.rules && <div className="text-[11px] text-zinc-400">{s.match_jury.rules}</div>}
             {s.match_jury.transcripts.length > 0 && (
               <div className="text-[11px] text-zinc-400">
                 Transcripts: {s.match_jury.transcripts.map((k, i) => (

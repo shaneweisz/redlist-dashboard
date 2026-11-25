@@ -143,6 +143,8 @@ export interface MatchJury {
   votes: string | null;
   /** Each run's transcript key: /jury/<key>?sis=<id>. */
   transcripts: string[];
+  /** For a decision: what the rules alone would have counted, in a sentence. */
+  rules?: string | null;
 }
 
 /** The species' match facts as the list carries them. */

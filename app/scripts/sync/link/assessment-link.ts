@@ -93,7 +93,8 @@ export async function buildLink(
   const jury = new Map<number, string>();
   for (const sel of selections) {
     const d = loaded.decisions.get(sel.sis);
-    if (sel.step === 1 && d?.by.startsWith("judge:")) jury.set(sel.sis, JSON.stringify({ kind: "decided", by: d.by.slice(6), date: d.date, votes: null, transcripts: d.transcripts }));
+    if (sel.step === 1 && d?.by.startsWith("judge:")) jury.set(sel.sis, JSON.stringify({ kind: "decided", by: d.by.slice(6), date: d.date, votes: null, transcripts: d.transcripts,
+      rules: sel.rules ? rulesWouldHave(sel.rules, false) : null }));
     else if (sel.jury) jury.set(sel.sis, JSON.stringify({ kind: sel.jury.verdict, by: loaded.verdicts.get(sel.sis)?.by.replace(/^judge:/, "") ?? null,
       date: sel.jury.date, votes: juryVotes(sel.jury.votes), transcripts: sel.jury.transcripts }));
   }
@@ -304,11 +305,13 @@ export function juryVotes(votes: string): string {
 }
 
 /** What the rules alone would have counted, for a species a decision settles. */
-export function rulesWouldHave(rules: Selection): string {
+export function rulesWouldHave(rules: Selection, ids = true): string {
   const counted = rules.selected.filter((x) => x.relation !== "refused")
-    .map((x) => `${fmt(x.record)}${x.relation === "part of" ? " (only the records under it)" : ""}`);
-  return `Without the decision, the rules would have counted ${counted.length ? counted.join("; ") : "nothing"}` +
-    `${rules.doubts.length ? `, flagged: ${rules.doubts.join(", ")}` : ""}.`;
+    .map((x) => `${ids ? fmt(x.record) : `${x.record.name}${x.record.authorship ? ` ${x.record.authorship}` : ""}`}${x.relation === "part of" ? " (only the records under it)" : ""}`);
+  // "counts nothing" only repeats an empty list.
+  const doubts = rules.doubts.filter((d) => !(d === "counts nothing" && counted.length === 0));
+  return `Without the decision, the rules would have counted ${counted.length ? [...new Set(counted)].join("; ") : "nothing"}` +
+    `${doubts.length ? `, flagged: ${doubts.join(", ")}` : ""}.`;
 }
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */
