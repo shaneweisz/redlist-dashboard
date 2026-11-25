@@ -113,12 +113,20 @@ export const MATCHING_CASES: MatchCase[] = [
     expect: { doubts: ["homonym"], selected: [{ name: "Vireo chivi", relation: "is" }, { name: "Vireo olivaceus chivi", relation: "part of" }], rules: ["name under another species"] },
   },
   {
+    name: "Porites ornata",
+    authority: "Nemenzo, 1971",
+    why: "CoL's only Porites ornata is Michelotti's (1838), filed under Madracis ornata, another coral. The AI jury (2026-11-25) decided no CoL record is Nemenzo's (WoRMS: an unreplaced junior homonym), so it counts nothing.",
+    source: "seeds/decisions.tsv",
+    confirmed: NOVEMBER_2026,
+    expect: { rules: ["decision, not in CoL"], hasRecords: false },
+  },
+  {
     name: "Lycaena clarki",
     authority: "Clark & Dickson, 1971",
-    why: "A synonym of Aloeides clarki, which the Red List also assesses: refused, so it counts nothing, with that doubt.",
+    why: "A synonym of Aloeides clarki, which the Red List also assesses: refused, so it counts nothing, with that doubt. Update (2026-11, COL26.6 XR, the AI jury): the jury decided it is a valid Lycaena that CoL wrongly sinks, so its own record counts, as part of Aloeides clarki.",
     source: SPEC_SOURCE,
     confirmed: MATCHING_SPEC,
-    expect: { doubts: ["counts nothing"], selected: [{ name: "Lycaena clarki", relation: "refused" }], hasRecords: false },
+    expect: { doubts: [], selected: [{ name: "Lycaena clarki", relation: "part of" }], hasRecords: true },
   },
   {
     name: "Turdus rubrocanus",
@@ -126,7 +134,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "The answer is Gray & Gray, 1847, which the citation contradicts; the only Hodgson record is under Philepitta castanea. Step 5: GBIF files the bare name at the answer, so it counts, doubted.",
     source: SPEC_SOURCE,
     confirmed: MATCHING_SPEC,
-    expect: { doubts: ["homonym", "other authors"], selected: [{ name: "Turdus rubrocanus", relation: "is" }] },
+    expect: { doubts: ["homonym", "other authors", "judge undecided"], selected: [{ name: "Turdus rubrocanus", relation: "is" }] },
   },
   {
     name: "Palaina martensi",
@@ -403,10 +411,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Cipangopaludina chinensis",
     authority: "(Gray in Griffith & Pidgeon, 1833)",
-    why: "Provisionally accepted under exactly this name, and also an ambiguous synonym of Margarya chinensis; the ambiguous synonym won and counted 448 records.",
+    why: "Provisionally accepted under exactly this name, and also an ambiguous synonym of Margarya chinensis; the ambiguous synonym won and counted 448 records. Update (2026-11, COL26.6 XR, the AI jury): every Cipangopaludina/Bellamya/Paludina record counts as this species, Margarya chinensis's included (MolluscaBase accepts Cipangopaludina chinensis).",
     source: "link/select.ts; seeds/decisions.tsv",
     confirmed: NOVEMBER_2026,
-    expect: { linkedTo: "Cipangopaludina chinensis", linkedAuthorship: "(Gray, 1834)", minRecords: 2_000 },
+    expect: { linkedTo: "Margarya chinensis", minRecords: 2_000 },
   },
   {
     name: "Vicia grandiflora",
@@ -665,10 +673,10 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Malaxis brachystachys",
     authority: "(Rchb.f.) Kuntze",
-    why: "Two orchids share the name. Asked without the authority the matcher scored Lindley's (a synonym of Oberonia brachystachys) 166 against Kuntze's 165, and the twin rule took it, counting another orchid's records. Found by the agent audit; decided in decisions.tsv.",
+    why: "Two orchids share the name. Asked without the authority the matcher scored Lindley's (a synonym of Oberonia brachystachys) 166 against Kuntze's 165, and the twin rule took it, counting another orchid's records. Found by the agent audit; decided in decisions.tsv. Update (2026-11, COL26.6 XR, the AI jury): its record is Malaxis realdelmontensis (POWO), so it counts that species whole.",
     source: "docs/specs/matching.md; link/select.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Malaxis realdelmontensis", rules: ["decision"], selected: [{ name: "Malaxis brachystachys", authorship: "(Rchb.f.) Kuntze", relation: "part of" }] },
+    expect: { linkedTo: "Malaxis realdelmontensis", rules: ["decision"], selected: [{ name: "Malaxis realdelmontensis", relation: "is" }] },
   },
   {
     name: "Sipyloidea brevicerci",
@@ -692,7 +700,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "CoL holds Linnaeus's and M.Bieb.'s Galium palustre, leading to two species, and the matcher can't say which the Red List means. The matcher's answer is the link now, flagged: flagged, and queued for review. The citation (L.) can't rule M.Bieb.'s out on its own: a bare initial is unclear to compareAuthors, so no author pick. The agent pilot found the answer wrong (3F682, under Hydrogalium palustre, is the species): a decision should correct it. Update (2026-11, COL26.6 XR, matching spec): the answer and Linnaeus's record both count (step 4), only records under their own name, with the doubts.",
     source: "docs/specs/matching.md; link/select.ts",
     confirmed: NOVEMBER_12,
-    expect: { assessed: true, doubts: ["homonym", "ambiguous synonym"], selected: [{ name: "Galium palustre", authorship: "L.", relation: "part of" }, { name: "Galium palustre", authorship: "M.Bieb.", relation: "part of" }] },
+    expect: { assessed: true, doubts: ["homonym", "ambiguous synonym", "judge undecided"], selected: [{ name: "Galium palustre", authorship: "L.", relation: "part of" }, { name: "Galium palustre", authorship: "M.Bieb.", relation: "part of" }] },
   },
   {
     name: "Buteo rufinus",
@@ -755,7 +763,7 @@ export const MATCHING_CASES: MatchCase[] = [
     why: "The bramble: CoL files the name as a synonym under three species (L., G.N.Jones and Loureiro's), so the matcher answers only the genus. The Red List cites L., which matches only Linnaeus's record, a synonym of Rubus plicatus: that one counts, flagged, as a pick the matcher didn't make; the other two citations don't. Before, the link owned all three (counting Loureiro's Vietnamese Rubus), then none.",
     source: "docs/specs/matching.md; link/select.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Rubus plicatus", doubts: ["chosen by the citation"], rules: ["candidate"], selected: [{ name: "Rubus fruticosus", authorship: "L.", relation: "part of" }] },
+    expect: { linkedTo: "Rubus plicatus", doubts: ["chosen by the citation", "judge undecided"], rules: ["candidate"], selected: [{ name: "Rubus fruticosus", authorship: "L.", relation: "part of" }] },
   },
   {
     name: "Pleurothallis elegantula",
@@ -784,9 +792,9 @@ export const MATCHING_CASES: MatchCase[] = [
   {
     name: "Vestia roschitzi",
     authority: "(Brancsik, 1890)",
-    why: "CoL holds the name only as a synonym that leads to no species. Update (2026-11, COL26.6 XR, matching spec): CoL now also holds it provisionally accepted (7FR8X) and as an ambiguous synonym of Pavlovicia roschitzi, which the Red List's synonym Vestiella roschitzi Brancsik, 1890 leads to: all count, with the doubts.",
+    why: "CoL holds the name only as a synonym that leads to no species. Update (2026-11, COL26.6 XR, matching spec): CoL now also holds it provisionally accepted (7FR8X) and as an ambiguous synonym of Pavlovicia roschitzi, which the Red List's synonym Vestiella roschitzi Brancsik, 1890 leads to: all count, with the doubts. Update (2026-11, COL26.6 XR, the AI jury): all its records are this species (MolluscaBase), so the doubts are settled.",
     source: "docs/specs/matching.md; link/select.ts",
     confirmed: NOVEMBER_12,
-    expect: { linkedTo: "Pavlovicia roschitzi", doubts: ["chosen by the citation", "ambiguous synonym"], selected: [{ name: "Vestia roschitzi", relation: "is" }, { name: "Pavlovicia roschitzi", relation: "is" }] },
+    expect: { linkedTo: "Pavlovicia roschitzi", doubts: [], selected: [{ name: "Vestia roschitzi", relation: "is" }, { name: "Pavlovicia roschitzi", relation: "is" }] },
   },
 ];
