@@ -70,7 +70,7 @@ export async function uploadTranscripts(keys: string[], cacheDir: string): Promi
     await b.client.send(new PutObjectCommand({ Bucket: b.name, Key: objectKey(k), Body: fs.readFileSync(transcriptPath(cacheDir, k)), ContentType: "application/gzip" }));
     sent++;
   }
-  console.log(`judge: ${sent} transcript(s) uploaded to the private bucket, ${keys.length - sent} already there`);
+  console.log(`judge: ${sent} transcript(s) uploaded to the transcripts bucket, ${keys.length - sent} already there`);
 }
 
 /** A transcript, from the local cache or else the bucket; null if neither has it. */

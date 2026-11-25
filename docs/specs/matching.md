@@ -232,7 +232,7 @@ the judge's verdicts (*Decisions*), listed in this order:
 | `counts nothing` | every one of the steps' records is *refused* (synonym records may still count) | the Red List's own name counts nothing |
 | `split, authors unclear` | a *split into* record (not made *refused*) that no unqualified author of its synonym compares `same` with | a bare "L." can't rule out another author's species (*Vicia sepium* would count *V. dumetorum* L. for the Red List's *V. dumetorum* Thuill.) |
 | `synonym filed elsewhere` | a relation-3 synonym record with occurrences | part of another species' records count here |
-| `judge undecided` | an `undecided` verdict whose answer is the rules' answer | asked five times, the judge couldn't settle the records; the count follows the rules |
+| `judge undecided` | an `undecided` verdict whose answer is the rules' answer | the judge's two runs didn't agree on the records; the count follows the rules |
 
 A species is **listed for review** when it has doubts or a reason, or its
 decision lapsed, its candidates changed since the decision, or the decision
@@ -331,8 +331,7 @@ until the judge asks again. One that doesn't hold is ignored, and the species
 listed for review with why. One that holds is still listed when its
 candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
 
-The judge asks each species twice; where the two don't agree and four of
-five still could, three more times, and then four of the five must agree. Its
+The judge asks each species twice, and the two must agree. Its
 answers are rewritten as counting would read them before they are compared
 or written (a *part of* on a record that is itself its CoL species is *is*;
 any relation on a record leading to no species is *part of*); two answers

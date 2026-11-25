@@ -11,9 +11,8 @@
  *   decide    the species listed for review, those with a note (seeds/judge-notes.tsv),
  *             and those whose decision is a fixture's or an unrecorded agent's, less
  *             those an undecided verdict still covers: each is asked in --runs
- *             independent runs (default 2; other batch-mates, other order), and where
- *             they differ, --more runs (default 3), after which --need of them (default
- *             4) must agree. An agreed answer is written: as a `confirmed` verdict
+ *             independent runs (default 2; other batch-mates, other order), which
+ *             must all agree. An agreed answer is written: as a `confirmed` verdict
  *             (seeds/judge-verdicts.tsv) when it is the rules' answer, else to
  *             seeds/decisions.tsv as a decision by judge:<model>, if it would hold.
  *             No agreement is an `undecided` verdict (the doubt `judge undecided`). A
@@ -28,7 +27,7 @@
  * by group.
  *
  * Usage: npm run sync:judge -- first | changed --baseline <old.json> | decide [--runs N]
- *          [--more N] [--need N] [--parallel N (calls at once, default 4)] [--yes] [--fixtures-only] [--limit N] [--model m]
+ *          [--parallel N (calls at once, default 4)] [--yes] [--fixtures-only] [--limit N] [--model m]
  */
 
 import * as crypto from "crypto";
@@ -153,7 +152,7 @@ export function counted(given: { id: string; relation: string }[], look: Lookup)
 
 /**
  * What the decide mode does with one species' runs, of which `need` (default:
- * all) must count the same: `confirm` when that is what the rules count,
+ * all; decide asks all) must count the same: `confirm` when that is what the rules count,
  * `decide` when it isn't (with the runs that agree), `split` when at least two
  * runs answered and differ without `need` agreeing, `unsure` otherwise (can't
  * tell, missing, unknown records, or an unsourced change). A run that is
@@ -367,20 +366,12 @@ if (require.main === module) {
     const model = opt("model") ?? (mode === "decide" ? "claude-opus-5-5" : undefined);
     const whole = (k: string, d: number, min: number) => { const v = Number(opt(k) ?? d);
       if (!Number.isInteger(v) || v < min) throw new Error(`judge: --${k} must be a whole number from ${min}, not ${opt(k)}`); return v; };
-    const runs = whole("runs", 2, 1), more = whole("more", 3, 0), need = whole("need", 4, 1), parallel = whole("parallel", 4, 1);
-    if (more > 0 && need > runs + more) throw new Error(`judge: --need ${need} is more than the ${runs + more} runs`);
+    const runs = whole("runs", 2, 1), parallel = whole("parallel", 4, 1);
 
-    /** decide: ask each species in `runs` runs, and those they don't agree on in `more`; then write the verdicts and decisions. */
+    /** decide: ask each species in `runs` runs; then write the verdicts and decisions (runs that differ are an undecided verdict). */
     async function decide(chosen: Selection[]) {
       const asked: Map<number, Answer>[] = [];
       for (let k = 1; k <= runs; k++) asked.push(await judge(chosen.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel }));
-      const known = (s: Selection) => new Set(factsOf(s.sis).col_records.map((r) => r.id));
-      // Asked again only where the first runs didn't agree and `need` of all the runs still can.
-      const disputed = more ? chosen.filter((s) => { const o = outcome(asked.map((m) => m.get(s.sis)), ourAnswer(s), lookOf(s.sis), known(s));
-        return o.kind !== "confirm" && o.kind !== "decide" && o.best + more >= need; }) : [];
-      if (disputed.length) console.log(`judge: the runs don't agree on ${disputed.length} species that ${need} of ${runs + more} still could; asking those ${more} more times`);
-      for (let k = runs + 1; k <= runs + more && disputed.length; k++) asked.push(await judge(disputed.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel }));
-      const isDisputed = new Set(disputed.map((s) => s.sis));
       const by = `judge:${model}`, date = new Date().toISOString().slice(0, 10);
       // What these rows were decided on, so a later model, prompt, release or matcher can find them.
       const rel = readSourcesReleases(tables().sourcesReleases);
@@ -400,9 +391,8 @@ if (require.main === module) {
         const f = factsOf(s.sis);
         const recs = new Map(f.col_records.map((r) => [r.id, r]));
         const ours = ourAnswer(s);
-        const mine = isDisputed.has(s.sis) ? asked.map((m) => m.get(s.sis)) : asked.slice(0, runs).map((m) => m.get(s.sis));
         const look = lookOf(s.sis);
-        const o = outcome(mine, ours, look, new Set(recs.keys()), isDisputed.has(s.sis) ? need : runs);
+        const o = outcome(asked.map((m) => m.get(s.sis)), ours, look, new Set(recs.keys()));
         tally[o.kind]++;
         const verdict = (v: JudgeVerdict["verdict"]): JudgeVerdict => ({ sis: s.sis, redlistName: sp.name, verdict: v, answer: answerKey(answerRecords(s)),
           basis: verdictBasis(sp, s), votes: o.votes, by, date, transcripts: transcriptsOf(s.sis), context });
@@ -452,7 +442,7 @@ if (require.main === module) {
         (patterns.get(k) ?? patterns.set(k, []).get(k)!).push(sp.name);
         if (fixtureNames.has(sp.name.toLowerCase())) fixturesToUpdate.push(sp.name);
       }
-      // The transcripts behind what was written go to the private bucket first: a row must lead to its evidence.
+      // The transcripts behind what was written go to the transcripts bucket first: a row must lead to its evidence.
       const behind = new Set([...written].flatMap((sis) => (decisions.get(sis) ?? verdicts.get(sis))?.transcripts ?? []));
       await uploadTranscripts([...behind], cacheDir);
       writeDecisions(decisions.values());
@@ -541,20 +531,15 @@ if (require.main === module) {
     console.log(`judge: on the ${fixtures.length} fixture species, ${t.right} right, ${t.wrong} wrong, ${t.cant} can't tell`);
     for (const r of fr.rows.filter((x) => x.verdict !== "right")) console.log(`  ${bySis.get(r.sis_taxon_id)?.name}: ${r.verdict}: ${r.answer} (${r.reason.slice(0, 160)})`);
     const perCall = spent.calls ? spent.usd / spent.calls : null;
-    const fxAgain: Map<number, Answer>[] = [];
     if (mode === "decide") {
       for (let k = 2; k <= runs; k++) {
         const again = await judge(fixtures.map((s) => factsOf(s.sis)), { cacheDir, model, run: k, parallel });
-        fxAgain.push(again);
         const same = fixtures.filter((s) => { const x = fx.get(s.sis), y = again.get(s.sis);
           return x && y && x.records !== "can't tell" && y.records !== "can't tell" && counted(x.records, lookOf(s.sis)) === counted(y.records, lookOf(s.sis)); }).length;
         console.log(`judge: run ${k} on the fixtures agrees with run 1 on ${same} of ${fixtures.length}`);
       }
     }
-    // decide: and for the species the first runs differ on (as many as the fixtures', proportionally), `more` runs.
-    const fxSplit = mode === "decide" && runs > 1 ? fixtures.filter((s) => outcome([fx.get(s.sis), ...fxAgain.map((m) => m.get(s.sis))], ourAnswer(s), lookOf(s.sis),
-      new Set(factsOf(s.sis).col_records.map((r) => r.id))).kind === "split").length / Math.max(1, fixtures.length) : 0;
-    const calls = Math.ceil(chosen.length / BATCH) * (mode === "decide" ? runs : 1) + (mode === "decide" ? Math.ceil(chosen.length * fxSplit / BATCH) * more : 0);
+    const calls = Math.ceil(chosen.length / BATCH) * (mode === "decide" ? runs : 1);
     console.log(`judge ${mode}: ${chosen.length.toLocaleString()} species, ${calls.toLocaleString()} calls of ${BATCH} (before the cache)` +
       (perCall ? `, about $${(perCall * calls).toFixed(0)} at the fixtures' $${perCall.toFixed(2)} a call` : ""));
     if (a.includes("--fixtures-only")) return;
