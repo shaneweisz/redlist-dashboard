@@ -210,7 +210,7 @@ export const stableFacts = (f: ReturnType<typeof facts>) =>
  * species has other batch-mates. A species a call leaves unanswered is asked
  * once more, then left out (not cached, so a rerun asks it).
  */
-export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cacheDir: string; runner?: Runner; model?: string; run?: number; parallel?: number }): Promise<Map<number, Answer>> {
+export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cacheDir: string; runner?: Runner; model?: string; run?: number; parallel?: number; retryWaitMs?: number }): Promise<Map<number, Answer>> {
   const dir = path.join(opts.cacheDir, "answers");
   fs.mkdirSync(dir, { recursive: true });
   const run = opts.run ?? 1;
@@ -251,8 +251,15 @@ export async function judge(batchFacts: ReturnType<typeof facts>[], opts: { cach
       if (answers.length === 0 && attempt === 1) throw new Error(`judge: the call answered none of its ${batch.length} species; nothing cached for them, so a rerun asks again`);
       for (const a of answers) { const ans = { ...a, transcript: call }; fs.writeFileSync(cacheOf(byId.get(a.sis_taxon_id)!), JSON.stringify(ans)); out.set(a.sis_taxon_id, ans); }
     };
+    // A call that fails (a dropped connection, an overloaded API) is tried twice more after a wait; one that still fails stops the run.
+    const askRetrying = async (batch: ReturnType<typeof facts>[]) => {
+      for (let k = 1; ; k++) {
+        try { return await ask(batch); }
+        catch (e) { if (k >= 3) throw e; console.log(`judge: ${(e as Error).message.slice(0, 200)}; trying again (${k} of 2)`); await new Promise((r) => setTimeout(r, (opts.retryWaitMs ?? 30_000) * k)); }
+      }
+    };
     let next = 0;
-    const worker = async () => { while (next < batches.length) await ask(batches[next++]); };
+    const worker = async () => { while (next < batches.length) await askRetrying(batches[next++]); };
     await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.parallel ?? 1, batches.length)) }, worker));
     todo = todo.filter((f) => !out.has(f.sis_taxon_id));
     if (todo.length) console.log(`judge: run ${run}: ${todo.length} species unanswered${attempt === 1 ? ", asking them once more" : ", left out (a rerun asks them)"}`);

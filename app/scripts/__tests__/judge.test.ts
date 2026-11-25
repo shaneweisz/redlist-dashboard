@@ -174,26 +174,44 @@ describe("judge", () => {
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
+  it("tries a failed call twice more before giving up", async () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
+    let calls = 0;
+    const runner = async (r: ClaudeRun) => {
+      if (++calls < 3) return { code: 1, stderr: "", stdout: "" };
+      const batch = JSON.parse(r.stdin!) as { sis_taxon_id: number }[];
+      return { code: 0, stderr: "", stdout: JSON.stringify({ structured_output: { answers: batch.map((b) => ({ sis_taxon_id: b.sis_taxon_id, records: "can't tell", reason: "r", sources: [] })) } }) };
+    };
+    expect((await judge(two, { cacheDir, runner, retryWaitMs: 0 })).size).toBe(2);
+    expect(calls).toBe(3);
+    calls = -10;
+    fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
+    await expect(judge(two, { cacheDir, runner, retryWaitMs: 0 })).rejects.toThrow(/exited 1/);
+    expect(calls).toBe(-7);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
   it("caches nothing from a failed call or one that answers none of its batch, and keeps only the batch's own ids", async () => {
     const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
     const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
     const say = (o: unknown) => async () => ({ code: 0, stderr: "", stdout: JSON.stringify(o) });
     const answer = (sis: number) => ({ sis_taxon_id: sis, records: "can't tell", reason: "r", sources: [] });
-    await expect(judge(two, { cacheDir, runner: say({ is_error: true, result: "usage limit" }) })).rejects.toThrow(/failed/);
-    await expect(judge(two, { cacheDir, runner: say({ result: "not json" }) })).rejects.toThrow(/none of its 2/);
-    await expect(judge(two, { cacheDir, runner: say({ structured_output: { answers: [answer(99)] } }) })).rejects.toThrow(/none of its 2/);
+    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ is_error: true, result: "usage limit" }) })).rejects.toThrow(/failed/);
+    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ result: "not json" }) })).rejects.toThrow(/none of its 2/);
+    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(99)] } }) })).rejects.toThrow(/none of its 2/);
     expect(fs.readdirSync(cacheDir).filter((f) => f.endsWith(".json"))).toEqual([]);
-    const a = await judge(two, { cacheDir, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
+    const a = await judge(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
     expect([...a.keys()]).toEqual([1]);
     fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
     // An id answered twice, or under another name, is dropped; a record named otherwise than its id's becomes an unknown record.
     const named = [{ sis_taxon_id: 1, red_list: { name: "Aa" }, col_records: [{ id: "R", name: "Aa" }] }, { sis_taxon_id: 2, red_list: { name: "Bb" }, col_records: [] }] as never[];
-    const b = await judge(named, { cacheDir, runner: say({ structured_output: { answers: [
+    const b = await judge(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [
       { ...answer(1), name: "Aa", records: [{ id: "R", name: "Zz", relation: "is" }] }, { ...answer(2), name: "Cc" }] } }) });
     expect([...b.keys()]).toEqual([1]);
     expect(b.get(1)!.records).toEqual([{ id: "R?named Zz", name: "Zz", relation: "is" }]);
     fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
-    await expect(judge(named, { cacheDir, runner: say({ structured_output: { answers: [answer(1), answer(1)] } }) })).rejects.toThrow(/none of its 2/);
+    await expect(judge(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(1)] } }) })).rejects.toThrow(/none of its 2/);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 });
