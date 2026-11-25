@@ -265,6 +265,15 @@ describe("decisions", () => {
     expect(s.selected[0].basis).toBe("decision");
   });
 
+  it("keeps what the rules alone select beside a decision, and the note says it", async () => {
+    const { matchNote } = await import("../sync/link/assessment-link");
+    const [s] = selectEvery([input], rel as Omit<Release, "wholeBySteps">, new Map([[1, decision({ rows: [{ ...decision().rows[0], relation: "part of" }] })]]));
+    expect(s.step).toBe(1);
+    expect(s.rules && ids(s.rules)).toEqual(["5XHD2:is"]);
+    expect(matchNote(s, input)!.note).toContain("Without the decision, the rules would have counted Centropogon australis (White, 1790) [5XHD2].");
+    expect(selectEvery([input], rel as Omit<Release, "wholeBySteps">, new Map())[0].rules).toBeUndefined();
+  });
+
   it("lapses when the Red List renames the species, or cites other authors", () => {
     expect(select(input, rel, decision({ redlistName: "Centropogon other" })).toReview).toBe("decision lapsed (name)");
     expect(select(input, rel, decision({ redlistAuthority: "Gaudich." })).toReview).toBe("decision lapsed (citation)");

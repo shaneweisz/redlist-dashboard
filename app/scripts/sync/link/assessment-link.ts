@@ -303,6 +303,14 @@ export function juryVotes(votes: string): string {
   }).join(", ");
 }
 
+/** What the rules alone would have counted, for a species a decision settles. */
+export function rulesWouldHave(rules: Selection): string {
+  const counted = rules.selected.filter((x) => x.relation !== "refused")
+    .map((x) => `${fmt(x.record)}${x.relation === "part of" ? " (only the records under it)" : ""}`);
+  return `Without the decision, the rules would have counted ${counted.length ? counted.join("; ") : "nothing"}` +
+    `${rules.doubts.length ? `, flagged: ${rules.doubts.join(", ")}` : ""}.`;
+}
+
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */
 export function matchNote(sel: Selection, sp: SpeciesInput): { note: string; records: NoteRecord[] } | null {
   const rec = (r: ColRecord, role: NoteRecord["role"]): NoteRecord => ({ id: r.id, name: r.name, authorship: r.authorship, status: status(r.status),
@@ -314,6 +322,7 @@ export function matchNote(sel: Selection, sp: SpeciesInput): { note: string; rec
 
   const by = sel.decision?.by ?? "?";
   if (sel.step === 1) sentences.push(`Decided by ${by.startsWith("judge:") ? `an AI jury (${by.slice(6)}), its runs agreeing` : by}${sel.reason ? ": not in CoL." : "."}`);
+  if (sel.step === 1 && sel.rules) sentences.push(rulesWouldHave(sel.rules));
   for (const d of sel.doubts) sentences.push(DOUBT_SENTENCE[d](sp, sel));
   if (sel.jury?.verdict === "confirmed") sentences.push(`Checked by an AI jury on ${sel.jury.date}: ${juryVotes(sel.jury.votes)}; the doubt stands, but the records match.`);
   const first = sel.selected[0];

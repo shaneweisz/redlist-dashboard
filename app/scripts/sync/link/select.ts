@@ -93,6 +93,8 @@ export interface Selection {
   toReview: string | null;
   /** The judge's verdict, where one applies: the species keeps its doubts, and its note says what the check found. */
   jury?: { verdict: "confirmed" | "undecided"; votes: string; date: string; transcripts: string[] } | null;
+  /** For a species a decision settles, what the rules alone select: shown beside the decision, never counted. */
+  rules?: Selection;
 }
 
 // ── Definitions ───────────────────────────────────────────────────────────────
@@ -365,6 +367,7 @@ export function selectEvery(species: SpeciesInput[], release: Omit<Release, "who
   const full: Release = { ...release, wholeBySteps };
   return species.map((sp) => {
     const s = select(sp, full, decisions.get(sp.sis));
+    if (s.step === 1) s.rules = select(sp, full);
     const v = verdicts.get(sp.sis);
     const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer && verdictBasis(sp, s) === v.basis;
     if (applies) s.jury = { verdict: v.verdict, votes: v.votes, date: v.date, transcripts: v.transcripts };
