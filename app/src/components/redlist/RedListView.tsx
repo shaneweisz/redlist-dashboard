@@ -2,7 +2,7 @@
 
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
@@ -585,6 +585,8 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
 const SKIP_PRIORITY = skipSet("priority");
+/** Wide enough for the Reassessment Triage sidebar beside the page (Tailwind's xl). */
+const XL_QUERY = "(min-width: 1280px)";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -1659,6 +1661,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  // Reassessment Triage as an ever-present sidebar on xl screens (prototype).
+  const triageInSidebar = useSyncExternalStore(
+    (cb) => { const mq = window.matchMedia(XL_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
+    () => window.matchMedia(XL_QUERY).matches,
+    () => false,
+  );
+  // Collapsed-or-not is a per-viewer convenience, remembered in localStorage.
+  const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
+    try { return typeof window !== "undefined" && localStorage.getItem("triageSidebarCollapsed") === "1"; } catch { return false; }
+  });
+  const setTriageSidebarCollapsed = useCallback((v: boolean) => {
+    setTriageSidebarCollapsedState(v);
+    try { localStorage.setItem("triageSidebarCollapsed", v ? "1" : "0"); } catch {}
+  }, []);
   // Set, not a single string (like expandedCriteria below) — multi-selecting
   // two top-level threats (cmd-click) should show pills below BOTH, not just
   // whichever was clicked last.
@@ -5070,6 +5086,109 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     );
   })();
 
+  // ── Reassessment Triage: shared between its inline card (narrow screens,
+  // bottom of More Filters) and the ever-present sidebar (xl and up). Only one
+  // is mounted at a time, so the ~175k-dot canvas is never drawn twice.
+  const triageHeader = (
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+      <div className="min-w-0">
+        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+        <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {priorityBox && (
+          <button type="button" onClick={() => setPriorityBox(null)}
+            className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+            {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  const renderTriageScatter = (fill: boolean) => (
+    <PriorityScatter
+      fill={fill}
+      points={priorityPoints}
+      colors={CATEGORY_COLORS}
+      yAxis={
+        // The y axis title is its controls, read as a phrase:
+        // "[New ▾] GBIF records ([all ▾])", each select sized to
+        // its chosen option where the browser supports it.
+        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+          <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+            onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+            {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+          </select>
+          GBIF records (
+          <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+            onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+            {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+          </select>
+          )
+        </span>
+      }
+      box={priorityBox}
+      onBoxChange={setPriorityBox}
+      onPointClick={openSpeciesFromScatter}
+      selectedKey={selectedSpeciesKey}
+      yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+      maxYears={priorityExtent.maxYears}
+      maxValue={priorityExtent.maxValue}
+    />
+  );
+  const triageSidebar = triageInSidebar && !isNewAssessments && showPriority ? (
+    triageSidebarCollapsed ? (
+      // Collapsed: a slim tab on the right edge; no data-triage-sidebar, so
+      // page.tsx gives the page its full width back.
+      <button type="button" onClick={() => setTriageSidebarCollapsed(false)}
+        aria-label="Show the Reassessment Triage sidebar"
+        className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-2 px-1.5 py-3 rounded-l-lg bg-white dark:bg-zinc-900 border border-r-0 border-zinc-200 dark:border-zinc-800 shadow-md text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+        <span aria-hidden>‹</span>
+        <span className="[writing-mode:vertical-rl] rotate-180">Reassessment Triage{priorityBox ? ` · ${priorityInBox.toLocaleString()}` : ""}</span>
+      </button>
+    ) : (
+      <aside data-triage-sidebar aria-label="Reassessment Triage"
+        className="fixed top-4 bottom-4 right-4 z-30 w-[24rem] 2xl:w-[30rem] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</div>
+            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              {priorityPoints.length.toLocaleString()} species plotted · top right is outdated with plenty of new data
+            </div>
+          </div>
+          <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
+            aria-label="Hide the Reassessment Triage sidebar" title="Hide sidebar"
+            className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <span aria-hidden>›</span>
+          </button>
+        </div>
+        <div className="mt-2 min-h-[1.75rem] flex flex-wrap items-center gap-1">
+          {priorityBox ? (
+            <button type="button" onClick={() => setPriorityBox(null)}
+              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Drag a box to filter the page · click a dot to open it in the table</span>
+          )}
+        </div>
+        <div className="flex-1 min-h-0 mt-1">
+          {speciesLoading && assessedSpecies.length === 0 ? (
+            <div className="h-full flex items-center justify-center"><Spinner /></div>
+          ) : renderTriageScatter(true)}
+        </div>
+        {/* Legend: the category colours the dots use. */}
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-600 dark:text-zinc-400">
+          {["CR", "EN", "VU", "NT", "LC", "DD"].map((c) => (
+            <span key={c} className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
+            </span>
+          ))}
+        </div>
+      </aside>
+    )
+  ) : null;
+
   return (
     <div className="space-y-1 min-w-0 flex-1 flex flex-col min-h-0">
       {/* Always show Taxa Summary table */}
@@ -5721,6 +5840,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               Habitat/Threats, Taxonomic revision, Reassessment Triage) lives behind the "More Filters"
               toggle below. No independently-scrollable panel here: nested
               scrollbars read as confusing, so this is plain click-to-expand. */}
+          {triageSidebar}
           {!isNewAssessments && (
             <>
                 <button
@@ -5969,55 +6089,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
 
                 {/* Reassessment Triage, full width at the bottom of More Filters: years
-                    since assessment against GBIF records (not for a single species). */}
-                  {!isNewAssessments && showPriority && (
+                    since assessment against GBIF records (not for a single species).
+                    On wide screens it lives in the sidebar instead (triageSidebar). */}
+                  {!isNewAssessments && showPriority && !triageInSidebar && (
                     <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {priorityBox && (
-                            <button type="button" onClick={() => setPriorityBox(null)}
-                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                      {triageHeader}
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-                      ) : (
-                        <PriorityScatter
-                          points={priorityPoints}
-                          colors={CATEGORY_COLORS}
-                          yAxis={
-                            // The y axis title is its controls, read as a phrase:
-                            // "[New ▾] GBIF records ([all ▾])", each select sized to
-                            // its chosen option where the browser supports it.
-                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                              </select>
-                              GBIF records (
-                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                              </select>
-                              )
-                            </span>
-                          }
-                          box={priorityBox}
-                          onBoxChange={setPriorityBox}
-                          onPointClick={openSpeciesFromScatter}
-                          selectedKey={selectedSpeciesKey}
-                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                          maxYears={priorityExtent.maxYears}
-                          maxValue={priorityExtent.maxValue}
-                        />
-                      )}
+                      ) : renderTriageScatter(false)}
                     </div>
                   )}
 
