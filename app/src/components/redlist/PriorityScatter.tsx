@@ -10,6 +10,11 @@
  * The axes' extents come from the caller (the whole taxon, not the filtered
  * points), so applying a filter never rescales the chart.
  *
+ * It also serves the first-assessment triage (Awaiting 1st Assessment): years
+ * since a not-evaluated species was described across, its total GBIF records
+ * up, one colour. Points there carry `describedYear`, and the caller passes
+ * its own x title and no reference line.
+ *
  * Canvas rather than SVG: "All species" is ~175k dots. Hover and the drag box
  * are DOM overlays, so the canvas only redraws when the data or box changes.
  */
@@ -28,7 +33,10 @@ export interface PriorityPoint {
   /** GBIF records in total and since the assessment (the plotted record mode), for the tooltip. */
   total: number | null;
   newRecords: number | null;
-  assessmentDate: string;
+  /** The latest assessment's date (reassessment triage). */
+  assessmentDate?: string;
+  /** The year described (first-assessment triage): `years` then counts from it. */
+  describedYear?: number;
 }
 
 /**
@@ -51,8 +59,10 @@ const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, C
 // labels, then the x title.
 const Y_TICKS = 40, X_TICKS = 16, Y_TITLE = 28, X_TITLE = 18;
 const M = { left: Y_TICKS, right: 12, top: Y_TITLE, bottom: X_TICKS + X_TITLE };
-/** The Red List's "needs updating" threshold (the summary table's 10+ yrs), marked on the x axis. */
-const NEEDS_UPDATING_YEARS = 10;
+/** A dashed vertical line, labelled, at an x value. */
+export interface RefLine { at: number; label: string }
+/** The Red List's "needs updating" threshold (the summary table's 10+ yrs), the reassessment triage's line. */
+export const NEEDS_UPDATING_LINE: RefLine = { at: 10, label: "Needs updating (10+ yrs) →" };
 const DEFAULT_HEIGHT = 300;
 const HIT_RADIUS = 6;
 
@@ -76,7 +86,11 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE }: {
+  /** The x axis title. */
+  xTitle?: string;
+  /** A labelled reference line on the x axis, or null for none. */
+  refLine?: RefLine | null;
   points: PriorityPoint[];
   /** Fill the parent's height (the sidebar) rather than the fixed 300px. */
   fill?: boolean;
@@ -175,7 +189,10 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ctx.fillText(yScale === "pct" ? `${t}%` : t === 0 ? "0" : formatCount(10 ** t), M.left - 6, y);
     }
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    for (let yr = 0; yr <= xMax; yr += 5) {
+    // Every 5 years for assessments (≤ ~35); coarser for wider ranges (years
+    // since described run to ~270), keeping to at most ~8 ticks.
+    const xStep = [5, 10, 25, 50, 100].find((step) => xMax / step <= 8) ?? 100;
+    for (let yr = 0; yr <= xMax; yr += xStep) {
       ctx.fillText(`${yr}`, Math.round(sx(yr)) + 0.5, M.top + plotH + 5);
     }
 
@@ -183,12 +200,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#71717a";
     ctx.textBaseline = "bottom";
-    ctx.fillText("Years since last assessed", M.left + plotW / 2, HEIGHT - 2);
+    ctx.fillText(xTitle, M.left + plotW / 2, HEIGHT - 2);
 
     // The "needs updating" threshold: a dashed line at 10 years, behind the
     // dots (its label is an HTML overlay, so it reads in both themes).
-    if (xMax > NEEDS_UPDATING_YEARS) {
-      const x = Math.round(sx(NEEDS_UPDATING_YEARS)) + 0.5;
+    if (refLine && xMax > refLine.at) {
+      const x = Math.round(sx(refLine.at)) + 0.5;
       ctx.save();
       ctx.strokeStyle = "rgba(113, 113, 122, 0.75)";
       ctx.setLineDash([4, 3]);
@@ -210,7 +227,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, HEIGHT, box, colors, yScale]);
+  }, [layout, scales, width, HEIGHT, box, colors, yScale, xTitle, refLine]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -333,7 +350,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   useLayoutEffect(() => {
     const w = needsLabelRef.current?.offsetWidth;
     if (w && w !== needsLabelW) setNeedsLabelW(w);
-  }, [needsLabelW, width, scales.xMax]);
+  }, [needsLabelW, width, scales.xMax, refLine]);
 
   return (
     <div
@@ -358,14 +375,14 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       {/* The "needs updating" line's label at the plot's top: just right of
           the line, or, where the axis ends too soon after 10 years for it to
           fit (Birds), just left of it, ending at the line. */}
-      {width > 0 && scales.xMax > NEEDS_UPDATING_YEARS && (() => {
-        const lineX = scales.sx(NEEDS_UPDATING_YEARS);
+      {refLine && width > 0 && scales.xMax > refLine.at && (() => {
+        const lineX = scales.sx(refLine.at);
         const fitsRight = lineX + 3 + needsLabelW <= M.left + scales.plotW;
         return (
           <div ref={needsLabelRef}
             className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
             style={{ left: fitsRight ? lineX + 3 : lineX - 3 - needsLabelW, top: M.top + 2 }}>
-            Needs updating (10+ yrs) →
+            {refLine.label}
           </div>
         );
       })()}
@@ -390,18 +407,34 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
           >
             <div className="italic text-zinc-900 dark:text-zinc-100">{hover.p.name}</div>
             {hover.p.commonName && <div className="text-zinc-500 dark:text-zinc-400">{hover.p.commonName}</div>}
-            <div className="mt-0.5 text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
-              <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
-              {" · "}assessed {ageText(hover.p.assessmentDate)}
-            </div>
-            {/* GBIF records in the species table's terms, spelt out: Total / New (since the assessment) / % new records. */}
-            <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
-              <tbody>
-                <tr><td className="pr-3">Total records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">New records</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
-                <tr><td className="pr-3">% new records</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
-              </tbody>
-            </table>
+            {hover.p.describedYear != null ? (
+              // First-assessment triage: when it was described, and its records (no assessment to count "new" from).
+              <>
+                <div className="mt-0.5 text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                  <span className="font-semibold">NE</span>{" · "}described {hover.p.describedYear} ({Math.round(hover.p.years)}y ago)
+                </div>
+                <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
+                  <tbody>
+                    <tr><td className="pr-3">Total records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <>
+                <div className="mt-0.5 text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                  <span className="font-semibold" style={{ color: colors[hover.p.category] }}>{hover.p.category}</span>
+                  {hover.p.assessmentDate && <>{" · "}assessed {ageText(hover.p.assessmentDate)}</>}
+                </div>
+                {/* GBIF records in the species table's terms, spelt out: Total / New (since the assessment) / % new records. */}
+                <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
+                  <tbody>
+                    <tr><td className="pr-3">Total records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
+                    <tr><td className="pr-3">New records</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+                    <tr><td className="pr-3">% new records</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
+                  </tbody>
+                </table>
+              </>
+            )}
           </div>
         </>
       )}
