@@ -22,6 +22,7 @@ import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
 import TaxaIcon from "../TaxaIcon";
 import PhotoCredit from "../PhotoCredit";
+import { MdScatterPlot } from "react-icons/md";
 import { FaInfoCircle } from "react-icons/fa";
 import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
 import type { IconType } from "react-icons";
@@ -1671,13 +1672,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     () => false,
   );
   const triageInSidebar = isWide;
-  // Collapsed-or-not is a per-viewer convenience, remembered in localStorage.
+  // Collapsed by default (the sidebar is opt-in: the collapsed rail is how
+  // it's found); opening or closing it is a per-viewer convenience,
+  // remembered in localStorage.
   const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
-    try { return typeof window !== "undefined" && localStorage.getItem("triageSidebarCollapsed") === "1"; } catch { return false; }
+    try { return typeof window === "undefined" || localStorage.getItem("triageSidebarOpen") !== "1"; } catch { return true; }
   });
   const setTriageSidebarCollapsed = useCallback((v: boolean) => {
     setTriageSidebarCollapsedState(v);
-    try { localStorage.setItem("triageSidebarCollapsed", v ? "1" : "0"); } catch {}
+    try { localStorage.setItem("triageSidebarOpen", v ? "0" : "1"); } catch {}
   }, []);
   // Set, not a single string (like expandedCriteria below) — multi-selecting
   // two top-level threats (cmd-click) should show pills below BOTH, not just
@@ -5147,18 +5150,33 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // scope layout or a single species) in the reassessed view; never on the
   // home summary, where there is no section for it to filter.
   const triageSidebarShown = wideTaxonLayout && showPriority;
-  const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
-  /** The page reserves the triage column (see the data-triage-column marker). */
-  const triageColumn = wideTaxonLayout && !triageSidebarCollapsed;
+  /** The page reserves the triage column (see the data-triage-column marker):
+   *  "open" for the sidebar (26rem + 1rem gap), "collapsed" for its rail
+   *  (3rem + 1rem gap), null when there is no column. */
+  const triageColumn: "open" | "collapsed" | null = wideTaxonLayout ? (triageSidebarCollapsed ? "collapsed" : "open") : null;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
-      // Collapsed: a slim tab on the right edge, and the section takes the
-      // whole (still wide) page.
+      // Collapsed: a slim rail in the page's triage column, styled like the
+      // other cards and sticky like the open sidebar, its top level with the
+      // first charts. It reads as a closed panel (the convention of editor and
+      // design-tool side panels) rather than a tab on the window's edge: a
+      // scatter icon and the panel's name say what opening it shows, and its
+      // chevron sits at the top, where the open sidebar's collapse chevron is.
+      // The whole rail is the button. A box selection still filtering the page
+      // shows as a count, so a hidden filter is never invisible.
       <button type="button" onClick={() => setTriageSidebarCollapsed(false)}
-        aria-label="Show the Reassessment Triage sidebar"
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-2 px-1.5 py-3 rounded-l-lg bg-white dark:bg-zinc-900 border border-r-0 border-zinc-200 dark:border-zinc-800 shadow-md text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800">
-        <span aria-hidden>‹</span>
-        <span className="[writing-mode:vertical-rl] rotate-180">Reassessment Triage{priorityBox ? ` · ${priorityInBox.toLocaleString()}` : ""}</span>
+        aria-expanded={false}
+        aria-label={`Show Reassessment Triage${priorityBox ? ` (${priorityInBox.toLocaleString()} species selected)` : ""}`}
+        title="Show Reassessment Triage: years since assessment against GBIF records"
+        className="sticky top-4 w-12 flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
+        <span aria-hidden className="text-base leading-none">‹</span>
+        <MdScatterPlot aria-hidden size={18} />
+        <span className="[writing-mode:vertical-rl] rotate-180 text-sm font-semibold text-zinc-700 dark:text-zinc-200 whitespace-nowrap">Reassessment Triage</span>
+        {priorityBox && (
+          <span className="[writing-mode:vertical-rl] rotate-180 text-[11px] font-medium px-0.5 py-1.5 rounded-md bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900 whitespace-nowrap">
+            {priorityInBox.toLocaleString()} selected
+          </span>
+        )}
       </button>
     ) : (
       // Sticky, not fixed: it scrolls up with its section, then stays in view
@@ -5174,7 +5192,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
-            aria-label="Hide the Reassessment Triage sidebar" title="Hide sidebar"
+            aria-expanded={true}
+            aria-label="Hide Reassessment Triage" title="Hide Reassessment Triage"
             className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <span aria-hidden>›</span>
           </button>
@@ -5290,7 +5309,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           sidebar being mounted, so switching to Awaiting 1st Assessment
           doesn't move the page (or the toggle under the cursor); collapsing,
           a deliberate layout change, gives the column back. */}
-      {triageColumn && <span data-triage-column hidden />}
+      {triageColumn && <span data-triage-column={triageColumn} hidden />}
 
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
@@ -5453,12 +5472,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       ) : (
       // With the triage column reserved (page.tsx), this section reaches into
-      // it (-mr-[27rem]: the 26rem column plus its 1rem gap). In the reassessed
+      // it (-mr: the column plus its 1rem gap; 27rem open, 4rem for the rail). In the reassessed
       // view it is two columns, the charts and table at the page's width and
       // the sticky triage chart in the reserved column, level with the first
       // charts. In Awaiting 1st Assessment its charts and table simply use the
       // extra width rather than leaving the column empty.
-      <div className={triageColumn ? `-mr-[27rem] ${triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start" : ""}` : undefined}>
+      <div className={!triageColumn ? undefined : triageColumn === "open"
+        ? `-mr-[27rem] ${triageSidebarShown ? "grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start" : ""}`
+        : `-mr-[4rem] ${triageSidebarShown ? "grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start" : ""}`}>
       <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
