@@ -5204,13 +5204,25 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <span aria-hidden>›</span>
           </button>
         </div>
-        {/* Legend first, so the colours are decoded before the dots are read. */}
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-600 dark:text-zinc-400" aria-label="Dot colour: Red List category">
-          {TRIAGE_LEGEND.map((c) => (
-            <span key={c} className="inline-flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
-            </span>
-          ))}
+        {/* Legend first, so the colours are decoded before the dots are read.
+            Each entry is also a filter: it drives the page's Conservation
+            Status selection (same handler as that chart's bars: click to
+            select one, again to clear, Cmd/Ctrl-click to add or remove), so
+            the table, the other charts and these dots all follow. Unselected
+            entries dim while a selection is active, as that chart's bars do. */}
+        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter.">
+          {TRIAGE_LEGEND.map((c) => {
+            const active = selectedCategories.has(c);
+            const dimmed = selectedCategories.size > 0 && !active;
+            return (
+              <button key={c} type="button" aria-pressed={active}
+                onClick={(e) => handleCategoryClick({ payload: { code: c } }, e)}
+                title={`Show only ${c} · ⌘/Ctrl-click to add or remove`}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"} ${dimmed ? "opacity-40" : ""}`}>
+                <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
+              </button>
+            );
+          })}
         </div>
         <div className="flex-1 min-h-0 mt-2">
           {speciesLoading && assessedSpecies.length === 0 ? (
