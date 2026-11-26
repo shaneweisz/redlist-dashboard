@@ -1735,6 +1735,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Every visitor opens on the same default; nothing is remembered between
   // visits, so everyone sees a consistent view.
   const [assessorReviewerMode, setAssessorReviewerMode] = useState<CreditChartMode>("assessors");
+  // Birds open on Facilitators instead: every bird assessment credits
+  // "BirdLife International" as the assessor, so the Assessors chart is one
+  // bar, and the facilitator line is the one that names people. Swaps only
+  // between the two defaults, so a Reviewers/Contributors/Institutions choice
+  // survives moving into or out of Birds. selectedTaxa hydrates from the URL
+  // after mount, hence an effect rather than an initializer.
+  const birdsOnly = selectedTaxa.size === 1 && selectedTaxa.has("birds");
+  useEffect(() => {
+    setAssessorReviewerMode((mode) =>
+      birdsOnly && mode === "assessors" ? "facilitators"
+        : !birdsOnly && mode === "facilitators" ? "assessors"
+        : mode);
+  }, [birdsOnly]);
 
   // Which credit line the Suggested Experts tab ranks. A legacy
   // ?tab=assessors/reviewers link names a role explicitly. It arrives LATE:
@@ -1742,7 +1755,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // urlTab is still null on the first pass — hence an effect on urlTab rather
   // than an initializer. Opening the tab then rewrites ?tab= to "candidates",
   // which yields no legacy role and so leaves the chosen role alone.
-  const [candidateRole, setCandidateRole] = useState<CreditRole>("assessors");
+  // null until someone picks a role: the default then depends on the species,
+  // Facilitators for a bird (see birdsOnly above), Assessors otherwise.
+  const [candidateRole, setCandidateRole] = useState<CreditRole | null>(null);
   useEffect(() => {
     const legacy = roleFromLegacyTab(urlTab);
     if (legacy) setCandidateRole(legacy);
@@ -7203,7 +7218,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {s.category === "NE" && (visitedTabs.has("candidates")) && (
                             <div style={{ display: activeDetailTab === "candidates" ? undefined : "none" }}>
-                              <CandidatesTable role={candidateRole} onRoleChange={setCandidateRole} species={candidateSpecies} />
+                              <CandidatesTable role={candidateRole ?? (s.taxon_group === "birds" ? "facilitators" : "assessors")} onRoleChange={setCandidateRole} species={candidateSpecies} />
                             </div>
                           )}
                           </div>
