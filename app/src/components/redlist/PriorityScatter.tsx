@@ -38,7 +38,12 @@ export interface PriorityPoint {
  * are jittered a few pixels, so a tight box around one dot could miss its
  * unjittered position and select nothing.
  */
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
+export interface PriorityBox {
+  x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string>;
+  /** A selection made by a rule rather than dragged (non-finite coordinates:
+   *  nothing to draw, the dots outside it are just dimmed), named for its chip. */
+  rule?: string;
+}
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
@@ -302,7 +307,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const cy = (v: number) => Math.min(Math.max(v, M.top - EDGE), M.top + plotH + EDGE);
     return { left: cx(l), top: cy(t), width: cx(r) - cx(l), height: cy(b) - cy(t) };
   };
-  const boxPx = box && width > 0
+  const boxPx = box && width > 0 && Number.isFinite(box.x0)
     ? toRect(scales.sx(box.x0), scales.sy(box.y1), scales.sx(box.x1), scales.sy(box.y0)) : null;
   const dragPx = drag
     ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;

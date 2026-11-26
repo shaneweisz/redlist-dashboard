@@ -5120,6 +5120,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
     </div>
   );
+  // A one-click selection for the usual question: species past the
+  // needs-updating threshold whose GBIF data has substantially changed since:
+  // 10+ new records, making up over half of all their records (in the chart's
+  // record mode). Not a box: the two record conditions are on different y
+  // metrics, so no rectangle matches it; the dots outside it are just dimmed.
+  const selectOverdueWithNewData = () => {
+    const keys = new Set(priorityPoints
+      .filter((p) => p.years >= 10 && p.newRecords != null && p.newRecords >= 10 && !!p.total && p.newRecords / p.total > 0.5)
+      .map((p) => p.key));
+    setPriorityBox({ x0: NaN, x1: NaN, y0: NaN, y1: NaN, keys, rule: "10+ yrs, 10+ new, >50% new" });
+  };
   const renderTriageScatter = (fill: boolean) => (
     <PriorityScatter
       fill={fill}
@@ -5229,19 +5240,26 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="h-full flex items-center justify-center"><Spinner /></div>
           ) : renderTriageScatter(true)}
         </div>
-        {/* A caption below the plot: before a selection, how to make one;
-            after, the selection itself in the same place, so the hint gives
-            way to its result. */}
-        {/* Fixed height, so swapping the hint for the chip never resizes the
-            plot above. */}
-        <div className="mt-2 h-7 flex items-center text-[11px] text-zinc-500 dark:text-zinc-400">
+        {/* A caption below the plot: before a selection, how to make one, and
+            a one-click one whose label is its criteria (so it can be checked,
+            not just trusted); after, the selection itself in the same place,
+            naming the rule if one made it. Fixed height (two lines), so the
+            swap never resizes the plot above. */}
+        <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
           {priorityBox ? (
             <button type="button" onClick={() => setPriorityBox(null)}
               className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+              {priorityInBox.toLocaleString()} species{priorityBox.rule ? ` · ${priorityBox.rule}` : " selected"} <span aria-hidden>×</span>
             </button>
           ) : (
-            <span>Drag to select · click a dot to open it</span>
+            <>
+              <span>Drag to select · click a dot to open it</span>
+              <button type="button" onClick={selectOverdueWithNewData}
+                title="Species assessed 10 or more years ago with at least 10 new GBIF records since, making up more than half of all their records"
+                className="text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                Select 10+ yrs since assessed · 10+ new records · &gt;50% new
+              </button>
+            </>
           )}
         </div>
       </aside>
