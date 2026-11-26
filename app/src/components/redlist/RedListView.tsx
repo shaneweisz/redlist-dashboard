@@ -3,6 +3,7 @@
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
+import { useFeatureFlagEnabled } from "posthog-js/react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
@@ -587,6 +588,8 @@ const SKIP_OBS = skipSet("obs");
 const SKIP_PRIORITY = skipSet("priority");
 /** Wide enough for the Reassessment Triage sidebar beside the page (Tailwind's xl). */
 const XL_QUERY = "(min-width: 1280px)";
+/** PostHog feature flag (boolean) that turns the Reassessment Triage sidebar on for everyone. */
+const TRIAGE_SIDEBAR_FLAG = "triage-sidebar";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -1661,12 +1664,30 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
-  // Reassessment Triage as an ever-present sidebar on xl screens (prototype).
-  const triageInSidebar = useSyncExternalStore(
+  // Reassessment Triage as an ever-present sidebar on xl screens. Behind the
+  // PostHog flag TRIAGE_SIDEBAR_FLAG, an all-or-nothing switch: PostHog runs
+  // with in-memory persistence and no identify, so every page load is a new
+  // anonymous id and a percentage rollout would re-roll on each reload. No
+  // NEXT_PUBLIC_POSTHOG_KEY (local dev) leaves the flag undefined, i.e. off.
+  // `?triageSidebar=1` previews it regardless of the flag, and is remembered on
+  // this browser until `?triageSidebar=0`.
+  const triageSidebarFlag = useFeatureFlagEnabled(TRIAGE_SIDEBAR_FLAG);
+  const [triageSidebarPreview] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const q = new URLSearchParams(window.location.search).get("triageSidebar");
+      if (q === "1") localStorage.setItem("triageSidebarPreview", "1");
+      if (q === "0") localStorage.removeItem("triageSidebarPreview");
+      return localStorage.getItem("triageSidebarPreview") === "1";
+    } catch { return false; }
+  });
+  const triageSidebarEnabled = triageSidebarFlag === true || triageSidebarPreview;
+  const isXl = useSyncExternalStore(
     (cb) => { const mq = window.matchMedia(XL_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
     () => window.matchMedia(XL_QUERY).matches,
     () => false,
   );
+  const triageInSidebar = triageSidebarEnabled && isXl;
   // Collapsed-or-not is a per-viewer convenience, remembered in localStorage.
   const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
     try { return typeof window !== "undefined" && localStorage.getItem("triageSidebarCollapsed") === "1"; } catch { return false; }
