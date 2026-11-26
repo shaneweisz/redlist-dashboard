@@ -24,7 +24,7 @@ import TaxaIcon from "../TaxaIcon";
 import PhotoCredit from "../PhotoCredit";
 import { MdScatterPlot } from "react-icons/md";
 import { FaInfoCircle } from "react-icons/fa";
-import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
+import { LuPanelRightClose, LuPanelRightOpen, LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
@@ -1679,6 +1679,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Always starts collapsed: the sidebar is opt-in on every visit, opened
   // from its rail, and not remembered.
   const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
+  /** The species table's card, for the triage selection's "↓ table" link. */
+  const speciesTableRef = useRef<HTMLDivElement>(null);
   // Leaving for Awaiting 1st Assessment closes it, so coming back shows the
   // rail and it has to be reopened. (Adjusted during render, React's pattern
   // for state that follows a prop, rather than in an effect.)
@@ -5120,16 +5122,27 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
     </div>
   );
-  // A one-click selection for the usual question: species past the
-  // needs-updating threshold whose GBIF data has substantially changed since:
-  // 10+ new records, making up over half of all their records (in the chart's
-  // record mode). Not a box: the two record conditions are on different y
-  // metrics, so no rectangle matches it; the dots outside it are just dimmed.
-  const selectOverdueWithNewData = () => {
-    const keys = new Set(priorityPoints
-      .filter((p) => p.years >= 10 && p.newRecords != null && p.newRecords >= 10 && !!p.total && p.newRecords / p.total > 0.5)
-      .map((p) => p.key));
-    setPriorityBox({ x0: NaN, x1: NaN, y0: NaN, y1: NaN, keys, rule: "10+ yrs, 10+ new, >50% new" });
+  // A one-click filter for the usual question: species past the
+  // needs-updating threshold whose GBIF data has substantially changed since.
+  // It sets the page's own filters (Years Since Assessed's "10+ yrs old", and
+  // GBIF Records' New and % New ranges, in the chart's record mode), so the
+  // rule shows as ordinary pills, the charts show their selections, each part
+  // can be changed or removed on its own, and it's in the URL. The ranges'
+  // edges set the thresholds: more than 10 new records, 50% or more new.
+  // Clicking it again, while exactly those filters are set, removes them.
+  const triageMode = gbifKeyParts(priorityKey).mode;
+  const OVERDUE_NEW = ["11-100", "101-1K", "1K-10K", "10K+"];
+  const OVERDUE_PCT = ["50%+"];
+  const sameSet = (a: ReadonlySet<string>, b: readonly string[]) => a.size === b.length && b.every((x) => a.has(x));
+  const overdueFilterOn = isOutdatedSelected
+    && sameSet(gbifRanges[`new.${triageMode}`], OVERDUE_NEW)
+    && sameSet(gbifRanges[`pctNew.${triageMode}`], OVERDUE_PCT);
+  const toggleOverdueFilter = () => {
+    const on = !overdueFilterOn;
+    setExactFilters({ outdated: on ? "yes" : null });
+    setGbifRanges(`new.${triageMode}`, new Set(on ? OVERDUE_NEW : []));
+    setGbifRanges(`pctNew.${triageMode}`, new Set(on ? OVERDUE_PCT : []));
+    setPriorityBox(null);
   };
   const renderTriageScatter = (fill: boolean) => (
     <PriorityScatter
@@ -5176,7 +5189,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // first charts. It reads as a closed panel (the convention of editor and
       // design-tool side panels) rather than a tab on the window's edge: a
       // scatter icon and the panel's name say what opening it shows, and its
-      // chevron sits at the top, where the open sidebar's collapse chevron is.
+      // open-panel icon sits at the top, where the open sidebar's close-panel
+      // icon is. (Panel icons rather than chevrons: a lone ‹ or › reads either
+      // as "this way" or "move this way", so it looks backwards to some.)
       // It's as tall as the open sidebar, so opening or closing it changes only
       // the column's width, not its footprint (and it's a large target).
       // The whole rail is the button. A box selection still filtering the page
@@ -5186,7 +5201,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         aria-label={`Show Reassessment Triage${priorityBox ? ` (${priorityInBox.toLocaleString()} species selected)` : ""}`}
         title="Show Reassessment Triage: years since assessment against GBIF records"
         className="sticky top-4 w-12 h-[min(calc(100vh-2rem),42rem)] flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
-        <span aria-hidden className="text-base leading-none">‹</span>
+        <LuPanelRightOpen aria-hidden size={16} />
         <MdScatterPlot aria-hidden size={18} />
         <span className="[writing-mode:vertical-rl] rotate-180 text-sm font-semibold text-zinc-700 dark:text-zinc-200 whitespace-nowrap">Reassessment Triage</span>
         {priorityBox && (
@@ -5211,8 +5226,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
             aria-expanded={true}
             aria-label="Hide Reassessment Triage" title="Hide Reassessment Triage"
-            className="shrink-0 w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <span aria-hidden>›</span>
+            className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100">
+            <LuPanelRightClose aria-hidden size={16} />
           </button>
         </div>
         {/* Legend first, so the colours are decoded before the dots are read.
@@ -5241,23 +5256,34 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           ) : renderTriageScatter(true)}
         </div>
         {/* A caption below the plot: before a selection, how to make one, and
-            a one-click one whose label is its criteria (so it can be checked,
-            not just trusted); after, the selection itself in the same place,
-            naming the rule if one made it. Fixed height (two lines), so the
-            swap never resizes the plot above. */}
+            a one-click filter whose label is its criteria (so it can be
+            checked, not just trusted); after, the selection itself in the
+            same place. Fixed height (two lines), so the swap never resizes the
+            plot above. */}
         <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
           {priorityBox ? (
-            <button type="button" onClick={() => setPriorityBox(null)}
-              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-              {priorityInBox.toLocaleString()} species{priorityBox.rule ? ` · ${priorityBox.rule}` : " selected"} <span aria-hidden>×</span>
-            </button>
+            // The selection, and a way down to it in the table when wanted
+            // (a selection doesn't scroll there itself, unlike clicking a dot:
+            // you may be refining it, and the charts above follow it too).
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setPriorityBox(null)}
+                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+              </button>
+              <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                ↓ table
+              </button>
+            </div>
           ) : (
             <>
               <span>Drag to select · click a dot to open it</span>
-              <button type="button" onClick={selectOverdueWithNewData}
-                title="Species assessed 10 or more years ago with at least 10 new GBIF records since, making up more than half of all their records"
-                className="text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
-                Select 10+ yrs since assessed · 10+ new records · &gt;50% new
+              <button type="button" onClick={toggleOverdueFilter} aria-pressed={overdueFilterOn}
+                title={overdueFilterOn
+                  ? "Remove these filters"
+                  : "Sets the page's filters to species assessed 10 or more years ago with more than 10 new GBIF records since, making up half or more of all their records"}
+                className={`text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100 ${overdueFilterOn ? "font-semibold text-zinc-800 dark:text-zinc-100" : ""}`}>
+                {overdueFilterOn ? "✓ " : ""}Filter to 10+ yrs since assessed · &gt;10 new records · 50%+ new
               </button>
             </>
           )}
@@ -6196,7 +6222,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
 
       {/* Species Table */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+      <div ref={speciesTableRef} className="scroll-mt-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
         {/* Applied filters — every currently-active filter (including the
             selected taxon/subgroup/breakdown-name) as a removable pill,
             directly above the table they filter. Clear all resets everything
