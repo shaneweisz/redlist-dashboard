@@ -5294,6 +5294,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
+      {/* The view toggle and the section it switches. With the triage sidebar
+          open they are the left column of a grid whose right column is the
+          sticky Reassessment Triage chart, starting level with the toggle: the
+          chart is a property of the Species Assessed view, so it sits beside
+          the control that picks that view rather than spanning the page.
+          Closed, the outer wrapper is display:contents and the inner one a
+          plain block with the parent's space-y-1, so the layout is unchanged
+          (and an empty wrapper adds no height, e.g. on Country View's landing). */}
+      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : "contents"}>
+      <div className="space-y-1 min-w-0">
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
@@ -5454,12 +5464,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // With the triage sidebar open, the reassessed section is two columns:
-      // its charts and table, and the sticky triage chart beside them. The
-      // sidebar starts here, below the view toggle, because it belongs to this
-      // view, not to the page.
-      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
-      <div className="space-y-3 min-w-0">
+      <div className="space-y-3">
 
           {/* Single species header — skeleton while loading */}
           {!isSingleSpecies && urlSpecies != null && speciesLoading && (
@@ -7397,9 +7402,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </div>
       </div>
+      ))}
+      </div>
       {triageSidebar}
       </div>
-      ))}
 
       {/* Fixed image preview portal */}
       <div
