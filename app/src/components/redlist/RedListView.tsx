@@ -5302,7 +5302,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           // the other sinks into the grey track. At this size an inverted
           // (solid black) fill outweighed the page, so selection is elevation,
           // border and full-contrast text instead. Small switches keep the fill.
-          <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? `w-full shrink-0 ${wideTaxonLayout ? "md:w-1/2" : "md:w-[33rem]"}` : ""}`}>
+          <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
             {([
               ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
@@ -5356,10 +5356,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             ))}
           </div>
         );
+        // In the wide (sidebar) layout the toggle sits right after the taxon's
+        // name, so "Mammals" and its counts read as one group; stretched across
+        // a 92rem page, a name block that grows pushed them ~450px apart.
+        // Narrower, the name grows and the toggle sits at the right, as before.
+        const taxonNameGrows = wideTaxonLayout ? "" : "flex-1";
         if (rowPending) {
           return (
-            <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className={`mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 ${wideTaxonLayout ? "md:gap-8" : ""}`}>
+              <div className={`flex items-center gap-3 min-w-0 ${taxonNameGrows}`}>
                 <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
                   <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" aria-label="Loading" />
                 </div>
@@ -5379,8 +5384,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           ? (selectedRow.name.startsWith(taxonRank.name) ? taxonRank.rank : <>{taxonRank.rank} <i>{taxonRank.name}</i></>)
           : null;
         return (
-          <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className={`mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 ${wideTaxonLayout ? "md:gap-8" : ""}`}>
+            <div className={`flex items-center gap-3 min-w-0 ${taxonNameGrows}`}>
               {taxonPhoto ? (
                 <PhotoCredit
                   credit={taxonPhoto.credit}
