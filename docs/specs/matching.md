@@ -1,13 +1,47 @@
 # Matching and counting: which CoL records and GBIF occurrences represent a Red List species
 
 *   **Status:** Implemented (2026-11-23, `link/select.ts`); rebuilt from the
-    spec alone (2026-11-24, `npm run sync:rebuild-check`)
+    spec alone (2026-11-26, `npm run sync:rebuild-check`)
 *   **Releases:** Red List 2026-1, CoL COL26.6 XR (ChecklistBank 315557),
     GBIF snapshot 2026-11-01
 
 This spec states the rules and why each exists. The code is the truth about
 behaviour, this is the truth about intent, and the examples, each a fixture
 case (`checks/fixtures/matching.ts`), tie the two together.
+
+## How matching works, in brief
+
+GBIF files every occurrence under a Catalogue of Life (CoL) name. To count a
+Red List species' occurrences, we find the CoL records that are that species
+and count what GBIF files under them:
+
+1. **Its name.** GBIF's name matcher says where GBIF files the Red List
+   name. If CoL has the same name by other authors (a homonym), the Red
+   List's author citation picks between them.
+2. **Its synonyms.** The Red List's synonyms are looked up in CoL too, and
+   their records count where they are the same species.
+3. **Whole or part.** Where CoL has split the species into several, each of
+   them counts for it. Where CoL files its name as part of a broader species,
+   it counts only what GBIF files under its own name; the rest stays with the
+   broader species.
+
+For example, the Red List's *Sorbus greenii* is a synonym of *Aria greenii*
+in CoL, so it counts *Aria greenii*'s records.
+
+**Doubts are flagged, not hidden.** Where the names leave real doubt, such as a
+homonym the citation can't settle, we still show a count, and flag the match
+(the GBIF matching card lists why). Two independent AI taxonomic reviewers
+check these matches and say whether they would count the same records. Their
+answers are shown beside the match. They never change the count: the rules
+alone decide it, with no exceptions for single species.
+
+**Its limits.** It works by names, not by how each group's experts draw the
+species, because for most groups CoL follows another checklist than the Red
+List. One known risk is a synonym meant only in part (some plants once
+called B are our species, not all of B), which the Red List seldom marks and
+the rules then count whole ([Known risks](#known-risks)).
+
+The rest of this spec gives each rule exactly, with the reason for it.
 
 ## What it decides
 
@@ -396,8 +430,8 @@ Each is a fixture case. "Taken" is the records and the step.
 ## Known risks
 
 - **A union or split counts another organism**, where a synonym is meant only
-  in part without saying so (*Catapodium borgesii*, VU, would count 20,886
-  records of *C. marinum*; it has a decision).
+  in part without saying so (*Catapodium borgesii*, VU, counts 20,886
+  records of *C. marinum*, and no doubt flags it).
 - **A name test misreads a name.** The largest is "L.", which
   `compareAuthors` reads as a bare initial, though in botany it is Linnaeus.
 
