@@ -5148,6 +5148,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // home summary, where there is no section for it to filter.
   const triageSidebarShown = wideTaxonLayout && showPriority;
   const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
+  /** The page reserves the triage column (see the data-triage-column marker). */
+  const triageColumn = wideTaxonLayout && !triageSidebarCollapsed;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim tab on the right edge, and the section takes the
@@ -5281,12 +5283,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
-      {/* Wide layout: on a sidebar-wide screen, whenever a taxon's section is
-          showing, page.tsx widens the page for the triage sidebar. Keyed to the
-          section rather than to the sidebar itself, so switching to Awaiting
-          1st Assessment or collapsing the sidebar doesn't change the page
-          width and shift the toggle under the cursor. */}
-      {wideTaxonLayout && <span data-wide-taxon-layout hidden />}
+      {/* Triage column: on a sidebar-wide screen, whenever a taxon's section is
+          showing (and the sidebar isn't collapsed), page.tsx keeps the page at
+          its usual width and reserves a column to its right for the triage
+          chart, centring the two together. Keyed to the section, not to the
+          sidebar being mounted, so switching to Awaiting 1st Assessment
+          doesn't move the page (or the toggle under the cursor); collapsing,
+          a deliberate layout change, gives the column back. */}
+      {triageColumn && <span data-triage-column hidden />}
 
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
@@ -5360,15 +5364,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             ))}
           </div>
         );
-        // In the wide (sidebar) layout the toggle sits right after the taxon's
-        // name, so "Mammals" and its counts read as one group; stretched across
-        // a 92rem page, a name block that grows pushed them ~450px apart.
-        // Narrower, the name grows and the toggle sits at the right, as before.
-        const taxonNameGrows = wideTaxonLayout ? "" : "flex-1";
         if (rowPending) {
           return (
-            <div className={`mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 ${wideTaxonLayout ? "md:gap-8" : ""}`}>
-              <div className={`flex items-center gap-3 min-w-0 ${taxonNameGrows}`}>
+            <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
                 <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded flex items-center justify-center flex-shrink-0">
                   <span className="inline-block animate-spin h-5 w-5 border-2 border-zinc-400 border-t-transparent rounded-full" aria-label="Loading" />
                 </div>
@@ -5388,8 +5387,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           ? (selectedRow.name.startsWith(taxonRank.name) ? taxonRank.rank : <>{taxonRank.rank} <i>{taxonRank.name}</i></>)
           : null;
         return (
-          <div className={`mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 ${wideTaxonLayout ? "md:gap-8" : ""}`}>
-            <div className={`flex items-center gap-3 min-w-0 ${taxonNameGrows}`}>
+          <div className="mb-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               {taxonPhoto ? (
                 <PhotoCredit
                   credit={taxonPhoto.credit}
@@ -5453,11 +5452,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // With the triage sidebar open, the section below the taxon header is
-      // two columns: its charts and table, and the sticky triage chart beside
-      // them. Below the header, because the view toggle in it switches the
-      // whole section, sidebar included.
-      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
+      // With the triage column reserved (page.tsx), this section reaches into
+      // it (-mr-[27rem]: the 26rem column plus its 1rem gap). In the reassessed
+      // view it is two columns, the charts and table at the page's width and
+      // the sticky triage chart in the reserved column, level with the first
+      // charts. In Awaiting 1st Assessment its charts and table simply use the
+      // extra width rather than leaving the column empty.
+      <div className={triageColumn ? `-mr-[27rem] ${triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start" : ""}` : undefined}>
       <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
