@@ -46,11 +46,14 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// Left: the y title (room for its 20px-tall selects, rotated), then the tick
-// labels. Below: the tick labels, then the x title.
-const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 26, X_TITLE = 18;
-const M = { left: Y_TITLE + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + X_TITLE };
-const HEIGHT = 300;
+// Left: the tick labels. Above: the y title, horizontal (it holds the y
+// metric's 20px-tall selects; rotated, they were hard to read). Below: the tick
+// labels, then the x title.
+const Y_TICKS = 40, X_TICKS = 16, Y_TITLE = 28, X_TITLE = 18;
+const M = { left: Y_TICKS, right: 12, top: Y_TITLE, bottom: X_TICKS + X_TITLE };
+/** The Red List's "needs updating" threshold (the summary table's 10+ yrs), marked on the x axis. */
+const NEEDS_UPDATING_YEARS = 10;
+const DEFAULT_HEIGHT = 300;
 const HIT_RADIUS = 6;
 
 /** "10y 3m ago", "4m ago", "this month": short, so the tooltip stays narrow (the table says "10y ago"). */
@@ -73,8 +76,10 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false }: {
   points: PriorityPoint[];
+  /** Fill the parent's height (the sidebar) rather than the fixed 300px. */
+  fill?: boolean;
   yScale: YScale;
   /** The y axis title, rotated beside the axis; it holds the y metric's controls. */
   yAxis: React.ReactNode;
@@ -91,21 +96,27 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
+  const [measuredHeight, setMeasuredHeight] = useState(DEFAULT_HEIGHT);
+  const HEIGHT = fill ? Math.max(160, measuredHeight) : DEFAULT_HEIGHT;
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => {
+      setWidth(Math.floor(e.contentRect.width));
+      if (fill) setMeasuredHeight(Math.floor(e.contentRect.height));
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [fill]);
 
-  // Scales. X runs to the taxon's oldest assessment (rounded up to 5 years); Y
-  // to its largest count's power of ten, or 100%.
+  // Scales. X runs just past the taxon's oldest assessment (to the next whole
+  // year: rounding to 5 left up to five empty years at the right); Y to its
+  // largest count's power of ten, or 100%.
   const scales = useMemo(() => {
-    const xMax = Math.max(10, Math.ceil(maxYears / 5) * 5);
+    const xMax = Math.max(10, Math.ceil(maxYears + 0.25));
     const yMax = yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log")));
     const plotW = Math.max(0, width - M.left - M.right);
     const plotH = HEIGHT - M.top - M.bottom;
@@ -116,7 +127,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       ix: (px: number) => ((px - M.left) / plotW) * xMax,
       iy: (py: number) => ((M.top + plotH - py) / plotH) * yMax,
     };
-  }, [width, maxYears, maxValue, yScale]);
+  }, [width, HEIGHT, maxYears, maxValue, yScale]);
 
   // Screen positions (with a little deterministic vertical jitter, so the many
   // species on the same count, above all 0, show as a band rather than a line),
@@ -172,7 +183,18 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#71717a";
     ctx.textBaseline = "bottom";
-    ctx.fillText("Years since latest assessment", M.left + plotW / 2, HEIGHT - 2);
+    ctx.fillText("Years since last assessed", M.left + plotW / 2, HEIGHT - 2);
+
+    // The "needs updating" threshold: a dashed line at 10 years, behind the
+    // dots (its label is an HTML overlay, so it reads in both themes).
+    if (xMax > NEEDS_UPDATING_YEARS) {
+      const x = Math.round(sx(NEEDS_UPDATING_YEARS)) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = "rgba(113, 113, 122, 0.75)";
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, M.top + plotH); ctx.stroke();
+      ctx.restore();
+    }
 
     // Dots.
     const { ordered, xy } = layout;
@@ -188,7 +210,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, box, colors, yScale]);
+  }, [layout, scales, width, HEIGHT, box, colors, yScale]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -303,8 +325,15 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       top = hover.py + gap + h <= HEIGHT || hover.py - gap - h < 0 ? hover.py + gap : hover.py - gap - h;
     }
     setTipPos({ left, top });
-  }, [hover, width]);
+  }, [hover, width, HEIGHT]);
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
+  // The needs-updating label's width, measured, to decide which side of its line it fits.
+  const needsLabelRef = useRef<HTMLDivElement>(null);
+  const [needsLabelW, setNeedsLabelW] = useState(140);
+  useLayoutEffect(() => {
+    const w = needsLabelRef.current?.offsetWidth;
+    if (w && w !== needsLabelW) setNeedsLabelW(w);
+  }, [needsLabelW, width, scales.xMax]);
 
   return (
     <div
@@ -312,20 +341,34 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       // Not overflow-hidden: the boxes are clamped to the plot themselves, and
       // the tooltip may sit just past the chart's edge on a narrow screen.
       className={`relative select-none ${hover && !drag ? "cursor-pointer" : "cursor-crosshair"}`}
-      style={{ height: HEIGHT }}
+      style={{ height: fill ? "100%" : HEIGHT }}
       onMouseDown={onMouseDown}
       onMouseMove={onMouseMove}
       onMouseLeave={() => setHover(null)}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
-      {/* The y axis title, rotated and centred on the plot's height. Its own
-          events: picking an option must not start a drag or hover a dot. */}
+      {/* The y axis title, horizontal above the plot's top-left corner. Its
+          own events: picking an option must not start a drag or hover a dot. */}
       <div className="absolute z-20 whitespace-nowrap cursor-default"
-        style={{ left: Y_TITLE / 2, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
+        style={{ left: 0, top: 0 }}
         onMouseDown={(e) => e.stopPropagation()}
         onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}>
         {yAxis}
       </div>
+      {/* The "needs updating" line's label at the plot's top: just right of
+          the line, or, where the axis ends too soon after 10 years for it to
+          fit (Birds), just left of it, ending at the line. */}
+      {width > 0 && scales.xMax > NEEDS_UPDATING_YEARS && (() => {
+        const lineX = scales.sx(NEEDS_UPDATING_YEARS);
+        const fitsRight = lineX + 3 + needsLabelW <= M.left + scales.plotW;
+        return (
+          <div ref={needsLabelRef}
+            className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
+            style={{ left: fitsRight ? lineX + 3 : lineX - 3 - needsLabelW, top: M.top + 2 }}>
+            Needs updating (10+ yrs) →
+          </div>
+        );
+      })()}
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />

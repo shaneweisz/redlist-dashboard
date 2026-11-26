@@ -2,7 +2,7 @@
 
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
@@ -22,8 +22,9 @@ import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
 import TaxaIcon from "../TaxaIcon";
 import PhotoCredit from "../PhotoCredit";
+import { MdScatterPlot } from "react-icons/md";
 import { FaInfoCircle } from "react-icons/fa";
-import { LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
+import { LuPanelRightClose, LuPanelRightOpen, LuCircleHelp, LuDroplet, LuMapPin, LuMountain, LuMountainSnow, LuMoveRight, LuRoute, LuShuffle, LuTrendingDown, LuTrendingUp, LuWaves } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { type CountryStats } from "../WorldMap";
 import { ALPHA2_TO_NAME } from "@/lib/countries";
@@ -585,6 +586,11 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
 const SKIP_PRIORITY = skipSet("priority");
+/** Wide enough for the Reassessment Triage sidebar beside a main column of ~900px
+ *  or more. 1400px takes in common laptops (1440, 1470, 1512 CSS px); narrower,
+ *  the chart stays in More Filters. Keep in step with the min-[1400px] widths
+ *  in the grid below and page.tsx. */
+const SIDEBAR_QUERY = "(min-width: 1400px)";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -1251,6 +1257,10 @@ function chipSelection<T>(prev: Set<T>, value: T, e: React.MouseEvent): Set<T> {
 }
 
 const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
+/** The triage scatter's y metric, spelt out (its axis title is "GBIF records: [this ▾]"). */
+const TRIAGE_METRIC_LABEL: Record<GbifMetric, string> = { total: "Total", new: "New since assessment", pctNew: "% new since assessment" };
+/** Red List categories in the triage legend, in severity order. */
+const TRIAGE_LEGEND = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"] as const;
 function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
   /** Names the control's subject in its aria-labels, where a page has two sets ("the scatter's y axis"). */
@@ -1659,6 +1669,26 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  // Reassessment Triage as an ever-present sidebar on wide screens.
+  const isWide = useSyncExternalStore(
+    (cb) => { const mq = window.matchMedia(SIDEBAR_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
+    () => window.matchMedia(SIDEBAR_QUERY).matches,
+    () => false,
+  );
+  const triageInSidebar = isWide;
+  // Always starts collapsed: the sidebar is opt-in on every visit, opened
+  // from its rail, and not remembered.
+  const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
+  /** The species table's card, for the triage selection's "↓ table" link. */
+  const speciesTableRef = useRef<HTMLDivElement>(null);
+  // Leaving for Awaiting 1st Assessment closes it, so coming back shows the
+  // rail and it has to be reopened. (Adjusted during render, React's pattern
+  // for state that follows a prop, rather than in an effect.)
+  const [triageViewWasNew, setTriageViewWasNew] = useState(isNewAssessments);
+  if (triageViewWasNew !== isNewAssessments) {
+    setTriageViewWasNew(isNewAssessments);
+    if (isNewAssessments) setTriageSidebarCollapsed(true);
+  }
   // Set, not a single string (like expandedCriteria below) — multi-selecting
   // two top-level threats (cmd-click) should show pills below BOTH, not just
   // whichever was clicked last.
@@ -3309,6 +3339,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
+  // The page is wide (see the data-wide-taxon-layout marker) for any taxon's
+  // section on a sidebar-wide screen, in either view: not for a single species.
+  const wideTaxonLayout = triageInSidebar && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && !(isSingleSpecies && singleSpecies);
 
   // Clicking a dot on the triage scatter opens that species in the table and
   // scrolls to it: turn to the page it is on, then scroll once the row renders.
@@ -5085,6 +5118,195 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     );
   })();
 
+  // ── Reassessment Triage: shared between its inline card (narrow screens,
+  // bottom of More Filters) and the ever-present sidebar (xl and up). Only one
+  // is mounted at a time, so the ~175k-dot canvas is never drawn twice.
+  const triageHeader = (
+    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
+      <div className="min-w-0">
+        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
+        <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {priorityBox && (
+          <button type="button" onClick={() => setPriorityBox(null)}
+            className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+            {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  // A one-click filter for the usual question: species past the
+  // needs-updating threshold whose GBIF data has substantially changed since.
+  // It sets the page's own filters (Years Since Assessed's "10+ yrs old", and
+  // GBIF Records' New and % New ranges, in the chart's record mode), so the
+  // rule shows as ordinary pills, the charts show their selections, each part
+  // can be changed or removed on its own, and it's in the URL. The ranges'
+  // edges set the thresholds: more than 10 new records, 50% or more new.
+  // Clicking it again, while exactly those filters are set, removes them.
+  const triageMode = gbifKeyParts(priorityKey).mode;
+  const OVERDUE_NEW = ["11-100", "101-1K", "1K-10K", "10K+"];
+  const OVERDUE_PCT = ["50%+"];
+  const sameSet = (a: ReadonlySet<string>, b: readonly string[]) => a.size === b.length && b.every((x) => a.has(x));
+  const overdueFilterOn = isOutdatedSelected
+    && sameSet(gbifRanges[`new.${triageMode}`], OVERDUE_NEW)
+    && sameSet(gbifRanges[`pctNew.${triageMode}`], OVERDUE_PCT);
+  const toggleOverdueFilter = () => {
+    const on = !overdueFilterOn;
+    setExactFilters({ outdated: on ? "yes" : null });
+    setGbifRanges(`new.${triageMode}`, new Set(on ? OVERDUE_NEW : []));
+    setGbifRanges(`pctNew.${triageMode}`, new Set(on ? OVERDUE_PCT : []));
+    setPriorityBox(null);
+  };
+  const renderTriageScatter = (fill: boolean) => (
+    <PriorityScatter
+      fill={fill}
+      points={priorityPoints}
+      colors={CATEGORY_COLORS}
+      yAxis={
+        // The y axis title is its controls, read as a phrase, above the
+        // plot: "GBIF records: [New since assessment ▾] [all records ▾]",
+        // each select sized to its chosen option where the browser supports it.
+        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+          GBIF records:
+          <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+            onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+            {GBIF_METRICS.map((m) => <option key={m} value={m}>{TRIAGE_METRIC_LABEL[m]}</option>)}
+          </select>
+          <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+            onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
+            {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all records" : "georeferenced only"}</option>)}
+          </select>
+        </span>
+      }
+      box={priorityBox}
+      onBoxChange={setPriorityBox}
+      onPointClick={openSpeciesFromScatter}
+      selectedKey={selectedSpeciesKey}
+      yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+      maxYears={priorityExtent.maxYears}
+      maxValue={priorityExtent.maxValue}
+    />
+  );
+  // Only beside a taxon's section (wideTaxonLayout: a taxon selected, not a
+  // scope layout or a single species) in the reassessed view; never on the
+  // home summary, where there is no section for it to filter.
+  const triageSidebarShown = wideTaxonLayout && showPriority;
+  /** The page makes room for the open sidebar (see the data-triage-column
+   *  marker). The collapsed rail needs none: it sits in the page's own right
+   *  margin, so entering a taxon doesn't move the page. */
+  const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
+  const triageSidebar = triageSidebarShown ? (
+    triageSidebarCollapsed ? (
+      // Collapsed: a slim rail in the page's triage column, styled like the
+      // other cards and sticky like the open sidebar, its top level with the
+      // first charts. It reads as a closed panel (the convention of editor and
+      // design-tool side panels) rather than a tab on the window's edge: a
+      // scatter icon and the panel's name say what opening it shows, and its
+      // open-panel icon sits at the top, where the open sidebar's close-panel
+      // icon is. (Panel icons rather than chevrons: a lone ‹ or › reads either
+      // as "this way" or "move this way", so it looks backwards to some.)
+      // It's as tall as the open sidebar, so opening or closing it changes only
+      // the column's width, not its footprint (and it's a large target).
+      // The whole rail is the button. A box selection still filtering the page
+      // shows as a count, so a hidden filter is never invisible.
+      <button type="button" onClick={() => setTriageSidebarCollapsed(false)}
+        aria-expanded={false}
+        aria-label={`Show Reassessment Triage${priorityBox ? ` (${priorityInBox.toLocaleString()} species selected)` : ""}`}
+        title="Show Reassessment Triage: years since assessment against GBIF records"
+        className="sticky top-4 w-12 h-[min(calc(100vh-2rem),42rem)] flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
+        <LuPanelRightOpen aria-hidden size={16} />
+        <MdScatterPlot aria-hidden size={18} />
+        <span className="[writing-mode:vertical-rl] rotate-180 text-sm font-semibold text-zinc-700 dark:text-zinc-200 whitespace-nowrap">Reassessment Triage</span>
+        {priorityBox && (
+          <span className="[writing-mode:vertical-rl] rotate-180 text-[11px] font-medium px-0.5 py-1.5 rounded-md bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900 whitespace-nowrap">
+            {priorityInBox.toLocaleString()} selected
+          </span>
+        )}
+      </button>
+    ) : (
+      // Sticky, not fixed: it scrolls up with its section, then stays in view
+      // while the charts and table scroll past. Capped height so the plot keeps
+      // a readable aspect rather than becoming a tall strip.
+      <aside data-triage-sidebar aria-label="Reassessment Triage"
+        className="sticky top-4 h-[min(calc(100vh-2rem),42rem)] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</div>
+            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              {priorityPoints.length.toLocaleString()} species plotted
+            </div>
+          </div>
+          <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
+            aria-expanded={true}
+            aria-label="Hide Reassessment Triage" title="Hide Reassessment Triage"
+            className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100">
+            <LuPanelRightClose aria-hidden size={16} />
+          </button>
+        </div>
+        {/* Legend first, so the colours are decoded before the dots are read.
+            Each entry is also a filter: it drives the page's Conservation
+            Status selection (same handler as that chart's bars: click to
+            select one, again to clear, Cmd/Ctrl-click to add or remove), so
+            the table, the other charts and these dots all follow. Unselected
+            entries dim while a selection is active, as that chart's bars do. */}
+        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter.">
+          {TRIAGE_LEGEND.map((c) => {
+            const active = selectedCategories.has(c);
+            const dimmed = selectedCategories.size > 0 && !active;
+            return (
+              <button key={c} type="button" aria-pressed={active}
+                onClick={(e) => handleCategoryClick({ payload: { code: c } }, e)}
+                title={`Show only ${c} · ⌘/Ctrl-click to add or remove`}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"} ${dimmed ? "opacity-40" : ""}`}>
+                <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex-1 min-h-0 mt-2">
+          {speciesLoading && assessedSpecies.length === 0 ? (
+            <div className="h-full flex items-center justify-center"><Spinner /></div>
+          ) : renderTriageScatter(true)}
+        </div>
+        {/* A caption below the plot: before a selection, how to make one, and
+            a one-click filter whose label is its criteria (so it can be
+            checked, not just trusted); after, the selection itself in the
+            same place. Fixed height (two lines), so the swap never resizes the
+            plot above. */}
+        <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+          {priorityBox ? (
+            // The selection, and a way down to it in the table when wanted
+            // (a selection doesn't scroll there itself, unlike clicking a dot:
+            // you may be refining it, and the charts above follow it too).
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setPriorityBox(null)}
+                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+              </button>
+              <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                ↓ table
+              </button>
+            </div>
+          ) : (
+            <>
+              <span>Drag to select · click a dot to open it</span>
+              <button type="button" onClick={toggleOverdueFilter} aria-pressed={overdueFilterOn}
+                title={overdueFilterOn
+                  ? "Remove these filters"
+                  : "Sets the page's filters to species assessed 10 or more years ago with more than 10 new GBIF records since, making up half or more of all their records"}
+                className={`text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100 ${overdueFilterOn ? "font-semibold text-zinc-800 dark:text-zinc-100" : ""}`}>
+                {overdueFilterOn ? "✓ " : ""}Filter to 10+ yrs since assessed · &gt;10 new records · 50%+ new
+              </button>
+            </>
+          )}
+        </div>
+      </aside>
+    )
+  ) : null;
+
   return (
     <div className="space-y-1 min-w-0 flex-1 flex flex-col min-h-0">
       {/* Always show Taxa Summary table */}
@@ -5161,6 +5383,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <p className="text-sm mt-1">{error}</p>
         </div>
       )}
+
+      {/* Triage column: while the sidebar is open, page.tsx keeps the page at
+          its usual width and reserves a 27rem column to its right for it,
+          centring the two together. Collapsed, nothing is reserved: the rail
+          sits in the page's right margin and the page stays where it always
+          is. Awaiting 1st Assessment has no triage, so the page recentres. */}
+      {triageSidebarOpen && <span data-triage-column="open" hidden />}
 
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
@@ -5322,7 +5551,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      <div className="space-y-3">
+      // In the reassessed view, on a sidebar-wide screen, this section reaches
+      // past the page's right edge (-mr: the column plus its 1rem gap) as two
+      // columns: the charts and table at the page's width, and the sticky
+      // triage chart (27rem, in the column page.tsx reserves for it) or its
+      // rail (4rem, in the page's own right margin), level with the first
+      // charts. Otherwise it's the page's width, as on main.
+      <div className={!triageSidebarShown ? undefined : triageSidebarOpen
+        ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start"
+        : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start"}>
+      <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
           {!isSingleSpecies && urlSpecies != null && speciesLoading && (
@@ -5732,7 +5970,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {/* Charts row 1 and the Country / Assessors row are the always-visible
               filter rows in reassessments mode. Everything else (Growth Form,
-              Assessment Criteria / Number of Assessments, Realm/Movement/Trend,
+              Realm/Movement/Trend, Assessment Criteria / Number of Assessments,
               Habitat/Threats, Taxonomic revision, Reassessment Triage) lives behind the "More Filters"
               toggle below. No independently-scrollable panel here: nested
               scrollbars read as confusing, so this is plain click-to-expand. */}
@@ -5826,71 +6064,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   );
                 })()}
 
-                {/* Assessment Criteria alongside Number of Assessments. */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Criteria — top-level A-E bar chart (see criteriaCard);
-                      clicking a bar both selects it as a filter AND expands
-                      its next level below (number -> sub-clause -> roman
-                      numeral, as deep as that branch goes) as pill rows via
-                      renderCriteriaLevel, since criteria nests up to 4
-                      levels vs. Threats/Habitat's 2. Cmd/ctrl-click for real
-                      multi-select — any number of branches can be drilled
-                      into and selected simultaneously (e.g. B1b(iii) AND
-                      C2a(i) together), each independently expanded via
-                      expandedCriteria (a Set, not a single "last expanded"
-                      value). A species can satisfy multiple codes under the
-                      same letter too (e.g. B1+B2, or B1a and B1b together),
-                      so selecting any code matches species with that code
-                      OR a more specific one beneath it (see
-                      parseCriteriaCodes' startsWith-based matching). */}
-                  {!isNewAssessments && criteriaCard}
-
-                  {/* Number of Assessments (#423 item 1) — how many times a
-                      species has been assessed, with a "Reassessed" shortcut
-                      selecting every bucket >= 2 in one click (1+ reassessment
-                      = 2+ total assessments, per the issue's explicit ask),
-                      same shape as the Outdated shortcut next to Years Since
-                      Assessed. */}
-                  {!isNewAssessments && (
-                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Number of Assessments</span>
-                        {!isSingleSpecies && (
-                        <button
-                          type="button"
-                          onClick={handleReassessedClick}
-                          className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
-                          aria-pressed={isReassessedSelected}
-                          title="Filter to species assessed 2 or more times (reassessed at least once)"
-                        >
-                          Reassessed
-                        </button>
-                        )}
-                      </div>
-                      <div style={{ height: 170 }} className="flex items-center justify-center">
-                        {speciesLoading && assessedSpecies.length === 0 ? (
-                          <Spinner />
-                        ) : isSingleSpecies && singleSpecies ? (
-                          <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                            {singleSpecies.assessment_count ?? "—"}
-                          </span>
-                        ) : assessmentCountData.length > 0 ? (
-                          <FilterBarChart
-                            data={assessmentCountData}
-                            dataKey="shortRange"
-                            selectedItems={selectedAssessmentCounts}
-                            onBarClick={handleAssessmentCountClick}
-                            onRangeSelect={rangeSelectAssessmentCounts}
-                            barColor="#8b5cf6"
-                            yAxisWidth={42}
-                            rightMargin={85}
-                          />
-                        ) : null}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Realm, Movement, and Trend as three columns in one row. Plain
                     single-select chips (cmd/ctrl-click adds to the selection). */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -5968,6 +6141,71 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </div>
                 </div>
 
+                {/* Assessment Criteria alongside Number of Assessments. */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Criteria — top-level A-E bar chart (see criteriaCard);
+                      clicking a bar both selects it as a filter AND expands
+                      its next level below (number -> sub-clause -> roman
+                      numeral, as deep as that branch goes) as pill rows via
+                      renderCriteriaLevel, since criteria nests up to 4
+                      levels vs. Threats/Habitat's 2. Cmd/ctrl-click for real
+                      multi-select — any number of branches can be drilled
+                      into and selected simultaneously (e.g. B1b(iii) AND
+                      C2a(i) together), each independently expanded via
+                      expandedCriteria (a Set, not a single "last expanded"
+                      value). A species can satisfy multiple codes under the
+                      same letter too (e.g. B1+B2, or B1a and B1b together),
+                      so selecting any code matches species with that code
+                      OR a more specific one beneath it (see
+                      parseCriteriaCodes' startsWith-based matching). */}
+                  {!isNewAssessments && criteriaCard}
+
+                  {/* Number of Assessments (#423 item 1) — how many times a
+                      species has been assessed, with a "Reassessed" shortcut
+                      selecting every bucket >= 2 in one click (1+ reassessment
+                      = 2+ total assessments, per the issue's explicit ask),
+                      same shape as the Outdated shortcut next to Years Since
+                      Assessed. */}
+                  {!isNewAssessments && (
+                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Number of Assessments</span>
+                        {!isSingleSpecies && (
+                        <button
+                          type="button"
+                          onClick={handleReassessedClick}
+                          className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
+                          aria-pressed={isReassessedSelected}
+                          title="Filter to species assessed 2 or more times (reassessed at least once)"
+                        >
+                          Reassessed
+                        </button>
+                        )}
+                      </div>
+                      <div style={{ height: 170 }} className="flex items-center justify-center">
+                        {speciesLoading && assessedSpecies.length === 0 ? (
+                          <Spinner />
+                        ) : isSingleSpecies && singleSpecies ? (
+                          <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
+                            {singleSpecies.assessment_count ?? "—"}
+                          </span>
+                        ) : assessmentCountData.length > 0 ? (
+                          <FilterBarChart
+                            data={assessmentCountData}
+                            dataKey="shortRange"
+                            selectedItems={selectedAssessmentCounts}
+                            onBarClick={handleAssessmentCountClick}
+                            onRangeSelect={rangeSelectAssessmentCounts}
+                            barColor="#8b5cf6"
+                            yAxisWidth={42}
+                            rightMargin={85}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Habitat alongside Threats. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {habitatCard}
@@ -5984,55 +6222,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
 
                 {/* Reassessment Triage, full width at the bottom of More Filters: years
-                    since assessment against GBIF records (not for a single species). */}
-                  {!isNewAssessments && showPriority && (
+                    since assessment against GBIF records (not for a single species).
+                    On wide screens it lives in the sidebar instead (triageSidebar). */}
+                  {!isNewAssessments && showPriority && !triageInSidebar && (
                     <div className="min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</span>
-                          <span className="ml-2 text-[11px] text-zinc-500 dark:text-zinc-400">Drag to select · click a dot to show it in the table</span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {priorityBox && (
-                            <button type="button" onClick={() => setPriorityBox(null)}
-                              className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                              {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                      {triageHeader}
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <div className="h-[300px] flex items-center justify-center"><Spinner /></div>
-                      ) : (
-                        <PriorityScatter
-                          points={priorityPoints}
-                          colors={CATEGORY_COLORS}
-                          yAxis={
-                            // The y axis title is its controls, read as a phrase:
-                            // "[New ▾] GBIF records ([all ▾])", each select sized to
-                            // its chosen option where the browser supports it.
-                            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                              <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-                                {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
-                              </select>
-                              GBIF records (
-                              <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
-                                onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-                                {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
-                              </select>
-                              )
-                            </span>
-                          }
-                          box={priorityBox}
-                          onBoxChange={setPriorityBox}
-                          onPointClick={openSpeciesFromScatter}
-                          selectedKey={selectedSpeciesKey}
-                          yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
-                          maxYears={priorityExtent.maxYears}
-                          maxValue={priorityExtent.maxValue}
-                        />
-                      )}
+                      ) : renderTriageScatter(false)}
                     </div>
                   )}
 
@@ -6040,7 +6237,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
 
       {/* Species Table */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+      <div ref={speciesTableRef} className="scroll-mt-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
         {/* Applied filters — every currently-active filter (including the
             selected taxon/subgroup/breakdown-name) as a removable pill,
             directly above the table they filter. Clear all resets everything
@@ -7300,6 +7497,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </>
         )}
       </div>
+      </div>
+      {triageSidebar}
       </div>
       ))}
 
