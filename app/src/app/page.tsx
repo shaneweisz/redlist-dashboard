@@ -85,7 +85,7 @@ export default function RedListPage() {
           affected: min-height (not height) lets the box grow past 100vh to
           fit real content, exactly as before. */}
       {/* When RedListView shows its Reassessment Triage sidebar (an <aside
-          data-triage-sidebar>, 2xl screens only), the page widens to make room
+          data-triage-sidebar>, 1400px and wider), the page widens to make room
           for it, so the charts and table beside it keep roughly their usual
           width rather than being squeezed. The side padding eases to match. */}
       <div className="min-h-screen flex flex-col px-4 sm:px-6 pt-4 md:px-16 md:pt-8 md:has-[[data-triage-sidebar]]:px-8">

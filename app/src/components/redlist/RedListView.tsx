@@ -586,9 +586,11 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
 const SKIP_PRIORITY = skipSet("priority");
-/** Wide enough for the Reassessment Triage sidebar beside a main column of roughly
- *  its usual width (Tailwind's 2xl). Narrower, the chart stays in More Filters. */
-const SIDEBAR_QUERY = "(min-width: 1536px)";
+/** Wide enough for the Reassessment Triage sidebar beside a main column of ~900px
+ *  or more. 1400px takes in common laptops (1440, 1470, 1512 CSS px); narrower,
+ *  the chart stays in More Filters. Keep in step with the min-[1400px] widths
+ *  in the grid below and page.tsx. */
+const SIDEBAR_QUERY = "(min-width: 1400px)";
 /** PostHog feature flag (boolean) that turns the Reassessment Triage sidebar on for everyone. */
 const TRIAGE_SIDEBAR_FLAG = "triage-sidebar";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
@@ -5456,7 +5458,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // its charts and table, and the sticky triage chart beside them. The
       // sidebar starts here, below the view toggle, because it belongs to this
       // view, not to the page.
-      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
+      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
       <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
