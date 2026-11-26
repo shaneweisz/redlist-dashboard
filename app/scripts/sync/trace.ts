@@ -3,11 +3,10 @@
  * of, read from a build. The whole chain, in the order the sync makes it:
  *
  *   1. the name: GBIF's matcher's answer for the Red List name, with the points
- *      it gave each candidate, and why the sync took that answer, took an
- *      override's instead, or left the species waiting (match-overrides.tsv,
- *      to_review)
- *   2. the concept: each link row, the CoL taxon and species it names, its
- *      match_reason, col_treatment, what it counts, and its description
+ *      it gave each candidate, and the AI taxonomic reviews if there are any (ai-reviews.tsv)
+ *   2. the selection (link/select.ts, docs/specs/matching.md): the step, the
+ *      doubts, and each record taken with its relation, basis, match_reason,
+ *      col_treatment, what it counts, and its description
  *   3. the count: every CoL record whose GBIF records count for it, and the
  *      totals the app shows
  *
@@ -16,10 +15,12 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { BUILD_DIR, tables } from "./paths";
+import { BUILD_DIR, CACHE_ROOT, tables } from "./paths";
+import { readTranscript, summarise } from "./checks/ai-review-transcripts";
 import { openDuckDB, rows, lit } from "./sql";
-import { readOverrides } from "./link/match-overrides";
+import { readReviews, formatRecord } from "./link/ai-reviews";
 import { syncPath } from "../../src/lib/data/sync-layout";
+import { loadEnvFiles } from "../lib/utils";
 
 type Score = { name: number | null; authorship: number | null; classification: number | null; rank: number | null; status: number | null; total: number | null } | null;
 
@@ -78,27 +79,38 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
       if (alts.length > 8) say(`    … and ${alts.length - 8} more`);
     }
   }
-  const o = readOverrides().get(s.sis);
-  if (o) say(`  Override (match-overrides.tsv): ${o.colName ?? "not in CoL"} ${o.colAuthorship ?? ""}, by ${o.by}${o.reviewed ? ", reviewed" : ""}, against ${o.redlistVersion ?? "?"} × ${o.colVersion ?? "?"}: ${o.note}`);
+  for (const v of readReviews().get(s.sis) ?? []) {
+    say(`  AI taxonomic reviewer ${v.reviewer} (ai-reviews.tsv, ${v.model}, ${v.date}): ${v.finding}, on the rules' answer (${v.rulesAnswer})`);
+    for (const x of v.records) say(`    would count ${formatRecord(x)}`);
+    say(`    why: ${v.reason}`);
+    const t = await readTranscript(v.transcript, path.join(CACHE_ROOT, "ai-review-cache"));
+    if (!t) { say(`    transcript ${v.transcript} not found locally or in the bucket`); continue; }
+    const r = summarise(t, s.sis, s.name);
+    say(`    transcript ${v.transcript}: ${r.searches.length} searches and ${r.fetches.length} pages for it (${r.others} for the batch's other species)`);
+    for (const q of r.searches) say(`    searched: ${q}`);
+    for (const u of r.fetches) say(`    read: ${u}`);
+    if (r.answer) say(`    answered: ${JSON.stringify(r.answer).slice(0, 600)}`);
+  }
 
-  // ── 2. The concept
-  say(); say("2. The concept");
-  const links = await rows<{ role: string; counts: string; method: string; basis: string | null; match_reason: string | null;
+  // ── 2. The selection
+  say(); say("2. The selection");
+  const links = await rows<{ role: string; counts: string; method: string; basis: string | null; match_reason: string | null; relation: string; step: number | null; doubts: string | null;
     col_treatment: string | null; match_description: string | null; counted: boolean;
     taxon: string | null; taxon_rank: string | null; taxon_status: string | null; species: string | null; col_taxon_id: string | null; col_species_id: string | null;
     to_review: string | null }>(conn, `
-    SELECT l.role, l.counts, l.method, l.basis, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
+    SELECT l.role, l.counts, l.method, l.basis, l.match_reason, l.relation, l.step, l.doubts, l.col_treatment, l.match_description, l.to_review, l.counted, l.col_taxon_id, l.col_species_id,
            t.scientific_name || coalesce(' ' || t.authorship, '') AS taxon, t.rank AS taxon_rank, t.status AS taxon_status,
            c.scientific_name || coalesce(' ' || c.authorship, '') AS species
     FROM ${pq(T.link)} l LEFT JOIN ${pq(T.taxa)} t ON t.col_id = l.col_taxon_id LEFT JOIN ${pq(T.taxa)} c ON c.col_id = l.col_species_id
     WHERE l.sis_taxon_id = ${s.sis} ORDER BY l.role DESC, l.counted DESC, l.col_species_id`);
   for (const l of links) {
+    if (l.role === "primary") say(`  Step ${l.step ?? "?"}; doubts: ${l.doubts?.replace(/;/g, ", ") ?? "none"}`);
     if (l.role === "primary" && l.to_review) say(`  To review: ${l.to_review}`);
     const where = !l.col_species_id ? "no CoL species"
       : l.col_taxon_id && l.col_taxon_id !== l.col_species_id ? `CoL taxon ${l.taxon} [${l.col_taxon_id}, ${l.taxon_status} ${l.taxon_rank}], in species ${l.species} [${l.col_species_id}]`
       : `CoL species ${l.species} [${l.col_species_id}]`;
     say(`  ${l.role.padEnd(8)} ${where}`);
-    say(`           ${l.match_reason ?? "–"} · ${l.col_treatment ?? "–"} · counts ${l.counts} (${l.method}${l.basis ? `, by ${l.basis}` : ""})`);
+    say(`           ${l.relation} · ${l.match_reason ?? "–"} · ${l.col_treatment ?? "–"} · counts ${l.counts} (${l.method}${l.basis ? `, by ${l.basis}` : ""})`);
     if (l.match_description) say(`           ${l.match_description}`);
   }
 
@@ -115,12 +127,13 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   const [a] = await rows<{ total: number | null; georef: number | null; key: string | null; note: string | null }>(conn, `
     SELECT gbif_all_records_count AS total, gbif_georeferenced_records_count AS georef, gbif_species_key AS key, count_note AS note
     FROM ${pq(T.assessed)} WHERE id = ${s.sis}`);
-  if (a) say(`  The app shows ${a.note === "unlinked" ? "a dash (waiting for a decision)" : `${fmt(a.total)} records, ${fmt(a.georef)} georeferenced`}; GBIF key ${a.key ?? "none"}.`);
+  if (a) say(`  The app shows ${a.note === "unlinked" ? "a dash (no CoL record to count through)" : `${fmt(a.total)} records, ${fmt(a.georef)} georeferenced`}; GBIF key ${a.key ?? "none"}.`);
   return out.join("\n");
 }
 
 const isDirectRun = process.argv[1]?.endsWith("sync/trace.ts") || process.argv[1]?.endsWith("sync/trace.js");
 if (isDirectRun) {
+  loadEnvFiles(); // the transcripts bucket, for a transcript not cached here
   const q = process.argv.slice(2).join(" ").trim();
   if (!q) { console.error('Usage: npm run sync:trace -- "<Red List name or SIS id>"'); process.exit(1); }
   trace(q).then((s) => console.log(s)).catch((e) => { console.error(e.message ?? e); process.exit(1); });

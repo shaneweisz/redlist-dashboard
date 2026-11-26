@@ -4,27 +4,31 @@
  * case list itself stays well-formed.
  */
 import { describe, it, expect } from "vitest";
-import { mismatches, failureKind, buildVersions, uncoveredRules, ruleLabel, type Observed } from "../sync/checks/check-fixtures";
+import { mismatches, failureKind, buildVersions, uncoveredRules, type Observed } from "../sync/checks/check-fixtures";
 import { MATCHING_CASES, type MatchCase } from "../sync/checks/fixtures/matching";
 
 const seen: Observed = {
   assessed: true, category: "VU", linkedTo: "Malus domestica", linkedAuthorship: "Borkh.", gbifKey: "9Y3S3", gbifKeyName: "Malus sieversii",
-  records: 8_413, neListed: { "Malus domestica": false }, rules: ["exact, unique"],
+  records: 8_413, neListed: { "Malus domestica": false }, rules: ["exact, unique"], doubts: [],
+  selected: [{ name: "Malus sieversii", authorship: "M.Roem.", relation: "part of" }],
 };
 const confirmed = { redlist: "2026-1", col: "COL26.6 XR", snapshot: "2026-11-01" };
 const c = (expect: MatchCase["expect"]): MatchCase => ({ name: "Malus sieversii", why: "", source: "", confirmed, expect });
 
 describe("rules", () => {
-  it("labels a waiting row by why it waits", () => {
-    expect(ruleLabel("waiting", "provisional name")).toBe("waiting: provisional name");
-    expect(ruleLabel("CoL duplicate", null)).toBe("CoL duplicate");
-  });
   it("fails a case whose rows don't show its rule", () => {
     expect(mismatches(c({ rules: ["exact, unique"] }), seen)).toEqual([]);
     expect(mismatches(c({ rules: ["CoL duplicate"] }), seen)).toEqual(['rule: expected "CoL duplicate", its rows show ["exact, unique"]']);
   });
-  it("names every rule a build applies that no case shows", () => {
-    expect(uncoveredRules([c({ rules: ["exact, unique"] })], ["exact, unique", "waiting: lower confidence"])).toEqual(["waiting: lower confidence"]);
+  it("names every rule and doubt a build applies that no case shows", () => {
+    expect(uncoveredRules([c({ rules: ["exact, unique"], doubts: ["homonym"] })], ["exact, unique", "no candidate", "doubt: homonym", "doubt: other authors"]))
+      .toEqual(["no candidate", "doubt: other authors"]);
+  });
+  it("checks doubts exactly, and each expected record with its relation", () => {
+    expect(mismatches(c({ doubts: [] }), seen)).toEqual([]);
+    expect(mismatches(c({ doubts: ["homonym"] }), seen)).toEqual(['doubts: expected ["homonym"], got []']);
+    expect(mismatches(c({ selected: [{ name: "Malus sieversii", authorship: "(Ledeb.) M.Roem.", relation: "part of" }] }), seen)).toEqual([]);
+    expect(mismatches(c({ selected: [{ name: "Malus sieversii", relation: "is" }] }), seen)).toHaveLength(1);
   });
 });
 

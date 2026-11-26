@@ -136,8 +136,9 @@ export async function loadFacts(conn: DuckDBConnection, schema: string, dir: str
   await conn.run(`CREATE TABLE ${schema}.ne AS
     WITH assessed_cols AS (
       SELECT DISTINCT ${species} AS col_id FROM read_parquet(${f("assessment_link.parquet")}) WHERE ${species} IS NOT NULL
-        -- A candidate (what a flagged or waiting species may be) doesn't hide a species from the list, since November 2026.
-        AND method IS DISTINCT FROM 'undecided_candidate')
+        -- Since docs/specs/matching.md, only a row counting it whole (is, split into) hides a species from the list;
+        -- before, any row but a candidate (what a flagged or waiting species may be) did.
+        AND ${linkColumns.includes("relation") ? "relation IN ('is', 'split into')" : "method IS DISTINCT FROM 'undecided_candidate'"})
     SELECT u.col_id AS key, u.scientific_name, u.taxon_group, u.class_name, u.order_name, u.family,
            u.described_year, g.gbif_species_key, g.gbif_georeferenced_records_count, g.gbif_all_records_count,
            g.gbif_all_records_countries, g.countries, g.common_name

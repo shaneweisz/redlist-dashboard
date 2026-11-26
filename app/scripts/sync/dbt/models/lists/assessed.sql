@@ -14,14 +14,12 @@
  *                            lists, ';'-joined (the app's filter SQL reads them so)
  *   gbif_species_key         see record_counts
  *   count_note               'unlinked' when it is linked to no CoL species, so
- *                            no records are counted; 'flagged' when the
- *                            count rests on the matcher's answer the link's rule
- *                            doubts (match_reason 'flagged: …'), or only on
- *                            other CoL names while its own link waits; else NULL
+ *                            no records are counted; 'flagged' when the species
+ *                            has doubts (match_doubts), or counts only other CoL
+ *                            names; else NULL
  *   match_reason             how its CoL name was found (assessment_link's primary
- *                            row): exact, unique | … | flagged: <doubt> |
- *                            override | waiting | …
- *   match_decided_by         who decided an override (a GitHub handle, agent:<model>)
+ *                            row): exact, unique | … | no candidate | …
+ *   match_doubts             its doubts, ';'-joined (docs/specs/matching.md); NULL when none
  *   match_counts             what its link counts: the whole CoL species | only
  *                            records under its own name | nothing
  *   match_note, match_records  for a match that isn't plain: how it was matched or why
@@ -30,6 +28,8 @@
  *                            species, role), from assessment_link, plus each counted
  *                            record's share of the all-records count (records), and
  *                            the CoL species holding the rest of the count, if any
+ *   match_review             the AI taxonomic reviewers' answers, for a species they
+ *                            checked (JSON, link/assessment-link.ts)
  *   redlist_authority, redlist_synonyms
  *                            the Red List's authority and its listed synonyms
  *                            (';'-joined), where there is a match note
@@ -111,9 +111,9 @@ SELECT latest.sis_taxon_id AS id, latest.scientific_name,
        gbif.gbif_species_key,
        -- A species with no link of its own can still count other CoL names' records (a Red List synonym CoL holds as a species): that count is shown, flagged.
        CASE WHEN link.col_species_id IS NULL AND other.n IS NULL THEN 'unlinked'
-            WHEN link.col_species_id IS NULL OR link.match_reason LIKE 'flagged: %' THEN 'flagged' END AS count_note,
-       link.match_reason, link.decided_by AS match_decided_by, link.counts AS match_counts,
-       link.match_note, mr.records AS match_records,
+            WHEN link.col_species_id IS NULL OR link.doubts IS NOT NULL THEN 'flagged' END AS count_note,
+       link.match_reason, link.counts AS match_counts, link.doubts AS match_doubts,
+       link.match_note, mr.records AS match_records, link.match_review,
        -- Shown beside a match note (the panel's Red List line); not needed otherwise.
        CASE WHEN link.match_note IS NOT NULL THEN latest.authority END AS redlist_authority,
        CASE WHEN link.match_note IS NOT NULL THEN array_to_string([regexp_replace(trim(x.name), '\s+', ' ', 'g') FOR x IN latest.synonyms], ';') END AS redlist_synonyms,

@@ -1,11 +1,11 @@
 /**
- * Seeds: every decision a person made that the sync applies, one file per kind,
- * one row per decision, each with its reason. Kept as data rather than code so
- * that "what did a person decide, and why" is a list you can read in one place.
+ * Seeds: what the sync reads besides its sources, one file per kind, each row
+ * with its reason. Kept as data rather than code so that "what was decided, and
+ * why" is a list you can read in one place.
  *
- *   match-overrides.tsv            which CoL name a Red List species is, where the
- *                            matcher's answer isn't taken on its own, with the
- *                            releases it was decided against (link/match-overrides.ts)
+ *   ai-reviews.tsv           the AI taxonomic reviewers' answers on the species
+ *                            listed for review, one row per reviewer (link/ai-reviews.ts,
+ *                            docs/specs/matching.md); shown, never counted
  *   domesticated-and-humans.tsv
  *                            species never listed as Not Evaluated: domestic
  *                            forms, whose wild relatives are what IUCN assesses,

@@ -18,10 +18,11 @@
  * Decisions:
  *   - Every count is occurrences summed over the usages usage_owner gives the
  *     species.
- *   - The GBIF key is the counted usage with the most records, an own row's
- *     before a lumped one's, so Hylatomus pileatus links to Dryocopus pileatus'
- *     5M records rather than its own 156: CoL holds that bird twice, and both
- *     halves count.
+ *   - The GBIF key is the counted usage with the most records among its *is*
+ *     rows, before split into and part of (docs/specs/matching.md): Hylatomus
+ *     pileatus links to Dryocopus pileatus' 5M records rather than its own 156,
+ *     as CoL holds that bird twice, and Butorides striata keeps its own rather
+ *     than the green heron it is split into.
  *   - Since the assessment means from the day after its date to the sync date.
  *     Later years count whatever their precision. In the assessment's own year a
  *     record counts if it is dated to a later day, or only to a later month; one
@@ -39,7 +40,7 @@ occ AS (SELECT * FROM {{ source('sources', 'occurrences') }}),
 
 -- Per assessed species and link row: its usages' records, in total and since the assessment.
 link_rows AS (
-  SELECT o.sis_taxon_id AS sis, o.link_usage_id AS usage_id, any_value(l.counts) AS counts,
+  SELECT o.sis_taxon_id AS sis, o.link_usage_id AS usage_id, any_value(l.counts) AS counts, any_value(l.relation) AS relation,
          CAST(any_value(a.assessment_date) AS DATE) AS assessed_on
   FROM owner o
   JOIN {{ source('link', 'assessment_link') }} l ON l.sis_taxon_id = o.sis_taxon_id AND l.col_taxon_id = o.link_usage_id AND l.counted
@@ -47,7 +48,7 @@ link_rows AS (
   WHERE o.sis_taxon_id IS NOT NULL GROUP BY 1, 2
 ),
 row_counts AS (
-  SELECT r.sis, r.usage_id, any_value(r.counts) AS counts, any_value(r.assessed_on) AS assessed_on,
+  SELECT r.sis, r.usage_id, any_value(r.counts) AS counts, any_value(r.relation) AS relation, any_value(r.assessed_on) AS assessed_on,
          coalesce(sum(c.n) FILTER (c.georef), 0)::BIGINT AS georef,
          coalesce(sum(c.n), 0)::BIGINT AS all_records,
          coalesce(sum(c.n) FILTER (c.georef AND ({{ since_assessment("c", "r.assessed_on", today) }})), 0)::BIGINT AS georef_since,
@@ -60,7 +61,7 @@ row_counts AS (
 
 SELECT sis AS sis_taxon_id, NULL::VARCHAR AS col_id,
        -- usage_id last: two usages with the same counts would otherwise swap between runs.
-       arg_min(usage_id, (CASE counts WHEN 'the whole CoL species' THEN 0 ELSE 1 END, -georef, -all_records, usage_id)) AS gbif_species_key,
+       arg_min(usage_id, (CASE relation WHEN 'is' THEN 0 WHEN 'split into' THEN 1 ELSE 2 END, -georef, -all_records, usage_id)) AS gbif_species_key,
        sum(georef)::BIGINT AS georef, sum(all_records)::BIGINT AS all_records,
        CASE WHEN any_value(assessed_on) IS NULL OR any_value(assessed_on) >= {{ today }} THEN NULL ELSE sum(georef_since)::BIGINT END AS georef_since,
        CASE WHEN any_value(assessed_on) IS NULL OR any_value(assessed_on) >= {{ today }} THEN NULL ELSE sum(all_since)::BIGINT END AS all_since

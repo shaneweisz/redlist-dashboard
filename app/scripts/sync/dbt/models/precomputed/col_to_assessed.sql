@@ -10,7 +10,7 @@
  *   col_id
  *   assessed_id, assessed_name   the assessed species linked to it
  *
- * Decisions: primary links only; where two share a col_id, an accepted-name
+ * Decisions: primary links that count the CoL species whole only; where two share a col_id, an accepted-name
  * match before others, then the lowest SIS id.
  */
 WITH links AS (
@@ -18,6 +18,6 @@ WITH links AS (
          row_number() OVER (PARTITION BY l.col_species_id ORDER BY (CASE WHEN l.method = 'accepted' THEN 0 ELSE 1 END), l.sis_taxon_id) AS rn
   FROM {{ source('link', 'assessment_link') }} l
   JOIN {{ ref('assessed') }} a ON a.id = l.sis_taxon_id
-  WHERE l.col_species_id IS NOT NULL AND l.role = 'primary'
+  WHERE l.relation IN ('is', 'split into') AND l.role = 'primary'
 )
 SELECT col_id, assessed_id, assessed_name FROM links WHERE rn = 1

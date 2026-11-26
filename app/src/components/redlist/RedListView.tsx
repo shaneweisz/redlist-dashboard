@@ -14,7 +14,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, checklistBankUrl, type SpeciesMatch, type MatchGroup } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchReview, type SuggestedRecord } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -751,6 +751,18 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
   const flagged = isMatchFlagged(s);
   const cbl = (id: string, label: React.ReactNode) =>
     <a className={link} href={checklistBankUrl(COL_RELEASE.key, id)} target="_blank" rel="noopener noreferrer">{label}</a>;
+  // An NE species an assessed one is part of, or shares its name with: a note, not a flag.
+  const here = s.assessed_here?.length ? (
+    <div className="text-zinc-300">
+      {s.assessed_here.map(assessedHere).map(({ name, kind }) => (
+        <div key={`${name}-${kind}`}>
+          {kind === "part of"
+            ? <><a className={link} href={`/?search=${encodeURIComponent(name)}`}><i>{name}</i></a>, assessed, is part of it in CoL; only the records under its own name count for it.</>
+            : <>The Red List&apos;s <a className={link} href={`/?search=${encodeURIComponent(name)}`}><i>{name}</i></a> has this name; its citation points to another CoL record.</>}
+        </div>
+      ))}
+    </div>
+  ) : null;
   let content: React.ReactNode;
   if (s.may_be_assessed?.length) {
     content = (
@@ -759,16 +771,27 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
         <div>
           Red List: {s.may_be_assessed.map((n, i) => (
             <span key={n}>{i > 0 ? ", " : ""}<a className={link} href={`/?search=${encodeURIComponent(n)}`}><i>{n}</i></a></span>
-          ))} <span className="text-zinc-400">· its match leads here, flagged or unresolved</span>
+          ))} <span className="text-zinc-400">· its match is in doubt, and this may be it</span>
         </div>
+        {here}
         {s.col_id && cbl(s.col_id, `This species in CoL (${COL_RELEASE.alias}) ↗`)}
       </div>
     );
-  } else if (s.match === "plain" && !s.match_records?.length) {
+  } else if (here) {
+    content = (
+      <div className="text-left space-y-1 max-w-[360px]">
+        <div className="font-semibold">Not Evaluated, with a note</div>
+        {here}
+        {s.col_id && cbl(s.col_id, `This species in CoL (${COL_RELEASE.alias}) ↗`)}
+      </div>
+    );
+  } else if (s.match === "plain" && !s.match_records?.length && !s.match_doubt_keys?.length) {
     // One name, accepted under it in CoL, nothing else counted: nothing to explain.
     return null;
   } else {
-    const kinds = [s.match, ...(s.match_counts_keys ?? [])].filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
+    // Every doubt is a pill of its own, flagged first, then how it was matched and what the count includes.
+    const kinds = [...new Set([...(s.match_doubt_keys ?? []), s.match, ...(s.match_counts_keys ?? [])])]
+      .filter((k): k is NonNullable<typeof k> => !!k && k !== "plain" && k !== "none");
     const records = s.match_records?.length ? s.match_records
       : s.gbif_species_key ? [{ id: s.gbif_species_key, name: s.scientific_name ?? "", authorship: null, status: "", species: null, role: "counted" as const }] : [];
     const split = records.some(r => r.records != null);
@@ -778,12 +801,14 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
       <div className="text-left w-[360px] max-w-full divide-y divide-zinc-700">
         {/* What kind of match: the bar labels, the doubt first. */}
         <div className="pb-1.5 flex flex-wrap gap-1">
-          {(kinds.length ? kinds : ["plain" as const]).map((k, i) => (
-            <span key={k} className={`px-1.5 py-px rounded text-[11px] font-medium ${i === 0 && flagged ? "bg-amber-500/20 text-amber-300" : "bg-zinc-700 text-zinc-200"}`}>
-              {i === 0 && flagged ? "⚑ " : ""}{k === "plain" ? "Matched" : barLabel(k)}
-            </span>
-          ))}
-          {s.match_decided_by && <span className="px-1.5 py-px text-[11px] text-zinc-400">Decided by {s.match_decided_by}</span>}
+          {(kinds.length ? kinds : ["plain" as const]).map((k) => {
+            const doubt = barGroup(k) === "flagged";
+            return (
+              <span key={k} className={`px-1.5 py-px rounded text-[11px] font-medium ${doubt ? "bg-amber-500/20 text-amber-300" : "bg-zinc-700 text-zinc-200"}`}>
+                {doubt ? "⚑ " : ""}{k === "plain" ? "Matched" : barLabel(k)}
+              </span>
+            );
+          })}
         </div>
         {/* The Red List side. */}
         <div className="py-1.5">
@@ -816,6 +841,8 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
             </div>
           </div>
         )}
+        {/* What the AI taxonomic reviewers said, with each one's transcript. */}
+        {s.match_review && <ReviewSection review={s.match_review} sis={s.sis_taxon_id} section={section} link={link} />}
       </div>
     );
   }
@@ -825,6 +852,59 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
         ? <span className="ml-1 text-amber-600 dark:text-amber-500 cursor-help" aria-label="Flagged match">⚑</span>
         : <span className="ml-1 text-[10px] text-zinc-300 group-hover:text-zinc-500 dark:text-zinc-600 dark:group-hover:text-zinc-400 cursor-help" aria-label="How this count is made">ⓘ</span>}
     </SelectableHoverTooltip>
+  );
+}
+
+/**
+ * The AI taxonomic reviewers' answers in the match tooltip: whether they agree
+ * with the records above, and where they don't, what each would count instead
+ * and why. The count always follows the rules.
+ */
+function ReviewSection({ review, sis, section, link }: { review: MatchReview; sis?: number | null; section: string; link: string }) {
+  const rs = review.reviewers;
+  const key = (r: MatchReview["reviewers"][number]) => `${r.finding}|${r.records.map((x) => `${x.label}:${x.relation}`).join(",")}`;
+  const same = rs.length > 1 && rs.every((r) => key(r) === key(rs[0]));
+  const both = rs.length === 2 ? "Both reviewers" : "All reviewers";
+  const transcript = (r: MatchReview["reviewers"][number], label: string) => r.transcript
+    ? <a className={link} href={`/ai-review/${r.transcript}${sis ? `?sis=${sis}` : ""}`} target="_blank" rel="noopener noreferrer">{label} ↗</a> : label;
+  const records = (xs: SuggestedRecord[]) => xs.length === 0 ? <div className="text-[11px] text-zinc-300">Nothing: none of these CoL records is this species.</div> : (
+    <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 items-baseline text-[11px]">
+      {xs.map((x) => (
+        <React.Fragment key={`${x.label}-${x.relation}`}>
+          <div className="min-w-0 text-zinc-200">
+            {x.relation === "part of"
+              ? <><i>{x.label}</i><span className="text-zinc-400">, only the records under this name{x.species ? <>, which CoL files under <i>{x.species}</i></> : null}</span></>
+              : <><span className="text-zinc-400">all of CoL&apos;s </span><i>{x.label}</i></>}
+          </div>
+          <div className="text-right tabular-nums whitespace-nowrap text-zinc-300">{x.records.toLocaleString()}</div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+  const verdict = (r: MatchReview["reviewers"][number]) =>
+    r.finding === "agrees" ? "agrees with these records" : r.finding === "can't tell" ? "couldn't tell" : "would count instead:";
+  return (
+    <div className="pt-1.5 space-y-1">
+      <div className={section}>AI taxonomic review <span className="normal-case tracking-normal">({review.model}, {review.date})</span></div>
+      {same ? (
+        <>
+          <div className="text-[11px] text-zinc-300">
+            {rs[0].finding === "agrees" ? `${both} agree with these records.` : rs[0].finding === "can't tell" ? "Neither reviewer could tell." : `${both} would count instead:`}
+          </div>
+          {rs[0].finding === "other records" && records(rs[0].records)}
+          {rs.map((r, i) => (
+            <div key={i} className="text-[11px] text-zinc-400">{transcript(r, `Reviewer ${i + 1}`)}{r.finding !== "agrees" && r.reason ? `: ${r.reason}` : ""}</div>
+          ))}
+        </>
+      ) : rs.map((r, i) => (
+        <div key={i} className="space-y-0.5">
+          <div className="text-[11px] text-zinc-300">{transcript(r, `Reviewer ${i + 1}`)} {verdict(r)}</div>
+          {r.finding === "other records" && records(r.records)}
+          {r.finding !== "agrees" && r.reason && <div className="text-[11px] text-zinc-400">{r.reason}</div>}
+        </div>
+      ))}
+      {rs.some((r) => r.finding === "other records") && <div className="text-[11px] text-zinc-500">The count follows the matching rules, shown above.</div>}
+    </div>
   );
 }
 
@@ -4242,7 +4322,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     const toggle = (k: string) => () => setMatch(prev => (prev.size === 1 && prev.has(k) ? new Set<string>() : new Set([k])));
     const toggleClass = (active: boolean, activeColor: string) => chartControlClass(active, `${activeColor} text-white border-transparent`);
     const single = isSingleSpecies && singleSpecies
-      ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length))
+      ? MATCH_BARS.filter(b => b.key === singleSpecies.match || singleSpecies.match_counts_keys?.includes(b.key as never)
+          || singleSpecies.match_doubt_keys?.includes(b.key as never) || (b.key === "ne_candidate" && singleSpecies.may_be_assessed?.length)
+          || (b.key === "ne_assessed_here" && singleSpecies.assessed_here?.length))
       : [];
     return (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">

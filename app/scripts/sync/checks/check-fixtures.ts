@@ -40,24 +40,25 @@ export interface Observed {
   gbifKeyName: string | null;
   records: number | null;
   neListed: Record<string, boolean>;
-  /** The rule labels its link rows carry (ruleLabel). */
+  /** The rule labels its link rows carry (match_reason). */
   rules: string[];
+  /** Its doubts (docs/specs/matching.md), from its primary row. */
+  doubts: string[];
+  /** The CoL records its rows count from, with their relations: the species for is and split into, the record for part of. */
+  selected: { name: string; authorship: string | null; relation: string }[];
 }
 
-/** A link row's rule: how it was made (match_reason), and for a species still waiting, why. */
-export const ruleLabel = (matchReason: string | null, toReview: string | null): string | null =>
-  matchReason === "waiting" ? `waiting: ${toReview ?? "?"}` : matchReason;
-
-/** The rule labels the build in `dir` gives at least one species. */
+/** The rule labels (match_reason) and doubts the build in `dir` gives at least one species; doubts as "doubt: <name>". */
 export async function rulesInBuild(conn: DuckDBConnection, dir: string): Promise<string[]> {
-  const rows = (await conn.runAndReadAll(`SELECT DISTINCT match_reason, to_review FROM read_parquet(${lit(inSync(dir, "assessment_link.parquet"))})
-    WHERE match_reason IS NOT NULL`)).getRowObjects();
-  return [...new Set(rows.map((r) => ruleLabel(r.match_reason as string | null, r.to_review as string | null)).filter((x): x is string => !!x))].sort();
+  const link = `read_parquet(${lit(inSync(dir, "assessment_link.parquet"))})`;
+  const rows = (await conn.runAndReadAll(`SELECT DISTINCT match_reason AS r FROM ${link} WHERE match_reason IS NOT NULL
+    UNION SELECT DISTINCT 'doubt: ' || unnest(string_split(doubts, ';')) FROM ${link} WHERE doubts IS NOT NULL`)).getRowObjects();
+  return rows.map((r) => String(r.r)).sort();
 }
 
-/** Rules the build shows that no case names: each needs a real species, read by name, before it ships. */
+/** Rules and doubts the build shows that no case names: each needs a real species, read by name, before it ships. */
 export function uncoveredRules(cases: MatchCase[], inBuild: string[]): string[] {
-  const named = new Set(cases.flatMap((c) => c.expect.rules ?? []));
+  const named = new Set(cases.flatMap((c) => [...(c.expect.rules ?? []), ...(c.expect.doubts ?? []).map((d) => `doubt: ${d}`)]));
   return inBuild.filter((r) => !named.has(r));
 }
 
@@ -98,9 +99,13 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
         SELECT count(*) AS c FROM f.ne WHERE scientific_name = ${lit(n)}`)).getRowObjects();
       neListed[n] = Number(r.c) > 0;
     }
-    const rules = row ? (await conn.runAndReadAll(`SELECT DISTINCT match_reason, to_review FROM read_parquet(${lit(inSync(dir, "assessment_link.parquet"))})
-      WHERE sis_taxon_id::VARCHAR = ${lit(String(row.sis))}`)).getRowObjects()
-      .map((r) => ruleLabel(r.match_reason as string | null, r.to_review as string | null)).filter((x): x is string => !!x).sort() : [];
+    const link = (await conn.runAndReadAll(`SELECT l.role, l.match_reason, l.doubts, l.relation, t.scientific_name AS name, t.authorship
+      FROM read_parquet(${lit(inSync(dir, "assessment_link.parquet"))}) l LEFT JOIN ${tax} t ON t.col_id = l.col_taxon_id
+      WHERE l.sis_taxon_id::VARCHAR = ${lit(String(row?.sis ?? -1))}`)).getRowObjects();
+    const rules = [...new Set(link.map((r) => r.match_reason as string | null).filter((x): x is string => !!x))].sort();
+    const doubts = String(link.find((r) => r.role === "primary")?.doubts ?? "").split(";").filter(Boolean);
+    const selected = link.filter((r) => ["is", "part of", "split into", "refused"].includes(String(r.relation)))
+      .map((r) => ({ name: String(r.name), authorship: (r.authorship as string | null) ?? null, relation: String(r.relation) }));
     out.set(c.name, {
       assessed: row !== undefined,
       category: row ? (row.category as string | null) : null,
@@ -112,6 +117,8 @@ export async function observe(conn: DuckDBConnection, dir: string, cases: MatchC
       records: row && row.n !== null ? Number(row.n) : null,
       neListed,
       rules,
+      doubts,
+      selected,
     });
   }
   return out;
@@ -179,6 +186,14 @@ export function mismatches(c: MatchCase, o: Observed): string[] {
   }
   for (const r of e.rules ?? []) {
     if (!o.rules.includes(r)) miss.push(`rule: expected "${r}", its rows show ${JSON.stringify(o.rules)}`);
+  }
+  if (e.doubts !== undefined && [...e.doubts].sort().join(";") !== [...o.doubts].sort().join(";")) {
+    miss.push(`doubts: expected ${JSON.stringify(e.doubts)}, got ${JSON.stringify(o.doubts)}`);
+  }
+  for (const x of e.selected ?? []) {
+    const hit = o.selected.some((y) => y.name === x.name && y.relation === x.relation
+      && (x.authorship === undefined || (y.authorship != null && compareAuthors(x.authorship, y.authorship) !== "other")));
+    if (!hit) miss.push(`selected: expected ${x.relation} ${x.name}${x.authorship ? ` ${x.authorship}` : ""}, got ${JSON.stringify(o.selected.map((y) => `${y.relation} ${y.name}`))}`);
   }
   return miss;
 }
