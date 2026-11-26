@@ -46,10 +46,13 @@ export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? valu
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
-// Left: the y title (room for its 20px-tall selects, rotated), then the tick
-// labels. Below: the tick labels, then the x title.
-const Y_TICKS = 38, X_TICKS = 16, Y_TITLE = 26, X_TITLE = 18;
-const M = { left: Y_TITLE + Y_TICKS, right: 12, top: 10, bottom: X_TICKS + X_TITLE };
+// Left: the tick labels. Above: the y title, horizontal (it holds the y
+// metric's 20px-tall selects; rotated, they were hard to read). Below: the tick
+// labels, then the x title.
+const Y_TICKS = 40, X_TICKS = 16, Y_TITLE = 28, X_TITLE = 18;
+const M = { left: Y_TICKS, right: 12, top: Y_TITLE, bottom: X_TICKS + X_TITLE };
+/** The Red List's "needs updating" threshold (the summary table's 10+ yrs), marked on the x axis. */
+const NEEDS_UPDATING_YEARS = 10;
 const DEFAULT_HEIGHT = 300;
 const HIT_RADIUS = 6;
 
@@ -180,7 +183,18 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
     ctx.fillStyle = "#71717a";
     ctx.textBaseline = "bottom";
-    ctx.fillText("Years since latest assessment", M.left + plotW / 2, HEIGHT - 2);
+    ctx.fillText("Years since last assessed", M.left + plotW / 2, HEIGHT - 2);
+
+    // The "needs updating" threshold: a dashed line at 10 years, behind the
+    // dots (its label is an HTML overlay, so it reads in both themes).
+    if (xMax > NEEDS_UPDATING_YEARS) {
+      const x = Math.round(sx(NEEDS_UPDATING_YEARS)) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = "rgba(113, 113, 122, 0.75)";
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, M.top + plotH); ctx.stroke();
+      ctx.restore();
+    }
 
     // Dots.
     const { ordered, xy } = layout;
@@ -326,14 +340,21 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       onMouseLeave={() => setHover(null)}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: HEIGHT, display: "block" }} />
-      {/* The y axis title, rotated and centred on the plot's height. Its own
-          events: picking an option must not start a drag or hover a dot. */}
+      {/* The y axis title, horizontal above the plot's top-left corner. Its
+          own events: picking an option must not start a drag or hover a dot. */}
       <div className="absolute z-20 whitespace-nowrap cursor-default"
-        style={{ left: Y_TITLE / 2, top: M.top + scales.plotH / 2, transform: "translate(-50%, -50%) rotate(-90deg)" }}
+        style={{ left: 0, top: 0 }}
         onMouseDown={(e) => e.stopPropagation()}
         onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}>
         {yAxis}
       </div>
+      {/* The "needs updating" line's label, just right of it at the plot's top. */}
+      {width > 0 && scales.xMax > NEEDS_UPDATING_YEARS && (
+        <div className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
+          style={{ left: scales.sx(NEEDS_UPDATING_YEARS) + 3, top: M.top + 2 }}>
+          Needs updating (10+ yrs) →
+        </div>
+      )}
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />

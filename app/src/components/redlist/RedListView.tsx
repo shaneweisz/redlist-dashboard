@@ -1257,6 +1257,10 @@ function chipSelection<T>(prev: Set<T>, value: T, e: React.MouseEvent): Set<T> {
 }
 
 const GBIF_METRICS: readonly GbifMetric[] = ["total", "new", "pctNew"];
+/** The triage scatter's y metric, spelt out (its axis title is "GBIF records: [this ▾]"). */
+const TRIAGE_METRIC_LABEL: Record<GbifMetric, string> = { total: "Total", new: "New since assessment", pctNew: "% new since assessment" };
+/** Red List categories in the triage legend, in severity order. */
+const TRIAGE_LEGEND = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"] as const;
 function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
   /** Names the control's subject in its aria-labels, where a page has two sets ("the scatter's y axis"). */
@@ -5108,26 +5112,35 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
     </div>
   );
+  // "Overdue with new records": selects the species past the needs-updating
+  // threshold (10+ years since assessed) whose plotted GBIF value is above 0,
+  // as a box from the 10-year line to the plot's top right. The box's far
+  // edges are clamped to the plot when drawn.
+  const priorityMetric = gbifKeyParts(priorityKey).metric;
+  const selectOverdueWithRecords = () => {
+    const keys = new Set(priorityPoints.filter((p) => p.years >= 10 && p.value > 0).map((p) => p.key));
+    setPriorityBox({ x0: 10, x1: 1e6, y0: priorityMetric === "pctNew" ? 0.5 : 0.15, y1: 1e6, keys });
+  };
+  const overdueLabel = priorityMetric === "total" ? "10+ yrs since assessed, with GBIF records" : "10+ yrs since assessed, with new records";
   const renderTriageScatter = (fill: boolean) => (
     <PriorityScatter
       fill={fill}
       points={priorityPoints}
       colors={CATEGORY_COLORS}
       yAxis={
-        // The y axis title is its controls, read as a phrase:
-        // "[New ▾] GBIF records ([all ▾])", each select sized to
-        // its chosen option where the browser supports it.
+        // The y axis title is its controls, read as a phrase, above the
+        // plot: "GBIF records: [New since assessment ▾] [all records ▾]",
+        // each select sized to its chosen option where the browser supports it.
         <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+          GBIF records:
           <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
             onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-            {GBIF_METRICS.map((m) => <option key={m} value={m}>{GBIF_METRIC_LABEL[m]}</option>)}
+            {GBIF_METRICS.map((m) => <option key={m} value={m}>{TRIAGE_METRIC_LABEL[m]}</option>)}
           </select>
-          GBIF records (
-          <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={`${CHART_SELECT_CLASS} -mx-0.5`} style={FIT_CONTENT}
+          <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
             onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
-            {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all" : "georeferenced"}</option>)}
+            {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all records" : "georeferenced only"}</option>)}
           </select>
-          )
         </span>
       }
       box={priorityBox}
@@ -5193,28 +5206,39 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <span aria-hidden>›</span>
           </button>
         </div>
-        <div className="mt-2 min-h-[1.75rem] flex flex-wrap items-center gap-1">
+        {/* Legend first, so the colours are decoded before the dots are read. */}
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-600 dark:text-zinc-400" aria-label="Dot colour: Red List category">
+          {TRIAGE_LEGEND.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
+            </span>
+          ))}
+        </div>
+        <div className="flex-1 min-h-0 mt-2">
+          {speciesLoading && assessedSpecies.length === 0 ? (
+            <div className="h-full flex items-center justify-center"><Spinner /></div>
+          ) : renderTriageScatter(true)}
+        </div>
+        {/* A caption below the plot: before a selection, how to make one (and a
+            one-click one for the usual question); after, the selection itself
+            in the same place, so the hint gives way to its result. */}
+        {/* Fixed height (two lines), so swapping the hint for the chip never
+            resizes the plot above. */}
+        <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
           {priorityBox ? (
             <button type="button" onClick={() => setPriorityBox(null)}
               className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
               {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
             </button>
           ) : (
-            <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Drag a box to filter the page · click a dot to open it in the table</span>
+            <>
+              <span>Drag to select · click a dot to open it</span>
+              <button type="button" onClick={selectOverdueWithRecords}
+                className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                Select {overdueLabel}
+              </button>
+            </>
           )}
-        </div>
-        <div className="flex-1 min-h-0 mt-1">
-          {speciesLoading && assessedSpecies.length === 0 ? (
-            <div className="h-full flex items-center justify-center"><Spinner /></div>
-          ) : renderTriageScatter(true)}
-        </div>
-        {/* Legend: the category colours the dots use. */}
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-600 dark:text-zinc-400">
-          {["CR", "EN", "VU", "NT", "LC", "DD"].map((c) => (
-            <span key={c} className="inline-flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
-            </span>
-          ))}
         </div>
       </aside>
     )
