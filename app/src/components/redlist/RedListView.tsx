@@ -1679,6 +1679,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Always starts collapsed: the sidebar is opt-in on every visit, opened
   // from its rail, and not remembered.
   const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
+  // Leaving for Awaiting 1st Assessment closes it, so coming back shows the
+  // rail and it has to be reopened. (Adjusted during render, React's pattern
+  // for state that follows a prop, rather than in an effect.)
+  const [triageViewWasNew, setTriageViewWasNew] = useState(isNewAssessments);
+  if (triageViewWasNew !== isNewAssessments) {
+    setTriageViewWasNew(isNewAssessments);
+    if (isNewAssessments) setTriageSidebarCollapsed(true);
+  }
   // Set, not a single string (like expandedCriteria below) — multi-selecting
   // two top-level threats (cmd-click) should show pills below BOTH, not just
   // whichever was clicked last.
@@ -5156,10 +5164,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // scope layout or a single species) in the reassessed view; never on the
   // home summary, where there is no section for it to filter.
   const triageSidebarShown = wideTaxonLayout && showPriority;
-  /** The page reserves the triage column (see the data-triage-column marker):
-   *  "open" for the sidebar (26rem + 1rem gap), "collapsed" for its rail
-   *  (3rem + 1rem gap), null when there is no column. */
-  const triageColumn: "open" | "collapsed" | null = wideTaxonLayout ? (triageSidebarCollapsed ? "collapsed" : "open") : null;
+  /** The page makes room for the open sidebar (see the data-triage-column
+   *  marker). The collapsed rail needs none: it sits in the page's own right
+   *  margin, so entering a taxon doesn't move the page. */
+  const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim rail in the page's triage column, styled like the
@@ -5321,13 +5329,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
-      {/* Triage column: on a sidebar-wide screen, whenever a taxon's section is
-          showing, page.tsx keeps the page at its usual width and reserves a
-          column to its right for the triage chart (27rem) or its collapsed
-          rail (4rem), centring the two together. Keyed to the section, not to the
-          sidebar being mounted, so switching to Awaiting 1st Assessment
-          doesn't move the page (or the toggle under the cursor). */}
-      {triageColumn && <span data-triage-column={triageColumn} hidden />}
+      {/* Triage column: while the sidebar is open, page.tsx keeps the page at
+          its usual width and reserves a 27rem column to its right for it,
+          centring the two together. Collapsed, nothing is reserved: the rail
+          sits in the page's right margin and the page stays where it always
+          is. Awaiting 1st Assessment has no triage, so the page recentres. */}
+      {triageSidebarOpen && <span data-triage-column="open" hidden />}
 
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
@@ -5489,14 +5496,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // With the triage column reserved (page.tsx), in the reassessed view this
-      // section reaches into it (-mr: the column plus its 1rem gap; 27rem open,
-      // 4rem for the rail) as two columns: the charts and table at the page's
-      // width, and the sticky triage chart or rail in the reserved column,
-      // level with the first charts. In Awaiting 1st Assessment it stays at
-      // the page's width, its right edge aligned with the header above, and
-      // the column is left empty (still reserved, so the page doesn't move).
-      <div className={!triageColumn || !triageSidebarShown ? undefined : triageColumn === "open"
+      // In the reassessed view, on a sidebar-wide screen, this section reaches
+      // past the page's right edge (-mr: the column plus its 1rem gap) as two
+      // columns: the charts and table at the page's width, and the sticky
+      // triage chart (27rem, in the column page.tsx reserves for it) or its
+      // rail (4rem, in the page's own right margin), level with the first
+      // charts. Otherwise it's the page's width, as on main.
+      <div className={!triageSidebarShown ? undefined : triageSidebarOpen
         ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start"
         : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start"}>
       <div className="space-y-3 min-w-0">

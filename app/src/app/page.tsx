@@ -84,16 +84,16 @@ export default function RedListPage() {
           than the viewport. Tall pages (e.g. a long species table) aren't
           affected: min-height (not height) lets the box grow past 100vh to
           fit real content, exactly as before. */}
-      {/* Triage column: when RedListView reserves it (its hidden
-          data-triage-column marker), the page keeps its usual width (up to
-          max-w-5xl, 64rem) and leaves a column at its right, the pair centred
-          together: equal side margins of max(0, (100% - total) / 2), the right
-          one plus the column. "open": the 26rem Reassessment Triage sidebar +
-          1rem gap (total 91rem); "collapsed": its 3rem rail + 1rem gap (68rem).
-          RedListView's section reaches into the column with a matching -mr.
-          The side padding eases to match. */}
+      {/* Triage column: while RedListView's Reassessment Triage sidebar is
+          open (its hidden data-triage-column marker), the page keeps its usual
+          width (up to max-w-5xl, 64rem) and leaves a 27rem column at its right
+          (the 26rem sidebar + 1rem gap), the pair centred together in 91rem:
+          equal side margins of max(0, (100% - 91rem) / 2), the right one plus
+          the column. RedListView's section reaches into it with a matching
+          -mr. The side padding eases to match. (The collapsed rail needs no
+          room: it sits in the page's own right margin.) */}
       <div className="min-h-screen flex flex-col px-4 sm:px-6 pt-4 md:px-16 md:pt-8 md:has-[[data-triage-column]]:px-8">
-        <main className="max-w-5xl has-[[data-triage-column]]:w-auto has-[[data-triage-column=open]]:ml-[max(0px,calc((100%_-_91rem)/2))] has-[[data-triage-column=open]]:mr-[calc(max(0px,calc((100%_-_91rem)/2))_+_27rem)] has-[[data-triage-column=collapsed]]:ml-[max(0px,calc((100%_-_68rem)/2))] has-[[data-triage-column=collapsed]]:mr-[calc(max(0px,calc((100%_-_68rem)/2))_+_4rem)] w-full min-w-0 mx-auto flex-1 flex flex-col min-h-0">
+        <main className="max-w-5xl has-[[data-triage-column]]:w-auto has-[[data-triage-column=open]]:ml-[max(0px,calc((100%_-_91rem)/2))] has-[[data-triage-column=open]]:mr-[calc(max(0px,calc((100%_-_91rem)/2))_+_27rem)] w-full min-w-0 mx-auto flex-1 flex flex-col min-h-0">
           {/* Header: two aligned rows (title | controls, subtitle | search).
               Globe sits inline with the title so the subtitle, controls and
               search bar share the same flush-left edge as the table below.
