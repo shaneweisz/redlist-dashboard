@@ -586,8 +586,9 @@ const skipSet = (...axes: FilterAxis[]): ReadonlySet<FilterAxis> => new Set(axes
 const SKIP_YEARS = skipSet("years", "assessmentYears");
 const SKIP_OBS = skipSet("obs");
 const SKIP_PRIORITY = skipSet("priority");
-/** Wide enough for the Reassessment Triage sidebar beside the page (Tailwind's xl). */
-const XL_QUERY = "(min-width: 1280px)";
+/** Wide enough for the Reassessment Triage sidebar beside a main column of roughly
+ *  its usual width (Tailwind's 2xl). Narrower, the chart stays in More Filters. */
+const SIDEBAR_QUERY = "(min-width: 1536px)";
 /** PostHog feature flag (boolean) that turns the Reassessment Triage sidebar on for everyone. */
 const TRIAGE_SIDEBAR_FLAG = "triage-sidebar";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
@@ -1682,12 +1683,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     } catch { return false; }
   });
   const triageSidebarEnabled = triageSidebarFlag === true || triageSidebarPreview;
-  const isXl = useSyncExternalStore(
-    (cb) => { const mq = window.matchMedia(XL_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
-    () => window.matchMedia(XL_QUERY).matches,
+  const isWide = useSyncExternalStore(
+    (cb) => { const mq = window.matchMedia(SIDEBAR_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
+    () => window.matchMedia(SIDEBAR_QUERY).matches,
     () => false,
   );
-  const triageInSidebar = triageSidebarEnabled && isXl;
+  const triageInSidebar = triageSidebarEnabled && isWide;
   // Collapsed-or-not is a per-viewer convenience, remembered in localStorage.
   const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
     try { return typeof window !== "undefined" && localStorage.getItem("triageSidebarCollapsed") === "1"; } catch { return false; }
@@ -5157,6 +5158,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       maxValue={priorityExtent.maxValue}
     />
   );
+  const triageSidebarOpen = triageInSidebar && !isNewAssessments && showPriority && !triageSidebarCollapsed;
   const triageSidebar = triageInSidebar && !isNewAssessments && showPriority ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim tab on the right edge; no data-triage-sidebar, so
@@ -5168,8 +5170,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         <span className="[writing-mode:vertical-rl] rotate-180">Reassessment Triage{priorityBox ? ` · ${priorityInBox.toLocaleString()}` : ""}</span>
       </button>
     ) : (
+      // Sticky, not fixed: it scrolls up with its section, then stays in view
+      // while the charts and table scroll past. Capped height so the plot keeps
+      // a readable aspect rather than becoming a tall strip.
       <aside data-triage-sidebar aria-label="Reassessment Triage"
-        className="fixed top-4 bottom-4 right-4 z-30 w-[24rem] 2xl:w-[30rem] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm p-3">
+        className="sticky top-4 h-[min(calc(100vh-2rem),42rem)] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</div>
@@ -5447,7 +5452,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      <div className="space-y-3">
+      // With the triage sidebar open, the reassessed section is two columns:
+      // its charts and table, and the sticky triage chart beside them. The
+      // sidebar starts here, below the view toggle, because it belongs to this
+      // view, not to the page.
+      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
+      <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
           {!isSingleSpecies && urlSpecies != null && speciesLoading && (
@@ -5861,7 +5871,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               Habitat/Threats, Taxonomic revision, Reassessment Triage) lives behind the "More Filters"
               toggle below. No independently-scrollable panel here: nested
               scrollbars read as confusing, so this is plain click-to-expand. */}
-          {triageSidebar}
           {!isNewAssessments && (
             <>
                 <button
@@ -7385,6 +7394,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </>
         )}
       </div>
+      </div>
+      {triageSidebar}
       </div>
       ))}
 

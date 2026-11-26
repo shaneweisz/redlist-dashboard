@@ -84,11 +84,12 @@ export default function RedListPage() {
           than the viewport. Tall pages (e.g. a long species table) aren't
           affected: min-height (not height) lets the box grow past 100vh to
           fit real content, exactly as before. */}
-      {/* xl+: when RedListView shows its fixed Reassessment Triage sidebar
-          (an <aside data-triage-sidebar>), reserve its width on the right so the
-          page centres in what's left rather than sliding under it. */}
-      <div className="min-h-screen flex flex-col px-4 sm:px-6 pt-4 md:px-16 md:pt-8 xl:has-[[data-triage-sidebar]]:pr-[calc(24rem+2.5rem)] 2xl:has-[[data-triage-sidebar]]:pr-[calc(30rem+2.5rem)] xl:has-[[data-triage-sidebar]]:pl-10">
-        <main className="max-w-5xl w-full min-w-0 mx-auto flex-1 flex flex-col min-h-0">
+      {/* When RedListView shows its Reassessment Triage sidebar (an <aside
+          data-triage-sidebar>, 2xl screens only), the page widens to make room
+          for it, so the charts and table beside it keep roughly their usual
+          width rather than being squeezed. The side padding eases to match. */}
+      <div className="min-h-screen flex flex-col px-4 sm:px-6 pt-4 md:px-16 md:pt-8 md:has-[[data-triage-sidebar]]:px-8">
+        <main className="max-w-5xl has-[[data-triage-sidebar]]:max-w-[92rem] w-full min-w-0 mx-auto flex-1 flex flex-col min-h-0">
           {/* Header: two aligned rows (title | controls, subtitle | search).
               Globe sits inline with the title so the subtitle, controls and
               search bar share the same flush-left edge as the table below.
