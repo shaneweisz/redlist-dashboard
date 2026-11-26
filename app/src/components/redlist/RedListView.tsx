@@ -5284,6 +5284,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           width and shift the toggle under the cursor. */}
       {wideTaxonLayout && <span data-wide-taxon-layout hidden />}
 
+      {/* The taxon header (with the view toggle) and the section it switches.
+          With the triage sidebar open they are the left column of a grid whose
+          right column is the sticky Reassessment Triage chart, its top level
+          with the header card: it fills the space the header leaves at its
+          right. The toggle sits right after the taxon's name in this layout,
+          so the header widening when the sidebar goes (Awaiting 1st
+          Assessment, or collapsed) doesn't move it. Closed, the outer wrapper
+          is display:contents and the inner one a plain block with the parent's
+          space-y-1, so the layout is unchanged (and an empty wrapper adds no
+          height, e.g. on Country View's landing). */}
+      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : "contents"}>
+      <div className="space-y-1 min-w-0">
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
@@ -5449,12 +5461,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // With the triage sidebar open, the reassessed section below the view
-      // toggle is two columns: its charts and table, and the sticky triage
-      // chart beside them. Below the toggle, because the toggle switches the
-      // whole section, sidebar included.
-      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
-      <div className="space-y-3 min-w-0">
+      <div className="space-y-3">
 
           {/* Single species header — skeleton while loading */}
           {!isSingleSpecies && urlSpecies != null && speciesLoading && (
@@ -7392,9 +7399,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </div>
       </div>
+      ))}
+      </div>
       {triageSidebar}
       </div>
-      ))}
 
       {/* Fixed image preview portal */}
       <div
