@@ -5303,12 +5303,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       )}
 
       {/* Triage column: on a sidebar-wide screen, whenever a taxon's section is
-          showing (and the sidebar isn't collapsed), page.tsx keeps the page at
-          its usual width and reserves a column to its right for the triage
-          chart, centring the two together. Keyed to the section, not to the
+          showing, page.tsx keeps the page at its usual width and reserves a
+          column to its right for the triage chart (27rem) or its collapsed
+          rail (4rem), centring the two together. Keyed to the section, not to the
           sidebar being mounted, so switching to Awaiting 1st Assessment
-          doesn't move the page (or the toggle under the cursor); collapsing,
-          a deliberate layout change, gives the column back. */}
+          doesn't move the page (or the toggle under the cursor). */}
       {triageColumn && <span data-triage-column={triageColumn} hidden />}
 
       {/* Wide view-mode toggle, directly above the filter charts it switches.
@@ -5471,15 +5470,16 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // With the triage column reserved (page.tsx), this section reaches into
-      // it (-mr: the column plus its 1rem gap; 27rem open, 4rem for the rail). In the reassessed
-      // view it is two columns, the charts and table at the page's width and
-      // the sticky triage chart in the reserved column, level with the first
-      // charts. In Awaiting 1st Assessment its charts and table simply use the
-      // extra width rather than leaving the column empty.
-      <div className={!triageColumn ? undefined : triageColumn === "open"
-        ? `-mr-[27rem] ${triageSidebarShown ? "grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start" : ""}`
-        : `-mr-[4rem] ${triageSidebarShown ? "grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start" : ""}`}>
+      // With the triage column reserved (page.tsx), in the reassessed view this
+      // section reaches into it (-mr: the column plus its 1rem gap; 27rem open,
+      // 4rem for the rail) as two columns: the charts and table at the page's
+      // width, and the sticky triage chart or rail in the reserved column,
+      // level with the first charts. In Awaiting 1st Assessment it stays at
+      // the page's width, its right edge aligned with the header above, and
+      // the column is left empty (still reserved, so the page doesn't move).
+      <div className={!triageColumn || !triageSidebarShown ? undefined : triageColumn === "open"
+        ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start"
+        : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start"}>
       <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
@@ -5890,7 +5890,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
           {/* Charts row 1 and the Country / Assessors row are the always-visible
               filter rows in reassessments mode. Everything else (Growth Form,
-              Assessment Criteria / Number of Assessments, Realm/Movement/Trend,
+              Realm/Movement/Trend, Assessment Criteria / Number of Assessments,
               Habitat/Threats, Taxonomic revision, Reassessment Triage) lives behind the "More Filters"
               toggle below. No independently-scrollable panel here: nested
               scrollbars read as confusing, so this is plain click-to-expand. */}
@@ -5984,71 +5984,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   );
                 })()}
 
-                {/* Assessment Criteria alongside Number of Assessments. */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Criteria — top-level A-E bar chart (see criteriaCard);
-                      clicking a bar both selects it as a filter AND expands
-                      its next level below (number -> sub-clause -> roman
-                      numeral, as deep as that branch goes) as pill rows via
-                      renderCriteriaLevel, since criteria nests up to 4
-                      levels vs. Threats/Habitat's 2. Cmd/ctrl-click for real
-                      multi-select — any number of branches can be drilled
-                      into and selected simultaneously (e.g. B1b(iii) AND
-                      C2a(i) together), each independently expanded via
-                      expandedCriteria (a Set, not a single "last expanded"
-                      value). A species can satisfy multiple codes under the
-                      same letter too (e.g. B1+B2, or B1a and B1b together),
-                      so selecting any code matches species with that code
-                      OR a more specific one beneath it (see
-                      parseCriteriaCodes' startsWith-based matching). */}
-                  {!isNewAssessments && criteriaCard}
-
-                  {/* Number of Assessments (#423 item 1) — how many times a
-                      species has been assessed, with a "Reassessed" shortcut
-                      selecting every bucket >= 2 in one click (1+ reassessment
-                      = 2+ total assessments, per the issue's explicit ask),
-                      same shape as the Outdated shortcut next to Years Since
-                      Assessed. */}
-                  {!isNewAssessments && (
-                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Number of Assessments</span>
-                        {!isSingleSpecies && (
-                        <button
-                          type="button"
-                          onClick={handleReassessedClick}
-                          className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
-                          aria-pressed={isReassessedSelected}
-                          title="Filter to species assessed 2 or more times (reassessed at least once)"
-                        >
-                          Reassessed
-                        </button>
-                        )}
-                      </div>
-                      <div style={{ height: 170 }} className="flex items-center justify-center">
-                        {speciesLoading && assessedSpecies.length === 0 ? (
-                          <Spinner />
-                        ) : isSingleSpecies && singleSpecies ? (
-                          <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                            {singleSpecies.assessment_count ?? "—"}
-                          </span>
-                        ) : assessmentCountData.length > 0 ? (
-                          <FilterBarChart
-                            data={assessmentCountData}
-                            dataKey="shortRange"
-                            selectedItems={selectedAssessmentCounts}
-                            onBarClick={handleAssessmentCountClick}
-                            onRangeSelect={rangeSelectAssessmentCounts}
-                            barColor="#8b5cf6"
-                            yAxisWidth={42}
-                            rightMargin={85}
-                          />
-                        ) : null}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Realm, Movement, and Trend as three columns in one row. Plain
                     single-select chips (cmd/ctrl-click adds to the selection). */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -6124,6 +6059,71 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Assessment Criteria alongside Number of Assessments. */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Criteria — top-level A-E bar chart (see criteriaCard);
+                      clicking a bar both selects it as a filter AND expands
+                      its next level below (number -> sub-clause -> roman
+                      numeral, as deep as that branch goes) as pill rows via
+                      renderCriteriaLevel, since criteria nests up to 4
+                      levels vs. Threats/Habitat's 2. Cmd/ctrl-click for real
+                      multi-select — any number of branches can be drilled
+                      into and selected simultaneously (e.g. B1b(iii) AND
+                      C2a(i) together), each independently expanded via
+                      expandedCriteria (a Set, not a single "last expanded"
+                      value). A species can satisfy multiple codes under the
+                      same letter too (e.g. B1+B2, or B1a and B1b together),
+                      so selecting any code matches species with that code
+                      OR a more specific one beneath it (see
+                      parseCriteriaCodes' startsWith-based matching). */}
+                  {!isNewAssessments && criteriaCard}
+
+                  {/* Number of Assessments (#423 item 1) — how many times a
+                      species has been assessed, with a "Reassessed" shortcut
+                      selecting every bucket >= 2 in one click (1+ reassessment
+                      = 2+ total assessments, per the issue's explicit ask),
+                      same shape as the Outdated shortcut next to Years Since
+                      Assessed. */}
+                  {!isNewAssessments && (
+                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Number of Assessments</span>
+                        {!isSingleSpecies && (
+                        <button
+                          type="button"
+                          onClick={handleReassessedClick}
+                          className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
+                          aria-pressed={isReassessedSelected}
+                          title="Filter to species assessed 2 or more times (reassessed at least once)"
+                        >
+                          Reassessed
+                        </button>
+                        )}
+                      </div>
+                      <div style={{ height: 170 }} className="flex items-center justify-center">
+                        {speciesLoading && assessedSpecies.length === 0 ? (
+                          <Spinner />
+                        ) : isSingleSpecies && singleSpecies ? (
+                          <span className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
+                            {singleSpecies.assessment_count ?? "—"}
+                          </span>
+                        ) : assessmentCountData.length > 0 ? (
+                          <FilterBarChart
+                            data={assessmentCountData}
+                            dataKey="shortRange"
+                            selectedItems={selectedAssessmentCounts}
+                            onBarClick={handleAssessmentCountClick}
+                            onRangeSelect={rangeSelectAssessmentCounts}
+                            barColor="#8b5cf6"
+                            yAxisWidth={42}
+                            rightMargin={85}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Habitat alongside Threats. */}
