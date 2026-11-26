@@ -1,7 +1,7 @@
 /**
  * review/links: every assessment_link row, written for a person to read: the
  * Red List's side, CoL's side and the matcher's, each with the release it comes
- * from beside it, the decision with its reasons, the records it counts, and the
+ * from beside it, the link with its reasons, the records it counts, and the
  * evidence for checking it. assessment_link holds ids for the stages that read
  * it; this is the same rows with the names. Rebuilt every sync; not published.
  *
@@ -24,8 +24,8 @@
  *                  (the taxon it is), col_species_id, col_species_name,
  *                  col_species_authorship (the species that taxon is in),
  *                  col_described_year
- *   the decision   records, georeferenced_records (what this row counts),
- *                  method, basis, decided_by
+ *   the link       records, georeferenced_records (what this row counts),
+ *                  method, basis
  *   the matcher    primary rows only: matcher_version, matcher_col_id,
  *                  matcher_name, matcher_authorship, matcher_status,
  *                  matcher_accepted_col_id, matcher_accepted_name,
@@ -68,10 +68,10 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
   const sameRank = (rank: string, a: string, b: string) => `(${a} = ${b} OR EXISTS (SELECT 1 FROM aliases x WHERE x.rank = '${rank}'
      AND ((x.name = ${a} AND x.alias = ${b}) OR (x.name = ${b} AND x.alias = ${a}))))`;
   const year = (s: string) => `regexp_extract(${s}, '(1[7-9]\\d\\d|20\\d\\d)')`;
-  // The judge's verdicts (checks/judge.ts), where it has run: shown, never read by the sync.
-  const judgements = path.join(path.dirname(T.reviewLinks), "judgements.parquet");
-  const verdicts = fs.existsSync(judgements) ? `SELECT sis_taxon_id, verdict AS judge_verdict, answer AS judge_answer, reason AS judge_reason, sources AS judge_sources FROM ${parquet(judgements)}`
-    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS judge_verdict, NULL::VARCHAR AS judge_answer, NULL::VARCHAR AS judge_reason, NULL::VARCHAR AS judge_sources WHERE false`;
+  // The AI taxonomic reviewer's scores (checks/ai-review.ts first or changed), where it has run: shown, never read by the sync.
+  const judgements = path.join(path.dirname(T.reviewLinks), "reviewer-scores.parquet");
+  const verdicts = fs.existsSync(judgements) ? `SELECT sis_taxon_id, verdict AS reviewer_verdict, answer AS reviewer_answer, reason AS reviewer_reason, sources AS reviewer_sources FROM ${parquet(judgements)}`
+    : `SELECT NULL::BIGINT AS sis_taxon_id, NULL::VARCHAR AS reviewer_verdict, NULL::VARCHAR AS reviewer_answer, NULL::VARCHAR AS reviewer_reason, NULL::VARCHAR AS reviewer_sources WHERE false`;
   await conn.run(`COPY (
     WITH latest AS (
       SELECT * FROM ${parquet(T.assessments)} WHERE is_latest
@@ -93,9 +93,9 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
              l.role, ${lit(releases.colXr)} AS col_xr,
              l.col_taxon_id, tx.scientific_name AS col_taxon_name, tx.authorship AS col_taxon_authorship, tx.rank AS col_taxon_rank, tx.status AS col_taxon_status,
              l.col_species_id, sp.scientific_name AS col_species_name, sp.authorship AS col_species_authorship, sp.described_year AS col_described_year,
-             l.counts, l.relation, l.step, l.doubts, l.method, l.basis, l.decided_by, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted,
-             CASE WHEN l.role = 'primary' THEN j.judge_verdict END AS judge_verdict, CASE WHEN l.role = 'primary' THEN j.judge_answer END AS judge_answer,
-             CASE WHEN l.role = 'primary' THEN j.judge_reason END AS judge_reason, CASE WHEN l.role = 'primary' THEN j.judge_sources END AS judge_sources,
+             l.counts, l.relation, l.step, l.doubts, l.method, l.basis, l.match_reason, l.col_treatment, l.match_description, l.to_review, l.counted,
+             CASE WHEN l.role = 'primary' THEN j.reviewer_verdict END AS reviewer_verdict, CASE WHEN l.role = 'primary' THEN j.reviewer_answer END AS reviewer_answer,
+             CASE WHEN l.role = 'primary' THEN j.reviewer_reason END AS reviewer_reason, CASE WHEN l.role = 'primary' THEN j.reviewer_sources END AS reviewer_sources,
              CASE WHEN l.counted THEN c.records END AS records, CASE WHEN l.counted THEN c.georeferenced_records END AS georeferenced_records,
              CASE WHEN l.role = 'primary' THEN m.matcher_version END AS matcher_version,
              CASE WHEN l.role = 'primary' THEN m.matcher_col_id END AS matcher_col_id,
@@ -148,13 +148,13 @@ export async function buildReviewLinks(T: Tables, releases: Releases): Promise<n
     SELECT
            -- 1. at a glance: what each side calls it, and why the link is what it is
            redlist_name, redlist_authority, col_taxon_name, col_taxon_authorship, relation, doubts, match_reason, col_treatment, counts, match_description, to_review,
-           judge_verdict, judge_answer, judge_reason, judge_sources,
+           reviewer_verdict, reviewer_answer, reviewer_reason, reviewer_sources,
            -- 2. the Red List
            sis_taxon_id, redlist_release, category, taxon_group, class, "order", family, assessment_date, redlist_synonyms,
            -- 3. CoL
            role, col_xr, col_taxon_id, col_taxon_rank, col_taxon_status, col_species_id, col_species_name, col_species_authorship, col_described_year,
-           -- 4. the decision
-           records, georeferenced_records, step, method, basis, decided_by,
+           -- 4. the link
+           records, georeferenced_records, step, method, basis,
            -- 5. the matcher
            matcher_version, matcher_col_id, matcher_name, matcher_authorship, matcher_status,
            matcher_accepted_col_id, matcher_accepted_name, matcher_accepted_authorship, matcher_lineage,

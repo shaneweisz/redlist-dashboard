@@ -18,12 +18,9 @@ describe("matchKey", () => {
       .toEqual(["f_counts_nothing", "f_split_unclear", "f_filed_elsewhere", "f_confidence"]);
     expect(doubtKeys({ match_doubts: null })).toEqual([]);
   });
-  it("tells a person's decision from an AI proposal", () => {
-    expect(matchKey({ match_reason: "decision", match_decided_by: "fixture" })).toBe("decided");
-    expect(matchKey({ match_reason: "decision", match_decided_by: "judge:claude-opus-5-5" })).toBe("decided_jury");
-    expect(matchKey({ match_reason: "decision", match_decided_by: "agent:unrecorded" })).toBe("agent");
-    expect(matchKey({ match_reason: "decision", match_decided_by: "agent:unrecorded", match_reviewed: true })).toBe("decided");
-    expect(matchKey({ match_reason: "decision, not in CoL", match_decided_by: "someone", count_note: "unlinked" })).toBe("none");
+  it("an AI reviewer's suggestion is a doubt of its own", () => {
+    expect(matchKey({ match_reason: "exact, unique", match_doubts: "other authors;reviewer suggests other records" })).toBe("f_other_authors");
+    expect(doubtKeys({ match_doubts: "other authors;reviewer suggests other records" })).toEqual(["f_other_authors", "f_reviewer_other"]);
   });
 });
 

@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { select, selectEvery, type ColRecord, type ColSpecies, type Release, type SpeciesInput } from "../sync/link/select";
 import { sameNameKey } from "../sync/link/name-rules";
-import { verdictBasis, type Decision } from "../sync/link/decisions";
+import { reviewBasis, REVIEW_DOUBT, type Review } from "../sync/link/ai-reviews";
 
 const sp = (id: string, name: string, authorship: string | null, cls = "aves"): ColSpecies =>
   ({ id, name, authorship, class: cls, kingdom: "animalia", phylum: "chordata" });
@@ -31,15 +31,15 @@ function release(records: ColRecord[] = [], assessed: string[] = [], occurrences
 const ids = (s: ReturnType<typeof select>) => s.selected.map((x) => `${x.record.id}:${x.relation}`);
 
 describe("steps", () => {
-  it("4: the answer, accepted, is the species (Panthera leo)", () => {
+  it("3: the answer, accepted, is the species (Panthera leo)", () => {
     const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
     const s = select(species("Panthera leo", "(Linnaeus, 1758)", acc(leo)), release());
-    expect(s.step).toBe(4);
+    expect(s.step).toBe(3);
     expect(ids(s)).toEqual(["L:is"]);
     expect(s.doubts).toEqual([]);
   });
 
-  it("4: copies join, so both count (Cygnus buccinator, 1831 and a provisional 1832)", () => {
+  it("3: copies join, so both count (Cygnus buccinator, 1831 and a provisional 1832)", () => {
     const a = sp("A", "Cygnus buccinator", "Richardson, 1831"), b = sp("B", "Cygnus buccinator", "Richardson, 1832");
     const s = select(species("Cygnus buccinator", "Richardson, 1832", acc(a), [acc(b, "PROVISIONALLY_ACCEPTED")]), release());
     expect(s.groups).toBe(1);
@@ -47,49 +47,49 @@ describe("steps", () => {
     expect(s.doubts).toEqual([]);
   });
 
-  it("4: a contradicted answer gives way to the record the citation matches (Weinmannia heterophylla)", () => {
+  it("3: a contradicted answer gives way to the record the citation matches (Weinmannia heterophylla)", () => {
     const kunth = sp("K", "Weinmannia heterophylla", "Kunth", "magnoliopsida"), cordata = sp("C", "Weinmannia cordata", "Sw.", "magnoliopsida");
     const lopez = rec("X", "Weinmannia heterophylla", "Ruiz & Pav. ex López", "AMBIGUOUS_SYNONYM", cordata);
     const s = select(species("Weinmannia heterophylla", "Ruiz & Pav.", acc(kunth), [lopez]), release());
-    expect(s.step).toBe(4);
+    expect(s.step).toBe(3);
     expect(ids(s)).toEqual(["X:part of"]);
     expect(s.doubts).toEqual(["chosen by the citation", "ambiguous synonym"]);
     expect(s.untakenSpecies.map((x) => x.id)).toEqual(["K"]);
   });
 
-  it("5: the answer, contradicted, with nothing matching: GBIF files the bare name there (Turdus rubrocanus)", () => {
+  it("4: the answer, contradicted, with nothing matching: GBIF files the bare name there (Turdus rubrocanus)", () => {
     const gray = sp("G", "Turdus rubrocanus", "Gray & Gray, 1847"), phil = sp("P", "Philepitta castanea", "(Müller, 1776)");
     const hodgson = rec("H", "Turdus rubrocanus", "Hodgson, BH, 1844", "SYNONYM", phil);
     const s = select(species("Turdus rubrocanus", "Hodgson, 1846", acc(gray), [hodgson]), release());
-    expect(s.step).toBe(5);
+    expect(s.step).toBe(4);
     expect(ids(s)).toEqual(["G:is"]);
     expect(s.doubts).toEqual(["homonym", "other authors"]);
   });
 
-  it("6: no answer: the groups the citation doesn't contradict (Palaina martensi)", () => {
+  it("5: no answer: the groups the citation doesn't contradict (Palaina martensi)", () => {
     const d = sp("D", "Diancta martensi", "(H. Adams, 1867)"), o = sp("O", "Other one", "(Andreae, 1902)");
     const adams = rec("A1", "Palaina martensi", "(H. Adams, 1867)", "SYNONYM", d), andreae = rec("A2", "Palaina martensi", "(Andreae, 1902)", "SYNONYM", o);
     const genus = { ...rec("G", "Palaina", null, "ACCEPTED", null), rank: "GENUS" };
     const s = select(species("Palaina martensi", "(Adams, 1866)", genus, [adams, andreae]), release());
-    expect(s.step).toBe(6);
+    expect(s.step).toBe(5);
     expect(ids(s)).toEqual(["A1:is"]);
     expect(s.doubts).toEqual(["chosen by the citation", "homonym"]);
   });
 
-  it("2: an informal name takes nothing", () => {
+  it("1: an informal name takes nothing", () => {
     const s = select(species("Galaxias sp. nov. 'Verlorenvlei'", null, null), release());
-    expect(s).toMatchObject({ step: 2, reason: "informal or qualified name", selected: [] });
+    expect(s).toMatchObject({ step: 1, reason: "informal or qualified name", selected: [] });
   });
 
-  it("3: no candidate (a misapplied answer)", () => {
+  it("2: no candidate (a misapplied answer)", () => {
     const s = select(species("Ampedus karpathicus", "(Buysson, 1885)", rec("M", "Ampedus karpathicus", "auct.", "MISAPPLIED", sp("S", "Ampedus x", null))), release());
-    expect(s).toMatchObject({ step: 3, reason: "no candidate" });
+    expect(s).toMatchObject({ step: 2, reason: "no candidate" });
   });
 
   it("a candidate across a phylum is no candidate", () => {
     const crab = { ...sp("C", "Hepatus lineatus", null), phylum: "arthropoda" };
     const s = select(species("Hepatus lineatus", null, acc(crab)), release());
-    expect(s.step).toBe(3);
+    expect(s.step).toBe(2);
   });
 });
 
@@ -134,7 +134,7 @@ describe("doubts on the steps' records", () => {
     const sabura = rec("S", "Agrotis sabura", "Mabille, 1888", "SYNONYM", las);
     const s = select(species("Agrotis sabine", "Brandstetter, 2010", sabura, [], { match: { matchType: "VARIANT", answerName: "Agrotis sabura", answer: sabura, alternatives: [] } }),
       release([], ["Agrotis sabine", "Agrotis lasserrei"]));
-    expect(s.step).toBe(5);
+    expect(s.step).toBe(4);
     expect(s.doubts).toEqual(["other authors", "other spelling", "counts nothing"]);
   });
 
@@ -242,64 +242,9 @@ describe("synonym records", () => {
     expect(ids(s)).toEqual(["O:is"]);
   });
 
-  it("are not added for a species with a reason at step 2, or a holding decision", () => {
+  it("are not added for a species with a reason at step 1", () => {
     const s = select(species("Leo sp.", null, null, [], { synonyms: [{ name: "Leo old", authors: [] }] }), release([acc(sp("LO", "Leo old", null))]));
     expect(s.selected).toEqual([]);
-  });
-});
-
-describe("decisions", () => {
-  const waspfish = sp("5XHD2", "Centropogon australis", "(White, 1790)", "teleostei");
-  const plant = { ...sp("PL", "Centropogon australis", "Gaudich.", "magnoliopsida"), kingdom: "plantae", phylum: "tracheophyta" };
-  const input = species("Centropogon australis", "(Shaw, 1790)", acc(waspfish), [], { kingdom: "Animalia", phylum: "Chordata" });
-  const decision = (over: Partial<Decision> = {}): Decision => ({
-    sis: 1, redlistName: "Centropogon australis", redlistAuthority: "(Shaw, 1790)", candidates: ["Centropogon australis"], by: "fixture", reviewed: true,
-    date: "2026-11-10", evidence: "the waspfish", sources: [], transcripts: [], context: "",
-    rows: [{ id: "5XHD2", name: "Centropogon australis", authorship: "(White, 1790)", status: "accepted", species: "Centropogon australis", relation: "is" }], ...over });
-  const rel = release([acc(waspfish), acc(plant)]);
-
-  it("holds: its records, step 1, no doubts", () => {
-    const s = select(input, rel, decision());
-    expect(s).toMatchObject({ step: 1, doubts: [], toReview: null });
-    expect(ids(s)).toEqual(["5XHD2:is"]);
-    expect(s.selected[0].basis).toBe("decision");
-  });
-
-  it("keeps what the rules alone select beside a decision, and the note says it", async () => {
-    const { matchNote } = await import("../sync/link/assessment-link");
-    const [s] = selectEvery([input], rel as Omit<Release, "wholeBySteps">, new Map([[1, decision({ rows: [{ ...decision().rows[0], relation: "part of" }] })]]));
-    expect(s.step).toBe(1);
-    expect(s.rules && ids(s.rules)).toEqual(["5XHD2:is"]);
-    expect(matchNote(s, input)!.note).toContain("Without the decision, the rules would have counted Centropogon australis (White, 1790) [5XHD2].");
-    expect(selectEvery([input], rel as Omit<Release, "wholeBySteps">, new Map())[0].rules).toBeUndefined();
-  });
-
-  it("lapses when the Red List renames the species, or cites other authors", () => {
-    expect(select(input, rel, decision({ redlistName: "Centropogon other" })).toReview).toBe("decision lapsed (name)");
-    expect(select(input, rel, decision({ redlistAuthority: "Gaudich." })).toReview).toBe("decision lapsed (citation)");
-  });
-
-  it("lapses when its record is gone, or names another assessed species", () => {
-    const gone = decision({ rows: [{ ...decision().rows[0], id: "NOPE", authorship: "Somebody" }] });
-    expect(select(input, rel, gone).toReview).toBe("decision lapsed (record not found)");
-    const assessed = release([acc(waspfish)], ["Centropogon australis", "Centropogon other"]);
-    const other = decision({ rows: [{ ...decision().rows[0], species: "Centropogon other" }] });
-    expect(select(input, assessed, other).toReview).toBe("decision lapsed (assessed name)");
-  });
-
-  it("finds a record whose id moved, by name, status, species and an equal authorship", () => {
-    const moved = decision({ rows: [{ ...decision().rows[0], id: "OLD" }] });
-    expect(ids(select(input, rel, moved))).toEqual(["5XHD2:is"]);
-  });
-
-  it("is listed when its candidates changed, or it isn't reviewed", () => {
-    expect(select(input, rel, decision({ candidates: [] })).toReview).toBe("decision's candidates changed (Centropogon australis)");
-    expect(select(input, rel, decision({ by: "someone", reviewed: false })).toReview).toBe("decision not yet reviewed (someone)");
-    expect(select(input, rel, decision({ by: "fixture", reviewed: false })).toReview).toBeNull();
-  });
-
-  it("not in CoL: holds with no records", () => {
-    expect(select(input, rel, decision({ rows: [] }))).toMatchObject({ step: 1, reason: "decision: not in CoL", selected: [] });
   });
 });
 
@@ -314,52 +259,49 @@ describe("selectEvery", () => {
     expect(ids(sa)).toEqual(["L:is"]);
   });
 
-  it("a judge's verdict applies only while its answer is the rules': confirmed takes the species off the review list, undecided adds the doubt", () => {
+  it("a review applies only while the rules give the answer and basis it was given, and never changes the records", () => {
     const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
     const a = species("Panthera leo", "(Gray, 1867)", acc(leo));  // other authors: listed
     const r = release() as Omit<Release, "wholeBySteps">;
-    const basis = verdictBasis(a, selectEvery([a], r, new Map())[0]);
-    const c = (answer: string, verdict: "confirmed" | "undecided" = "confirmed", b = basis) =>
-      new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict, answer, basis: b, votes: "3/5 rules; 2/5 other", by: "judge:m", date: "2026-11-24", transcripts: [], context: "" }]]);
+    const basis = reviewBasis(a, selectEvery([a], r)[0]);
+    const rv = (rulesAnswer: string, findings: Review["finding"][] = ["agrees", "agrees"], b = basis) => new Map([[1, findings.map((finding, i): Review => ({
+      sis: 1, redlistName: "Panthera leo", reviewer: i + 1, finding, records: [], reason: "r", sources: [], rulesAnswer, basis: b, model: "m", date: "2026-11-26", transcript: "", context: "" }))]]);
     const L = "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", X = "Panthera leo linnaeus 1758 [synonym, of Panthera leo]: is";
-    expect(selectEvery([a], r, new Map())[0].toReview).toMatch(/^other authors/);
-    expect(selectEvery([a], r, new Map(), c(L))[0].toReview).toBeNull();
-    expect(selectEvery([a], r, new Map(), c(X))[0].toReview).toMatch(/^other authors/);
-    const u = selectEvery([a], r, new Map(), c(L, "undecided"))[0];
-    expect(u.doubts).toEqual(["other authors", "judge undecided"]);
-    expect(u.toReview).toBe("judge undecided (3/5 rules; 2/5 other)");
+    expect(selectEvery([a], r)[0].toReview).toMatch(/^other authors/);
+    expect(selectEvery([a], r, rv(L))[0].toReview).toBeNull();
+    expect(selectEvery([a], r, rv(X))[0].toReview).toMatch(/^other authors/);
+    const u = selectEvery([a], r, rv(L, ["agrees", "other records"]))[0];
+    expect(u.doubts).toEqual(["other authors", REVIEW_DOUBT]);
+    expect(u.toReview).toBe(`${REVIEW_DOUBT} (agrees; other records)`);
     expect(u.selected.map((x) => x.record.id)).toEqual(["L"]);
-    expect(selectEvery([a], r, new Map(), c(X, "undecided"))[0].doubts).toEqual(["other authors"]);
-    // A release that renumbers the record keeps the verdict.
+    // A release that renumbers the record keeps the review.
     const moved = species("Panthera leo", "(Gray, 1867)", acc({ ...leo, id: "L2" }));
-    expect(selectEvery([moved], r, new Map(), c(L))[0].toReview).toBeNull();
-    // A new synonym, candidate or doubt changes what it was given: the verdict no longer applies.
+    expect(selectEvery([moved], r, rv(L))[0].toReview).toBeNull();
+    // A new synonym or another basis: the review no longer applies.
     const synonym = { ...a, synonyms: [{ name: "Felis leo", authors: ["Linnaeus, 1758"] }] };
-    expect(selectEvery([synonym], r, new Map(), c(L))[0].toReview).toMatch(/^other authors/);
-    expect(selectEvery([a], r, new Map(), c(L, "confirmed", "something else"))[0].toReview).toMatch(/^other authors/);
+    expect(selectEvery([synonym], r, rv(L))[0].toReview).toMatch(/^other authors/);
+    expect(selectEvery([a], r, rv(L, ["agrees", "agrees"], "something else"))[0].toReview).toMatch(/^other authors/);
   });
 });
 
-describe("jury notes", () => {
-  it("say what an AI jury's check found, in words", async () => {
-    const { juryVotes } = await import("../sync/link/assessment-link");
-    expect(juryVotes("2/2 rules")).toBe("2 independent runs agreed with the rules");
-    expect(juryVotes("3/5 rules; 1/5 can't tell; 1/5 other")).toBe("3 of 5 independent runs agreed with the rules, 1 couldn't tell, 1 gave another answer");
-    expect(juryVotes("2/5 other 1; 2/5 other 2; 1/5 other 3")).toBe("5 independent runs gave 3 different other answers");
-    expect(juryVotes("2/5 rules; 2/5 other 1; 1/5 other 2")).toBe("3 of 5 independent runs gave 2 different other answers, 2 agreed with the rules");
-  });
-  it("a confirmed or undecided verdict keeps the species' doubts and adds the check to its note", async () => {
+describe("review notes", () => {
+  it("say what the AI taxonomic reviewers found: both agree, both suggest the same, or each reviewer", async () => {
     const { matchNote } = await import("../sync/link/assessment-link");
     const leo = sp("L", "Panthera leo", "(Linnaeus, 1758)");
     const a = species("Panthera leo", "(Gray, 1867)", acc(leo));
     const r = release() as Omit<Release, "wholeBySteps">;
-    const s0 = selectEvery([a], r, new Map())[0];
-    const v = (verdict: "confirmed" | "undecided", votes: string) => new Map([[1, { sis: 1, redlistName: "Panthera leo", verdict,
-      answer: "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", basis: verdictBasis(a, s0), votes, by: "judge:m", date: "2026-11-25", transcripts: [], context: "" }]]);
-    const c = selectEvery([a], r, new Map(), v("confirmed", "2/2 rules"))[0];
-    expect(c.doubts).toEqual(["other authors"]);
-    expect(matchNote(c, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25: 2 independent runs agreed with the rules; the doubt stands/);
-    const u = selectEvery([a], r, new Map(), v("undecided", "3/5 rules; 2/5 other"))[0];
-    expect(matchNote(u, a)!.note).toMatch(/Checked by an AI jury on 2026-11-25, which couldn't agree .* \(3 of 5 independent runs agreed with the rules, 2 gave another answer\)/);
+    const s0 = selectEvery([a], r)[0];
+    const given = { rulesAnswer: "Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is", basis: reviewBasis(a, s0) };
+    const tigris = { id: "T", relation: "split into" as const, label: "Panthera tigris", status: "accepted", species: "Panthera tigris", records: 1234 };
+    const part = { id: "P", relation: "part of" as const, label: "Felis leo L.", status: "synonym", species: "Panthera pardus", records: 7 };
+    const rv = (...xs: [Review["finding"], Review["records"]][]) => new Map([[1, xs.map(([finding, records], i): Review => ({
+      sis: 1, redlistName: "Panthera leo", reviewer: i + 1, finding, records, reason: "r", sources: [], ...given, model: "claude-opus-5-5", date: "2026-11-25", transcript: "", context: "" }))]]);
+    const note = (m: Map<number, Review[]>) => matchNote(selectEvery([a], r, m)[0], a)!.note;
+    expect(note(rv(["agrees", []], ["agrees", []]))).toContain("Both AI taxonomic reviewers agree with these records (claude-opus-5-5, 2026-11-25).");
+    expect(note(rv(["other records", [tigris]], ["other records", [tigris]])))
+      .toContain("Both AI taxonomic reviewers suggest other records (claude-opus-5-5, 2026-11-25): they would count all of CoL's Panthera tigris, 1,234 GBIF records. The count follows the rules.");
+    expect(note(rv(["agrees", []], ["other records", [part]])))
+      .toContain("reviewer 1 agrees with these records; reviewer 2 would count the records under Felis leo L. (which CoL files under Panthera pardus), 7 GBIF records. The count follows the rules.");
+    expect(note(rv(["agrees", []], ["can't tell", []]))).toContain("reviewer 1 agrees with these records; reviewer 2 couldn't tell.");
   });
 });

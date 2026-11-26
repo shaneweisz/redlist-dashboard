@@ -4,7 +4,7 @@
  * select.ts; this writes it, with the labels and sentences the app and a
  * reviewer read. Its columns are the link's contract with the rest of the sync.
  *
- * Built from: taxa, assessments, occurrences, matches, seeds/decisions.tsv.
+ * Built from: taxa, assessments, occurrences, matches, seeds/ai-reviews.tsv.
  *
  * Columns:
  *   sis_taxon_id
@@ -21,28 +21,28 @@
  *   method         the record's CoL status (accepted, provisional, synonym,
  *                  ambiguous_synonym), or for a covered row what added it
  *                  (step_record, synonym_record, undecided_candidate, other_group)
- *   basis          matcher | citation | synonym | decision
- *   decided_by, reviewed   for a decision
- *   step           the primary row's step (1-6)
+ *   basis          matcher | citation | synonym
+ *   step           the primary row's step (1-5)
  *   doubts         the species' doubts, ;-joined, on its primary row
  *   match_reason   how the name found its record (exact, unique | exact, homonym,
- *                  author decides | exact, duplicate in CoL | spelling variant… |
- *                  decision), or why nothing was taken; a covered row's names why it is there
+ *                  author decides | exact, duplicate in CoL | spelling variant…),
+ *                  or why nothing was taken; a covered row's names why it is there
  *   col_treatment  what CoL makes of the record: accepted | synonym, other name |
  *                  synonym, other spelling | lumped, unassessed | lumped, assessed | split;
  *                  a covered row's, the record's CoL status
  *   match_description  the row in a sentence, with names, authors and ids
  *   to_review      why a person needs to look (the queue), on the primary row
  *   match_note, match_records  for a match that isn't plain: why, in sentences, and the CoL records named
- *   match_jury     what the AI jury found, for a species it checked: JSON {kind: decided |
- *                  confirmed | undecided, by, date, votes, transcripts (its runs' keys)}
+ *   match_review   the AI taxonomic reviewers' answers, for a species they checked: JSON
+ *                  {model, date, reviewers: [{finding, records: [{label, relation, species,
+ *                  records}], reason, transcript}]}
  */
 
 import { sameName } from "./name-rules";
 import { oneOwnerPerUsage, type LinkRow } from "./rules";
 import { selectEvery, type ColRecord, type ColSpecies, type Selected, type Selection, type SpeciesInput } from "./select";
 import { loadInputs } from "./select-inputs";
-import { readDecisions, type Decision } from "./decisions";
+import { REVIEW_DOUBT, type Review, type SuggestedRecord } from "./ai-reviews";
 import { output, parquet, tables } from "../paths";
 import { lit, openDuckDB, rows, writeTable } from "../sql";
 
@@ -65,16 +65,14 @@ const counts = (relation: string) => relation === "is" || relation === "split in
   : relation === "part of" ? "only records under its own name" : "nothing";
 
 export async function buildLink(
-  inputs: { taxa: string; assessments: string; matches: string; occurrences?: string; decisions?: Map<number, Decision> },
+  inputs: { taxa: string; assessments: string; matches: string; occurrences?: string },
   out: { link: string },
 ): Promise<LinkSummary> {
   const conn = await openDuckDB();
   const T = { ...tables(), taxa: inputs.taxa, assessments: inputs.assessments, matches: inputs.matches, ...(inputs.occurrences ? { occurrences: inputs.occurrences } : {}) };
-  const loaded = await loadInputs(T, inputs.decisions ?? readDecisions(), conn);
-  const selections = selectEvery(loaded.species, loaded.release, loaded.decisions, loaded.verdicts);
+  const loaded = await loadInputs(T, conn);
+  const selections = selectEvery(loaded.species, loaded.release, loaded.reviews);
   const species = new Map(loaded.species.map((s) => [s.sis, s]));
-  const orphaned = [...loaded.decisions.keys()].filter((k) => !species.has(k));
-  if (orphaned.length > 0) console.log(`   ${orphaned.length} decisions name species no longer assessed; delete them (SIS ${orphaned.slice(0, 5).join(", ")})`);
 
   const partOf = [...new Set(selections.flatMap((s) => s.selected.filter((x) => x.relation === "part of").map((x) => x.record.id)))];
   const root = await partOfRoots(conn, T.taxa, partOf);
@@ -89,16 +87,13 @@ export async function buildLink(
     if (n) notes.set(sel.sis, n);
   }
 
-  // What the AI jury found, for the species it checked: a judge's decision that holds, or a verdict that applies.
-  const jury = new Map<number, string>();
-  for (const sel of selections) {
-    const d = loaded.decisions.get(sel.sis);
-    if (sel.step === 1 && d?.by.startsWith("judge:")) jury.set(sel.sis, JSON.stringify({ kind: "decided", by: d.by.slice(6), date: d.date, votes: null, transcripts: d.transcripts,
-      rules: sel.rules ? rulesWouldHave(sel.rules, false) : null }));
-    else if (sel.jury) jury.set(sel.sis, JSON.stringify({ kind: sel.jury.verdict, by: loaded.verdicts.get(sel.sis)?.by.replace(/^judge:/, "") ?? null,
-      date: sel.jury.date, votes: juryVotes(sel.jury.votes), transcripts: sel.jury.transcripts }));
-  }
-  const flagged = new Set(selections.filter((s) => s.doubts.length > 0).map((s) => s.sis));
+  // The AI taxonomic reviewers' answers, for the species whose reviews apply.
+  const review = new Map<number, string>();
+  for (const sel of selections) if (sel.reviews) review.set(sel.sis, JSON.stringify({ model: sel.reviews[0].model, date: sel.reviews[0].date,
+    reviewers: sel.reviews.map((r) => ({ finding: r.finding, records: r.records.map(({ label, relation, species, records }) => ({ label, relation, species, records })),
+      reason: r.reason, transcript: r.transcript })) }));
+  // A review's doubt is left out: a review never changes what is counted.
+  const flagged = new Set(selections.filter((s) => s.doubts.some((d) => d !== REVIEW_DOUBT)).map((s) => s.sis));
   const exactName = new Set(selections.filter((s) => s.selected[0] && sameName(s.selected[0].record.name, species.get(s.sis)!.name)
     && s.selected[0].record.name.trim() === species.get(s.sis)!.name.trim()).map((s) => s.sis));
   const lost = oneOwnerPerUsage(links, flagged, exactName);
@@ -111,13 +106,13 @@ export async function buildLink(
   }
 
   await writeTable(conn, "link_rows", { sis_taxon_id: "BIGINT", role: "VARCHAR", relation: "VARCHAR", col_species_id: "VARCHAR", col_taxon_id: "VARCHAR",
-    counts: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", decided_by: "VARCHAR", reviewed: "BOOLEAN", step: "INTEGER", doubts: "VARCHAR",
+    counts: "VARCHAR", method: "VARCHAR", basis: "VARCHAR", step: "INTEGER", doubts: "VARCHAR",
     match_reason: "VARCHAR", col_treatment: "VARCHAR", match_description: "VARCHAR", to_review: "VARCHAR", counted: "BOOLEAN",
-    match_note: "VARCHAR", match_records: "VARCHAR", match_jury: "VARCHAR" },
+    match_note: "VARCHAR", match_records: "VARCHAR", match_review: "VARCHAR" },
     links.map((l) => {
       const n = l.role === "primary" ? notes.get(l.sis_taxon_id) : undefined;
       return { ...l, counts: l.counted ? counts(l.relation) : "nothing", match_note: n?.note ?? null, match_records: n ? JSON.stringify(n.records) : null,
-        match_jury: l.role === "primary" ? jury.get(l.sis_taxon_id) ?? null : null };
+        match_review: l.role === "primary" ? review.get(l.sis_taxon_id) ?? null : null };
     }));
   await conn.run(`COPY (SELECT * FROM link_rows ORDER BY sis_taxon_id, role DESC, col_species_id) TO ${lit(output(out.link))} (FORMAT parquet, COMPRESSION zstd)`);
 
@@ -140,8 +135,7 @@ export async function buildLink(
  * Where each part-of record's records start: the record, or the non-nominate
  * infraspecific of the same species that CoL files the synonym under
  * (Fringilla polatzeki → F. teydea polatzeki); never a genus or family, nor
- * anything for a synonym leading to no species. The judge uses it too, to
- * count an answer as the sync would.
+ * anything for a synonym leading to no species.
  */
 export async function partOfRoots(conn: Awaited<ReturnType<typeof openDuckDB>>, taxa: string, ids: string[]): Promise<Map<string, string>> {
   await writeTable(conn, "part_of", { id: "VARCHAR" }, ids.map((id) => ({ id })));
@@ -158,14 +152,12 @@ export function speciesRows(sel: Selection, sp: SpeciesInput, root: Map<string, 
   const doubts = sel.doubts.length ? sel.doubts.join(";") : null;
   const steps = sel.selected.filter((x) => x.basis !== "synonym");
   const primaryRecord = steps[0]?.record ?? null;
-  const base = { sis_taxon_id: sel.sis, decided_by: null as string | null, reviewed: null as boolean | null, step: null as number | null,
-    doubts: null as string | null, to_review: null as string | null };
+  const base = { sis_taxon_id: sel.sis, step: null as number | null, doubts: null as string | null, to_review: null as string | null };
 
-  const primaryFields = { ...base, role: "primary" as const, step: sel.step, doubts, to_review: sel.toReview,
-    decided_by: sel.decision && sel.step === 1 ? sel.decision.by : null, reviewed: sel.decision && sel.step === 1 ? sel.decision.reviewed : null };
+  const primaryFields = { ...base, role: "primary" as const, step: sel.step, doubts, to_review: sel.toReview };
   if (!primaryRecord) {
-    out.push({ ...primaryFields, col_species_id: null, col_taxon_id: null, relation: "none", method: "unmatched", basis: sel.step === 1 ? "decision" : null,
-      match_reason: sel.reason === "decision: not in CoL" ? "decision, not in CoL" : sel.reason ?? "no candidate", col_treatment: null,
+    out.push({ ...primaryFields, col_species_id: null, col_taxon_id: null, relation: "none", method: "unmatched", basis: null,
+      match_reason: sel.reason ?? "no candidate", col_treatment: null,
       match_description: nothingDescription(sel, sp), counted: false });
   }
   for (const x of sel.selected) {
@@ -177,10 +169,8 @@ export function speciesRows(sel: Selection, sp: SpeciesInput, root: Map<string, 
     const row: LinkRow = {
       ...(isPrimary ? primaryFields : { ...base, role: "covered" as const }),
       col_species_id: s?.id ?? null, col_taxon_id: taxon, relation: x.relation,
-      method: isPrimary ? methodOf(x.record) : x.basis === "synonym" ? "synonym_record" : x.basis === "decision" ? "decision_record" : "step_record",
+      method: isPrimary ? methodOf(x.record) : x.basis === "synonym" ? "synonym_record" : "step_record",
       basis: x.basis,
-      decided_by: x.basis === "decision" ? sel.decision?.by ?? null : null,
-      reviewed: x.basis === "decision" ? sel.decision?.reviewed ?? null : null,
       match_reason: isPrimary ? primaryReason(sel, sp, x) : coveredReason(x, primaryRecord),
       col_treatment: isPrimary ? treatment(x) : x.relation === "split into" ? "split" : status(x.record.status),
       match_description: describe(x, sp, isPrimary),
@@ -198,7 +188,7 @@ export function speciesRows(sel: Selection, sp: SpeciesInput, root: Map<string, 
       method: doubted ? "undecided_candidate" : "other_group", basis: null, match_reason: doubted ? "candidate" : "other group",
       col_treatment: null, counted: false,
       match_description: doubted
-        ? `${fmtSpecies(c)} may be it; shown on the Not Evaluated list flagged as possibly this species until someone decides.`
+        ? `${fmtSpecies(c)} may be it; shown on the Not Evaluated list flagged as possibly this species.`
         : `${fmtSpecies(c)} has this name in CoL too, but the citation points elsewhere; it stays on the Not Evaluated list with a note.` });
   }
   return out;
@@ -208,7 +198,6 @@ const fmtSpecies = (s: ColSpecies) => `${s.name}${s.authorship ? ` ${s.authorshi
 
 /** match_reason of the primary row: how the name found its record. */
 function primaryReason(sel: Selection, sp: SpeciesInput, x: Selected): string {
-  if (x.basis === "decision") return "decision";
   const exact = sameName(x.record.name, sp.name);
   const stepRecords = sel.selected.filter((y) => y.basis !== "synonym");
   const kind = sel.groups > 1 && !sel.doubts.includes("homonym") ? "homonym, author decides"
@@ -221,7 +210,6 @@ function primaryReason(sel: Selection, sp: SpeciesInput, x: Selected): string {
 function coveredReason(x: Selected, primary: ColRecord | null): string {
   if (x.basis === "synonym") return { "is": "CoL duplicate, Red List synonym", "split into": "Red List synonym, split", "part of": "Red List synonym, filed elsewhere",
     "refused": "Red List synonym, assessed separately" }[x.relation];
-  if (x.basis === "decision") return "decision";
   if (x.relation === "part of") return "name under another species";
   if (x.relation === "refused") return "refused";
   return primary && !sameName(primary.name, x.record.name) ? "CoL duplicate, respelled" : "CoL duplicate";
@@ -237,7 +225,6 @@ function treatment(x: Selected): string {
 
 const WHY: Record<string, string> = {
   "matcher": "GBIF's matcher answered", "citation": "The Red List's citation also takes", "synonym": "The Red List's synonym names",
-  "decision": "A decision takes",
 };
 
 function describe(x: Selected, sp: SpeciesInput, isPrimary: boolean): string {
@@ -253,7 +240,6 @@ function describe(x: Selected, sp: SpeciesInput, isPrimary: boolean): string {
 }
 
 function nothingDescription(sel: Selection, sp: SpeciesInput): string {
-  if (sel.reason === "decision: not in CoL") return `${sel.decision?.by ?? "A decision"} decided it is not in CoL.`;
   if (sel.reason === "informal or qualified name") return `${sp.name}${sp.authority ? ` ${sp.authority}` : ""} is an informal or qualified name; nothing is counted.`;
   const m = sp.match;
   const said = !m?.answer ? "The matcher found no CoL record" : `The matcher answered ${fmt(m.answer)}, ${status(m.answer.rank)}`;
@@ -277,41 +263,25 @@ const DOUBT_SENTENCE: Record<string, (sp: SpeciesInput, sel: Selection) => strin
   "counts nothing": () => "Every record taken leads to a species the Red List assesses separately, so nothing counts.",
   "split, authors unclear": () => "A Red List synonym CoL holds as its own species counts whole, but its authors can't be told apart from another species'.",
   "synonym filed elsewhere": () => "A Red List synonym is filed in CoL under a species that isn't this one; only the records under that name count.",
-  "judge undecided": (_sp, sel) => `Checked by an AI jury${sel.jury ? ` on ${sel.jury.date}` : ""}, which couldn't agree which CoL records are this species${sel.jury ? ` (${juryVotes(sel.jury.votes)})` : ""}; the count follows the rules until a person decides.`,
+  [REVIEW_DOUBT]: (_sp, sel) => reviewSentence(sel.reviews ?? []),
 };
 
-/** A verdict's votes in words: "2/2 rules" → "2 independent runs agreed with the rules"; "4/5 rules; 1/5 can't tell" → "4 of 5 independent runs agreed with the rules, 1 couldn't tell". */
-export function juryVotes(votes: string): string {
-  const parts = votes.split(";").map((p) => p.trim().match(/^(\d+)\/(\d+) (.+)$/)).filter((m): m is RegExpMatchArray => !!m);
-  if (!parts.length) return votes;
-  const total = Number(parts[0][2]);
-  // Answers other than the rules' ("other", "other 1", "other 2", ...) as one phrase: how many runs gave them, and how many different ones.
-  const others = parts.filter((m) => /^other( \d+)?$/.test(m[3]));
-  const nOther = others.reduce((a, m) => a + Number(m[1]), 0);
-  const otherPhrase = (n: number) => (others.length > 1 ? `${n} gave ${others.length} different other answers` : `${n} gave another answer`);
-  const say: Record<string, (n: number) => string> = { rules: (n) => `${n} agreed with the rules`,
-    "can't tell": (n) => `${n} couldn't tell`, missing: (n) => `${n} gave no answer`, "unknown record": (n) => `${n} named a record it wasn't given`,
-    unsourced: (n) => `${n} cited no source` };
-  const items: [number, string][] = [];
-  for (const m of parts) {
-    if (/^other( \d+)?$/.test(m[3])) { if (m === others[0]) items.push([nOther, "other"]); continue; }
-    items.push([Number(m[1]), m[3]]);
-  }
-  items.sort((a, b) => b[0] - a[0]);
-  return items.map(([n, k], i) => {
-    const phrase = k === "other" ? otherPhrase(n) : (say[k] ?? ((x: number) => `${x} ${k}`))(n);
-    return i === 0 ? `${n === total ? n : `${n} of ${total}`} independent runs ${phrase.replace(/^\d+ /, "")}` : phrase;
-  }).join(", ");
-}
+/** A suggested record in words: a whole CoL species, or the records under one name. */
+export const suggestedWords = (r: Pick<SuggestedRecord, "label" | "relation" | "species" | "records">) =>
+  `${r.relation === "part of" ? `the records under ${r.label}${r.species ? ` (which CoL files under ${r.species})` : ""}` : `all of CoL's ${r.label}`}, ${r.records.toLocaleString("en-US")} GBIF records`;
 
-/** What the rules alone would have counted, for a species a decision settles. */
-export function rulesWouldHave(rules: Selection, ids = true): string {
-  const counted = rules.selected.filter((x) => x.relation !== "refused")
-    .map((x) => `${ids ? fmt(x.record) : `${x.record.name}${x.record.authorship ? ` ${x.record.authorship}` : ""}`}${x.relation === "part of" ? " (only the records under it)" : ""}`);
-  // "counts nothing" only repeats an empty list.
-  const doubts = rules.doubts.filter((d) => !(d === "counts nothing" && counted.length === 0));
-  return `Without the decision, the rules would have counted ${counted.length ? [...new Set(counted)].join("; ") : "nothing"}` +
-    `${doubts.length ? `, flagged: ${doubts.join(", ")}` : ""}.`;
+/** What the AI taxonomic reviewers said, in a sentence: both agree, both suggest the same records, or each reviewer's answer. */
+export function reviewSentence(rs: Review[]): string {
+  if (!rs.length) return "";
+  const when = ` (${rs[0].model}, ${rs[0].date})`;
+  const both = rs.length === 2 ? "Both" : "All";
+  const suggests = (r: Review) => (r.records.length ? `would count ${r.records.map(suggestedWords).join("; ")}` : "would count nothing");
+  if (rs.every((r) => r.finding === "agrees")) return `${both} AI taxonomic reviewers agree with these records${when}.`;
+  const key = (r: Review) => r.records.map((x) => `${x.id}:${x.relation}`).sort().join(",");
+  if (rs.every((r) => r.finding === "other records") && rs.every((r) => key(r) === key(rs[0])))
+    return `${both} AI taxonomic reviewers suggest other records${when}: they ${suggests(rs[0])}. The count follows the rules.`;
+  const said = rs.map((r) => `reviewer ${r.reviewer} ${r.finding === "agrees" ? "agrees with these records" : r.finding === "can't tell" ? "couldn't tell" : suggests(r)}`);
+  return `AI taxonomic review${when}: ${said.join("; ")}.${rs.some((r) => r.finding === "other records") ? " The count follows the rules." : ""}`;
 }
 
 /** match_note and match_records: for a match that isn't plain, why in sentences, and the records named. */
@@ -321,13 +291,11 @@ export function matchNote(sel: Selection, sp: SpeciesInput): { note: string; rec
   const sentences: string[] = [];
   const records: NoteRecord[] = [];
   for (const [i, x] of sel.selected.entries()) records.push(rec(x.record, x.relation === "refused" ? "not" : i === 0 ? "counted" : "also"));
-  for (const r of sel.decision && sel.step === 1 ? [] : candidatesNotTaken(sel, sp)) records.push(rec(r, "not"));
+  for (const r of candidatesNotTaken(sel, sp)) records.push(rec(r, "not"));
 
-  const by = sel.decision?.by ?? "?";
-  if (sel.step === 1) sentences.push(`Decided by ${by.startsWith("judge:") ? `an AI jury (${by.slice(6)}), its runs agreeing` : by}${sel.reason ? ": not in CoL." : "."}`);
-  if (sel.step === 1 && sel.rules) sentences.push(rulesWouldHave(sel.rules));
   for (const d of sel.doubts) sentences.push(DOUBT_SENTENCE[d](sp, sel));
-  if (sel.jury?.verdict === "confirmed") sentences.push(`Checked by an AI jury on ${sel.jury.date}: ${juryVotes(sel.jury.votes)}; the doubt stands, but the records match.`);
+  // A review with no other records (every reviewer agrees, or some couldn't tell): said after the doubts it was about.
+  if (sel.reviews && !sel.doubts.includes(REVIEW_DOUBT)) sentences.push(reviewSentence(sel.reviews));
   const first = sel.selected[0];
   if (sentences.length === 0 && first && first.basis !== "synonym") {
     if (!sameName(first.record.name, sp.name)) sentences.push(`CoL spells it ${first.record.name}, not ${sp.name}: the naming codes treat the two as one name.`);

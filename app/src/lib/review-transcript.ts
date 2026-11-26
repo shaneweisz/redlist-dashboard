@@ -1,16 +1,16 @@
 /**
- * An AI jury run's transcript (the judge's stream-json conversation, see
- * scripts/sync/checks/judge-transcripts.ts), read for one species: what it
+ * An AI taxonomic reviewer's transcript (its stream-json conversation, see
+ * scripts/sync/checks/ai-review-transcripts.ts), read for one species: what it
  * answered, the searches and pages that were about it, and every step of the
  * call, which asked about a batch of species at once.
  */
 
-/** Where the transcripts are served: the jury's public Backblaze B2 bucket, judge/<key>.jsonl.gz. */
-export const JURY_TRANSCRIPTS_URL = "https://f005.backblazeb2.com/file/dashboard-agent-transcripts";
+/** Where the transcripts are served: a public Backblaze B2 bucket, judge/<key>.jsonl.gz (judge, the reviewers' earlier name). */
+export const REVIEW_TRANSCRIPTS_URL = "https://f005.backblazeb2.com/file/dashboard-agent-transcripts";
 
 export const isTranscriptKey = (k: string) => /^[0-9a-f]{64}$/.test(k);
 
-export interface JuryAnswer {
+export interface ReviewAnswer {
   sis_taxon_id: number;
   name?: string;
   records: { id: string; name?: string; relation: string }[] | "can't tell";
@@ -18,7 +18,7 @@ export interface JuryAnswer {
   sources: string[];
 }
 
-export interface JuryStep {
+export interface ReviewStep {
   kind: "text" | "search" | "fetch" | "tool";
   /** The words, the query, the URL, or the tool's name and input. */
   text: string;
@@ -28,9 +28,9 @@ export interface JuryStep {
   mine: boolean;
 }
 
-export interface JuryRun {
-  steps: JuryStep[];
-  answers: JuryAnswer[];
+export interface ReviewRun {
+  steps: ReviewStep[];
+  answers: ReviewAnswer[];
   model: string | null;
   costUsd: number | null;
 }
@@ -42,15 +42,15 @@ type Block = { type?: string; text?: string; name?: string; id?: string; tool_us
 const asText = (c: unknown): string =>
   typeof c === "string" ? c : Array.isArray(c) ? c.map((x) => (typeof x === "string" ? x : (x as Block)?.text ?? "")).join("\n") : "";
 
-/** The run, its steps marked by whether they are about `name` (words over three letters, as in the judge's summarise). */
-export function readJuryRun(transcript: string, name: string | null): JuryRun {
+/** The run, its steps marked by whether they are about `name` (words over three letters, as in the sync's summarise). */
+export function readReviewRun(transcript: string, name: string | null): ReviewRun {
   const words = (name ?? "").toLowerCase().split(/\s+/).filter((w) => w.length > 3);
   const about = (s: string) => words.length > 0 && words.some((w) => s.toLowerCase().includes(w));
-  const steps: JuryStep[] = [];
-  const byTool = new Map<string, JuryStep>();
-  const run: JuryRun = { steps, answers: [], model: null, costUsd: null };
+  const steps: ReviewStep[] = [];
+  const byTool = new Map<string, ReviewStep>();
+  const run: ReviewRun = { steps, answers: [], model: null, costUsd: null };
   for (const line of transcript.split("\n")) {
-    let d: { type?: string; model?: string; message?: { content?: Block[] }; structured_output?: { answers?: JuryAnswer[] }; total_cost_usd?: number };
+    let d: { type?: string; model?: string; message?: { content?: Block[] }; structured_output?: { answers?: ReviewAnswer[] }; total_cost_usd?: number };
     try { d = JSON.parse(line); } catch { continue; }
     if (d.type === "system" && d.model) run.model = d.model;
     if (d.type === "result") { run.answers = d.structured_output?.answers ?? []; run.costUsd = d.total_cost_usd ?? null; }
@@ -58,7 +58,7 @@ export function readJuryRun(transcript: string, name: string | null): JuryRun {
       if (d.type === "assistant" && c.type === "text" && c.text?.trim()) steps.push({ kind: "text", text: c.text.trim(), mine: about(c.text) });
       if (d.type === "assistant" && c.type === "tool_use") {
         const q = String(c.input?.query ?? c.input?.url ?? "");
-        const step: JuryStep = c.name === "WebSearch" ? { kind: "search", text: q, mine: about(q) }
+        const step: ReviewStep = c.name === "WebSearch" ? { kind: "search", text: q, mine: about(q) }
           : c.name === "WebFetch" ? { kind: "fetch", text: q, mine: about(q) }
           : { kind: "tool", text: `${c.name} ${JSON.stringify(c.input ?? {})}`, mine: false };
         steps.push(step);

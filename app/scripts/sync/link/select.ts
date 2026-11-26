@@ -5,7 +5,7 @@
  * the spec is what it is meant to do: the rebuild check and the tests keep the
  * two in step. Section names below are the spec's headings.
  *
- * select() is pure: a species, the release's lookups, and its decision.
+ * select() is pure: a species and the release's lookups.
  * selectAll() reads a build (sources/ and link/matches.parquet) and runs every
  * species in two passes, as the synonym records need to know which CoL
  * species other assessed species' steps count whole.
@@ -16,7 +16,7 @@
 import {
   compareAuthors, orthographicallySame, sameName, sameNameKey, sameOrganism, isCoLRespelling, type TaxonName,
 } from "./name-rules";
-import { answerKey, decisionHolds, verdictBasis, type JudgeVerdict, type Decision, type DecidedRelation, type Lapse } from "./decisions";
+import { answerKey, reviewBasis, REVIEW_DOUBT, type Review } from "./ai-reviews";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,30 +53,30 @@ export interface Release {
   recordsNamed(name: string): ColRecord[];
   /** Occurrences under a record: its own and the records below it. */
   occurrencesUnder(id: string): number;
-  /** A CoL record by id, any rank (a decision's record). */
+  /** A CoL record by id, any rank (the matcher's records). */
   byId(id: string): ColRecord | undefined;
   /** CoL species id → the assessed species whose steps count it whole (pass 1 of selectAll). */
   wholeBySteps: Map<string, Set<number>>;
 }
 
 export type Relation = "is" | "part of" | "split into" | "refused";
-export type Basis = "matcher" | "citation" | "synonym" | "decision";
-/** 1-5 for the steps' records; 1, 2, 3 (with the doubt) or 3s (s already reached by the steps) for synonym records; "decision". */
-export type RelationStep = 1 | 2 | 3 | 4 | 5 | "3s" | "decision";
+export type Basis = "matcher" | "citation" | "synonym";
+/** 1-5 for the steps' records; 1, 2, 3 (with the doubt) or 3s (s already reached by the steps) for synonym records. */
+export type RelationStep = 1 | 2 | 3 | 4 | 5 | "3s";
 
 export interface Selected { record: ColRecord; relation: Relation; relationStep: RelationStep; basis: Basis }
 
 export type Doubt =
   | "chosen by the citation" | "homonym" | "other authors" | "other spelling" | "ambiguous synonym" | "placed elsewhere"
-  | "counts nothing" | "split, authors unclear" | "synonym filed elsewhere" | "judge undecided";
+  | "counts nothing" | "split, authors unclear" | "synonym filed elsewhere" | typeof REVIEW_DOUBT;
 export const DOUBTS: Doubt[] = ["chosen by the citation", "homonym", "other authors", "other spelling", "ambiguous synonym",
-  "placed elsewhere", "counts nothing", "split, authors unclear", "synonym filed elsewhere", "judge undecided"];
+  "placed elsewhere", "counts nothing", "split, authors unclear", "synonym filed elsewhere", REVIEW_DOUBT];
 
-export type Reason = "informal or qualified name" | "no candidate" | "decision: not in CoL";
+export type Reason = "informal or qualified name" | "no candidate";
 
 export interface Selection {
   sis: number;
-  step: 1 | 2 | 3 | 4 | 5 | 6;
+  step: 1 | 2 | 3 | 4 | 5;
   reason: Reason | null;
   doubts: Doubt[];
   /** The steps' records first (the first is the primary row), then synonym records. */
@@ -85,16 +85,12 @@ export interface Selection {
   groups: number;
   /** The CoL species of the groups not taken (for candidate rows and the NE list's notes). */
   untakenSpecies: ColSpecies[];
-  /** A decision: whether it held, and if not why; and why it is listed anyway. */
-  decision: { by: string; reviewed: boolean; lapse: Lapse | null; candidatesChanged: string[] | null } | null;
-  /** The candidates' CoL species names, sorted: what a decision records. */
+  /** The candidates' CoL species names, sorted: part of a review's basis. */
   candidateSpecies: string[];
   /** Listed for review: to_review's text, or null. */
   toReview: string | null;
-  /** The judge's verdict, where one applies: the species keeps its doubts, and its note says what the check found. */
-  jury?: { verdict: "confirmed" | "undecided"; votes: string; date: string; transcripts: string[] } | null;
-  /** For a species a decision settles, what the rules alone select: shown beside the decision, never counted. */
-  rules?: Selection;
+  /** The AI taxonomic reviewers' answers, where they apply: shown beside the records, never counted. */
+  reviews?: Review[];
 }
 
 // ── Definitions ───────────────────────────────────────────────────────────────
@@ -125,40 +121,19 @@ const speciesName = (s: ColSpecies): TaxonName => ({ scientificName: s.name, aut
 
 // ── select ────────────────────────────────────────────────────────────────────
 
-export function select(sp: SpeciesInput, release: Release, decision?: Decision): Selection {
+export function select(sp: SpeciesInput, release: Release): Selection {
   const citation = citationOf(sp.authority);
   const me: TaxonName = { scientificName: sp.name, authorship: citation };
   const anotherAssessed = (n: string | null | undefined) => !!n && !sameName(n, sp.name) && release.assessedNames.has(sameNameKey(n));
-  const res: Selection = { sis: sp.sis, step: 4, reason: null, doubts: [], selected: [], groups: 0, untakenSpecies: [], decision: null,
+  const res: Selection = { sis: sp.sis, step: 3, reason: null, doubts: [], selected: [], groups: 0, untakenSpecies: [],
     candidateSpecies: [], toReview: null };
 
   const cands = candidates(sp);
   res.candidateSpecies = [...new Set(cands.map((r) => r.species!.name))].sort();
 
-  // 1. A decision holds: its records, with their recorded relations; no doubts.
-  if (decision) {
-    const decidable = (r: ColRecord) => ({ ...r, record: r, status: r.status.toLowerCase().replace(/_/g, " "),
-      speciesId: r.species?.id ?? null, speciesName: r.species?.name ?? null });
-    const held = decisionHolds(decision, { name: sp.name, citation }, {
-      byId: (id) => { const r = release.byId(id); return r ? decidable(r) : undefined; },
-      byName: (n) => release.recordsNamed(n).filter((r) => sameName(r.name, n)).map(decidable),
-      isAnotherAssessedName: anotherAssessed });
-    res.decision = { by: decision.by, reviewed: decision.reviewed, lapse: held.holds ? null : held.lapse, candidatesChanged: null };
-    if (held.holds) {
-      res.step = 1;
-      const changed = decision.candidates.join(";") !== res.candidateSpecies.join(";");
-      if (changed) res.decision.candidatesChanged = res.candidateSpecies;
-      if (held.records.length === 0) res.reason = "decision: not in CoL";
-      for (const { record, relation } of held.records) res.selected.push({ record: record.record, relation, relationStep: "decision", basis: "decision" });
-      res.toReview = changed ? `decision's candidates changed (${res.candidateSpecies.join("; ") || "none"})`
-        : !decision.reviewed && decision.by !== "fixture" ? `decision not yet reviewed (${decision.by})` : null;
-      return res;
-    }
-  }
-
-  // 2. Informal or qualified name.
+  // 1. Informal or qualified name.
   if (INFORMAL_NAME.test(sp.name) || (citation && QUALIFIED_CITATION.test(citation))) {
-    res.step = 2; res.reason = "informal or qualified name";
+    res.step = 1; res.reason = "informal or qualified name";
     return finish(res);
   }
 
@@ -166,8 +141,8 @@ export function select(sp: SpeciesInput, release: Release, decision?: Decision):
   let taken: ColRecord[] = [];
   const relationOf = new Map<ColRecord, Relation>();
   if (cands.length === 0) {
-    // 3. No candidates.
-    res.step = 3; res.reason = "no candidate";
+    // 2. No candidates.
+    res.step = 2; res.reason = "no candidate";
   } else {
     // Groups: candidates with the same speciesOf, joined through copies.
     const groupOf = groups(cands, cmp);
@@ -180,14 +155,14 @@ export function select(sp: SpeciesInput, release: Release, decision?: Decision):
     const contradicted = answer ? cmp(answer) === "other" : false;
 
     let chosen: number[];
-    const step4 = new Set(M);
-    if (A !== null && !contradicted) step4.add(A);
-    if (step4.size > 0) { chosen = [...step4]; res.step = 4; }
-    else if (A !== null) { chosen = [A]; res.step = 5; }
+    const step3 = new Set(M);
+    if (A !== null && !contradicted) step3.add(A);
+    if (step3.size > 0) { chosen = [...step3]; res.step = 3; }
+    else if (A !== null) { chosen = [A]; res.step = 4; }
     else {
       const notOther = all.filter((g) => cands.some((r) => G(r) === g && cmp(r) !== "other"));
       chosen = notOther.length ? notOther : all;
-      res.step = 6;
+      res.step = 5;
     }
     // Every candidate in a chosen group, the answer first, then in the matcher's order.
     taken = cands.filter((r) => chosen.includes(G(r)));
@@ -225,12 +200,9 @@ export function select(sp: SpeciesInput, release: Release, decision?: Decision):
   return finish(res);
 }
 
-/** to_review, and the decision that didn't hold. */
+/** to_review: the first doubt (with them all), else the reason. */
 function finish(res: Selection): Selection {
-  const lapse = res.decision?.lapse;
-  res.toReview = lapse ? `decision lapsed (${lapse})`
-    : res.doubts.length ? `${res.doubts[0]} (${res.doubts.join("; ")})`
-    : res.reason;
+  res.toReview = res.doubts.length ? `${res.doubts[0]} (${res.doubts.join("; ")})` : res.reason;
   return res;
 }
 
@@ -286,7 +258,7 @@ function groups(cands: ColRecord[], cmp: (r: ColRecord) => string): Map<ColRecor
 }
 
 /**
- * Synonym records (steps 3 to 6): each Red List synonym, in order, adds the
+ * Synonym records (steps 2 to 5): each Red List synonym, in order, adds the
  * CoL records with its name, accepted and provisional first, then by id, that
  * agree with the lineage, aren't taken, don't lead to a species already
  * counted whole, and whose authorship one of its unqualified authors doesn't
@@ -354,27 +326,30 @@ export const countedWhole = (s: Selection) => s.selected.filter((x) => x.relatio
  * which CoL species each assessed species' steps count whole, then each
  * species in full.
  */
-export function selectEvery(species: SpeciesInput[], release: Omit<Release, "wholeBySteps">, decisions: Map<number, Decision>,
-  /** The judge's verdicts, applied while the rules give the answer it was asked about and no decision holds (decisions.ts). */
-  verdicts: Map<number, JudgeVerdict> = new Map()): Selection[] {
+export function selectEvery(species: SpeciesInput[], release: Omit<Release, "wholeBySteps">,
+  /** The AI taxonomic reviews, applied while the rules give the answer and basis they were given (ai-reviews.ts). */
+  reviews: Map<number, Review[]> = new Map()): Selection[] {
   const wholeBySteps = new Map<string, Set<number>>();
   const firstPass: Release = { ...release, wholeBySteps: new Map() };
   for (const sp of species) {
-    for (const id of countedWhole(select({ ...sp, synonyms: [] }, firstPass, decisions.get(sp.sis)))) {
+    for (const id of countedWhole(select({ ...sp, synonyms: [] }, firstPass))) {
       (wholeBySteps.get(id) ?? wholeBySteps.set(id, new Set()).get(id)!).add(sp.sis);
     }
   }
   const full: Release = { ...release, wholeBySteps };
   return species.map((sp) => {
-    const s = select(sp, full, decisions.get(sp.sis));
-    if (s.step === 1) s.rules = select(sp, full);
-    const v = verdicts.get(sp.sis);
-    const applies = v && (!s.decision || s.decision.lapse) && answerKey(answerRecords(s)) === v.answer && verdictBasis(sp, s) === v.basis;
-    if (applies) s.jury = { verdict: v.verdict, votes: v.votes, date: v.date, transcripts: v.transcripts };
-    if (applies && v.verdict === "confirmed") s.toReview = null;
-    if (applies && v.verdict === "undecided") { s.doubts.push("judge undecided"); s.toReview = `judge undecided (${v.votes})`; }
+    const s = select(sp, full);
+    const rs = reviews.get(sp.sis);
+    if (!rs?.length) return s;
+    const answer = answerKey(answerRecords(s)), basis = reviewBasis(sp, s);
+    if (!rs.every((r) => r.rulesAnswer === answer && r.basis === basis)) return s;
+    s.reviews = rs;
+    // Every reviewer agrees: the species leaves the review list, keeping its doubts. One suggests other records: a doubt.
+    if (rs.every((r) => r.finding === "agrees")) s.toReview = null;
+    else if (rs.some((r) => r.finding === "other records")) {
+      s.doubts.push(REVIEW_DOUBT);
+      s.toReview = `${REVIEW_DOUBT} (${rs.map((r) => r.finding).join("; ")})`;
+    }
     return s;
   });
 }
-
-export type { DecidedRelation };

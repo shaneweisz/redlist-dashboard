@@ -3,7 +3,7 @@
  * of, read from a build. The whole chain, in the order the sync makes it:
  *
  *   1. the name: GBIF's matcher's answer for the Red List name, with the points
- *      it gave each candidate, and a decision if there is one (decisions.tsv)
+ *      it gave each candidate, and the AI taxonomic reviews if there are any (ai-reviews.tsv)
  *   2. the selection (link/select.ts, docs/specs/matching.md): the step, the
  *      doubts, and each record taken with its relation, basis, match_reason,
  *      col_treatment, what it counts, and its description
@@ -16,9 +16,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { BUILD_DIR, CACHE_ROOT, tables } from "./paths";
-import { readTranscript, summarise } from "./checks/judge-transcripts";
+import { readTranscript, summarise } from "./checks/ai-review-transcripts";
 import { openDuckDB, rows, lit } from "./sql";
-import { readVerdicts, readDecisions } from "./link/decisions";
+import { readReviews, formatRecord } from "./link/ai-reviews";
 import { syncPath } from "../../src/lib/data/sync-layout";
 import { loadEnvFiles } from "../lib/utils";
 
@@ -79,19 +79,14 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
       if (alts.length > 8) say(`    … and ${alts.length - 8} more`);
     }
   }
-  const o = readDecisions().get(s.sis);
-  if (o) {
-    say(`  Decision (decisions.tsv), by ${o.by}${o.reviewed ? ", reviewed" : ""}, ${o.date}: ${o.evidence}`);
-    for (const r of o.rows) say(`    ${r.relation}: ${r.name} ${r.authorship ?? ""} [${r.id}, ${r.status}, of ${r.species}]`);
-    if (o.rows.length === 0) say(`    not in CoL`);
-  }
-  const v = readVerdicts().get(s.sis);
-  if (v) say(`  Verdict (judge-verdicts.tsv): ${v.verdict} by ${v.by}, ${v.date}, on the rules' answer (${v.answer}); votes ${v.votes}`);
-  for (const [i, key] of (o?.transcripts ?? v?.transcripts ?? []).entries()) {
-    const t = await readTranscript(key, path.join(CACHE_ROOT, "judge-cache"));
-    if (!t) { say(`  Run ${i + 1} (${key}): transcript not found locally or in the bucket`); continue; }
+  for (const v of readReviews().get(s.sis) ?? []) {
+    say(`  AI taxonomic reviewer ${v.reviewer} (ai-reviews.tsv, ${v.model}, ${v.date}): ${v.finding}, on the rules' answer (${v.rulesAnswer})`);
+    for (const x of v.records) say(`    would count ${formatRecord(x)}`);
+    say(`    why: ${v.reason}`);
+    const t = await readTranscript(v.transcript, path.join(CACHE_ROOT, "ai-review-cache"));
+    if (!t) { say(`    transcript ${v.transcript} not found locally or in the bucket`); continue; }
     const r = summarise(t, s.sis, s.name);
-    say(`  Run ${i + 1} (${key}): ${r.searches.length} searches and ${r.fetches.length} pages for it (${r.others} for the batch's other species)`);
+    say(`    transcript ${v.transcript}: ${r.searches.length} searches and ${r.fetches.length} pages for it (${r.others} for the batch's other species)`);
     for (const q of r.searches) say(`    searched: ${q}`);
     for (const u of r.fetches) say(`    read: ${u}`);
     if (r.answer) say(`    answered: ${JSON.stringify(r.answer).slice(0, 600)}`);
@@ -132,7 +127,7 @@ export async function trace(query: string, buildDir = BUILD_DIR): Promise<string
   const [a] = await rows<{ total: number | null; georef: number | null; key: string | null; note: string | null }>(conn, `
     SELECT gbif_all_records_count AS total, gbif_georeferenced_records_count AS georef, gbif_species_key AS key, count_note AS note
     FROM ${pq(T.assessed)} WHERE id = ${s.sis}`);
-  if (a) say(`  The app shows ${a.note === "unlinked" ? "a dash (waiting for a decision)" : `${fmt(a.total)} records, ${fmt(a.georef)} georeferenced`}; GBIF key ${a.key ?? "none"}.`);
+  if (a) say(`  The app shows ${a.note === "unlinked" ? "a dash (no CoL record to count through)" : `${fmt(a.total)} records, ${fmt(a.georef)} georeferenced`}; GBIF key ${a.key ?? "none"}.`);
   return out.join("\n");
 }
 

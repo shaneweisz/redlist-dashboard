@@ -21,7 +21,7 @@ records, each with:
   nothing);
 - a **basis**: `matcher` for the answer record itself, `citation` for every
   other record the steps take (copies in the answer's group too), `synonym`
-  for a Red List synonym's record, `decision` for a decision's;
+  for a Red List synonym's record;
 
 and for the species, its **doubts**, or the **reason** nothing was taken.
 
@@ -31,7 +31,9 @@ follows another source than the Red List Authority ([Garnett et al.
 
 **Principles.** Use what GBIF uses (candidates come from GBIF's matcher,
 matching-ws, asked with kingdom to family as hints and no authority). Show,
-with doubts, rather than hide. No rule for one case: those get a decision.
+with doubts, rather than hide. No rule for one case, and no exceptions: a
+species the rules can't settle stays flagged, with the AI taxonomic reviewers'
+answers beside it.
 Deterministic, fast on the saved matcher answers, and traceable (`npm run
 sync:trace -- "<name or SIS id>"`).
 
@@ -46,8 +48,8 @@ species' name, authorship, class, kingdom and phylum, and the occurrences
 GBIF files under it and the records below it. Statuses use the
 matcher's forms (`SYNONYM`, `AMBIGUOUS_SYNONYM`, `MISAPPLIED`). Ids are
 strings, ordered by code unit (an arbitrary but fixed order). The
-**assessed names** are every species' `name`. Decisions come from
-`seeds/decisions.tsv`.
+**assessed names** are every species' `name`. The AI taxonomic reviews come
+from `seeds/ai-reviews.tsv`.
 
 ## Name tests
 
@@ -118,27 +120,26 @@ answer's group, *M* the matching groups.
 
 The first that applies:
 
-1. A decision holds → its records, with their recorded relations; no doubts.
-2. The name or citation is informal or qualified → nothing; reason `informal or qualified name`.
-3. No candidates → nothing; reason `no candidate`.
-4. The union of *M* and (unless the answer is contradicted) *A*, if that
+1. The name or citation is informal or qualified → nothing; reason `informal or qualified name`.
+2. No candidates → nothing; reason `no candidate`.
+3. The union of *M* and (unless the answer is contradicted) *A*, if that
    union isn't empty.
-5. *A*, which is then contradicted and nothing matches.
-6. (No answer among the candidates and nothing matches.) The groups with a
+4. *A*, which is then contradicted and nothing matches.
+5. (No answer among the candidates and nothing matches.) The groups with a
    record the citation doesn't compare `other` with; if none, every group.
 
 Every record of a chosen group is taken, the answer first, then in the
 matcher's order.
 
 *Why this order*: the matcher's answer is where GBIF files occurrences of the
-bare name, so it stays unless the citation contradicts it (step 4). Even
-contradicted, it is kept when nothing else matches (step 5), since GBIF still
+bare name, so it stays unless the citation contradicts it (step 3). Even
+contradicted, it is kept when nothing else matches (step 4), since GBIF still
 files the bare name there, and the doubt `other authors` says so. A homonym where the citation settles
 it takes only its own group; one where the citation matches several takes
 them all and doubts it. Trying author-first (*M*, else *A*) was never more
 accurate on the 28 species where it differs, and drops where the bare name is
 filed (*Sambucus nigra*: 1,166,917 occurrences). Taking every group of a
-homonym counts groups no evidence points to, so only step 6 does it, where
+homonym counts groups no evidence points to, so only step 5 does it, where
 every citation is contradicted.
 
 ## Relations of the steps' records
@@ -166,7 +167,7 @@ with that species).
 
 ## Synonym records
 
-For a species at steps 3 to 6, each Red List synonym in order adds CoL
+For a species at steps 2 to 5, each Red List synonym in order adds CoL
 records. Here `name` and the citation are still the species' own, not the
 synonym's. *Why*: CoL may hold as separate species what the Red List treats as
 one (*Butorides striata* includes the green heron *B. virescens*), or file
@@ -207,7 +208,7 @@ applies:
 2. *r* is *s* → **split into**.
 3. Otherwise *s* is another species. If any of the steps' records (a
    *refused* one too) leads to *s* → **part of**. Else if *s* is another assessed name, or another assessed
-   species' steps or decision count it whole, the record isn't added.
+   species' steps count it whole, the record isn't added.
    Otherwise → **part of**, with the doubt `synonym filed elsewhere` if it has
    occurrences (*Elymus farctus*'s synonym *E. junceiformis*, under
    *Thinopyrum junceiforme*).
@@ -218,8 +219,8 @@ In 1 and 2, *s* being another assessed name makes the record **refused**.
 
 A doubt marks a species whose records may be wrong; it never changes which
 records are taken. The first seven are computed on the steps' records (steps
-4 to 6), the next two on synonym records (steps 3 to 6), and the last from
-the judge's verdicts (*Decisions*), listed in this order:
+3 to 5), the next two on synonym records (steps 2 to 5), and the last from
+the AI taxonomic reviews (*AI taxonomic review*), listed in this order:
 
 | Doubt | Holds when | Why it's a doubt |
 |---|---|---|
@@ -232,11 +233,11 @@ the judge's verdicts (*Decisions*), listed in this order:
 | `counts nothing` | every one of the steps' records is *refused* (synonym records may still count) | the Red List's own name counts nothing |
 | `split, authors unclear` | a *split into* record (not made *refused*) that no unqualified author of its synonym compares `same` with | a bare "L." can't rule out another author's species (*Vicia sepium* would count *V. dumetorum* L. for the Red List's *V. dumetorum* Thuill.) |
 | `synonym filed elsewhere` | a relation-3 synonym record with occurrences | part of another species' records count here |
-| `judge undecided` | an `undecided` verdict whose answer is the rules' answer | the judge's two runs didn't agree on the records; the count follows the rules |
+| `reviewer suggests other records` | a reviewer of a review that applies would count other records | an independent check disagrees with the records; the count follows the rules |
 
-A species is **listed for review** when it has doubts or a reason, or its
-decision lapsed, its candidates changed since the decision, or the decision
-isn't reviewed (see *Decisions*). A homonym the citation settles has no doubt; its other groups
+A species is **listed for review** when it has doubts or a reason, until
+every AI taxonomic reviewer agrees with its records (see *AI taxonomic
+review*). A homonym the citation settles has no doubt; its other groups
 stay on the NE list with a note, since the citation says they're other
 organisms.
 
@@ -273,11 +274,10 @@ into*, or the record itself where it leads to none; the root above for
 *part of*), from the first record that names that taxon, with that record's
 relation; a *refused* record claims nothing. The row of its first step record
 (never a synonym record) is its **primary** row, and the rest are
-**covered**; a species with no step record has no primary row. Decisions'
-records are taken as written (the judge reads its own answers as counting
-would before it writes them). Where two assessed species claim one CoL taxon, the stronger
-claim wins, first by: primary row before covered; no doubts before
-doubts; *is*, *split into*, *part of*; decision before matcher; the species
+**covered**; a species with no step record has no primary row. Where two
+assessed species claim one CoL taxon, the stronger claim wins, first by:
+primary row before covered; no doubts (other than a review's) before
+doubts; *is*, *split into*, *part of*; the species
 whose primary row's record has its Red List name as written; the lower SIS id. The
 loser's row counts nothing. (This is the one place a doubt affects
 counting.)
@@ -297,87 +297,52 @@ settled elsewhere.
 The build stops if a record has two owners, or a described species is
 neither counted whole nor on the NE list.
 
-## Decisions
+## AI taxonomic review
 
-A decision is an answer for one species the rules can't settle without a
-rule for one case. The **judge** makes them (`npm run sync:judge -- decide`,
-see *How it's checked*), outside the sync; the sync reads only the committed
-file, so a build stays reproducible. A person can **override** one (a row with
-their GitHub handle in `by`, which the judge never replaces), or give the
-judge a **note** on a species (`seeds/judge-notes.tsv`), which it weighs as
-evidence the next time it asks.
+Two **AI taxonomic reviewers** check each species listed for review (`npm
+run sync:ai-review -- review`, outside the sync). Each is an agent with web
+search, asked independently (other batch-mates, other order), that reads the
+species' facts, not our answer, and says which of its CoL records it would
+count, or *can't tell*. A review never changes the records: the sync reads
+the committed `seeds/ai-reviews.tsv` and shows each reviewer's answer beside
+the rules', so a build stays reproducible.
 
-One row per record in `seeds/decisions.tsv`, with its relation (*is*, *part
-of* or *split into*), the Red List name and citation it was made for, the
-record's id, name, authorship, status and species, the candidates' species
-when decided, who decided (`by`: `judge:<model>`, a person, or the older
-`agent:` and `fixture`), whether reviewed (by a person, or the judge's runs
-agreeing), the date, the evidence, its sources, the judge's
-transcripts behind it (each run's whole conversation, kept so the decision can
-be audited), and its `context`: the CoL XR, GBIF snapshot, matcher version and
-prompt it was decided on. "Not in CoL" is a
-species' only row, with empty record columns; it gives step 1, no records,
-and the reason `decision: not in CoL`.
+Each answer is read as counting would read it (a *part of* on a record that
+is itself its CoL species is *is*; any relation on a record leading to no
+species is *part of*). A reviewer **agrees** when its answer counts what the
+rules count: the same CoL species counted whole (with records or not) and
+the same *part of* records, outside those, with records. It suggests **other
+records** when it counts something else and cites a source; else it **can't
+tell** (also: no answer, a record it wasn't given, or a change without a
+source). One row per species and reviewer, with its finding, the records it
+would count (each CoL species it counts whole, and each *part of* record,
+with their GBIF records when reviewed), its reason, sources and transcript
+(the whole conversation, kept so it can be audited), the model, date and
+`context` (the CoL XR, GBIF snapshot, matcher version and prompt), and what
+it was given: the rules' answer by its records' names, authorship, status and
+species, and a hash of the rest (the Red List name, citation and synonyms,
+the candidates' species, the rules' doubts).
 
-A decision **holds** while: `name` is still the decided name, the citation
-doesn't compare `other` with the decided one, no record's name is another
-assessed name, nor the species of an *is* or *split into* record (a *part of*
-record takes only what is filed under it, so its species may be assessed: see
-Counting), and every record is still found (by `id` with the
-recorded name, status and species; else as the one record with that name and
-the same `normaliseAuthorship`). *Why*: a decision is about names and
-records, so it lapses when a release moves them, and the rules apply again
-until the judge asks again. One that doesn't hold is ignored, and the species
-listed for review with why. One that holds is still listed when its
-candidates changed, or when it isn't reviewed and `by` isn't `fixture`.
+A species' reviews **apply** while the rules give that answer and that hash.
+When every reviewer agrees, the species leaves the review list; it keeps its
+doubts and its flag. When one suggests other records, the species gets the
+doubt `reviewer suggests other records`, which never weakens its claim in a
+clash (*Counting*). Otherwise it stays listed as it was. Either way its match
+note says what each reviewer found. A species whose reviews apply isn't asked
+again; a new homonym, candidate, synonym or answer lists it again.
 
-The judge asks each species twice, and the two must agree. Its
-answers are rewritten as counting would read them before they are compared
-or written (a *part of* on a record that is itself its CoL species is *is*;
-any relation on a record leading to no species is *part of*); two answers
-agree when the sync would count the same for them (the same records owned,
-the same CoL species counted whole). An answer
-that is missing, *can't tell*, names a record it wasn't given, or would change
-the count without citing a source agrees with nothing.
-
-It writes a **verdict** to `seeds/judge-verdicts.tsv` when the agreed answer
-is the rules' (`confirmed`: the species leaves the review list but keeps its
-doubts and its flag), or when at least two runs answered and no answer reaches
-agreement (`undecided`: the doubt `judge undecided`). Either way the species'
-match note says it was checked, when, and how the runs voted, so the
-dashboard shows the checks done. When the runs mostly can't tell,
-it writes nothing and the species stays listed as it was. A verdict keeps the
-rules' answer by its records' names, authorship, status and species, as a
-decision does, and a hash of what else the judge was given (the Red List
-name, citation and synonyms, the candidates' species, the rules' doubts); it
-applies only while both are unchanged and no decision holds, so a new
-homonym, candidate or synonym lists the species again.
-
-It writes a decision (the agreeing runs' answer, less *part of* records that
-count nothing, with their sources) only if it would hold and takes no CoL
-species another assessed species counts whole by the rules; else the species
-stays listed. A lapsed decision the runs agree with gives way to a verdict; a
-decision they confirm takes the current candidates. The judge never replaces a
-person's override, and doesn't ask again a species whose verdict applies
-unless a note newer than it was added.
-
-**Over time.** Each species' answer is cached by run, keyed by its facts
+**Over time.** Each answer is cached by reviewer, keyed by the species' facts
 without the occurrence counts, the prompt and the model, so a run pays only
-for species whose facts changed, whatever else it asks. A release, a Red List
-update or a matcher version lists again only what it moves: a decision that
-lapses, a verdict whose answer or basis changed, a species newly listed for
-review; a new snapshot changes counts, not answers. More runs can be added
-later at the cost of the new runs, for the species a run chooses. A new model
-or prompt asks nothing by itself; settled rows are to be re-asked by a run
-that chooses them (by `context`), reports how often it agrees with them, and
-replaces them only after that is read, never an override. That run isn't
-built yet, and `context` is what makes it possible. The taxonomic notes are
-facts the judge reads but not part of a verdict's basis, so a re-assessment
-that changes only its notes doesn't list a species again.
+for species whose facts changed. A release, a Red List update or a matcher
+version asks again only what it moves; a new snapshot changes counts, not
+answers. A new model or prompt asks nothing by itself: reviews are re-asked
+by a run that chooses them (by `context`), which isn't built yet. The
+taxonomic notes are facts the reviewers read but not part of the hash, so a
+re-assessment that changes only its notes doesn't list a species again.
 
-Example: a decision takes *Centropogon australis* (White, 1790), the
-waspfish, for the Red List's *C. australis* (Shaw, 1790), with no doubts,
-until a release moves that record to another species.
+The reviewers' disagreements are the to-do list for these rules: many of one
+kind (the review run prints them by doubt and by what changes) are a rule to
+change, which then applies everywhere. One-off exceptions aren't written.
 
 ## Output
 
@@ -385,7 +350,7 @@ until a release moves that record to another species.
 doubts, selected: [{id, relation, relation_step, basis}]}`. `relation_step` is
 the relation rule that applied: 1 to 5 for the steps' records; for synonym
 records 1, 2, `3` (*s* not reached by the steps) or `3s` (*s* reached by the
-steps); `decision` for a decision's. `link/assessment_link.parquet` writes the
+steps). `link/assessment_link.parquet` writes the
 same as one row per record (the first of the steps' records `primary`, the
 rest `covered`, a duplicate `col_taxon_id` once), plus one candidate row per
 untaken group's species for the NE list's notes.
@@ -396,24 +361,24 @@ Each is a fixture case. "Taken" is the records and the step.
 
 | Red List | Answer | Other candidates | Taken (step) | Doubts |
 |---|---|---|---|---|
-| *Panthera leo* (Linnaeus, 1758) | accepted | — | answer (4) | — |
-| *Sorbus greenii* T.C.G.Rich | synonym of *Aria greenii* | — | answer, *is* (4) | — |
-| *Cygnus buccinator* Richardson, 1832 | Richardson, 1831 | provisional, 1832 (copy) | both (4) | — |
-| *Weinmannia heterophylla* Ruiz & Pav. | Kunth (contradicted) | "Ruiz & Pav. ex López" (matches) | López (4) | chosen by the citation, ambiguous synonym |
-| *Rubus fruticosus* L. | HIGHERRANK | L. under *R. plicatus* (matches); G.N.Jones; Lour. | L. (4) | chosen by the citation |
-| *Galium palustre* L. | M.Bieb. | L. (matches); Pourr. ex Willk. & Lange | answer, L. (4) | homonym, ambiguous synonym |
-| *Vireo chivi* (Vieillot, 1817) | accepted, no authorship | (Vieillot, 1817) under *V. olivaceus* | both (4) | homonym |
-| *Lycaena clarki* Clark & Dickson, 1971 | synonym of *Aloeides clarki*, also assessed | — | answer, *refused* (4) | counts nothing |
-| *Turdus rubrocanus* Hodgson, 1846 | Gray & Gray, 1847 (contradicted) | "Hodgson, BH, 1844" under *Philepitta castanea* | answer (5) | homonym, other authors |
-| *Agrotis sabine* Brandstetter, 2010 | VARIANT *A. sabura* Mabille | — | answer, *refused* (5) | other authors, other spelling, counts nothing |
-| *Palaina martensi* (Adams, 1866) | HIGHERRANK | (H. Adams, 1867); (Andreae, 1902) | H. Adams (6) | chosen by the citation, homonym |
-| *Amygdalus ledebouriana* Schlecht. | — | two "Schltdl." synonyms | both (6) | chosen by the citation, homonym, other authors |
-| *Kuhlia rubens* (Spinola, 1807) | synonym of *Apogon imberbis*, −20 | — | answer (4) | placed elsewhere |
-| *Galaxias* sp. nov. 'Verlorenvlei' | HIGHERRANK | — | nothing (2) | — |
-| *Ampedus karpathicus* (Buysson, 1885) | misapplied | — | nothing (3), and *A. suecicus* Palm, 1976, *split into* | — |
-| *Lepilemur jamesorum* Louis Jr. et al., 2006 | synonym of *L. jamesi*, same citation | — | answer, *is* (4) | — |
-| *Butorides striata* (Linnaeus, 1758) | accepted | — | answer (4), and *B. virescens*, *split into* | — |
-| *Hoplocephalus bungaroides* (Schlegel, 1837) | accepted | Wagler, 1830 synonyms under it and under *Ophiophagus bungarus* (contradicted: no join) | answer and the Wagler synonym under it (4) | — |
+| *Panthera leo* (Linnaeus, 1758) | accepted | — | answer (3) | — |
+| *Sorbus greenii* T.C.G.Rich | synonym of *Aria greenii* | — | answer, *is* (3) | — |
+| *Cygnus buccinator* Richardson, 1832 | Richardson, 1831 | provisional, 1832 (copy) | both (3) | — |
+| *Weinmannia heterophylla* Ruiz & Pav. | Kunth (contradicted) | "Ruiz & Pav. ex López" (matches) | López (3) | chosen by the citation, ambiguous synonym |
+| *Rubus fruticosus* L. | HIGHERRANK | L. under *R. plicatus* (matches); G.N.Jones; Lour. | L. (3) | chosen by the citation |
+| *Galium palustre* L. | M.Bieb. | L. (matches); Pourr. ex Willk. & Lange | answer, L. (3) | homonym, ambiguous synonym |
+| *Vireo chivi* (Vieillot, 1817) | accepted, no authorship | (Vieillot, 1817) under *V. olivaceus* | both (3) | homonym |
+| *Lycaena clarki* Clark & Dickson, 1971 | synonym of *Aloeides clarki*, also assessed | — | answer, *refused* (3) | counts nothing |
+| *Turdus rubrocanus* Hodgson, 1846 | Gray & Gray, 1847 (contradicted) | "Hodgson, BH, 1844" under *Philepitta castanea* | answer (4) | homonym, other authors |
+| *Agrotis sabine* Brandstetter, 2010 | VARIANT *A. sabura* Mabille | — | answer, *refused* (4) | other authors, other spelling, counts nothing |
+| *Palaina martensi* (Adams, 1866) | HIGHERRANK | (H. Adams, 1867); (Andreae, 1902) | H. Adams (5) | chosen by the citation, homonym |
+| *Amygdalus ledebouriana* Schlecht. | — | two "Schltdl." synonyms | both (5) | chosen by the citation, homonym, other authors |
+| *Kuhlia rubens* (Spinola, 1807) | synonym of *Apogon imberbis*, −20 | — | answer (3) | placed elsewhere |
+| *Galaxias* sp. nov. 'Verlorenvlei' | HIGHERRANK | — | nothing (1) | — |
+| *Ampedus karpathicus* (Buysson, 1885) | misapplied | — | nothing (2), and *A. suecicus* Palm, 1976, *split into* | — |
+| *Lepilemur jamesorum* Louis Jr. et al., 2006 | synonym of *L. jamesi*, same citation | — | answer, *is* (3) | — |
+| *Butorides striata* (Linnaeus, 1758) | accepted | — | answer (3), and *B. virescens*, *split into* | — |
+| *Hoplocephalus bungaroides* (Schlegel, 1837) | accepted | Wagler, 1830 synonyms under it and under *Ophiophagus bungarus* (contradicted: no join) | answer and the Wagler synonym under it (3) | — |
 
 ## Not done, and why
 
@@ -439,8 +404,8 @@ Each is a fixture case. "Taken" is the records and the step.
 ## How it's checked
 
 - **Tests and fixtures**: every example and every doubt is a fixture case,
-  run on every build. Fixtures aren't checked by a person either: where the
-  judge decides a fixture species otherwise, the fixture is updated.
+  run on every build. A fixture states what the rules do; where the AI
+  taxonomic reviewers disagree with one, its review says so.
 - **Rebuild check** (`npm run sync:rebuild-check`): an agent given only this
   spec, `name-rules.ts` and the inputs rewrites the rule in a sealed folder,
   and its output is compared with `select.ts` species by species. With
@@ -449,16 +414,15 @@ Each is a fixture case. "Taken" is the records and the step.
   from *Counting and the NE list*, compared with the sync's. Run after a
   change to these rules or a release move; a disagreement is a gap here, a
   bug there, or an unstated rule.
-- **One counting rule** (`npm run sync:owners-check`): the judge counts with
-  `count/owners.ts`, a copy of `usage_owner.sql`'s rule, so the two are
-  compared on a whole build and must give every CoL usage the same owner.
-- **The judge** (`npm run sync:judge`, `checks/judge.ts`): an agent with web
-  search says which records it would take for each species, from the facts
-  alone (and any notes), and code scores it against ours. It runs by hand, and
-  the sync reads it only through committed decisions and verdicts. In
-  `decide`, each species listed for review is asked in independent runs
-  (other batch-mates, other order), as *Decisions* says. It reports the patterns among its decisions: many
-  decisions of one kind are a rule to change, not decisions to keep. A rule change merges only if, among the species it changes, no
-  taxonomic group has fewer judged right, unless each species lost becomes a
-  fixture with its correct answer. Release moves are judged and reported,
-  never gated.
+- **One counting rule** (`npm run sync:owners-check`): the counting rebuild
+  check counts with `count/owners.ts`, a copy of `usage_owner.sql`'s rule, so
+  the two are compared on a whole build and must give every CoL usage the
+  same owner.
+- **The AI taxonomic reviewers** (`npm run sync:ai-review`,
+  `checks/ai-review.ts`): an agent with web search says which records it would
+  count for each species, from the facts alone, and code compares it with
+  ours. `review` writes the reviews (*AI taxonomic review*); `first` and
+  `changed` score the rules without writing anything. A rule change merges
+  only if, among the species it changes, no taxonomic group has fewer judged
+  right, unless each species lost becomes a fixture with its correct answer.
+  Release moves are scored and reported, never gated.

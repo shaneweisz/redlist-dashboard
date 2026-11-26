@@ -35,14 +35,13 @@ beforeAll(async () => {
       ('S2', 'Astur two', 'A2', 'synonym'), ('Q2', 'Accipiter two minor', 'A2', 'accepted')) t(col_id, name, parent_id, status)`, T.taxa);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, col_taxon_id, 'the whole CoL species' AS counts, 'primary' AS role, true AS counted,
       col_taxon_id AS col_species_id, CASE WHEN col_taxon_id IS NULL THEN 'unmatched' ELSE 'exact' END AS method,
-      'matcher' AS basis, NULL::VARCHAR AS decided_by,
+      'matcher' AS basis,
       CASE WHEN col_taxon_id IS NULL THEN 'no candidate' ELSE 'exact, unique' END AS match_reason,
       CASE WHEN col_taxon_id IS NULL THEN 'none' ELSE 'is' END AS relation, CASE WHEN sis = 2 THEN 'placed elsewhere' END AS doubts,
-      NULL::BOOLEAN AS reviewed,
       CASE WHEN sis = 2 THEN 'The matcher places a record taken in a different part of the tree.' END AS match_note,
       CASE WHEN sis = 2 THEN '[{"id":"S2","name":"Astur two","authorship":null,"status":"synonym","species":"Accipiter two","role":"counted"},'
         || '{"id":"Z9","name":"Astur two","authorship":"Other","status":"synonym","species":"Accipiter nine","role":"not"}]' END AS match_records,
-      CASE WHEN sis = 2 THEN '{"kind":"confirmed","by":"m","date":"2026-11-25","votes":"2 independent runs agreed with the rules","transcripts":["t1","t2"]}' END AS match_jury,
+      CASE WHEN sis = 2 THEN '{"model":"m","date":"2026-11-25","reviewers":[{"finding":"agrees","records":[],"reason":"r","transcript":"t1"},{"finding":"agrees","records":[],"reason":"r","transcript":"t2"}]}' END AS match_review,
       CASE WHEN col_taxon_id IS NOT NULL THEN 'accepted' END AS col_treatment
     FROM (VALUES (1, 'A1'), (2, 'A2'), (3, NULL)) t(sis, col_taxon_id)`, T.link);
   await copy(`SELECT sis::BIGINT AS sis_taxon_id, sis::BIGINT * 10 AS assessment_id, true AS is_latest, '2025' AS year_published,
@@ -121,7 +120,7 @@ describe("GBIF counts in the lists", () => {
     expect(rows["1"].count_note).toBeNull();
     expect(rows["2"].match_doubts).toBe("placed elsewhere");
     expect(rows["2"].match_note).toBe("The matcher places a record taken in a different part of the tree.");
-    expect(JSON.parse(String(rows["2"].match_jury))).toMatchObject({ kind: "confirmed", transcripts: ["t1", "t2"] });
+    expect(JSON.parse(String(rows["2"].match_review))).toMatchObject({ model: "m", reviewers: [{ finding: "agrees", transcript: "t1" }, { transcript: "t2" }] });
   });
   it("splits the count among the match records, and names the CoL species holding the rest", () => {
     expect(Number(rows["2"].gbif_all_records_count)).toBe(13);

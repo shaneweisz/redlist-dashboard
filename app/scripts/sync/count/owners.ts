@@ -1,7 +1,7 @@
 /**
  * Who each CoL record's GBIF records count for: count/usage_owner.sql's rule
  * (docs/specs/matching.md, "Counting and the NE list"), in TypeScript, so the
- * judge can ask what an answer would count without a sync. The two are kept
+ * rebuild check's counting can be compared without a sync. The two are kept
  * the same by checks/owners-check.ts, which compares them on a whole build.
  *
  * The first that applies:

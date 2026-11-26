@@ -1,19 +1,21 @@
 /**
- * The judge (scripts/sync/checks/judge.ts) with `claude` stubbed: which species
- * are easy, the facts it is given, how its answer is scored, the cache, and Goal 2.
+ * The AI taxonomic reviewers (scripts/sync/checks/ai-review.ts) with `claude` stubbed: which
+ * species are easy, the facts they are given, how an answer is scored and becomes a review,
+ * the cache, and Goal 2.
  */
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, it, expect } from "vitest";
-import { isEasy, score, ourAnswer, judge, goal2, outcome, change, asCounted, counted, ANSWER_SCHEMA, PROMPT, facts, type Answer } from "../sync/checks/judge";
+import { isEasy, score, ourAnswer, askReviewer, goal2, findingOf, reviewRows, change, asCounted, counted, ANSWER_SCHEMA, PROMPT, facts,
+  type Answer, type FactRecord } from "../sync/checks/ai-review";
 import { claudeArgs, resultOf, toolUse, type ClaudeRun } from "../sync/checks/claude-run";
-import { leaks, secretsToScanFor, summarise, transcriptPath } from "../sync/checks/judge-transcripts";
+import { leaks, secretsToScanFor, summarise, transcriptPath } from "../sync/checks/ai-review-transcripts";
 import type { ColRecord, ColSpecies, Selection, SpeciesInput } from "../sync/link/select";
 
 const spc: ColSpecies = { id: "S", name: "Panthera leo", authorship: "(Linnaeus, 1758)", class: "mammalia", kingdom: "animalia", phylum: "chordata" };
 const rec = (id: string, over: Partial<ColRecord> = {}): ColRecord => ({ id, name: "Panthera leo", authorship: "(Linnaeus, 1758)", rank: "SPECIES", status: "ACCEPTED", species: spc, ...over });
-const sel = (over: Partial<Selection> = {}): Selection => ({ sis: 1, step: 4, reason: null, doubts: [], groups: 1, untakenSpecies: [], decision: null, candidateSpecies: [],
+const sel = (over: Partial<Selection> = {}): Selection => ({ sis: 1, step: 3, reason: null, doubts: [], groups: 1, untakenSpecies: [], candidateSpecies: [],
   toReview: null, selected: [{ record: rec("S"), relation: "is", relationStep: 3, basis: "matcher" }], ...over });
 
 describe("isEasy", () => {
@@ -55,59 +57,56 @@ describe("facts", () => {
     const tigris = { ...spc, id: "T", name: "Panthera tigris" };
     const sp: SpeciesInput = { sis: 1, name: "Panthera leo", authority: "(Linnaeus, 1758)", kingdom: "Animalia", phylum: "Chordata",
       synonyms: [{ name: "Felis leo", authors: ["Linnaeus, 1758"] }], match: { matchType: "EXACT", answerName: "Panthera leo", answer: rec("S"), alternatives: [] } };
-    const inputs = { species: [sp], decisions: new Map(), verdicts: new Map(), release: {
+    const inputs = { species: [sp], reviews: new Map(), release: {
       assessedNames: new Set(["panthera leo", "panthera tigris"]), byId: () => undefined, occurrencesUnder: (id: string) => (id === "FL" ? 7 : 0),
       recordsNamed: (n: string) => (n === "Felis leo" ? [rec("FL", { name: "Felis leo", status: "SYNONYM", species: tigris })] : []) } };
     const f = facts(sp, { class: "Mammalia" }, inputs);
     expect(f.col_records.map((r) => [r.id, r.gbif_records_under, r.col_species_assessed_as, r.name_assessed_separately])).toEqual([["FL", 7, "Panthera tigris", false], ["S", 0, null, false]]);
     expect(f.red_list).not.toHaveProperty("taxonomic_notes");
-    const extra = facts(sp, { class: "Mammalia" }, inputs, [], { taxonomicNotes: "x".repeat(2500), holders: new Map([["T", ["Panthera tigris", "Panthera leo"]]]) });
+    const extra = facts(sp, { class: "Mammalia" }, inputs, { taxonomicNotes: "x".repeat(2500), holders: new Map([["T", ["Panthera tigris", "Panthera leo"]]]) });
     expect(extra.red_list.taxonomic_notes).toHaveLength(2001);
     expect(extra.col_records[0].col_species_holds_assessed).toEqual(["Panthera tigris"]);
     expect(JSON.stringify(f)).not.toMatch(/relation|doubt|step/);
-    expect(f).not.toHaveProperty("notes_from_people");
-    const noted = facts(sp, { class: "Mammalia" }, inputs, [{ sis: 1, redlistName: "Panthera leo", note: "Felis leo is meant only in part", by: "someone", date: "2026-11-24" }]);
-    expect(noted.notes_from_people).toEqual([{ note: "Felis leo is meant only in part", by: "someone", date: "2026-11-24" }]);
   });
 });
 
-describe("outcome (decide)", () => {
+describe("findingOf and reviewRows (review)", () => {
+  // S is the species; S2 a synonym record under it; P a record under another species O, which counts whole.
   const look = { speciesOf: (id: string) => ({ S: "S", S2: "S", P: "O", O: "O" } as Record<string, string>)[id], under: () => 10 };
-  const known = new Set(["S", "S2", "P", "O"]);
-  const ans = (records: Answer["records"]): Answer => ({ sis_taxon_id: 1, records, reason: "r", sources: ["https://x"] });
+  const fr = (id: string, name: string, species: string, gbif: number, status = "ACCEPTED"): FactRecord => ({ id, name, authorship: "L.", status,
+    col_species: { id: species, name: species === "S" ? "Panthera leo" : "Other one", authorship: null, class: null, gbif_records: gbif },
+    gbif_records_under: 10, name_assessed_separately: false, col_species_assessed_as: null, col_species_holds_assessed: [], col_species_counted_whole_by: [] });
+  const recs = new Map([["S", fr("S", "Panthera leo", "S", 100)], ["S2", fr("S2", "Felis leo", "S", 100, "SYNONYM")], ["P", fr("P", "Leo pardus", "O", 50, "SYNONYM")],
+    ["O", fr("O", "Other one", "O", 50)]]);
+  const ans = (records: Answer["records"], sources = ["https://x"]): Answer => ({ sis_taxon_id: 1, records, reason: "r", sources, transcript: "t" });
   const ours = [{ id: "S", relation: "is" }];
-  it("confirms when every run counts what the rules count, even naming other records of the same species", () => {
-    expect(outcome([ans([{ id: "S", relation: "is" }]), ans([{ id: "S2", relation: "is" }])], ours, look, known)).toMatchObject({ kind: "confirm", votes: "2/2 rules", best: 2 });
+  it("agrees when it counts what the rules count, even naming other records of the same species", () => {
+    expect(findingOf(ans([{ id: "S2", relation: "is" }]), ours, look, recs)).toEqual({ finding: "agrees", records: [] });
   });
-  it("decides when every run agrees and the rules don't", () => {
-    const o = outcome([ans([{ id: "P", relation: "part of" }]), ans([{ id: "P", relation: "part of" }])], ours, look, known);
-    expect(o).toMatchObject({ kind: "decide", answer: { records: [{ id: "P", relation: "part of" }] } });
+  it("suggests other records as counting reads them: one per species counted whole, then part-of records outside those", () => {
+    expect(findingOf(ans([{ id: "S", relation: "is" }, { id: "S2", relation: "is" }, { id: "O", relation: "split into" }]), ours, look, recs)).toEqual({ finding: "other records", records: [
+      { id: "S", relation: "is", label: "Panthera leo", status: "accepted", species: "Panthera leo", records: 100 },
+      { id: "O", relation: "split into", label: "Other one", status: "accepted", species: "Other one", records: 50 }] });
+    expect(findingOf(ans([{ id: "P", relation: "part of" }]), ours, look, recs).records).toEqual([
+      { id: "P", relation: "part of", label: "Leo pardus L.", status: "synonym", species: "Other one", records: 10 }]);
   });
-  it("splits when two runs answered and differ; is unsure when one can't tell, is missing, or names a record not in the facts", () => {
-    expect(outcome([ans([{ id: "P", relation: "part of" }]), ans([{ id: "S", relation: "is" }])], ours, look, known).kind).toBe("split");
-    expect(outcome([ans([{ id: "P", relation: "part of" }]), ans("can't tell")], ours, look, known)).toMatchObject({ kind: "unsure", best: 1 });
-    expect(outcome([ans([{ id: "P", relation: "part of" }]), undefined], ours, look, known)).toMatchObject({ kind: "unsure", votes: "1/2 other; 1/2 missing" });
-    expect(outcome([ans([{ id: "NOPE", relation: "is" }]), ans([{ id: "NOPE", relation: "is" }])], ours, look, known).kind).toBe("unsure");
+  it("can't tell when it says so, gives no answer, names a record it wasn't given, or changes the count without a source", () => {
+    expect(findingOf(ans("can't tell"), ours, look, recs).finding).toBe("can't tell");
+    expect(findingOf(undefined, ours, look, recs).finding).toBe("can't tell");
+    expect(findingOf(ans([{ id: "NOPE", relation: "is" }]), ours, look, recs).finding).toBe("can't tell");
+    expect(findingOf(ans([{ id: "P", relation: "part of" }], []), ours, look, recs).finding).toBe("can't tell");
+    expect(findingOf(ans([{ id: "S", relation: "is" }], []), ours, look, recs).finding).toBe("agrees");
+  });
+  it("writes one row per reviewer, with the rules' answer and basis they were given", () => {
+    const sp: SpeciesInput = { sis: 1, name: "Panthera leo", authority: "(Linnaeus, 1758)", kingdom: null, phylum: null, synonyms: [], match: null };
+    const rows = reviewRows(sp, sel(), [ans([{ id: "S", relation: "is" }]), ans([{ id: "P", relation: "part of" }])], look, recs, { model: "m", date: "2026-11-26", context: "c" });
+    expect(rows.map((r) => [r.reviewer, r.finding, r.transcript])).toEqual([[1, "agrees", "t"], [2, "other records", "t"]]);
+    expect(rows[0].rulesAnswer).toBe("Panthera leo linnaeus 1758 [accepted, of Panthera leo]: is");
+    expect(rows[0].basis).toBe(rows[1].basis);
   });
   it("counts a CoL species counted whole even with no records: naming it hides it from the Not Evaluated list", () => {
     const lk = { speciesOf: (id: string) => ({ S: "S", X: "X" } as Record<string, string>)[id], under: (id: string) => (id === "X" ? 0 : 10) };
     expect(counted([{ id: "S", relation: "is" }], lk)).not.toBe(counted([{ id: "S", relation: "is" }, { id: "X", relation: "split into" }], lk));
-  });
-  it("with need, decides on 4 of 5 and leaves 3 of 5 undecided, counting can't tell and unknown records as agreeing with nothing", () => {
-    const p = ans([{ id: "P", relation: "part of" }]), s = ans([{ id: "S", relation: "is" }]);
-    expect(outcome([p, p, p, p, s], ours, look, known, 4)).toMatchObject({ kind: "decide", votes: "4/5 other; 1/5 rules" });
-    expect(outcome([s, s, s, ans("can't tell"), p], ours, look, known, 4)).toMatchObject({ kind: "split", votes: "3/5 rules; 1/5 can't tell; 1/5 other" });
-    expect(outcome([s, s, s, s, ans([{ id: "NOPE", relation: "is" }])], ours, look, known, 4)).toMatchObject({ kind: "confirm" });
-    expect(outcome([ans("can't tell"), ans("can't tell")], ours, look, known).kind).toBe("unsure");
-    // The answer written is one the agreeing runs gave, with them all.
-    const o = outcome([s, p, p, p, p], ours, look, known, 4);
-    expect(o).toMatchObject({ kind: "decide", best: 4 });
-    expect(o.agreeing).toHaveLength(4);
-  });
-  it("an answer that changes the count without a source agrees with nothing", () => {
-    const p = { ...ans([{ id: "P", relation: "part of" }]), sources: [] };
-    expect(outcome([p, p], ours, look, known)).toMatchObject({ kind: "unsure", votes: "2/2 unsourced" });
-    expect(outcome([{ ...ans([{ id: "S", relation: "is" }]), sources: [] }, ans([{ id: "S", relation: "is" }])], ours, look, known).kind).toBe("confirm");
   });
   it("reads relations as counting does: part of on a record that is its species is is, anything on a record leading nowhere is part of", () => {
     const lk = { speciesOf: (id: string) => ({ S: "S", P: "O" } as Record<string, string>)[id], under: () => 10 };
@@ -115,15 +114,15 @@ describe("outcome (decide)", () => {
       .toEqual([{ id: "S", relation: "is" }, { id: "N", relation: "part of" }, { id: "P", relation: "part of" }]);
     expect(counted([{ id: "S", relation: "part of" }], lk)).toBe(counted([{ id: "S", relation: "is" }], lk));
   });
-  it("says how a decision changes the counts", () => {
+  it("says how a suggestion changes the counts", () => {
     expect(change(ours, [{ id: "P", relation: "part of" }], look)).toBe("adds part + drops whole");
     expect(change(ours, [...ours, { id: "O", relation: "split into" }], look)).toBe("adds whole");
   });
 });
 
-describe("judge", () => {
+describe("askReviewer", () => {
   it("asks in batches with the spec's flags, and answers a rerun from the cache", async () => {
-    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-review-test-"));
     const calls: ClaudeRun[] = [];
     const runner = async (r: ClaudeRun) => {
       calls.push(r);
@@ -131,7 +130,7 @@ describe("judge", () => {
       return { code: 0, stderr: "", stdout: JSON.stringify({ structured_output: { answers: batch.map((b) => ({ sis_taxon_id: b.sis_taxon_id, records: "can't tell", reason: "r", sources: [] })) } }) };
     };
     const many = Array.from({ length: 25 }, (_, i) => ({ sis_taxon_id: i + 1 })) as never[];
-    const a = await judge(many, { cacheDir, runner });
+    const a = await askReviewer(many, { cacheDir, runner });
     expect(a.size).toBe(25);
     // Each call's transcript is kept, and each answer names the call it came from.
     const t = a.get(1)!.transcript!;
@@ -140,28 +139,28 @@ describe("judge", () => {
     expect(calls).toHaveLength(3);
     expect(calls[0]).toMatchObject({ tools: ["WebSearch", "WebFetch"], outputFormat: "stream-json", schema: ANSWER_SCHEMA, prompt: PROMPT });
     expect(calls[0].disallowed).toEqual(["WebFetch(domain:dashforlife.org)", "WebFetch(domain:vercel.app)"]);
-    await judge(many, { cacheDir, runner });
+    await askReviewer(many, { cacheDir, runner });
     expect(calls).toHaveLength(3);
     // A second run asks again, in another order (other batch-mates), and is cached apart.
-    const b = await judge(many, { cacheDir, runner, run: 2 });
+    const b = await askReviewer(many, { cacheDir, runner, run: 2 });
     expect(b.size).toBe(25);
     expect(calls).toHaveLength(6);
     expect(calls[3].stdin).not.toBe(calls[0].stdin);
-    await judge(many, { cacheDir, runner, run: 2 });
+    await askReviewer(many, { cacheDir, runner, run: 2 });
     expect(calls).toHaveLength(6);
     // Each species is cached apart: one more species is one more call, and new counts ask nothing again.
-    await judge([...many, { sis_taxon_id: 99 }] as never[], { cacheDir, runner });
+    await askReviewer([...many, { sis_taxon_id: 99 }] as never[], { cacheDir, runner });
     expect(calls).toHaveLength(7);
     expect(JSON.parse(calls[6].stdin!).map((f: { sis_taxon_id: number }) => f.sis_taxon_id)).toEqual([99]);
-    await judge(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 5 }] })).slice(0, 1) as never[], { cacheDir, runner });
+    await askReviewer(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 5 }] })).slice(0, 1) as never[], { cacheDir, runner });
     expect(calls).toHaveLength(8);
-    await judge(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 9 }] })).slice(0, 1) as never[], { cacheDir, runner });
+    await askReviewer(many.map((f: { sis_taxon_id: number }) => ({ ...f, col_records: [{ id: "R", gbif_records_under: 9 }] })).slice(0, 1) as never[], { cacheDir, runner });
     expect(calls).toHaveLength(8);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
   it("runs up to `parallel` calls at once", async () => {
-    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-review-test-"));
     let now = 0, most = 0;
     const runner = async (r: ClaudeRun) => {
       now++; most = Math.max(most, now); await new Promise((res) => setTimeout(res, 20)); now--;
@@ -169,13 +168,13 @@ describe("judge", () => {
       return { code: 0, stderr: "", stdout: JSON.stringify({ structured_output: { answers: batch.map((b) => ({ sis_taxon_id: b.sis_taxon_id, records: "can't tell", reason: "r", sources: [] })) } }) };
     };
     const many = Array.from({ length: 55 }, (_, i) => ({ sis_taxon_id: i + 1 })) as never[];
-    expect((await judge(many, { cacheDir, runner, parallel: 3 })).size).toBe(55);
+    expect((await askReviewer(many, { cacheDir, runner, parallel: 3 })).size).toBe(55);
     expect(most).toBe(3);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
   it("tries a failed call twice more before giving up", async () => {
-    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-review-test-"));
     const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
     let calls = 0;
     const runner = async (r: ClaudeRun) => {
@@ -183,35 +182,35 @@ describe("judge", () => {
       const batch = JSON.parse(r.stdin!) as { sis_taxon_id: number }[];
       return { code: 0, stderr: "", stdout: JSON.stringify({ structured_output: { answers: batch.map((b) => ({ sis_taxon_id: b.sis_taxon_id, records: "can't tell", reason: "r", sources: [] })) } }) };
     };
-    expect((await judge(two, { cacheDir, runner, retryWaitMs: 0 })).size).toBe(2);
+    expect((await askReviewer(two, { cacheDir, runner, retryWaitMs: 0 })).size).toBe(2);
     expect(calls).toBe(3);
     calls = -10;
     fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
-    await expect(judge(two, { cacheDir, runner, retryWaitMs: 0 })).rejects.toThrow(/exited 1/);
+    await expect(askReviewer(two, { cacheDir, runner, retryWaitMs: 0 })).rejects.toThrow(/exited 1/);
     expect(calls).toBe(-7);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
   it("caches nothing from a failed call or one that answers none of its batch, and keeps only the batch's own ids", async () => {
-    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "judge-test-"));
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-review-test-"));
     const two = [{ sis_taxon_id: 1 }, { sis_taxon_id: 2 }] as never[];
     const say = (o: unknown) => async () => ({ code: 0, stderr: "", stdout: JSON.stringify(o) });
     const answer = (sis: number) => ({ sis_taxon_id: sis, records: "can't tell", reason: "r", sources: [] });
-    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ is_error: true, result: "usage limit" }) })).rejects.toThrow(/failed/);
-    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ result: "not json" }) })).rejects.toThrow(/none of its 2/);
-    await expect(judge(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(99)] } }) })).rejects.toThrow(/none of its 2/);
+    await expect(askReviewer(two, { cacheDir, retryWaitMs: 0, runner: say({ is_error: true, result: "usage limit" }) })).rejects.toThrow(/failed/);
+    await expect(askReviewer(two, { cacheDir, retryWaitMs: 0, runner: say({ result: "not json" }) })).rejects.toThrow(/none of its 2/);
+    await expect(askReviewer(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(99)] } }) })).rejects.toThrow(/none of its 2/);
     expect(fs.readdirSync(cacheDir).filter((f) => f.endsWith(".json"))).toEqual([]);
-    const a = await judge(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
+    const a = await askReviewer(two, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(99)] } }) });
     expect([...a.keys()]).toEqual([1]);
     fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
     // An id answered twice, or under another name, is dropped; a record named otherwise than its id's becomes an unknown record.
     const named = [{ sis_taxon_id: 1, red_list: { name: "Aa" }, col_records: [{ id: "R", name: "Aa" }] }, { sis_taxon_id: 2, red_list: { name: "Bb" }, col_records: [] }] as never[];
-    const b = await judge(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [
+    const b = await askReviewer(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [
       { ...answer(1), name: "Aa", records: [{ id: "R", name: "Zz", relation: "is" }] }, { ...answer(2), name: "Cc" }] } }) });
     expect([...b.keys()]).toEqual([1]);
     expect(b.get(1)!.records).toEqual([{ id: "R?named Zz", name: "Zz", relation: "is" }]);
     fs.rmSync(cacheDir, { recursive: true, force: true }); fs.mkdirSync(cacheDir);
-    await expect(judge(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(1)] } }) })).rejects.toThrow(/none of its 2/);
+    await expect(askReviewer(named, { cacheDir, retryWaitMs: 0, runner: say({ structured_output: { answers: [answer(1), answer(1)] } }) })).rejects.toThrow(/none of its 2/);
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 });

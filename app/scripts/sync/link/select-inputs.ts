@@ -3,15 +3,15 @@
  * runs every species: selectAll(). `npm run sync:select` prints the result.
  *
  * Read from the build: sources/assessments.parquet (is_latest), sources/taxa.parquet,
- * sources/occurrences.parquet and link/matches.parquet; and seeds/decisions.tsv.
+ * sources/occurrences.parquet and link/matches.parquet; and seeds/ai-reviews.tsv.
  */
 
 import * as path from "path";
 import { type DuckDBConnection } from "@duckdb/node-api";
-import { lit, openDuckDB, rows, writeTable } from "../sql";
+import { openDuckDB, rows, writeTable } from "../sql";
 import { tables, parquet, BUILD_DIR } from "../paths";
 import { orthographicKey, sameNameKey } from "./name-rules";
-import { readVerdicts, readDecisions, type JudgeVerdict, type Decision } from "./decisions";
+import { readReviews, type Review } from "./ai-reviews";
 import { selectEvery, type ColRecord, type ColSpecies, type Release, type Selection, type SpeciesInput } from "./select";
 
 /** taxa's status and rank in the matcher's forms (synonym → SYNONYM, provisionally accepted → PROVISIONALLY_ACCEPTED). */
@@ -31,14 +31,13 @@ const toRecord = (t: TaxaRow, classification: number | null = null): ColRecord =
 export interface Inputs {
   species: SpeciesInput[];
   release: Omit<Release, "wholeBySteps">;
-  decisions: Map<number, Decision>;
-  /** seeds/judge-verdicts.tsv. */
-  verdicts: Map<number, JudgeVerdict>;
+  /** seeds/ai-reviews.tsv. */
+  reviews: Map<number, Review[]>;
 }
 
 /** Everything select() reads, from the build's tables. */
-export async function loadInputs(t = tables(), decisions = readDecisions(), conn?: DuckDBConnection,
-  /** Further names whose CoL records to load (the judge's facts: the Red List names and the answers'). */
+export async function loadInputs(t = tables(), conn?: DuckDBConnection,
+  /** Further names whose CoL records to load (the reviewers' facts: the Red List names and the answers'). */
   extraNames: string[] = []): Promise<Inputs> {
   conn ??= await openDuckDB();
   const taxa = parquet(t.taxa);
@@ -56,18 +55,16 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
     SELECT sis_taxon_id, matcher_col_id, matcher_name, matcher_authorship, matcher_rank, matcher_status, match_type, matcher_score, alternatives FROM ${parquet(t.matches)}`)).map((m) => [m.sis_taxon_id, m]));
   await conn.run(`CREATE OR REPLACE TEMP TABLE named_ids AS
     SELECT matcher_col_id AS id FROM ${parquet(t.matches)} WHERE matcher_col_id IS NOT NULL
-    UNION SELECT unnest(json_extract_string(alternatives, '$[*].col_id')) FROM ${parquet(t.matches)}
-    ${[...decisions.values()].flatMap((d) => d.rows.flatMap((r) => (r.id ? [`UNION SELECT ${lit(r.id)}`] : []))).join(" ")}`);
+    UNION SELECT unnest(json_extract_string(alternatives, '$[*].col_id')) FROM ${parquet(t.matches)}`);
   const byId = new Map((await rows<TaxaRow>(conn, `
     SELECT ${TAXA_COLUMNS} FROM named_ids n JOIN ${taxa} t ON t.col_id = n.id LEFT JOIN ${taxa} s ON s.col_id = t.species_id`))
     .map((r) => [r.col_id, r]));
 
-  // CoL records with a synonym's (or a decision's) name: the same name, or orthographicallySame.
+  // CoL records with a synonym's name: the same name, or orthographicallySame.
   const parsed = species.map((s) => ({ ...s, synonyms: (JSON.parse(s.synonyms ?? "[]") as { name: string; authors?: string[] | null }[]) }));
   const wanted = new Set<string>(), wantedKeys = new Set<string>();
   const want = (n: string) => { wanted.add(sameNameKey(n)); const k = orthographicKey(n); if (k) wantedKeys.add(k); };
   for (const s of parsed) for (const y of s.synonyms) want(y.name);
-  for (const d of decisions.values()) for (const r of d.rows) if (r.name) want(r.name);
   for (const n of extraNames) want(n);
   // Names whose orthographic key is wanted: every species-rank name, keyed here, as the key is name-rules.ts's.
   const names = new Set<string>(wanted);
@@ -96,7 +93,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
   };
 
   // Occurrences under each pool record, and under the species each leads to: its own and three levels below it.
-  // (The species' counts are for the judge, which compares what answers count; the rules read only records'.)
+  // (The species' counts are for the reviewers, whose answers are compared by what they count; the rules read only records'.)
   const rootIds = new Set(pool.flatMap((r) => (r.sp_id ? [r.col_id, r.sp_id] : [r.col_id])));
   await writeTable(conn, "pool_ids", { id: "VARCHAR" }, [...rootIds].map((id) => ({ id })));
   const occurrences = new Map((await rows<{ id: string; n: number }>(conn, `
@@ -137,7 +134,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
 
   const assessedNames = new Set(species.map((s) => sameNameKey(s.name)));
   return {
-    species: input, decisions, verdicts: readVerdicts(),
+    species: input, reviews: readReviews(),
     release: {
       assessedNames, recordsNamed,
       occurrencesUnder: (id) => occurrences.get(id) ?? 0,
@@ -149,7 +146,7 @@ export async function loadInputs(t = tables(), decisions = readDecisions(), conn
 /** Every species' selection, from the build in `buildDir`. */
 export async function selectAll(buildDir = BUILD_DIR): Promise<{ selections: Selection[]; inputs: Inputs }> {
   const inputs = await loadInputs(tables(buildDir));
-  return { selections: selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.verdicts), inputs };
+  return { selections: selectEvery(inputs.species, inputs.release, inputs.reviews), inputs };
 }
 
 /** What `npm run sync:select` prints for one species. */

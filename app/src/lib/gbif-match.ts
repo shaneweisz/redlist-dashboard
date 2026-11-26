@@ -16,13 +16,13 @@
  */
 
 export type MatchKey =
-  | "plain" | "renamed" | "author" | "duplicate" | "variant" | "decided" | "decided_jury"
-  | DoubtKey | "f_synonyms_only" | "agent"
+  | "plain" | "renamed" | "author" | "duplicate" | "variant"
+  | DoubtKey | "f_synonyms_only"
   | "none" | "ne_candidate" | "ne_assessed_here";
 
 /** One bar per doubt the sync can give (docs/specs/matching.md, "Doubts"). */
 export type DoubtKey = "f_author_pick" | "f_homonym" | "f_other_authors" | "f_spelling" | "f_ambiguous" | "f_confidence"
-  | "f_counts_nothing" | "f_split_unclear" | "f_filed_elsewhere" | "f_judge_undecided";
+  | "f_counts_nothing" | "f_split_unclear" | "f_filed_elsewhere" | "f_reviewer_other";
 
 /** The sync's doubt → its bar. */
 const DOUBT_KEY: Record<string, DoubtKey> = {
@@ -35,7 +35,7 @@ const DOUBT_KEY: Record<string, DoubtKey> = {
   "counts nothing": "f_counts_nothing",
   "split, authors unclear": "f_split_unclear",
   "synonym filed elsewhere": "f_filed_elsewhere",
-  "judge undecided": "f_judge_undecided",
+  "reviewer suggests other records": "f_reviewer_other",
 };
 
 /** A species' doubts, from assessed.parquet's match_doubts (';'-joined), as bar keys. */
@@ -63,16 +63,13 @@ export const MATCH_BARS: MatchBar[] = [
   { key: "f_counts_nothing", label: "No records counted", group: "flagged" },
   { key: "f_split_unclear", label: "Split, authors unclear", group: "flagged" },
   { key: "f_filed_elsewhere", label: "Synonym filed elsewhere", group: "flagged" },
-  { key: "f_judge_undecided", label: "Judge couldn't agree", group: "flagged" },
+  { key: "f_reviewer_other", label: "AI reviewer suggests other records", group: "flagged" },
   { key: "f_synonyms_only", label: "Only its synonyms matched", group: "flagged" },
-  { key: "agent", label: "Proposed by AI, not yet checked", group: "flagged" },
   { key: "ne_candidate", label: "Not Evaluated, may be assessed", group: "flagged" },
   { key: "ne_assessed_here", label: "Not Evaluated, includes an assessed species", group: "includes" },
   { key: "author", label: "Homonym settled by author", group: "resolved" },
   { key: "duplicate", label: "Same species twice in CoL", group: "resolved" },
   { key: "variant", label: "Spelt differently in CoL", group: "resolved" },
-  { key: "decided_jury", label: "Decided by the AI jury", group: "resolved" },
-  { key: "decided", label: "Decided by a person", group: "resolved" },
   { key: "other_names", label: "Also counts other CoL names", group: "includes" },
   { key: "own_name", label: "Only its own name counts", group: "includes" },
   { key: "none", label: "No match, no count", group: "none" },
@@ -89,18 +86,12 @@ export const GROUP_TITLE: Record<MatchGroup, { title: string; sub: string }> = {
 };
 
 /** One species' key, from assessed.parquet's match columns: its first doubt, else how it was matched. */
-export function matchKey(r: { match_reason?: unknown; match_decided_by?: unknown; match_reviewed?: unknown; count_note?: unknown; match_treatment?: unknown; match_doubts?: unknown }): MatchKey {
+export function matchKey(r: { match_reason?: unknown; count_note?: unknown; match_treatment?: unknown; match_doubts?: unknown }): MatchKey {
   const reason = typeof r.match_reason === "string" ? r.match_reason : "";
   const doubts = doubtKeys(r);
   if (doubts.length > 0) return doubts[0];
-  // An AI's decision is flagged until a person has reviewed it.
-  if (reason === "decision") {
-    const by = String(r.match_decided_by ?? "");
-    if (by.startsWith("judge:")) return "decided_jury";
-    return by.startsWith("agent:") && r.match_reviewed !== true ? "agent" : "decided";
-  }
   if (r.count_note === "flagged") return "f_synonyms_only";
-  if (r.count_note === "unlinked" || !reason || reason.startsWith("decision,") || reason === "no candidate" || reason === "informal or qualified name") return "none";
+  if (r.count_note === "unlinked" || !reason || reason === "no candidate" || reason === "informal or qualified name") return "none";
   if (reason.includes("homonym, author decides")) return "author";
   if (reason.includes("duplicate in CoL")) return "duplicate";
   if (reason.startsWith("spelling variant")) return "variant";
@@ -133,18 +124,24 @@ export interface NoteRecord {
   records?: number | null;
 }
 
-/** What the AI jury found for a species it checked (the sync's match_jury; docs/specs/matching.md, "Decisions"). */
-export interface MatchJury {
-  kind: "decided" | "confirmed" | "undecided";
+/** A record an AI taxonomic reviewer would count instead: a whole CoL species, or the records under one name (part of). */
+export interface SuggestedRecord {
+  /** The species' name, or the record's name and authorship. */
+  label: string;
+  relation: "is" | "split into" | "part of";
+  /** For part of, the CoL species the record is filed under. */
+  species: string | null;
+  /** Its GBIF records when reviewed. */
+  records: number;
+}
+
+/** The AI taxonomic reviewers' answers for a species they checked (the sync's match_review; docs/specs/matching.md, "AI taxonomic review"). */
+export interface MatchReview {
   /** The model, e.g. claude-opus-5-5. */
-  by: string | null;
+  model: string;
   date: string;
-  /** How the runs voted, in words; null for a decision. */
-  votes: string | null;
-  /** Each run's transcript key: /jury/<key>?sis=<id>. */
-  transcripts: string[];
-  /** For a decision: what the rules alone would have counted, in a sentence. */
-  rules?: string | null;
+  /** In order, reviewer 1 first. Each transcript is at /ai-review/<transcript>?sis=<id>. */
+  reviewers: { finding: "agrees" | "other records" | "can't tell"; records: SuggestedRecord[]; reason: string; transcript: string }[];
 }
 
 /** The species' match facts as the list carries them. */
@@ -163,9 +160,7 @@ export interface SpeciesMatch {
   assessed_here?: string[];
   /** A match that isn't plain: the CoL records it is about. */
   match_records?: NoteRecord[];
-  match_jury?: MatchJury;
-  /** A decision: who made it (a GitHub handle, agent:<model>). */
-  match_decided_by?: string | null;
+  match_review?: MatchReview;
 }
 
 export const isFlagged = (s: SpeciesMatch) => GROUP.get(s.match ?? "plain") === "flagged" || !!s.match_doubt_keys?.length || !!s.may_be_assessed?.length;

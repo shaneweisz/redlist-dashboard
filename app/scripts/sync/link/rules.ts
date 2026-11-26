@@ -16,9 +16,7 @@ export interface LinkRow {
   col_taxon_id: string | null;
   relation: LinkRelation;
   method: string;
-  basis: "matcher" | "citation" | "synonym" | "decision" | null;
-  decided_by: string | null;
-  reviewed: boolean | null;
+  basis: "matcher" | "citation" | "synonym" | null;
   /** The primary row's step (1-6); covered rows' is null. */
   step: number | null;
   /** The species' doubts, ;-joined, on its primary row; NULL when none. */
@@ -38,7 +36,7 @@ const RELATION_ORDER: Record<string, number> = { "is": 0, "split into": 1, "part
 /**
  * Each record counts for one assessed species at most. Where two claim one
  * record, the first by: primary before covered; no doubts before doubts; is,
- * then split into, then part of; a decision before the matcher; the species
+ * then split into, then part of; the species
  * whose CoL name is its Red List name as written; the lower SIS id. The
  * loser's row becomes a duplicate and counts nothing.
  *
@@ -47,7 +45,7 @@ const RELATION_ORDER: Record<string, number> = { "is": 0, "split into": 1, "part
  */
 export function oneOwnerPerUsage(links: LinkRow[], flagged: Set<number>, exactName: Set<number>): Set<number> {
   const rank = (l: LinkRow) => [l.role === "primary" ? 0 : 1, flagged.has(l.sis_taxon_id) ? 1 : 0, RELATION_ORDER[l.relation] ?? 3,
-    l.basis === "decision" ? 0 : 1, exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
+    exactName.has(l.sis_taxon_id) ? 0 : 1, l.sis_taxon_id];
   const claimants = links.filter((l) => l.counted && l.col_taxon_id).sort((a, b) => {
     const x = rank(a), y = rank(b);
     for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];

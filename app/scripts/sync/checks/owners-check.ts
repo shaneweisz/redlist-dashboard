@@ -1,5 +1,5 @@
 /**
- * Checks count/owners.ts (the judge's copy of the counting rule) against
+ * Checks count/owners.ts (the TypeScript copy of the counting rule) against
  * count/usage_owner.sql on a whole build: every CoL usage must have the same
  * owner, or no owner, in both. Run after a change to either, or to the spec's
  * "Counting and the NE list":

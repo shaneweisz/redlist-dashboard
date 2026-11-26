@@ -1,5 +1,5 @@
 /**
- * One headless Claude Code run (`claude -p`), as the rebuild check and the judge
+ * One headless Claude Code run (`claude -p`), as the rebuild check and the AI reviewers
  * use it: no settings, no MCP servers, only the tools named, in a folder of its
  * own. It logs in with CLAUDE_CODE_OAUTH_TOKEN (app/.env.local, from `claude
  * setup-token`), so HOME can point at the run's own folder.
@@ -10,7 +10,7 @@ import { spawn } from "child_process";
 export interface ClaudeRun {
   /** The prompt, as -p's argument. */
   prompt: string;
-  /** Sent on stdin (the judge's facts). */
+  /** Sent on stdin (the reviewers' facts). */
   stdin?: string;
   cwd: string;
   /** --tools: the only tools it has. */

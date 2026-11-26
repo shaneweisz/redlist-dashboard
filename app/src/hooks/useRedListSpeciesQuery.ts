@@ -2,7 +2,7 @@
 // by RedListView. (The data is fetched inline in RedListView; this module is the
 // canonical type definition imported across the app.)
 
-import type { MatchKey, CountsKey, DoubtKey, MatchJury, NoteRecord } from "@/lib/gbif-match";
+import type { MatchKey, CountsKey, DoubtKey, MatchReview, NoteRecord } from "@/lib/gbif-match";
 import type { CountNote } from "@/lib/count-note";
 import type { ColRevision } from "@/lib/col-revision";
 
@@ -68,9 +68,8 @@ export interface RedListSpecies {
   assessed_here?: string[];
   /** A match that isn't plain: the CoL records it is about. */
   match_records?: NoteRecord[];
-  match_decided_by?: string | null;
-  /** What the AI jury found, for a species it checked: its runs' transcripts are at /jury/<key>?sis=<id>. */
-  match_jury?: MatchJury;
+  /** The AI taxonomic reviewers' answers, for a species they checked: each transcript is at /ai-review/<key>?sis=<id>. */
+  match_review?: MatchReview;
   /**
    * The counts the view shows, for the record mode it is in. Set by RedListView
    * when species arrive (inGbifMode), so charts, filters, sorting and the table

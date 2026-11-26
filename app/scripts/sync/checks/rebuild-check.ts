@@ -7,14 +7,15 @@
  *   inputs/          the build's inputs as JSON lines: species (with synonyms and
  *                    their authors, and the matcher's response, each record with its
  *                    CoL species' name, authorship, class, kingdom and phylum),
- *                    records (the CoL records each synonym or decided name names, and
- *                    the occurrences under each), decisions.tsv
+ *                    records (the CoL records each synonym names, and the
+ *                    occurrences under each)
  *   output.schema.json  what to write: out.json
  *
  * and runs `claude -p` there with only Read, Write, Edit and Bash, no web, no
  * settings or MCP servers, HOME set to the folder. Its out.json is compared with
  * select.ts species by species, and its log kept, with every file it read and
- * every command it ran listed, and any path outside the folder called out.
+ * every command it ran listed, and any path outside the folder called out. The
+ * rules alone are compared: the AI taxonomic reviews are left out of ours.
  *
  * --counting checks the spec's "Counting and the NE list" the same way, apart
  * from selection: the folder holds the spec, select.ts's selection for every
@@ -41,7 +42,6 @@ import { buildLink } from "../link/assessment-link";
 import { usageOwners, type OwnerClaim, type OwnerTaxon } from "../count/owners";
 import { loadInputs, selectionJson } from "../link/select-inputs";
 import { selectEvery } from "../link/select";
-import { DECISIONS_FILE } from "../link/decisions";
 import { runClaude, claudeArgs, toolUse, type ClaudeRun } from "./claude-run";
 
 const SPEC = path.join(__dirname, "..", "..", "..", "..", "docs", "specs", "matching.md");
@@ -53,7 +53,7 @@ const OUTPUT_SCHEMA = {
     doubts: { type: "array", items: { type: "string" } },
     selected: { type: "array", items: { type: "object", required: ["id", "relation", "relation_step", "basis"], properties: {
       id: { type: "string" }, relation: { enum: ["is", "part of", "split into", "refused"] },
-      relation_step: { type: ["integer", "string"] }, basis: { enum: ["matcher", "citation", "synonym", "decision"] } } } } } },
+      relation_step: { type: ["integer", "string"] }, basis: { enum: ["matcher", "citation", "synonym"] } } } } } },
 };
 
 const PROMPT = `This folder holds a specification (spec.md) and the inputs it describes (inputs/).
@@ -74,29 +74,23 @@ export async function prepare(dir: string): Promise<{ dir: string; species: Out[
   execFileSync(path.join(__dirname, "..", "..", "..", "node_modules", ".bin", "rolldown"),
     [NAME_RULES, "--format", "esm", "--platform", "node", "--file", path.join(dir, "name-rules.mjs")], { stdio: "ignore" });
   fs.writeFileSync(path.join(dir, "output.schema.json"), JSON.stringify(OUTPUT_SCHEMA, null, 1));
-  if (fs.existsSync(DECISIONS_FILE)) fs.copyFileSync(DECISIONS_FILE, path.join(dir, "inputs", "decisions.tsv"));
 
   const inputs = await loadInputs();
   const lines = (f: string, xs: unknown[]) => fs.writeFileSync(path.join(dir, "inputs", f), xs.map((x) => JSON.stringify(x)).join("\n") + "\n");
   lines("species.jsonl", inputs.species);
-  // Every name a synonym or a decision names, with the CoL records of that name (or orthographicallySame), each with the occurrences under it.
-  const names = new Set<string>([...inputs.species.flatMap((s) => s.synonyms.map((y) => y.name)),
-    ...[...inputs.decisions.values()].flatMap((d) => d.rows.flatMap((r) => (r.name ? [r.name] : [])))]);
+  // Every name a synonym names, with the CoL records of that name (or orthographicallySame), each with the occurrences under it.
+  const names = new Set<string>(inputs.species.flatMap((s) => s.synonyms.map((y) => y.name)));
   lines("records.jsonl", [...names].map((name) => ({ name, records: inputs.release.recordsNamed(name).map((r) => ({ ...r, occurrences_under: inputs.release.occurrencesUnder(r.id) })) })));
-  const decided = [...inputs.decisions.values()].flatMap((d) => d.rows.flatMap((r) => (r.id ? [inputs.release.byId(r.id)].filter(Boolean) : [])));
-  lines("records-by-id.jsonl", decided);
   fs.writeFileSync(path.join(dir, "inputs", "README.md"), `# Inputs
 
 - species.jsonl: one assessed species per line: sis, name, authority, kingdom, phylum, synonyms [{name, authors}] in the Red List's
   order, and match: the matcher's response (matchType, answerName, answer, alternatives in its order). Each record: id, name,
   authorship, rank and status (the matcher's forms), classification (the matcher's points against the hints), and species:
   speciesOf(id) with its name, authorship, class, kingdom, phylum (null if it leads to none).
-- records.jsonl: for each name a Red List synonym or a decision names, the species-rank CoL records with that name or an
+- records.jsonl: for each name a Red List synonym names, the species-rank CoL records with that name or an
   orthographicallySame one, in the same shape, each with occurrences_under (its own and those below it).
-- records-by-id.jsonl: the CoL records decisions.tsv names by id.
-- decisions.tsv: seeds/decisions.tsv (statuses lower-case, as CoL writes them).
 `);
-  const ours = selectEvery(inputs.species, inputs.release, inputs.decisions).map(selectionJson);
+  const ours = selectEvery(inputs.species, inputs.release).map(selectionJson);
   return { dir, species: ours };
 }
 
@@ -151,7 +145,7 @@ export async function prepareCounting(dir: string): Promise<{ dir: string; ours:
     [NAME_RULES, "--format", "esm", "--platform", "node", "--file", path.join(dir, "name-rules.mjs")], { stdio: "ignore" });
   fs.writeFileSync(path.join(dir, "output.schema.json"), JSON.stringify(COUNT_SCHEMA, null, 1));
   const inputs = await loadInputs();
-  const sel = selectEvery(inputs.species, inputs.release, inputs.decisions, inputs.verdicts).map(selectionJson);
+  const sel = selectEvery(inputs.species, inputs.release).map(selectionJson);
   const lines = (f: string, xs: unknown[]) => fs.writeFileSync(path.join(dir, "inputs", f), xs.map((x) => JSON.stringify(x)).join("\n") + "\n");
   lines("species.jsonl", inputs.species.map((sp) => ({ sis: sp.sis, name: sp.name })));
   lines("selection.jsonl", sel);

@@ -14,7 +14,7 @@ import { GBIF_CHECKLIST_KEY, gbifOccurrenceParams } from "@/lib/gbif";
 import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORD_MODES, GBIF_RECORD_MODE_LABEL, gbifRecordCount, gbifRecordsSinceAssessment, sinceAssessmentStart, type GbifRecordMode,
   GBIF_RANGE_KEYS, GBIF_METRIC_LABEL, gbifRangeKeyLabel, gbifKeyParts, gbifBucketsFor, gbifBucket, gbifMetricValue, matchesGbifRanges, hasGbifRanges, type GbifRangeKey, type GbifMetric } from "@/lib/gbif-records";
 import { countNoteText } from "@/lib/count-note";
-import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchJury } from "@/lib/gbif-match";
+import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchReview, type SuggestedRecord } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
 import CitesSummary from "../CitesSummary";
@@ -803,7 +803,6 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
               </span>
             );
           })}
-          {s.match_decided_by && !s.match_jury && <span className="px-1.5 py-px text-[11px] text-zinc-400">Decided by {s.match_decided_by}</span>}
         </div>
         {/* The Red List side. */}
         <div className="py-1.5">
@@ -836,21 +835,8 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
             </div>
           </div>
         )}
-        {/* What the AI jury found, with each run's transcript. */}
-        {s.match_jury && (
-          <div className="pt-1.5">
-            <div className={section}>AI jury{s.match_jury.by ? ` (${s.match_jury.by})` : ""}</div>
-            <div className="text-[11px] text-zinc-300">{juryLine(s.match_jury)}</div>
-            {s.match_jury.rules && <div className="text-[11px] text-zinc-400">{s.match_jury.rules}</div>}
-            {s.match_jury.transcripts.length > 0 && (
-              <div className="text-[11px] text-zinc-400">
-                Transcripts: {s.match_jury.transcripts.map((k, i) => (
-                  <span key={k}>{i > 0 ? " · " : ""}<a className={link} href={`/jury/${k}${s.sis_taxon_id ? `?sis=${s.sis_taxon_id}` : ""}`} target="_blank" rel="noopener noreferrer">run {i + 1} ↗</a></span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* What the AI taxonomic reviewers said, with each one's transcript. */}
+        {s.match_review && <ReviewSection review={s.match_review} sis={s.sis_taxon_id} section={section} link={link} />}
       </div>
     );
   }
@@ -863,11 +849,57 @@ function MatchFlag({ s }: { s: SpeciesMatch & { gbif_species_key?: string | null
   );
 }
 
-/** The AI jury's finding in a sentence, for the match tooltip. */
-function juryLine(j: MatchJury): string {
-  if (j.kind === "decided") return `Decided on ${j.date}: independent runs agreed on these records, which replace the rules' answer.`;
-  if (j.kind === "confirmed") return `Checked on ${j.date}: ${j.votes ?? "its runs agreed with the rules"}. The doubt stands, but the records match.`;
-  return `Checked on ${j.date}, but couldn't agree${j.votes ? `: ${j.votes}` : ""}. The count follows the rules until a person decides.`;
+/**
+ * The AI taxonomic reviewers' answers in the match tooltip: whether they agree
+ * with the records above, and where they don't, what each would count instead
+ * and why. The count always follows the rules.
+ */
+function ReviewSection({ review, sis, section, link }: { review: MatchReview; sis?: number | null; section: string; link: string }) {
+  const rs = review.reviewers;
+  const key = (r: MatchReview["reviewers"][number]) => `${r.finding}|${r.records.map((x) => `${x.label}:${x.relation}`).join(",")}`;
+  const same = rs.length > 1 && rs.every((r) => key(r) === key(rs[0]));
+  const both = rs.length === 2 ? "Both reviewers" : "All reviewers";
+  const transcript = (r: MatchReview["reviewers"][number], label: string) => r.transcript
+    ? <a className={link} href={`/ai-review/${r.transcript}${sis ? `?sis=${sis}` : ""}`} target="_blank" rel="noopener noreferrer">{label} ↗</a> : label;
+  const records = (xs: SuggestedRecord[]) => xs.length === 0 ? <div className="text-[11px] text-zinc-300">Nothing: none of these CoL records is this species.</div> : (
+    <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 items-baseline text-[11px]">
+      {xs.map((x) => (
+        <React.Fragment key={`${x.label}-${x.relation}`}>
+          <div className="min-w-0 text-zinc-200">
+            {x.relation === "part of"
+              ? <><i>{x.label}</i><span className="text-zinc-400">, only the records under this name{x.species ? <>, which CoL files under <i>{x.species}</i></> : null}</span></>
+              : <><span className="text-zinc-400">all of CoL&apos;s </span><i>{x.label}</i></>}
+          </div>
+          <div className="text-right tabular-nums whitespace-nowrap text-zinc-300">{x.records.toLocaleString()}</div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+  const verdict = (r: MatchReview["reviewers"][number]) =>
+    r.finding === "agrees" ? "agrees with these records" : r.finding === "can't tell" ? "couldn't tell" : "would count instead:";
+  return (
+    <div className="pt-1.5 space-y-1">
+      <div className={section}>AI taxonomic review <span className="normal-case tracking-normal">({review.model}, {review.date})</span></div>
+      {same ? (
+        <>
+          <div className="text-[11px] text-zinc-300">
+            {rs[0].finding === "agrees" ? `${both} agree with these records.` : rs[0].finding === "can't tell" ? "Neither reviewer could tell." : `${both} would count instead:`}
+          </div>
+          {rs[0].finding === "other records" && records(rs[0].records)}
+          {rs.map((r, i) => (
+            <div key={i} className="text-[11px] text-zinc-400">{transcript(r, `Reviewer ${i + 1}`)}{r.finding !== "agrees" && r.reason ? `: ${r.reason}` : ""}</div>
+          ))}
+        </>
+      ) : rs.map((r, i) => (
+        <div key={i} className="space-y-0.5">
+          <div className="text-[11px] text-zinc-300">{transcript(r, `Reviewer ${i + 1}`)} {verdict(r)}</div>
+          {r.finding === "other records" && records(r.records)}
+          {r.finding !== "agrees" && r.reason && <div className="text-[11px] text-zinc-400">{r.reason}</div>}
+        </div>
+      ))}
+      {rs.some((r) => r.finding === "other records") && <div className="text-[11px] text-zinc-500">The count follows the matching rules, shown above.</div>}
+    </div>
+  );
 }
 
 // A HoverTooltip you can move the pointer INTO — so its content can be read at

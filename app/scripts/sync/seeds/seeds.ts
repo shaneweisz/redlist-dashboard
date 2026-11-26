@@ -1,14 +1,11 @@
 /**
- * Seeds: every decision a person made that the sync applies, one file per kind,
- * one row per decision, each with its reason. Kept as data rather than code so
- * that "what did a person decide, and why" is a list you can read in one place.
+ * Seeds: what the sync reads besides its sources, one file per kind, each row
+ * with its reason. Kept as data rather than code so that "what was decided, and
+ * why" is a list you can read in one place.
  *
- *   decisions.tsv            the CoL records a Red List species is, where the
- *                            rules can't settle it, one row per record, mostly
- *                            written by the judge (link/decisions.ts,
- *                            docs/specs/matching.md)
- *   judge-verdicts.tsv       the judge's verdicts: the rules' answer confirmed, or undecided
- *   judge-notes.tsv          a person's notes to the judge about a species
+ *   ai-reviews.tsv           the AI taxonomic reviewers' answers on the species
+ *                            listed for review, one row per reviewer (link/ai-reviews.ts,
+ *                            docs/specs/matching.md); shown, never counted
  *   domesticated-and-humans.tsv
  *                            species never listed as Not Evaluated: domestic
  *                            forms, whose wild relatives are what IUCN assesses,

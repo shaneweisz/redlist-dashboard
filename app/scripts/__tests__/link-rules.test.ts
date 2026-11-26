@@ -8,7 +8,7 @@ import { oneOwnerPerUsage, type LinkRow } from "../sync/link/rules";
 
 const row = (sis: number, taxon: string, over: Partial<LinkRow> = {}): LinkRow => ({
   sis_taxon_id: sis, role: "primary", col_species_id: taxon, col_taxon_id: taxon, relation: "is", method: "accepted", basis: "matcher",
-  decided_by: null, reviewed: null, step: 4, doubts: null, match_reason: null, col_treatment: null, match_description: null, to_review: null,
+  step: 3, doubts: null, match_reason: null, col_treatment: null, match_description: null, to_review: null,
   counted: true, ...over,
 });
 const owner = (links: LinkRow[], flagged: number[] = [], exact: number[] = []) => {
@@ -26,9 +26,6 @@ describe("oneOwnerPerUsage", () => {
   it("is, then split into, then part of", () => {
     expect(owner([row(1, "A", { relation: "part of" }), row(2, "A", { relation: "split into" })])).toEqual([2]);
     expect(owner([row(1, "A", { relation: "split into" }), row(2, "A")])).toEqual([2]);
-  });
-  it("a decision before the matcher", () => {
-    expect(owner([row(1, "A"), row(2, "A", { basis: "decision" })])).toEqual([2]);
   });
   it("the species whose CoL name is its Red List name as written (Peltophorum dasyrhachis / dasyrachis)", () => {
     expect(owner([row(1, "A"), row(2, "A")], [], [2])).toEqual([2]);

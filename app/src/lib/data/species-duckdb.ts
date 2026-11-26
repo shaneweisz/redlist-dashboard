@@ -148,7 +148,7 @@ const ASSESSED_SELECT = `
   taxon_group, gbif_species_key, gbif_georeferenced_records_count, gbif_georeferenced_records_since_assessment,
   gbif_all_records_count, gbif_all_records_since_assessment, count_note,
   openalex_works, bhl_works,
-  match_reason, match_decided_by, match_counts, match_doubts, match_reviewed, match_other_names, match_records, match_jury, match_treatment, redlist_authority, redlist_synonyms,
+  match_reason, match_counts, match_doubts, match_other_names, match_records, match_review, match_treatment, redlist_authority, redlist_synonyms,
   systems, growth_forms, movement_pattern, possibly_extinct, possibly_extinct_in_the_wild,
   criteria, threat_codes, habitat_codes, latest_assessors, latest_reviewers, latest_facilitators,
   latest_contributors, latest_institutions,
@@ -209,9 +209,9 @@ export function toSpeciesRow(r: Record<string, unknown>) {
     // Only where there are doubts, to keep the list slim.
     ...(r.match_doubts ? { match_doubt_keys: doubtKeys(r) } : {}),
     match_other_names: num(r.match_other_names),
-    ...(r.match_jury ? { match_jury: JSON.parse(String(r.match_jury)) } : {}),
+    ...(r.match_review ? { match_review: JSON.parse(String(r.match_review)) } : {}),
     // Only where there is something to say, to keep the list slim.
-    ...(r.match_records ? { match_records: JSON.parse(String(r.match_records)), match_decided_by: r.match_reason === "decision" ? str(r.match_decided_by) : null,
+    ...(r.match_records ? { match_records: JSON.parse(String(r.match_records)),
       redlist_authority: str(r.redlist_authority), redlist_synonyms: splitList(r.redlist_synonyms) } : {}),
     // Latest (most recent) assessment's credits, denormalized into
     // assessed.parquet — the list view's credit filters read these.

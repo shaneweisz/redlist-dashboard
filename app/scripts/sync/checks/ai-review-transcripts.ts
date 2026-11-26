@@ -1,8 +1,8 @@
 /**
- * The judge's transcripts: each call's whole conversation (its searches, the
- * pages it read, and its answer), so a decision it wrote can be audited. Kept
- * gzipped next to the judge's cache, and uploaded to a private Backblaze B2
- * bucket before a decision that cites one is written (B2_TRANSCRIPTS_BUCKET,
+ * The AI taxonomic reviewers' transcripts: each call's whole conversation (its
+ * searches, the pages it read, and its answer), so a review can be audited. Kept
+ * gzipped next to the reviewers' cache, and uploaded to a private Backblaze B2
+ * bucket before a review that cites one is written (B2_TRANSCRIPTS_BUCKET,
  * B2_TRANSCRIPTS_KEY_ID, B2_TRANSCRIPTS_APPLICATION_KEY in app/.env.local; B2_TRANSCRIPTS_ENDPOINT,
  * else B2_ENDPOINT). Private, because a transcript holds the text of the pages
  * it fetched; deletable, should one hold something it shouldn't.
@@ -11,7 +11,7 @@
  * environment variables named like a token, key, secret or password, and any
  * email in one), its home folder and the git user's email; a match stops the upload.
  *
- * `npm run sync:trace -- "<species>"` shows a decision's runs (summarise, below).
+ * `npm run sync:trace -- "<species>"` shows a species' reviews (summarise, below).
  */
 
 import { execSync } from "child_process";
@@ -22,6 +22,7 @@ import * as zlib from "zlib";
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 export const transcriptPath = (cacheDir: string, key: string) => path.join(cacheDir, "transcripts", `${key}.jsonl.gz`);
+// Under judge/, the reviewers' earlier name: the transcripts already uploaded keep their keys.
 const objectKey = (key: string) => `judge/${key}.jsonl.gz`;
 
 export function saveTranscript(cacheDir: string, key: string, transcript: string): void {
@@ -54,23 +55,23 @@ export const leaks = (text: string, secrets: string[]) => secrets.flatMap((s, i)
 export async function uploadTranscripts(keys: string[], cacheDir: string): Promise<void> {
   if (keys.length === 0) return;
   const b = bucket();
-  if (!b) throw new Error("judge: the transcripts bucket isn't set (B2_TRANSCRIPTS_BUCKET, B2_TRANSCRIPTS_KEY_ID, B2_TRANSCRIPTS_APPLICATION_KEY in app/.env.local); " +
+  if (!b) throw new Error("ai-review: the transcripts bucket isn't set (B2_TRANSCRIPTS_BUCKET, B2_TRANSCRIPTS_KEY_ID, B2_TRANSCRIPTS_APPLICATION_KEY in app/.env.local); " +
     "nothing was written. Answers and transcripts are cached, so a rerun costs nothing.");
   const secrets = secretsToScanFor();
   const bad: string[] = [];
   for (const k of keys) {
     const f = transcriptPath(cacheDir, k);
-    if (!fs.existsSync(f)) throw new Error(`judge: transcript ${k} is missing from ${path.dirname(f)}`);
+    if (!fs.existsSync(f)) throw new Error(`ai-review: transcript ${k} is missing from ${path.dirname(f)}`);
     if (leaks(zlib.gunzipSync(fs.readFileSync(f)).toString(), secrets).length) bad.push(k);
   }
-  if (bad.length) throw new Error(`judge: ${bad.length} transcript(s) hold a secret, the home folder or the git email (${bad.join(", ")}); nothing was uploaded or written`);
+  if (bad.length) throw new Error(`ai-review: ${bad.length} transcript(s) hold a secret, the home folder or the git email (${bad.join(", ")}); nothing was uploaded or written`);
   let sent = 0;
   for (const k of keys) {
     try { await b.client.send(new HeadObjectCommand({ Bucket: b.name, Key: objectKey(k) })); continue; } catch { /* not there yet */ }
     await b.client.send(new PutObjectCommand({ Bucket: b.name, Key: objectKey(k), Body: fs.readFileSync(transcriptPath(cacheDir, k)), ContentType: "application/gzip" }));
     sent++;
   }
-  console.log(`judge: ${sent} transcript(s) uploaded to the transcripts bucket, ${keys.length - sent} already there`);
+  console.log(`ai-review: ${sent} transcript(s) uploaded to the transcripts bucket, ${keys.length - sent} already there`);
 }
 
 /** A transcript, from the local cache or else the bucket; null if neither has it. */

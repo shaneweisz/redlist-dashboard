@@ -7,7 +7,7 @@ flowchart LR
   col[Catalogue of Life] --> taxa
   rl[Red List] --> assessments
   gbif[GBIF snapshot] --> occurrences
-  seeds["seeds/<br/>people's decisions"] --> link
+  seeds["seeds/<br/>decisions and AI reviews"] --> link
   taxa --> link
   assessments --> link
   link["<b>link</b><br/>assessment_link<br/>which CoL species each<br/>assessed species is"] --> count
@@ -49,7 +49,7 @@ The design has one idea: **every number comes from four tables, by one rule.** T
 
 Stages meet at a single table: `assessment_link` out of link, `usage_owner` out of count. Their columns are each stage's contract with the rest, so the inside of a stage can be rewritten without touching the others.
 
-- **`seeds/`** holds every decision the sync applies, one file per kind and one row per decision with its reason: `decisions.tsv` (which CoL records a species is, where the rules can't settle it; mostly the judge's, with `judge-confirmed.tsv` and `judge-notes.tsv` beside it), `domesticated-and-humans.tsv` (domestic forms and humans), and the taxonomy tree's CoL homonyms and equivalents.
+- **`seeds/`** holds every decision the sync applies, one file per kind and one row per decision with its reason: `ai-reviews.tsv` (the AI taxonomic reviewers' answers on the species listed for review, shown beside the records and never counted), `domesticated-and-humans.tsv` (domestic forms and humans), and the taxonomy tree's CoL homonyms and equivalents.
 - **Count, lists and the precomputed SQL are dbt models** (`dbt/`, dbt-oss with DuckDB, installed by uv on first use). A model's `ref()`s are what it reads; its `.yml` holds its tests. `npm run sync:lineage` serves dbt's docs for the build: every model's SQL, columns, tests and lineage graph. By hand, from `app/scripts/sync/dbt`:
 
 ```bash
@@ -122,15 +122,15 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 
 **The rules are [docs/specs/matching.md](specs/matching.md)**, the source of truth: which CoL records each assessed species is (with a relation: *is*, *part of*, *split into* or *refused*), its doubts, the counting rule and the Not Evaluated list. This section is how to run and review it.
 
-`link/`: `matches.ts` asks GBIF's matcher, matching-ws, running locally against the XR the sync uses, with the Red List lineage as hints and no authority; `select.ts` is the spec's selection, over `name-rules.ts`, the one name library; `select-inputs.ts` reads the build into it (`npm run sync:select` prints every species' selection); `decisions.ts` reads `seeds/decisions.tsv`; `assessment-link.ts` writes `assessment_link`, one row per record. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
+`link/`: `matches.ts` asks GBIF's matcher, matching-ws, running locally against the XR the sync uses, with the Red List lineage as hints and no authority; `select.ts` is the spec's selection, over `name-rules.ts`, the one name library; `select-inputs.ts` reads the build into it (`npm run sync:select` prints every species' selection); `ai-reviews.ts` reads `seeds/ai-reviews.tsv`; `assessment-link.ts` writes `assessment_link`, one row per record. The hardest part, and the most likely place for a wrong number: a species matched to the wrong CoL species shows someone else's records.
 
 ![How an assessed species is linked](https://f005.backblazeb2.com/file/dashboard-pr-screenshots/pr-639-gbif-match/46-link-flow.png)
 
 (The diagram predates the spec; `docs/diagrams/link_flow.py` is to be redrawn from it.)
 
-**Decisions.** The judge decides the species the rules can't settle: `npm run sync:judge -- decide` (outside the sync; asks each species listed for review in two independent runs, which must agree, priced first) writes an agreed answer to **`seeds/decisions.tsv`** (by `judge:<model>`, with its evidence and sources) or, where it is the rules' answer, a `confirmed` verdict to `seeds/judge-verdicts.tsv`, which takes the species off the review list; where the runs don't agree, an `undecided` verdict, which the dashboard flags as "Judge couldn't agree"; commit both. A row per CoL record: the Red List name and authority it was decided for, the record (id, name, authorship, status, the species it leads to) and its relation, the candidates' species when decided, `by`, and the evidence. Every row names the judge's calls behind it (`transcripts`): each whole conversation, its searches, the pages it read and its answer, uploaded to a private B2 bucket (`B2_TRANSCRIPTS_*` in `app/.env.local`) after a scan for secrets, before the row is written; `npm run sync:trace -- "<species>"` shows them. To steer it, add a note to `seeds/judge-notes.tsv` (the judge weighs it next run); to overrule it, write the row yourself with your GitHub handle in `by`, which it never replaces. A decision is keyed by names, not CoL ids, which move, and holds while the spec's hold conditions do; one that lapses is ignored, the species listed for review, and the judge asks again next run.
+**AI taxonomic review.** The rules settle every species; there are no overrides. Where they are in doubt, two AI taxonomic reviewers check: `npm run sync:ai-review -- review` (outside the sync; asks each species listed for review whose reviews don't apply, in two independent runs, priced first) writes one row per species and reviewer to **`seeds/ai-reviews.tsv`**: it agrees with the rules, suggests other records (listed, with their GBIF records), or can't tell, with its reason and sources; commit it. The sync shows the reviews in the match tooltip and never counts them. When both agree the species leaves the review list; when one suggests other records it gets the doubt `reviewer suggests other records`, which the dashboard flags as "AI reviewer suggests other records". Every row names the call behind it (`transcript`): the whole conversation, its searches, the pages it read and its answer, uploaded to a private B2 bucket (`B2_TRANSCRIPTS_*` in `app/.env.local`) after a scan for secrets, before the row is written; the dashboard links each one (`/ai-review/<key>`), and `npm run sync:trace -- "<species>"` shows them. A review is keyed by the rules' answer by names (CoL ids move) and a hash of what the reviewers were given; a release that changes either lists the species again, and the next run asks it again. The run prints the patterns among the suggestions: many of one kind are a rule to change.
 
-**The review queue.** `assessment_link.to_review` (on the primary row) says why a person needs to look: the first doubt with all of them, the reason nothing was taken, a lapsed decision, a decision whose candidates changed, or one not yet reviewed. `.sync/review/links.parquet` has every row with the names, versions and evidence beside it. `sync.json`'s `matching` records the counts by basis, step and doubt, and the queue by kind.
+**The review queue.** `assessment_link.to_review` (on the primary row) says why a person needs to look: the first doubt with all of them, or the reason nothing was taken; cleared when both AI taxonomic reviewers agree. `.sync/review/links.parquet` has every row with the names, versions and evidence beside it. `sync.json`'s `matching` records the counts by basis, step and doubt, and the queue by kind.
 
 **What the app shows of a match.** `lists/assessed.parquet` carries each species' `match_reason`, `match_doubts`, `match_counts`, `match_treatment`, `match_other_names`, and for any match that isn't one plain name, `match_records`: the CoL records involved, each counted, also counted, or named only, with its share of the all-records count (the records under it, or under a usage below it no closer listed record claims; what none claims is listed by the CoL species it falls under, so the shares sum to the count). The GBIF matching reconciliation card has a bar per doubt (⚑) and per kind of match; once a bar is selected the app marks each count (⚑ in doubt, ⓘ otherwise), and the marker's tooltip shows the Red List name and each CoL record with its share and links to ChecklistBank and GBIF. `match_note` keeps the same facts in sentences for reviewers.
 
@@ -139,12 +139,12 @@ From sync `2026-11-04T16-18-27Z`, georeferenced records.
 | Column | Answers | Values |
 |---|---|---|
 | `relation` | what the record is to the species | `is`, `part of`, `split into`, `refused`; `none` (nothing taken, or a candidate row); `duplicate` (another species owns it) |
-| `match_reason` | how the Red List name found its record | `exact, unique`, `exact, homonym, author decides`, `exact, duplicate in CoL`, `spelling variant` (and `, …`), `decision`, or why nothing was taken (`no candidate`, `informal or qualified name`). A covered row's says why it is there: `CoL duplicate` (`, respelled`, `, Red List synonym`), `name under another species`, `refused`, `Red List synonym, split` / `, filed elsewhere` / `, assessed separately`, `candidate`, `other group` |
+| `match_reason` | how the Red List name found its record | `exact, unique`, `exact, homonym, author decides`, `exact, duplicate in CoL`, `spelling variant` (and `, …`), or why nothing was taken (`no candidate`, `informal or qualified name`). A covered row's says why it is there: `CoL duplicate` (`, respelled`, `, Red List synonym`), `name under another species`, `refused`, `Red List synonym, split` / `, filed elsewhere` / `, assessed separately`, `candidate`, `other group` |
 | `col_treatment` | what CoL makes of the record | `accepted`, `synonym, other name`, `synonym, other spelling`, `lumped, unassessed`, `lumped, assessed`, `split`; a covered row's, the record's CoL status |
 | `counts` | what the row counts | `the whole CoL species`, `only records under its own name`, `nothing` |
 | `match_description` | the row in one sentence, with names, authors and ids | "GBIF's matcher answered *Sorbus greenii* T.C.G.Rich [..], synonym of *Aria greenii* … Counts every record of *Aria greenii*." |
 
-**Accuracy** is measured outside the sync by the judge (the spec's last section): `npm run sync:judge`. **A rule change** is checked by `npm run sync:rebuild-check`, which has an agent rebuild the selection from the spec alone and compares.
+**Accuracy** is measured outside the sync by the AI taxonomic reviewers (the spec's last section): `npm run sync:ai-review -- first` (or `changed --baseline <old.json>` for a rule change). **A rule change** is checked by `npm run sync:rebuild-check`, which has an agent rebuild the selection from the spec alone and compares.
 
 ### Versions
 
@@ -219,7 +219,7 @@ DB_NAME=<new> npm run sync -- --baseline ../.sync2/data           # + Red List, 
 
 `npm run sync:trace -- "<Red List name or SIS id>"` prints why a species is linked as it is, from the build, in the order the sync decides it:
 
-1. **The name:** GBIF's matcher's answer, and the points it gave it and every other candidate (name, authorship, classification, rank, status), and a decision if there is one.
+1. **The name:** GBIF's matcher's answer, and the points it gave it and every other candidate (name, authorship, classification, rank, status), and the AI taxonomic reviews if there are any, with each one's searches and pages.
 2. **The selection:** the step, the doubts, and each link row: the CoL taxon and species it names, its relation, `match_reason`, `col_treatment` and `counts`, and its description.
 3. **The count:** every CoL record whose GBIF records count for it, and the totals the app shows.
 
@@ -248,7 +248,7 @@ Choices made on purpose:
 - **Only a species counted whole leaves the NE list**: a record counted only under its own name, or refused, leaves the rest of its species there, with a note.
 - **Outdated is as of the sync date**, so a page's numbers don't drift between syncs.
 - **One CoL release for everything**, named in the footer.
-- **Every human decision is a seed**, with its reason, not a constant in code.
+- **Every decision is a seed**, with its reason, not a constant in code.
 
 Known limits (sync of 16 November 2026):
 
@@ -256,5 +256,5 @@ Known limits (sync of 16 November 2026):
 - Ownership walks three levels below a lumped species' root; a deeper case would go uncounted.
 - BOLD BINs filed under a genus or family stay unresolved, as GBIF leaves them.
 - NE country lists come from the snapshot, so differ a little from gbif.org's live counts.
-- The link's concept rules are checked against real data only (the fixtures); the acceptance rule, decisions and counting rule also have unit tests.
+- The link's concept rules are checked against real data only (the fixtures); the acceptance rule, the reviews and counting rule also have unit tests.
 - `assessed.parquet` keeps lists as `;`-joined strings, because the app's filter SQL expects them.
