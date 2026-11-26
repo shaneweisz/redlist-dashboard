@@ -1672,16 +1672,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     () => false,
   );
   const triageInSidebar = isWide;
-  // Collapsed by default (the sidebar is opt-in: the collapsed rail is how
-  // it's found); opening or closing it is a per-viewer convenience,
-  // remembered in localStorage.
-  const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
-    try { return typeof window === "undefined" || localStorage.getItem("triageSidebarOpen") !== "1"; } catch { return true; }
-  });
-  const setTriageSidebarCollapsed = useCallback((v: boolean) => {
-    setTriageSidebarCollapsedState(v);
-    try { localStorage.setItem("triageSidebarOpen", v ? "0" : "1"); } catch {}
-  }, []);
+  // Always starts collapsed: the sidebar is opt-in on every visit, opened
+  // from its rail, and not remembered.
+  const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
   // Set, not a single string (like expandedCriteria below) — multi-selecting
   // two top-level threats (cmd-click) should show pills below BOTH, not just
   // whichever was clicked last.
@@ -5162,13 +5155,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // design-tool side panels) rather than a tab on the window's edge: a
       // scatter icon and the panel's name say what opening it shows, and its
       // chevron sits at the top, where the open sidebar's collapse chevron is.
+      // It's as tall as the open sidebar, so opening or closing it changes only
+      // the column's width, not its footprint (and it's a large target).
       // The whole rail is the button. A box selection still filtering the page
       // shows as a count, so a hidden filter is never invisible.
       <button type="button" onClick={() => setTriageSidebarCollapsed(false)}
         aria-expanded={false}
         aria-label={`Show Reassessment Triage${priorityBox ? ` (${priorityInBox.toLocaleString()} species selected)` : ""}`}
         title="Show Reassessment Triage: years since assessment against GBIF records"
-        className="sticky top-4 w-12 flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
+        className="sticky top-4 w-12 h-[min(calc(100vh-2rem),42rem)] flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
         <span aria-hidden className="text-base leading-none">‹</span>
         <MdScatterPlot aria-hidden size={18} />
         <span className="[writing-mode:vertical-rl] rotate-180 text-sm font-semibold text-zinc-700 dark:text-zinc-200 whitespace-nowrap">Reassessment Triage</span>
