@@ -327,6 +327,13 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     setTipPos({ left, top });
   }, [hover, width, HEIGHT]);
   const selected = selectedKey ? layout.ordered.findIndex((p) => p.key === selectedKey) : -1;
+  // The needs-updating label's width, measured, to decide which side of its line it fits.
+  const needsLabelRef = useRef<HTMLDivElement>(null);
+  const [needsLabelW, setNeedsLabelW] = useState(140);
+  useLayoutEffect(() => {
+    const w = needsLabelRef.current?.offsetWidth;
+    if (w && w !== needsLabelW) setNeedsLabelW(w);
+  }, [needsLabelW, width, scales.xMax]);
 
   return (
     <div
@@ -348,13 +355,20 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
         onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}>
         {yAxis}
       </div>
-      {/* The "needs updating" line's label, just right of it at the plot's top. */}
-      {width > 0 && scales.xMax > NEEDS_UPDATING_YEARS && (
-        <div className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
-          style={{ left: scales.sx(NEEDS_UPDATING_YEARS) + 3, top: M.top + 2 }}>
-          Needs updating (10+ yrs) →
-        </div>
-      )}
+      {/* The "needs updating" line's label at the plot's top: just right of
+          the line, or, where the axis ends too soon after 10 years for it to
+          fit (Birds), just left of it, ending at the line. */}
+      {width > 0 && scales.xMax > NEEDS_UPDATING_YEARS && (() => {
+        const lineX = scales.sx(NEEDS_UPDATING_YEARS);
+        const fitsRight = lineX + 3 + needsLabelW <= M.left + scales.plotW;
+        return (
+          <div ref={needsLabelRef}
+            className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
+            style={{ left: fitsRight ? lineX + 3 : lineX - 3 - needsLabelW, top: M.top + 2 }}>
+            Needs updating (10+ yrs) →
+          </div>
+        );
+      })()}
       {(dragPx ?? boxPx) && (
         <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
           style={dragPx ?? boxPx ?? undefined} />
