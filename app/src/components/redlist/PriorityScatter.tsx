@@ -109,10 +109,11 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     return () => ro.disconnect();
   }, [fill]);
 
-  // Scales. X runs to the taxon's oldest assessment (rounded up to 5 years); Y
-  // to its largest count's power of ten, or 100%.
+  // Scales. X runs just past the taxon's oldest assessment (to the next whole
+  // year: rounding to 5 left up to five empty years at the right); Y to its
+  // largest count's power of ten, or 100%.
   const scales = useMemo(() => {
-    const xMax = Math.max(10, Math.ceil(maxYears / 5) * 5);
+    const xMax = Math.max(10, Math.ceil(maxYears + 0.25));
     const yMax = yScale === "pct" ? 100 : Math.max(1, Math.ceil(toPlotY(maxValue, "log")));
     const plotW = Math.max(0, width - M.left - M.right);
     const plotH = HEIGHT - M.top - M.bottom;

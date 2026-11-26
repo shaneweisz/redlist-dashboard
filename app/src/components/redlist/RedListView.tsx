@@ -3,7 +3,6 @@
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
-import { useFeatureFlagEnabled } from "posthog-js/react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import TaxaSummary, { type SelectedRow } from "./TaxaSummary";
@@ -591,8 +590,6 @@ const SKIP_PRIORITY = skipSet("priority");
  *  the chart stays in More Filters. Keep in step with the min-[1400px] widths
  *  in the grid below and page.tsx. */
 const SIDEBAR_QUERY = "(min-width: 1400px)";
-/** PostHog feature flag (boolean) that turns the Reassessment Triage sidebar on for everyone. */
-const TRIAGE_SIDEBAR_FLAG = "triage-sidebar";
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -1667,30 +1664,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
-  // Reassessment Triage as an ever-present sidebar on xl screens. Behind the
-  // PostHog flag TRIAGE_SIDEBAR_FLAG, an all-or-nothing switch: PostHog runs
-  // with in-memory persistence and no identify, so every page load is a new
-  // anonymous id and a percentage rollout would re-roll on each reload. No
-  // NEXT_PUBLIC_POSTHOG_KEY (local dev) leaves the flag undefined, i.e. off.
-  // `?triageSidebar=1` previews it regardless of the flag, and is remembered on
-  // this browser until `?triageSidebar=0`.
-  const triageSidebarFlag = useFeatureFlagEnabled(TRIAGE_SIDEBAR_FLAG);
-  const [triageSidebarPreview] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      const q = new URLSearchParams(window.location.search).get("triageSidebar");
-      if (q === "1") localStorage.setItem("triageSidebarPreview", "1");
-      if (q === "0") localStorage.removeItem("triageSidebarPreview");
-      return localStorage.getItem("triageSidebarPreview") === "1";
-    } catch { return false; }
-  });
-  const triageSidebarEnabled = triageSidebarFlag === true || triageSidebarPreview;
+  // Reassessment Triage as an ever-present sidebar on wide screens.
   const isWide = useSyncExternalStore(
     (cb) => { const mq = window.matchMedia(SIDEBAR_QUERY); mq.addEventListener("change", cb); return () => mq.removeEventListener("change", cb); },
     () => window.matchMedia(SIDEBAR_QUERY).matches,
     () => false,
   );
-  const triageInSidebar = triageSidebarEnabled && isWide;
+  const triageInSidebar = isWide;
   // Collapsed-or-not is a per-viewer convenience, remembered in localStorage.
   const [triageSidebarCollapsed, setTriageSidebarCollapsedState] = useState(() => {
     try { return typeof window !== "undefined" && localStorage.getItem("triageSidebarCollapsed") === "1"; } catch { return false; }
@@ -3334,6 +3314,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
+  // The page is wide (see the data-wide-taxon-layout marker) for any taxon's
+  // section on a sidebar-wide screen, in either view: not for a single species.
+  const wideTaxonLayout = triageInSidebar && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && !(isSingleSpecies && singleSpecies);
 
   // Clicking a dot on the triage scatter opens that species in the table and
   // scrolls to it: turn to the page it is on, then scroll once the row renders.
@@ -5163,8 +5146,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const triageSidebarOpen = triageInSidebar && !isNewAssessments && showPriority && !triageSidebarCollapsed;
   const triageSidebar = triageInSidebar && !isNewAssessments && showPriority ? (
     triageSidebarCollapsed ? (
-      // Collapsed: a slim tab on the right edge; no data-triage-sidebar, so
-      // page.tsx gives the page its full width back.
+      // Collapsed: a slim tab on the right edge, and the section takes the
+      // whole (still wide) page.
       <button type="button" onClick={() => setTriageSidebarCollapsed(false)}
         aria-label="Show the Reassessment Triage sidebar"
         className="fixed right-0 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-2 px-1.5 py-3 rounded-l-lg bg-white dark:bg-zinc-900 border border-r-0 border-zinc-200 dark:border-zinc-800 shadow-md text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800">
@@ -5181,7 +5164,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Reassessment Triage</div>
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-              {priorityPoints.length.toLocaleString()} species plotted · top right is outdated with plenty of new data
+              {priorityPoints.length.toLocaleString()} species plotted
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
@@ -5294,16 +5277,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
       )}
 
-      {/* The view toggle and the section it switches. With the triage sidebar
-          open they are the left column of a grid whose right column is the
-          sticky Reassessment Triage chart, starting level with the toggle: the
-          chart is a property of the Species Assessed view, so it sits beside
-          the control that picks that view rather than spanning the page.
-          Closed, the outer wrapper is display:contents and the inner one a
-          plain block with the parent's space-y-1, so the layout is unchanged
-          (and an empty wrapper adds no height, e.g. on Country View's landing). */}
-      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : "contents"}>
-      <div className="space-y-1 min-w-0">
+      {/* Wide layout: on a sidebar-wide screen, whenever a taxon's section is
+          showing, page.tsx widens the page for the triage sidebar. Keyed to the
+          section rather than to the sidebar itself, so switching to Awaiting
+          1st Assessment or collapsing the sidebar doesn't change the page
+          width and shift the toggle under the cursor. */}
+      {wideTaxonLayout && <span data-wide-taxon-layout hidden />}
+
       {/* Wide view-mode toggle, directly above the filter charts it switches.
           Same visibility as the charts block below, and outside its "too large"
           branch so you can still switch back from that prompt. */}
@@ -5322,7 +5302,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           // the other sinks into the grey track. At this size an inverted
           // (solid black) fill outweighed the page, so selection is elevation,
           // border and full-contrast text instead. Small switches keep the fill.
-          <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
+          <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? `w-full shrink-0 ${wideTaxonLayout ? "md:w-1/2" : "md:w-[33rem]"}` : ""}`}>
             {([
               ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
@@ -5464,7 +5444,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      <div className="space-y-3">
+      // With the triage sidebar open, the reassessed section below the view
+      // toggle is two columns: its charts and table, and the sticky triage
+      // chart beside them. Below the toggle, because the toggle switches the
+      // whole section, sidebar included.
+      <div className={triageSidebarOpen ? "grid grid-cols-[minmax(0,1fr)_26rem] min-[1680px]:grid-cols-[minmax(0,1fr)_30rem] gap-4 items-start" : undefined}>
+      <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
           {!isSingleSpecies && urlSpecies != null && speciesLoading && (
@@ -7402,10 +7387,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </div>
       </div>
-      ))}
-      </div>
       {triageSidebar}
       </div>
+      ))}
 
       {/* Fixed image preview portal */}
       <div
