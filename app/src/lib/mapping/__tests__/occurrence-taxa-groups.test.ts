@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath, SHAPES, type ColFiling, type CountedTaxon,
+  taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath, shapePolygon, ALL_SHAPES, type ColFiling, type CountedTaxon,
 } from "../occurrence-taxa-groups";
 import { taxaFromLinkRows } from "@/lib/data/occurrence-taxa";
 
@@ -35,8 +35,8 @@ describe("taxonGroups", () => {
     const groups = taxonGroups(records, butorides);
     expect(groups.map((g) => [g.name, g.loaded, g.shape, g.relation])).toEqual([
       ["Butorides striata", 2, "circle", "is"],
-      ["Butorides striatus (Linnaeus, 1758)", 1, "square", "is"],
-      ["Butorides virescens", 3, "triangle", "split into"],
+      ["Butorides striatus (Linnaeus, 1758)", 1, "triangle", "is"],
+      ["Butorides virescens", 3, "square", "split into"],
     ]);
     expect(groups[0].primary).toBe(true);
     expect(groupNote(groups[1])).toBe("synonym of Butorides striata, counted");
@@ -51,11 +51,11 @@ describe("taxonGroups", () => {
     expect(groupNote(g)).toBe("synonym of Pararge aegeria; only these count");
   });
 
-  it("shares the last shape from the seventh name on", () => {
-    const many = Array.from({ length: 8 }, (_, i): ColFiling => ({ colUsageKey: `S${i}`, colUsageName: `Name ${i}`, colStatus: "SYNONYM", colSpeciesKey: "NZ6J", colSpeciesName: "Butorides striata" }));
-    const shapes = taxonGroups(many, butorides).map((g) => g.shape);
-    expect(shapes.slice(0, 6)).toEqual([...SHAPES]);
-    expect(shapes.slice(6)).toEqual(["star", "star"]);
+  it("gives five names a shape each, in order, and folds the rest into a shared plus", () => {
+    const many = Array.from({ length: 7 }, (_, i): ColFiling => ({ colUsageKey: `S${i}`, colUsageName: `Name ${i}`, colStatus: "SYNONYM", colSpeciesKey: "NZ6J", colSpeciesName: "Butorides striata" }));
+    const groups = taxonGroups(many, butorides);
+    expect(groups.map((g) => g.shape)).toEqual(["circle", "triangle", "square", "star", "triangle-down", "plus", "plus"]);
+    expect(groups.map((g) => g.other)).toEqual([false, false, false, false, false, true, true]);
   });
 });
 
@@ -91,8 +91,23 @@ describe("taxaFromLinkRows", () => {
 });
 
 describe("shape images", () => {
+  it("gives every shape the circle's area, centred where a circle would be", () => {
+    for (const shape of ALL_SHAPES) {
+      const poly = shapePolygon(shape);
+      if (!poly) continue;
+      let a = 0, cx = 0, cy = 0;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const cross = poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+        a += cross; cx += (poly[j][0] + poly[i][0]) * cross; cy += (poly[j][1] + poly[i][1]) * cross;
+      }
+      expect(Math.abs(a) / 2).toBeCloseTo(Math.PI, 6);
+      expect(cx / (3 * a)).toBeCloseTo(0, 6);
+      expect(cy / (3 * a)).toBeCloseTo(0, 6);
+    }
+  });
+
   it("encodes the edge where MapLibre's SDF shader draws it", () => {
-    for (const shape of SHAPES) {
+    for (const shape of ALL_SHAPES) {
       const { width, data } = shapeSdf(shape);
       const alpha = (x: number, y: number) => data[(y * width + x) * 4 + 3];
       const c = width / 2;

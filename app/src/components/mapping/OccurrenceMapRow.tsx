@@ -60,7 +60,7 @@ import { ELEVATION_ATTRIBUTION, elevationAt, formatElevation } from "@/lib/mappi
 import { effortGroupFor } from "@/lib/mapping/sampling-effort";
 import {
   taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath,
-  SHAPES, SHAPE_IMAGE_PREFIX, SHAPE_RADIUS, type CountedTaxon,
+  ALL_SHAPES, LEGEND_BOX, OTHER_SHAPE, SHAPE_IMAGE_PREFIX, SHAPE_RADIUS, type CountedTaxon, type Shape, type TaxonGroup,
 } from "@/lib/mapping/occurrence-taxa-groups";
 import { formatDistance, pathLengthMetres } from "@/lib/mapping/geo-distance";
 import {
@@ -628,7 +628,7 @@ function registerShapeImages(map: {
   on: (type: "styleimagemissing", listener: (e: { id: string }) => void) => unknown;
 }) {
   const add = () => {
-    for (const shape of SHAPES) {
+    for (const shape of ALL_SHAPES) {
       const id = SHAPE_IMAGE_PREFIX + shape;
       if (!map.hasImage(id)) map.addImage(id, shapeSdf(shape), { sdf: true });
     }
@@ -640,10 +640,10 @@ function registerShapeImages(map: {
 }
 
 /** A marker shape for the legend, in the colours it is drawn in. */
-function ShapeGlyph({ shape, fill, stroke, className = "" }: { shape: (typeof SHAPES)[number]; fill: string; stroke: string; className?: string }) {
+function ShapeGlyph({ shape, fill, stroke, className = "" }: { shape: Shape; fill: string; stroke: string; className?: string }) {
   return (
-    <svg className={`w-3 h-3 shrink-0 ${className}`} viewBox="0 0 12 12" aria-hidden>
-      <path d={shapeSvgPath(shape)} fill={fill} stroke={stroke} strokeWidth={1.4} strokeLinejoin="round" />
+    <svg className={`w-3.5 h-3.5 shrink-0 ${className}`} viewBox={`${-LEGEND_BOX} ${-LEGEND_BOX} ${2 * LEGEND_BOX} ${2 * LEGEND_BOX}`} aria-hidden>
+      <path d={shapeSvgPath(shape)} fill={fill} stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   );
 }
@@ -2216,6 +2216,19 @@ export default function OccurrenceMapRow({
   /** One name and nothing beside it: every dot a circle, and no legend rows. */
   const showTaxonGroups = taxonGroupList.length > 1 || hasContext;
   const shapeByGroup = useMemo(() => new Map(taxonGroupList.map((g) => [g.key, g.shape])), [taxonGroupList]);
+  const otherTaxonGroups = useMemo(() => taxonGroupList.filter((g) => g.other), [taxonGroupList]);
+  /** Show or hide names together: all shown if any were hidden, else all hidden. */
+  const toggleTaxonGroups = useCallback((groups: TaxonGroup[]) => {
+    setHiddenTaxonGroups((prev) => {
+      const next = new Set(prev);
+      const anyShown = groups.some((g) => !prev.has(g.key));
+      for (const g of groups) {
+        if (anyShown) next.add(g.key);
+        else next.delete(g.key);
+      }
+      return next;
+    });
+  }, []);
   const drawnByGroup = useMemo(() => {
     const counts = new Map<string, number>();
     for (const o of mappedOccurrences) {
@@ -6519,9 +6532,7 @@ export default function OccurrenceMapRow({
       {showGbif && showTaxonGroups && (
         <div className="pl-6 pr-2 pb-0.5">
           <div className="pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400">Filed in CoL under</div>
-          {taxonGroupList.map((g, i) => {
-            // A seventh name and beyond share the last shape: say so once.
-            const shared = i >= SHAPES.length - 1 && taxonGroupList.length > SHAPES.length;
+          {taxonGroupList.filter((g) => !g.other).map((g) => {
             const total = g.taxonKey != null ? taxonTotals[g.taxonKey] : undefined;
             return (
               <label
@@ -6532,17 +6543,10 @@ export default function OccurrenceMapRow({
                 <input
                   type="checkbox"
                   checked={!hiddenTaxonGroups.has(g.key)}
-                  onChange={() =>
-                    setHiddenTaxonGroups((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(g.key)) next.delete(g.key);
-                      else next.add(g.key);
-                      return next;
-                    })
-                  }
+                  onChange={() => toggleTaxonGroups([g])}
                   className="w-3 h-3 rounded accent-blue-500 shrink-0 mt-0.5"
                 />
-                <ShapeGlyph shape={g.shape} fill="#4ade80" stroke="#16a34a" className="mt-0.5" />
+                <ShapeGlyph shape={g.shape} fill="#4ade80" stroke="#16a34a" className="mt-px" />
                 <span className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-200">
                   <span className="italic">{g.name}</span>
                   <span className="text-zinc-400">
@@ -6551,7 +6555,6 @@ export default function OccurrenceMapRow({
                       // The species it leads to in italics, like every name here.
                       <>{groupNote(g).split(g.speciesName)[0]}<span className="italic">{g.speciesName}</span>{groupNote(g).split(g.speciesName).slice(1).join(g.speciesName)}</>
                     ) : groupNote(g)}
-                    {shared ? "; shape shared" : ""}
                   </span>
                 </span>
                 <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
@@ -6561,6 +6564,30 @@ export default function OccurrenceMapRow({
               </label>
             );
           })}
+          {/* Past the fifth name, one row and one shape: more shapes than a
+              reader can hold send them back and forth to the legend. The
+              names are in the tooltip, and each record's panel says its own. */}
+          {otherTaxonGroups.length > 0 && (
+            <label
+              title={otherTaxonGroups.map((g) => `${g.name}: ${groupNote(g)}`).join("\n")}
+              className="flex items-start gap-1.5 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+            >
+              <input
+                type="checkbox"
+                checked={otherTaxonGroups.some((g) => !hiddenTaxonGroups.has(g.key))}
+                onChange={() => toggleTaxonGroups(otherTaxonGroups)}
+                className="w-3 h-3 rounded accent-blue-500 shrink-0 mt-0.5"
+              />
+              <ShapeGlyph shape={OTHER_SHAPE} fill="#4ade80" stroke="#16a34a" className="mt-px" />
+              <span className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-200">
+                {otherTaxonGroups.length} other names
+                <span className="text-zinc-400"> (hover to list)</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
+                {otherTaxonGroups.reduce((n, g) => n + (drawnByGroup.get(g.key) ?? 0), 0).toLocaleString()}
+              </span>
+            </label>
+          )}
           {hasContext && (
             <label
               title="Records of the same CoL species filed under other names. The count leaves them to that species; drawn for context, and never in the list or the point file."

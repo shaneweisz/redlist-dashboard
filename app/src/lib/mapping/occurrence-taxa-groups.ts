@@ -12,6 +12,14 @@
  *   - a synonym or other non-accepted name, on its own: where the Red List and
  *     CoL disagree, the name a record was filed under is the evidence.
  * Colour keeps its meaning (the record's date); shape is the name.
+ *
+ * Shapes, in order (ggplot2's order, and the research behind it: a shape is told
+ * from a circle by its points, so the most pointed comes first): circle,
+ * triangle, square, star, inverted triangle. No diamond, which imported point
+ * files already draw, and no hexagon, which at a 5px dot is a circle. Each has
+ * a circle's area, so no name looks more prominent than another. Five is about
+ * as many as a reader can hold; a sixth name and beyond share a plus, as
+ * "other names".
  */
 
 /** The CoL filing the occurrence route reads from each record (route.ts, colFiling). */
@@ -31,8 +39,12 @@ export interface CountedTaxon {
   speciesKey: string;
 }
 
-export const SHAPES = ["circle", "square", "triangle", "triangle-down", "hexagon", "star"] as const;
-export type Shape = (typeof SHAPES)[number];
+export const SHAPES = ["circle", "triangle", "square", "star", "triangle-down"] as const;
+/** The marker every name past the fifth shares. */
+export const OTHER_SHAPE = "plus";
+export type Shape = (typeof SHAPES)[number] | typeof OTHER_SHAPE;
+/** Every shape the map draws, for its images. */
+export const ALL_SHAPES: readonly Shape[] = [...SHAPES, OTHER_SHAPE];
 
 export interface TaxonGroup {
   key: string;
@@ -47,6 +59,8 @@ export interface TaxonGroup {
   /** The claimed taxon's key, for its total (route metadata taxonTotals). */
   taxonKey: string | null;
   shape: Shape;
+  /** Past the fifth name: shares the plus, and the legend folds it into "other names". */
+  other: boolean;
   /** Records loaded in the group. */
   loaded: number;
   /** The species' own name: the group the matcher's answer is. */
@@ -66,7 +80,7 @@ export function groupKeyOf(f: ColFiling): string {
 /**
  * The groups among `records`, the species' own first, then by the CoL species
  * they lead to (the most records first), each species before its synonyms.
- * Six shapes; a seventh group and beyond share the last.
+ * Five shapes; a sixth group and beyond share the plus.
  */
 export function taxonGroups(records: ColFiling[], counted: CountedTaxon[]): TaxonGroup[] {
   const partOf = new Map(counted.filter((t) => t.relation === "part of").map((t) => [t.key, t]));
@@ -75,7 +89,7 @@ export function taxonGroups(records: ColFiling[], counted: CountedTaxon[]): Taxo
     ? counted[0].relation === "part of" ? `name:${counted[0].key}` : `species:${counted[0].speciesKey}`
     : null;
 
-  const groups = new Map<string, Omit<TaxonGroup, "shape"> & { speciesKey: string | null }>();
+  const groups = new Map<string, Omit<TaxonGroup, "shape" | "other"> & { speciesKey: string | null }>();
   for (const f of records) {
     const key = groupKeyOf(f);
     let g = groups.get(key);
@@ -122,7 +136,7 @@ export function taxonGroups(records: ColFiling[], counted: CountedTaxon[]): Taxo
     for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] < rb[i] ? -1 : 1;
     return 0;
   });
-  return sorted.map(({ speciesKey: _s, ...g }, i) => ({ ...g, shape: SHAPES[Math.min(i, SHAPES.length - 1)] }));
+  return sorted.map(({ speciesKey: _s, ...g }, i) => ({ ...g, shape: SHAPES[i] ?? OTHER_SHAPE, other: i >= SHAPES.length }));
 }
 
 /** A part-of claim on a record filed beneath the claimed name (a subspecies under a synonym). */
@@ -161,28 +175,48 @@ export const SHAPE_IMAGE_PREFIX = "occ-shape-";
 /** The shape's half-width, in image pixels: icon-size = radius / SHAPE_RADIUS. A dot's own radius, so icon-size stays near 1: scaled down, MapLibre widens an SDF's antialiasing into a haze. */
 export const SHAPE_RADIUS = 5;
 const SDF_RADIUS = 8;
-const SIZE = 2 * (SHAPE_RADIUS + SDF_RADIUS + 2);
 
-/** A shape's outline, as a polygon in a unit box centred on 0 (circle: none). */
+/** A polygon's area (shoelace). */
+function polygonArea(poly: [number, number][]): number {
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) a += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
+  return Math.abs(a) / 2;
+}
+
+/**
+ * A shape's outline, as a polygon around 0 with the unit circle's area, π
+ * (circle: none). Centred on its centroid, so a triangle sits where a circle
+ * would.
+ */
 export function shapePolygon(shape: Shape): [number, number][] | null {
-  const ring = (n: number, start: number, r = 1) =>
+  const ring = (n: number, start: number, radius: (i: number) => number = () => 1) =>
     Array.from({ length: n }, (_, i) => {
       const a = start + (i * 2 * Math.PI) / n;
-      return [r * Math.cos(a), r * Math.sin(a)] as [number, number];
+      return [radius(i) * Math.cos(a), radius(i) * Math.sin(a)] as [number, number];
     });
-  switch (shape) {
-    case "circle": return null;
-    case "square": return [[-0.8, -0.8], [0.8, -0.8], [0.8, 0.8], [-0.8, 0.8]];
-    // Screen y runs down: a point up is at negative y.
-    case "triangle": return ring(3, -Math.PI / 2, 1.15).map(([x, y]) => [x, y + 0.2]);
-    case "triangle-down": return ring(3, Math.PI / 2, 1.15).map(([x, y]) => [x, y - 0.2]);
-    case "hexagon": return ring(6, 0, 1);
-    case "star": return Array.from({ length: 10 }, (_, i) => {
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
-      const r = i % 2 ? 0.5 : 1.2;
-      return [r * Math.cos(a), r * Math.sin(a)] as [number, number];
-    });
-  }
+  // Screen y runs down: a point up is at negative y.
+  const raw: [number, number][] | null = (() => {
+    switch (shape) {
+      case "circle": return null;
+      case "triangle": return ring(3, -Math.PI / 2);
+      case "triangle-down": return ring(3, Math.PI / 2);
+      case "square": return ring(4, Math.PI / 4);
+      case "star": return ring(10, -Math.PI / 2, (i) => (i % 2 ? 0.5 : 1));
+      case "plus": {
+        const w = 0.36;
+        return [[-w, -1], [w, -1], [w, -w], [1, -w], [1, w], [w, w], [w, 1], [-w, 1], [-w, w], [-1, w], [-1, -w], [-w, -w]];
+      }
+    }
+  })();
+  if (!raw) return null;
+  const k = Math.sqrt(Math.PI / polygonArea(raw));
+  return raw.map(([x, y]) => [x * k, y * k]);
+}
+
+/** How far a shape reaches from its centre, in units of the circle's radius. */
+function extent(shape: Shape): number {
+  const poly = shapePolygon(shape);
+  return poly ? Math.max(...poly.map(([x, y]) => Math.hypot(x, y))) : 1;
 }
 
 /** Signed distance from (x, y) to a polygon: negative inside. */
@@ -205,6 +239,7 @@ function polygonDistance(x: number, y: number, poly: [number, number][]): number
  * (TinySDF's radius 8, cutoff 0.25), so a halo of N pixels is N pixels.
  */
 export function shapeSdf(shape: Shape): { width: number; height: number; data: Uint8Array } {
+  const SIZE = 2 * Math.ceil(SHAPE_RADIUS * extent(shape) + SDF_RADIUS + 2);
   const data = new Uint8Array(SIZE * SIZE * 4);
   const poly = shapePolygon(shape);
   const c = SIZE / 2;
@@ -219,9 +254,12 @@ export function shapeSdf(shape: Shape): { width: number; height: number; data: U
   return { width: SIZE, height: SIZE, data };
 }
 
-/** The SVG path of a shape in a 0–12 box, for the legend. */
+/** The legend's box: a viewBox of ±LEGEND_BOX, the circle's radius 4. */
+export const LEGEND_BOX = 7;
+
+/** The SVG path of a shape around 0, the circle's radius 4, for the legend. */
 export function shapeSvgPath(shape: Shape): string {
   const poly = shapePolygon(shape);
-  if (!poly) return "M6 1.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9z";
-  return poly.map(([x, y], i) => `${i ? "L" : "M"}${(6 + x * 4.5).toFixed(2)} ${(6 + y * 4.5).toFixed(2)}`).join("") + "Z";
+  if (!poly) return "M0 -4a4 4 0 1 1 0 8a4 4 0 1 1 0-8z";
+  return poly.map(([x, y], i) => `${i ? "L" : "M"}${(x * 4).toFixed(2)} ${(y * 4).toFixed(2)}`).join("") + "Z";
 }
