@@ -73,10 +73,13 @@ export async function loadOccurrenceTaxa(gbifSpeciesKey: string): Promise<Occurr
       FROM read_parquet('${parquetUri("assessment_link.parquet")}')
       WHERE sis_taxon_id = $sis AND counted AND relation IN ('is', 'split into', 'part of')
       ORDER BY role = 'primary' DESC, relation, col_taxon_id`, { sis: Number(sis) }),
-    // The likeliest parent only (rn = 1), as the CoL-differences card reads it.
+    // As the CoL-differences card reads it: the likeliest parent only (rn = 1),
+    // and only species on the NE list, the described ones needing their own
+    // assessment (a provisionally accepted *Giraffa senaariensis* is neither).
     conn.runAndReadAll(`
-      SELECT ne_col_id FROM read_parquet('${parquetUri("col-split-candidates.parquet")}')
-      WHERE parent_id = $sis AND rn = 1 ORDER BY ne_col_id`, { sis: Number(sis) }),
+      SELECT sc.ne_col_id FROM read_parquet('${parquetUri("col-split-candidates.parquet")}') sc
+      JOIN read_parquet('${parquetUri("ne.parquet")}') ne ON ne.col_id = sc.ne_col_id
+      WHERE sc.parent_id = $sis AND sc.rn = 1 ORDER BY sc.ne_col_id`, { sis: Number(sis) }),
   ]);
   return taxaFromLinkRows(
     gbifSpeciesKey,
