@@ -2897,26 +2897,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // Triage scatter: every assessed species passing every filter but its own box.
   // On home, All Species' straight from the cached list (see homeAllSpecies).
-  // Assessed species with no place on the y axis (no value for its metric:
-  // e.g. an assessment dated after the GBIF snapshot has no "since assessment"
-  // window) are counted, so the sidebar can say how many aren't shown.
-  const { priorityPoints, priorityUnplaced } = useMemo(() => {
+  const priorityPoints = useMemo((): PriorityPoint[] => {
+    if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
-    let unplaced = 0;
-    if (isNewAssessments) return { priorityPoints: out, priorityUnplaced: 0 };
     const { mode } = gbifKeyParts(priorityKey);
     const source = homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpecies;
     for (const s of source) {
-      if (s.category === "NE" || (!homeTriage && !matchesFilters(s, SKIP_PRIORITY))) continue;
       const p = priorityOf(s, priorityKey);
-      if (!p) { unplaced++; continue; }
+      if (!p || (!homeTriage && !matchesFilters(s, SKIP_PRIORITY))) continue;
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
         taxon: s.taxon_id, total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
         assessmentDate: s.assessment_date!, ...p,
       });
     }
-    return { priorityPoints: out, priorityUnplaced: unplaced };
+    return out;
   }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey, homeTriage, homeAllSpecies]);
   // The axes' extents from the whole taxon, filters ignored, so applying or
   // changing a filter never rescales the chart and selections stay comparable.
@@ -3688,7 +3683,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedTaxa, selectedCategories, selectedYearRanges, selectedAssessmentYears, selectedDescribedYears, gbifRanges, selectedAssessors, selectedReviewers, searchFilter, selectedCountries, showOnlyStarred]);
+  }, [selectedTaxa, selectedCategories, selectedYearRanges, selectedAssessmentYears, selectedDescribedYears, gbifRanges, selectedAssessors, selectedReviewers, searchFilter, selectedCountries, showOnlyStarred, triageSelection]);
+  // And whenever the page is past the last one: a filter not listed above
+  // (threats, habitat, ...) narrowing the table left it on an empty page.
+  useEffect(() => {
+    if (currentPage > Math.max(1, totalPages)) setCurrentPage(1); // eslint-disable-line react-hooks/set-state-in-effect -- corrects a page the filters left out of range
+  }, [currentPage, totalPages]);
 
   // Auto-navigate to the page containing the URL-selected species
   useEffect(() => {
@@ -5519,17 +5519,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     </button>
                     <span title="Hold ⌘ (Ctrl on Windows) and drag to add a box, or click a dot to add or remove it"> · ⌘ to add</span>
                   </>
-                ) : (
-                  <>
-                    {!isNewAssessments && priorityUnplaced > 0 ? (
-                      <span className="underline decoration-dotted underline-offset-2 cursor-help"
-                        title={`${priorityUnplaced.toLocaleString()} assessed species ${priorityUnplaced === 1 ? "has" : "have"} no value on this y axis, so ${priorityUnplaced === 1 ? "isn't" : "aren't"} plotted: for "since assessment" counts, an assessment dated after the GBIF snapshot has no window yet.`}>
-                        {triagePoints.length.toLocaleString()} of {(triagePoints.length + priorityUnplaced).toLocaleString()} plotted
-                      </span>
-                    ) : `${triagePoints.length.toLocaleString()} species plotted`}
-                    {" · drag to select · click a dot to open it"}
-                  </>
-                )}
+                ) : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
