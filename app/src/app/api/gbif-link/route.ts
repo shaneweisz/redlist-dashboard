@@ -5,9 +5,14 @@
  * files its records under (gbif-live-keys.ts): between GBIF re-indexing against
  * a newer CoL release and our next sync, our id can find nothing on gbif.org.
  * Every other parameter is passed through to the occurrence search unchanged.
+ *
+ * The occurrence search asks for every CoL taxon the species' count claims
+ * (occurrence-taxa.ts), so the link opens the records the count counted. The
+ * species page shows one taxon, so it stays on the key itself.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
+import { countedGbifKeys } from "@/lib/data/occurrence-taxa";
 
 export async function GET(request: NextRequest) {
   const params = new URLSearchParams(request.nextUrl.searchParams);
@@ -16,10 +21,9 @@ export async function GET(request: NextRequest) {
   const page = params.get("page");
   params.delete("key");
   params.delete("page");
-  const keys = await liveGbifKeys(key);
   // A species page shows one taxon: the live release's id where there is one (listed last).
   const url = page === "species"
-    ? `https://www.gbif.org/species/${keys.at(-1) ?? key}`
-    : `https://www.gbif.org/occurrence/search?${setKeys(params, "taxonKey", keys)}`;
+    ? `https://www.gbif.org/species/${(await liveGbifKeys(key)).at(-1) ?? key}`
+    : `https://www.gbif.org/occurrence/search?${setKeys(params, "taxonKey", await countedGbifKeys(key))}`;
   return NextResponse.redirect(url, 302);
 }

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_CHECKLIST_KEY } from "@/lib/gbif";
 import { gbifJson } from "@/lib/gbif-fetch";
-import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
+import { setKeys } from "@/lib/gbif-live-keys";
+import { countedGbifKeys } from "@/lib/data/occurrence-taxa";
 
 const GBIF_SEARCH = "https://api.gbif.org/v1/occurrence/search";
 
@@ -97,8 +98,10 @@ export async function GET(
   }
 
   try {
-    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
-    const gbifKeys = await liveGbifKeys(speciesKey);
+    // Every CoL taxon the count claims (occurrence-taxa.ts), as the ids GBIF's
+    // live index files their records under (gbif-live-keys.ts): the same
+    // records the occurrence map loads.
+    const gbifKeys = await countedGbifKeys(speciesKey);
     // Build base params using occurrence/search with limit=0 to get counts
     // This supports hasCoordinate and hasGeospatialIssue unlike /count endpoint
     const buildParams = (extraParams: Record<string, string> = {}) => {
