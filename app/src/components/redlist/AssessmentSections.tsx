@@ -5,6 +5,7 @@ import { narrativeLabel, type NarrativeField, type RedListAssessment } from "@/l
 import { stripHtml } from "@/lib/html-text";
 import { CitationProse } from "@/components/redlist/CitationProse";
 import { chartSegmentClass } from "@/components/redlist/chart-controls";
+import { AssessmentFacts, hasFacts } from "@/components/redlist/AssessmentFacts";
 import { THREAT_SUB_LEVEL, THREAT_TOP_LEVEL, compareThreatCodes } from "@/lib/mapping/nearby-species";
 
 type Assessment = Partial<RedListAssessment>;
@@ -15,13 +16,13 @@ export interface ComparedAssessment {
   label: string;
 }
 
-/** A tab: one of the narratives, or the assessment's bibliography. */
-export type AssessmentSection = NarrativeField | "bibliography";
+/** A tab: one of the narratives, the taxonomy, or the assessment's bibliography. */
+export type AssessmentSection = NarrativeField | "taxonomy" | "bibliography";
 
 /** What a tab holds, as text, so "is it empty" and "did it change" have one answer. */
 function sectionText(a: Assessment, section: AssessmentSection): string {
   if (section === "bibliography") return (a.references ?? []).map((r) => stripHtml(r.citation)).join("\n");
-  const raw = a[section];
+  const raw = section === "taxonomy" ? a.taxonomy?.notes : a[section];
   return raw ? stripHtml(String(raw)) : "";
 }
 
@@ -52,6 +53,7 @@ export function AssessmentSections({
   compare,
   labels,
   lead,
+  facts = false,
 }: {
   assessment: Assessment;
   sections: readonly AssessmentSection[];
@@ -59,14 +61,17 @@ export function AssessmentSections({
   compare?: { older: ComparedAssessment; newer: ComparedAssessment };
   labels?: Partial<Record<AssessmentSection, string>>;
   lead?: Partial<Record<AssessmentSection, ReactNode>>;
+  /** Show each tab's structured data (habitats, countries, ...) above its text. */
+  facts?: boolean;
 }) {
   const [section, setSection] = useState<AssessmentSection>(initial ?? sections[0]);
-  const label = (s: AssessmentSection) => labels?.[s] ?? (s === "bibliography" ? "Bibliography" : narrativeLabel(s));
+  const label = (s: AssessmentSection) =>
+    labels?.[s] ?? (s === "bibliography" ? "Bibliography" : s === "taxonomy" ? "Taxonomy" : narrativeLabel(s));
 
   const quiet = (field: AssessmentSection) =>
     compare
       ? sectionText(compare.older.assessment, field) === sectionText(compare.newer.assessment, field)
-      : !sectionText(assessment, field);
+      : !sectionText(assessment, field) && !(facts && hasFacts(assessment, field));
 
   return (
     <div className="space-y-1.5">
@@ -99,8 +104,11 @@ export function AssessmentSections({
       ) : (
         <>
           {lead?.[section]}
+          {facts && <AssessmentFacts assessment={assessment} section={section} />}
           {section === "threats" && <ThreatSummary assessment={assessment} />}
-          <SectionBody assessment={assessment} section={section} label={label(section)} />
+          {(sectionText(assessment, section) || !(facts && hasFacts(assessment, section))) && (
+            <SectionBody assessment={assessment} section={section} label={label(section)} />
+          )}
         </>
       )}
     </div>
@@ -130,7 +138,16 @@ function SectionBody({
       </ol>
     );
   }
-  return <CitationProse text={sectionText(assessment, section)} references={assessment.references ?? []} />;
+  const text = sectionText(assessment, section);
+  if (section === "taxonomy") {
+    return (
+      <div>
+        <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">Taxonomic notes</div>
+        <CitationProse text={text} references={assessment.references ?? []} />
+      </div>
+    );
+  }
+  return <CitationProse text={text} references={assessment.references ?? []} />;
 }
 
 /**

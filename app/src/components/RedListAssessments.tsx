@@ -86,9 +86,10 @@ function CategoryBadge({ code, small }: { code: string; small?: boolean }) {
 /**
  * The tabs, in the Red List website's order and under its names, Assessment
  * Information first: the rationale is the assessors' own summary of why the
- * species is in its category, and the credits go with it. The website's
- * Taxonomy and External Data are left out; the species row has Catalogue of
- * Life, GBIF and CITES tabs of its own.
+ * species is in its category, and the credits go with it. Each tab carries the
+ * website's structured data for it (habitats, countries, uses, parameters)
+ * above the narrative. The website's External Data is left out; the species
+ * row has GBIF, CITES and Catalogue of Life tabs of its own.
  */
 const NARRATIVE_FIELDS = [
   "rationale",
@@ -99,7 +100,7 @@ const NARRATIVE_FIELDS = [
   "use_trade",
   "conservation_actions",
 ] as const satisfies readonly NarrativeField[];
-const SECTIONS: readonly AssessmentSection[] = [...NARRATIVE_FIELDS, "bibliography"];
+const SECTIONS: readonly AssessmentSection[] = ["rationale", "taxonomy", ...NARRATIVE_FIELDS.slice(1), "bibliography"];
 const SECTION_LABELS: Partial<Record<AssessmentSection, string>> = {
   ...Object.fromEntries(ASSESSMENT_NARRATIVES.map((n) => [n.field, n.title])),
   rationale: "Assessment Information",
@@ -487,7 +488,7 @@ function AssessmentDetailView({
       {assessment.institutions && <div><span className="font-medium">Institutions:</span> {assessment.institutions}</div>}
     </div>
   );
-  const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]) || !!detail.references?.length;
+  const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]) || !!detail.references?.length || !!detail.taxonomy;
 
   return (
     <div className="space-y-3">
@@ -547,6 +548,7 @@ function AssessmentDetailView({
             sections={SECTIONS}
             labels={SECTION_LABELS}
             lead={{ rationale: credits }}
+            facts
           />
         </div>
       ) : (
