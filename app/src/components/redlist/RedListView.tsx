@@ -5580,10 +5580,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
         )}
         {!homeNeTriage && <>
-        {/* The plot: one height everywhere, what fits in home's table-high
-            panel, so it doesn't resize between home and a taxon; a taxon's
-            taller panel gives the rest to the selection's list. */}
-        <div className="h-[17rem] shrink-0 mt-2">
+        {/* The plot: on home it fills the table-high panel (there's no list
+            there); elsewhere 21rem, the same height, so it doesn't resize
+            between home and a taxon, and a taxon's taller panel gives the
+            rest to the species list. */}
+        <div className={`${homeTriage ? "flex-1 min-h-0" : "h-[21rem] shrink-0"} mt-2`}>
           {(homeTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
               <Spinner />{homeTriage && "Loading all species…"}
