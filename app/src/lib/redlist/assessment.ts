@@ -51,6 +51,8 @@ export interface RedListAssessment {
         score: string | null;
         /** The species or pathogen named on an invasive-species threat. */
         named?: string | null;
+        /** What the threat does to the species ("Species mortality"). */
+        stresses?: string[] | null;
       }[]
     | null;
   /*

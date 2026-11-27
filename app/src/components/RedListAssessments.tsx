@@ -59,13 +59,6 @@ function getCategoryCode(cat: RedListAssessment["red_list_category"]): string {
   return cat.code || "?";
 }
 
-// Safely extract population trend text (can be string or object)
-function getTrendText(trend: RedListAssessment["population_trend"]): string {
-  if (!trend) return "";
-  if (typeof trend === "string") return trend;
-  return trend.description || trend.code || "";
-}
-
 function CategoryBadge({ code, small }: { code: string; small?: boolean }) {
   const normalized = normalizeCategory(code);
   const color = CATEGORY_COLORS[normalized] || "#6b7280";
@@ -470,7 +463,6 @@ function AssessmentDetailView({
   assessment: PreviousAssessment;
 }) {
   const catCode = getCategoryCode(detail.red_list_category) !== "?" ? getCategoryCode(detail.red_list_category) : assessment.category;
-  const trendText = getTrendText(detail.population_trend);
   const assessmentUrl =
     detail.url || `https://www.iucnredlist.org/species/${detail.sis_taxon_id}/${detail.assessment_id}`;
   // Assessment credits, in the Red List's own billing order: who made the call,
@@ -500,20 +492,6 @@ function AssessmentDetailView({
             Criteria: {detail.criteria}
           </span>
         )}
-        {trendText && (
-          <span className="text-xs text-zinc-400 flex items-center gap-1">
-            Trend:{" "}
-            <span className={
-              trendText.toLowerCase().includes("decreasing")
-                ? "text-red-500"
-                : trendText.toLowerCase().includes("increasing")
-                ? "text-green-500"
-                : "text-zinc-500"
-            }>
-              {trendText}
-            </span>
-          </span>
-        )}
         {detail.possibly_extinct && (
           <span className="text-xs px-2 py-0.5 bg-black/10 dark:bg-white/10 text-red-600 dark:text-red-400 rounded font-medium">
             Possibly Extinct
@@ -526,18 +504,13 @@ function AssessmentDetailView({
         )}
       </div>
 
-      {/* Date and systems */}
+      {/* Dates */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
         {detail.assessment_date && (
           <span>Assessed: {formatDate(detail.assessment_date)}</span>
         )}
         {detail.year_published && (
           <span>Published: {detail.year_published}</span>
-        )}
-        {detail.systems && detail.systems.length > 0 && (
-          <span>
-            Systems: {detail.systems.map((s) => typeof s === "string" ? s : (s.description || s.code)).join(", ")}
-          </span>
         )}
       </div>
 

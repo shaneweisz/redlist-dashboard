@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import type { RedListAssessment } from "@/lib/redlist/assessment";
 import type { AssessmentSection } from "@/components/redlist/AssessmentSections";
+import { THREAT_SUB_LEVEL, THREAT_TOP_LEVEL, compareThreatCodes } from "@/lib/mapping/nearby-species";
 
 type Assessment = Partial<RedListAssessment>;
 
@@ -26,6 +27,8 @@ export function hasFacts(a: Assessment, section: AssessmentSection): boolean {
       return any(POPULATION_KEYS.map(([k]) => k)) || !!a.population_trend || CHANGE_PERIODS.some((p) => si[`${p}_percent_change`] != null);
     case "habitat":
       return !!a.habitats?.length || !!a.systems?.length || any(HABITAT_KEYS.map(([k]) => k));
+    case "threats":
+      return !!a.threat_classification?.length;
     case "use_trade":
       return !!a.use_trade_classification?.length;
     case "conservation_actions":
@@ -50,6 +53,8 @@ function factsFor(assessment: Assessment, section: AssessmentSection) {
       return <PopulationFacts a={assessment} />;
     case "habitat":
       return <HabitatFacts a={assessment} />;
+    case "threats":
+      return <ThreatCards a={assessment} />;
     case "use_trade":
       return <UseTradeFacts a={assessment} />;
     case "conservation_actions":
@@ -256,7 +261,18 @@ function PopulationFacts({ a }: { a: Assessment }) {
       <Block>
         <Pairs
           rows={[
-            ["Current trend", trend ?? null],
+            [
+              "Current trend",
+              trend ? (
+                <span
+                  className={
+                    /decreasing/i.test(trend) ? "text-red-500" : /increasing/i.test(trend) ? "text-green-600" : undefined
+                  }
+                >
+                  {trend}
+                </span>
+              ) : null,
+            ],
             ...POPULATION_KEYS.map(([k, label]) => [label, num(si[k])] as [string, ReactNode]),
           ]}
         />
@@ -333,6 +349,74 @@ function HabitatFacts({ a }: { a: Assessment }) {
           ]}
         />
       </Block>
+    </div>
+  );
+}
+
+// ── Threats ─────────────────────────────────────────────────────────────────
+
+/** "High Impact: 8" → the impact band the score falls in, for the card's colour. */
+function impactBand(score: string | null): "high" | "medium" | "low" | null {
+  if (!score) return null;
+  if (/high/i.test(score)) return "high";
+  if (/medium/i.test(score)) return "medium";
+  if (/low/i.test(score)) return "low";
+  return null;
+}
+const IMPACT_CHIP: Record<"high" | "medium" | "low", string> = {
+  high: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  medium: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+  low: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+};
+
+/**
+ * One card per scored threat, as the habitats are shown: the threat by name
+ * with the classification above it, then how it was scored and what it does to
+ * the species. Ordered by code, so two assessments read in the same order.
+ */
+function ThreatCards({ a }: { a: Assessment }) {
+  const rows = [...(a.threat_classification ?? [])].sort((x, y) => compareThreatCodes(x.code, y.code));
+  if (rows.length === 0) return null;
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-1.5">
+      {rows.map((t, i) => {
+        const parts = t.code.replace(/_/g, ".").split(".");
+        const top = parts[0];
+        const sub = parts.slice(0, 2).join(".");
+        // The levels above the threat's own, by name: "Biological resource use › Hunting & trapping".
+        const path = [
+          parts.length > 1 ? THREAT_TOP_LEVEL[top] : null,
+          parts.length > 2 ? THREAT_SUB_LEVEL[sub] : null,
+        ].filter(Boolean);
+        const band = impactBand(t.score);
+        const scoring = [t.timing, t.scope, t.severity].filter(Boolean);
+        return (
+          <div
+            key={`${t.code}-${i}`}
+            className={`rounded-md border px-2 py-1 text-xs ${
+              band === "high" || band === "medium"
+                ? "border-zinc-300 bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800/60"
+                : "border-zinc-100 dark:border-zinc-800"
+            }`}
+          >
+            {path.length > 0 && <div className="text-[11px] text-zinc-400">{path.join(" › ")}</div>}
+            <div className="text-zinc-700 dark:text-zinc-200">
+              <span className="tabular-nums text-zinc-400">{parts.join(".")}.</span>{" "}
+              {parts.length === 1 ? THREAT_TOP_LEVEL[top] ?? t.name : t.name}
+            </div>
+            {t.named && <div className="italic text-zinc-500 dark:text-zinc-400">{t.named}</div>}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-zinc-400">
+              {t.score && <span className={`rounded px-1 ${band ? IMPACT_CHIP[band] : IMPACT_CHIP.low}`}>{t.score}</span>}
+              {scoring.length > 0 && <span>{scoring.join(" · ")}</span>}
+            </div>
+            {!!t.stresses?.length && (
+              <div className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                <span className="text-zinc-400">Stresses:</span> {t.stresses.join(", ")}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

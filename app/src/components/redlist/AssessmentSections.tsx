@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { narrativeLabel, type NarrativeField, type RedListAssessment } from "@/lib/redlist/assessment";
-import { stripHtml } from "@/lib/html-text";
+import { decodeHtmlEntities, stripHtml } from "@/lib/html-text";
 import { CitationProse } from "@/components/redlist/CitationProse";
 import { chartSegmentClass } from "@/components/redlist/chart-controls";
 import { AssessmentFacts, hasFacts } from "@/components/redlist/AssessmentFacts";
@@ -105,7 +105,8 @@ export function AssessmentSections({
         <>
           {lead?.[section]}
           {facts && <AssessmentFacts assessment={assessment} section={section} />}
-          {section === "threats" && <ThreatSummary assessment={assessment} />}
+          {/* The panel's compact summary; with facts on, the threat cards replace it. */}
+          {section === "threats" && !facts && <ThreatSummary assessment={assessment} />}
           {(sectionText(assessment, section) || !(facts && hasFacts(assessment, section))) && (
             <SectionBody assessment={assessment} section={section} label={label(section)} />
           )}
@@ -127,17 +128,7 @@ function SectionBody({
   if (!sectionText(assessment, section)) {
     return <span className="block text-zinc-400">This assessment records no {label.toLowerCase()}.</span>;
   }
-  if (section === "bibliography") {
-    return (
-      <ol className="space-y-1">
-        {(assessment.references ?? []).map((r, i) => (
-          <li key={i} className="pl-4 -indent-4">
-            {stripHtml(r.citation)}
-          </li>
-        ))}
-      </ol>
-    );
-  }
+  if (section === "bibliography") return <Bibliography references={assessment.references ?? []} />;
   const text = sectionText(assessment, section);
   if (section === "taxonomy") {
     return (
@@ -148,6 +139,68 @@ function SectionBody({
     );
   }
   return <CitationProse text={text} references={assessment.references ?? []} />;
+}
+
+/**
+ * The references as a list, alphabetical as on the Red List website: one per
+ * row, titles in italics (the API marks them with <i>), links live.
+ */
+function Bibliography({ references }: { references: { citation: string }[] }) {
+  const sorted = [...references].sort((x, y) =>
+    stripHtml(x.citation).localeCompare(stripHtml(y.citation), "en", { sensitivity: "base" })
+  );
+  return (
+    <div>
+      <div className="mb-1 text-[11px] text-zinc-400">
+        {sorted.length} reference{sorted.length === 1 ? "" : "s"}
+      </div>
+      <ol className="divide-y divide-zinc-100 text-xs leading-relaxed dark:divide-zinc-800">
+        {sorted.map((r, i) => (
+          <li key={i} className="py-1.5 [overflow-wrap:anywhere]">
+            <CitationText html={r.citation} />
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** A citation's text with its italics kept and its URLs and DOIs made links. */
+function CitationText({ html }: { html: string }) {
+  // Split on the italic tags only; everything else is reduced to text.
+  const parts = html.split(/(<\/?(?:i|em)>)/i);
+  let italic = false;
+  const out: ReactNode[] = [];
+  parts.forEach((part, i) => {
+    if (/^<\/?(?:i|em)>$/i.test(part)) {
+      italic = !part.startsWith("</");
+      return;
+    }
+    // Not stripHtml: it trims, and the spaces either side of a title are text.
+    const text = decodeHtmlEntities(part.replace(/<[^>]*>/g, ""));
+    if (!text) return;
+    const linked = linkify(text, i);
+    out.push(italic ? <em key={i}>{linked}</em> : <span key={i}>{linked}</span>);
+  });
+  return <>{out}</>;
+}
+
+function linkify(text: string, key: number): ReactNode[] {
+  const re = /(https?:\/\/[^\s<>]+[^\s<>.,;:)]|\b10\.\d{4,9}\/[^\s<>]+[^\s<>.,;:)])/g;
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index! > last) out.push(text.slice(last, m.index));
+    const href = m[0].startsWith("http") ? m[0] : `https://doi.org/${m[0]}`;
+    out.push(
+      <a key={`${key}-${m.index}`} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+        {m[0]}
+      </a>
+    );
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
 }
 
 /**
