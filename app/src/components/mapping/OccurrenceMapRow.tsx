@@ -58,6 +58,10 @@ import type { OccurrenceFeature as OccurrenceFeatureType } from "./OccurrenceLis
 import { BASIS_LABELS, isGeoreferenceable } from "./OccurrenceListTable";
 import { ELEVATION_ATTRIBUTION, elevationAt, formatElevation } from "@/lib/mapping/elevation";
 import { effortGroupFor } from "@/lib/mapping/sampling-effort";
+import {
+  taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath,
+  SHAPES, SHAPE_IMAGE_PREFIX, SHAPE_RADIUS, type CountedTaxon,
+} from "@/lib/mapping/occurrence-taxa-groups";
 import { formatDistance, pathLengthMetres } from "@/lib/mapping/geo-distance";
 import {
   clearPointFile,
@@ -612,6 +616,37 @@ export function isOutsideNativeRange(
   return !nativeCountries.some((c) => c.toUpperCase() === upper);
 }
 
+
+/**
+ * The marker shapes, as distance-field images MapLibre tints per feature. Added
+ * on load and again whenever the style asks for one it lost (a basemap switch
+ * replaces the style, and its images with it).
+ */
+function registerShapeImages(map: {
+  hasImage: (id: string) => boolean;
+  addImage: (id: string, image: { width: number; height: number; data: Uint8Array }, options: { sdf: boolean }) => void;
+  on: (type: "styleimagemissing", listener: (e: { id: string }) => void) => unknown;
+}) {
+  const add = () => {
+    for (const shape of SHAPES) {
+      const id = SHAPE_IMAGE_PREFIX + shape;
+      if (!map.hasImage(id)) map.addImage(id, shapeSdf(shape), { sdf: true });
+    }
+  };
+  add();
+  map.on("styleimagemissing", (e) => {
+    if (String(e.id).startsWith(SHAPE_IMAGE_PREFIX)) add();
+  });
+}
+
+/** A marker shape for the legend, in the colours it is drawn in. */
+function ShapeGlyph({ shape, fill, stroke, className = "" }: { shape: (typeof SHAPES)[number]; fill: string; stroke: string; className?: string }) {
+  return (
+    <svg className={`w-3 h-3 shrink-0 ${className}`} viewBox="0 0 12 12" aria-hidden>
+      <path d={shapeSvgPath(shape)} fill={fill} stroke={stroke} strokeWidth={1.4} strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export default function OccurrenceMapRow({
   speciesKey,
@@ -1371,6 +1406,24 @@ export default function OccurrenceMapRow({
 
   // GBIF points toggle (on by default)
   const [showGbif, setShowGbif] = useState(true);
+  /**
+   * The CoL taxa the species' count claims, and the species whose other
+   * records it leaves to them (the route's metadata.taxa; occurrence-taxa.ts).
+   * Where there is more than one name, each gets a marker shape and a legend
+   * row (lib/mapping/occurrence-taxa-groups.ts).
+   */
+  const [countedTaxa, setCountedTaxa] = useState<{ counted: CountedTaxon[]; context: string[] } | null>(null);
+  /** Each claimed taxon's own mapped total, by its key. */
+  const [taxonTotals, setTaxonTotals] = useState<Record<string, number>>({});
+  /** Name groups switched off in the legend: the map only, like a neighbour's layer. */
+  const [hiddenTaxonGroups, setHiddenTaxonGroups] = useState<Set<string>>(() => new Set());
+  /**
+   * The rest of the CoL species a part-of name is filed under, off by default:
+   * it can be thousands of times the species' own records, and isn't counted.
+   */
+  const [showContext, setShowContext] = useState(false);
+  const [contextOccurrences, setContextOccurrences] = useState<OccurrenceFeature[] | null>(null);
+  const [contextTotal, setContextTotal] = useState<number | null>(null);
 
   /**
    * The three point sets are toggled independently rather than being one
@@ -1712,6 +1765,8 @@ export default function OccurrenceMapRow({
         setTotalOccurrences(data.metadata?.total ?? null);
         setBbox(data.metadata?.bbox ?? null);
         setRecordSetTotals(data.metadata?.totals ?? null);
+        setCountedTaxa(data.metadata?.taxa ?? null);
+        setTaxonTotals(data.metadata?.taxonTotals ?? {});
         // How far the records-with-coordinates list has been paged, which is
         // the sample size — not the number of records that came back. The
         // unmapped set is fetched under its own limit and merged in, so
@@ -1721,7 +1776,37 @@ export default function OccurrenceMapRow({
       })
       .catch(console.error)
       .finally(() => setLoadingOccurrences(false));
+    setContextOccurrences(null);
+    setContextTotal(null);
   }, [speciesKey, countryCode, sampleSize]);
+
+  // Another species starts with every name shown and the context off: reset
+  // while rendering, as the point file is, not in an effect a frame late.
+  const [taxaShownFor, setTaxaShownFor] = useState(speciesKey);
+  if (taxaShownFor !== speciesKey) {
+    setTaxaShownFor(speciesKey);
+    setHiddenTaxonGroups(new Set());
+    setShowContext(false);
+  }
+
+  // The context, once asked for: one sample, under the same limit.
+  useEffect(() => {
+    if (!showContext || contextOccurrences) return;
+    let live = true;
+    const params = new URLSearchParams({ speciesKey, scope: "context", limit: sampleSize.toString() });
+    if (countryCode) params.set("country", countryCode);
+    fetch(`/api/occurrences?${params}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!live) return;
+        setContextOccurrences(data.features ?? []);
+        setContextTotal(data.metadata?.total ?? null);
+      })
+      .catch(console.error);
+    return () => {
+      live = false;
+    };
+  }, [showContext, contextOccurrences, speciesKey, countryCode, sampleSize]);
 
   /**
    * The records this assessor has edited, whether or not the sample holds them.
@@ -2117,6 +2202,45 @@ export default function OccurrenceMapRow({
     () => mappedOccurrences.filter(hasPosition).length,
     [mappedOccurrences]
   );
+
+  /**
+   * The names the loaded records are filed under, each with a shape. Built
+   * from everything loaded, so a name keeps its shape while filters change;
+   * the legend's counts are what the map draws.
+   */
+  const taxonGroupList = useMemo(
+    () => taxonGroups(occurrences.filter(hasPosition).map((o) => o.properties), countedTaxa?.counted ?? []),
+    [occurrences, countedTaxa]
+  );
+  const hasContext = (countedTaxa?.context.length ?? 0) > 0;
+  /** One name and nothing beside it: every dot a circle, and no legend rows. */
+  const showTaxonGroups = taxonGroupList.length > 1 || hasContext;
+  const shapeByGroup = useMemo(() => new Map(taxonGroupList.map((g) => [g.key, g.shape])), [taxonGroupList]);
+  const drawnByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of mappedOccurrences) {
+      if (!hasPosition(o)) continue;
+      const k = groupKeyOf(o.properties);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [mappedOccurrences]);
+  /** The context's records the map can draw: mapped, and not claimed by this species. */
+  const contextShown = useMemo(
+    () => (contextOccurrences ?? []).filter((o) =>
+      hasPosition(o) && o.properties.coordinateStatus === "mapped" && !isClaimed(o.properties, countedTaxa?.counted ?? [])),
+    [contextOccurrences, countedTaxa]
+  );
+  const contextName = useMemo(() => {
+    const names = new Set(contextShown.map((o) => o.properties.colSpeciesName).filter(Boolean));
+    if (names.size === 1) return [...names][0] as string;
+    const ofPartOf = taxonGroupList.find((g) => g.relation === "part of")?.speciesName;
+    return ofPartOf ?? null;
+  }, [contextShown, taxonGroupList]);
+  const contextGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: contextShown.map((o) => ({ type: "Feature" as const, properties: {}, geometry: o.geometry as GeoJSON.Point })),
+  }), [contextShown]);
   const struckOutCount = useMemo(
     () => filteredOccurrences.filter((o) => hasPosition(o) && exclusions[o.properties.gbifID]).length,
     [filteredOccurrences, exclusions]
@@ -2613,7 +2737,8 @@ export default function OccurrenceMapRow({
   ): GeoJSON.FeatureCollection => {
     // Records with no coordinates can't be drawn — they're carried through the
     // same filter pipeline so the list can show them, and dropped here.
-    const features = panelOccurrences.filter(hasPosition).map((feature) => {
+    const features = panelOccurrences.filter(hasPosition)
+      .filter((o) => !(showTaxonGroups && hiddenTaxonGroups.has(groupKeyOf(o.properties)))).map((feature) => {
       const isFeatureHovered = hoveredFeature?.properties.gbifID === feature.properties.gbifID;
       const struckOut = !!exclusions[feature.properties.gbifID];
 
@@ -2661,12 +2786,14 @@ export default function OccurrenceMapRow({
           _strokeWidth: struckOut ? 1.75 : strokeWidth,
           _fillOpacity: struckOut ? 0 : 1,
           _strokeOpacity: struckOut ? 0.85 : 1,
+          // The CoL name it is filed under, as a marker shape.
+          _shape: showTaxonGroups ? shapeByGroup.get(groupKeyOf(feature.properties)) ?? "circle" : "circle",
         },
         geometry: feature.geometry,
       };
     });
     return { type: "FeatureCollection", features };
-  }, [hoveredFeature, colorByDate, assessmentDate, assessmentYear, exclusions]);
+  }, [hoveredFeature, colorByDate, assessmentDate, assessmentYear, exclusions, showTaxonGroups, hiddenTaxonGroups, shapeByGroup]);
 
   /**
    * The uncertainty rings for a panel's records, built once per set of records.
@@ -3584,6 +3711,27 @@ export default function OccurrenceMapRow({
         "circle-stroke-width": ["get", "_strokeWidth"] as unknown as number,
         "circle-stroke-opacity": ["get", "_strokeOpacity"] as unknown as number,
       },
+      filter: ["==", ["get", "_shape"], "circle"] as unknown as boolean,
+    };
+    // Every other shape: the same fill and outline, from a distance-field image
+    // (registerShapeImages) tinted per feature. Radius as the circle's, the
+    // outline outside it as the circle's stroke is.
+    const shapeLayerStyle = {
+      id: `occ-shapes-${panelId}`,
+      type: "symbol" as const,
+      filter: ["!=", ["get", "_shape"], "circle"] as unknown as boolean,
+      layout: {
+        "icon-image": ["concat", SHAPE_IMAGE_PREFIX, ["get", "_shape"]] as unknown as string,
+        "icon-size": ["/", ["get", "_radius"], SHAPE_RADIUS] as unknown as number,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+      paint: {
+        "icon-color": ["get", "_fillColor"] as unknown as string,
+        "icon-opacity": ["max", ["get", "_fillOpacity"], ["get", "_strokeOpacity"]] as unknown as number,
+        "icon-halo-color": ["get", "_strokeColor"] as unknown as string,
+        "icon-halo-width": ["get", "_strokeWidth"] as unknown as number,
+      },
     };
 
     const mapProps = splitView
@@ -3699,6 +3847,7 @@ export default function OccurrenceMapRow({
               mapStyle={BASEMAP_STYLES[basemap].style}
               interactiveLayerIds={[
                 `occ-circles-${panelId}`,
+                `occ-shapes-${panelId}`,
                 `georef-point-${panelId}`,
                 `nearby-points-circle-${panelId}`,
                 `nearby-radius-grab-${panelId}`,
@@ -3711,7 +3860,10 @@ export default function OccurrenceMapRow({
               onTouchCancel={cancelLongPress}
               onMouseMove={(e: MapLayerMouseEvent) => handleMapMouseMove(e, panelId)}
               onMouseLeave={handleMapMouseLeave}
-              onLoad={panelId === "main" || panelId === "before" || !splitView ? handleMapLoad : undefined}
+              onLoad={(e) => {
+                registerShapeImages(e.target);
+                if (panelId === "main" || panelId === "before" || !splitView) handleMapLoad();
+              }}
               // The ordinary arrow at rest, four-way arrows while panning and
               // a crosshair while measuring — the map cursor everyone already
               // knows from Google Maps. The hand it replaces claimed the map
@@ -3881,6 +4033,27 @@ export default function OccurrenceMapRow({
               {showGbif && (
                 <Source id={`occurrences-${panelId}`} type="geojson" data={styledGeoJson}>
                   <Layer {...circleLayerStyle} beforeId={slotId("records", panelId)} />
+                  <Layer {...shapeLayerStyle} beforeId={slotId("records", panelId)} />
+                </Source>
+              )}
+              {/* The rest of the CoL species a part-of name is filed under:
+                  hollow and grey, under the species' own records, and not
+                  interactive — they aren't this species' records, and the list
+                  and the point file never hold them. */}
+              {showGbif && showContext && contextShown.length > 0 && (
+                <Source id={`occ-context-${panelId}`} type="geojson" data={contextGeoJson}>
+                  <Layer
+                    id={`occ-context-circles-${panelId}`}
+                    type="circle"
+                    beforeId={`occ-circles-${panelId}`}
+                    paint={{
+                      "circle-radius": 3.5,
+                      "circle-color": "rgba(0,0,0,0)",
+                      "circle-stroke-color": "#71717a",
+                      "circle-stroke-width": 1.25,
+                      "circle-stroke-opacity": 0.7,
+                    }}
+                  />
                 </Source>
               )}
               {/* The IUCN point file, when one is loaded — the assessment's
@@ -5203,6 +5376,9 @@ export default function OccurrenceMapRow({
       };
 
       add("Species", p.species);
+      // The CoL name it is filed under, where that isn't the species itself: a
+      // synonym or a subspecies, which the map's shapes tell apart.
+      if (p.colUsageName && p.colUsageName !== p.species) add("Filed as", p.colUsageName);
       add("Basis", formatBasisOfRecord(p.basisOfRecord));
       // The assessor's own reading of the label wins over GBIF's transcription,
       // and says so — the same bargain as their coordinates.
@@ -6336,6 +6512,79 @@ export default function OccurrenceMapRow({
           {(mappedPositionedCount - struckOutCount).toLocaleString()}
         </span>
       </label>
+      {/* The names the records are filed under, where there is more than one:
+          a shape each, what it is and why it counts, and a switch. The count is
+          what the map draws; "of N" is GBIF's own total for a claimed taxon,
+          because a sample of the whole says little about a small part of it. */}
+      {showGbif && showTaxonGroups && (
+        <div className="pl-6 pr-2 pb-0.5">
+          <div className="pb-0.5 text-[9px] uppercase tracking-wide text-zinc-400">Filed in CoL under</div>
+          {taxonGroupList.map((g, i) => {
+            // A seventh name and beyond share the last shape: say so once.
+            const shared = i >= SHAPES.length - 1 && taxonGroupList.length > SHAPES.length;
+            const total = g.taxonKey != null ? taxonTotals[g.taxonKey] : undefined;
+            return (
+              <label
+                key={g.key}
+                title={`${g.name}: ${groupNote(g)}`}
+                className="flex items-start gap-1.5 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+              >
+                <input
+                  type="checkbox"
+                  checked={!hiddenTaxonGroups.has(g.key)}
+                  onChange={() =>
+                    setHiddenTaxonGroups((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(g.key)) next.delete(g.key);
+                      else next.add(g.key);
+                      return next;
+                    })
+                  }
+                  className="w-3 h-3 rounded accent-blue-500 shrink-0 mt-0.5"
+                />
+                <ShapeGlyph shape={g.shape} fill="#4ade80" stroke="#16a34a" className="mt-0.5" />
+                <span className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-200">
+                  <span className="italic">{g.name}</span>
+                  <span className="text-zinc-400">
+                    {" "}
+                    {g.speciesName ? (
+                      // The species it leads to in italics, like every name here.
+                      <>{groupNote(g).split(g.speciesName)[0]}<span className="italic">{g.speciesName}</span>{groupNote(g).split(g.speciesName).slice(1).join(g.speciesName)}</>
+                    ) : groupNote(g)}
+                    {shared ? "; shape shared" : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
+                  {(drawnByGroup.get(g.key) ?? 0).toLocaleString()}
+                  {total != null && total >= 0 && <> of {total.toLocaleString()}</>}
+                </span>
+              </label>
+            );
+          })}
+          {hasContext && (
+            <label
+              title="Records of the same CoL species filed under other names. The count leaves them to that species; drawn for context, and never in the list or the point file."
+              className="flex items-start gap-1.5 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+            >
+              <input
+                type="checkbox"
+                checked={showContext}
+                onChange={() => setShowContext((v) => !v)}
+                className="w-3 h-3 rounded accent-zinc-500 shrink-0 mt-0.5"
+              />
+              <svg className="w-3 h-3 shrink-0 mt-0.5" viewBox="0 0 12 12" aria-hidden>
+                <circle cx="6" cy="6" r="3.5" fill="none" stroke="#71717a" strokeWidth={1.25} />
+              </svg>
+              <span className="min-w-0 flex-1 text-zinc-500 dark:text-zinc-400">
+                The rest of {contextName ? <span className="italic">{contextName}</span> : "its CoL species"}, not counted
+              </span>
+              <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
+                {showContext ? (contextOccurrences ? <>{contextShown.length.toLocaleString()}{contextTotal != null && <> of {Math.max(0, contextTotal - (recordSetTotals?.mapped ?? 0)).toLocaleString()}</>}</> : "…") : ""}
+              </span>
+            </label>
+          )}
+        </div>
+      )}
         {/* Struck-out records get their own row rather than being folded into
           the one above: the count that matters is what's still counted, and
           the greyed points need a key of their own to be read as deliberate. */}

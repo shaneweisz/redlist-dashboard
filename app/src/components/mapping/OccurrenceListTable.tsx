@@ -73,6 +73,14 @@ export interface OccurrenceFeature {
     verbatimElevation?: string;
     /** The publisher's own record id — outlives a GBIF re-key. */
     occurrenceID?: string;
+    /** The CoL name GBIF files the record under, and its species (lib/mapping/occurrence-taxa-groups.ts). */
+    colUsageKey?: string | null;
+    colUsageName?: string | null;
+    colUsageRank?: string | null;
+    colStatus?: string | null;
+    colSpeciesKey?: string | null;
+    colSpeciesName?: string | null;
+    colPath?: string[] | null;
     /** Which record set this came from — see CoordinateStatus in the API route. */
     coordinateStatus?: "mapped" | "issue" | "missing";
     /** GBIF's own geospatial issues with this record's coordinates. */

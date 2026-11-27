@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CACHE_5M } from "@/lib/cache-headers";
 import { GBIF_USER_AGENT } from "@/lib/gbif-fetch";
 import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
+import { occurrenceTaxa } from "@/lib/data/occurrence-taxa";
 import { getQualityFlags } from "@/lib/mapping/coordinate-cleaning";
 import { GBIF_CHECKLIST_KEY, GBIF_COORDINATE_NOTES, GBIF_GEOSPATIAL_ISSUES } from "@/lib/gbif";
 
@@ -121,6 +122,14 @@ type GbifRecord = {
   lastInterpreted?: string;
   isSequenced?: boolean;
   isInCluster?: boolean;
+  /** Each checklist's reading of the record's name, by checklist key: the CoL
+   *  record it is filed under (usage), its accepted name and its classification. */
+  classifications?: Record<string, {
+    usage?: { key?: string; name?: string; rank?: string; authorship?: string };
+    acceptedUsage?: { key?: string; name?: string };
+    taxonomicStatus?: string;
+    classification?: { key?: string; name?: string; rank?: string }[];
+  }>;
   media?: { type?: string; format?: string; identifier?: string; references?: string; title?: string; creator?: string; license?: string; rightsHolder?: string }[];
 };
 
@@ -356,6 +365,31 @@ async function fetchPaginated(
  * arrived in a sample. Anything less and the two would behave differently in
  * the table that shows them side by side.
  */
+/**
+ * The CoL record GBIF files an occurrence under, and the CoL species that leads
+ * to: what the map groups its dots by (lib/mapping/occurrence-taxa-groups.ts).
+ * Read from the record's classification in the checklist we count by.
+ */
+function withoutAuthorship(name: string | undefined, authorship: string | undefined): string | null {
+  if (!name) return null;
+  return authorship && name.endsWith(` ${authorship}`) ? name.slice(0, -authorship.length - 1) : name;
+}
+
+function colFiling(r: GbifRecord) {
+  const c = r.classifications?.[GBIF_CHECKLIST_KEY];
+  const species = c?.classification?.find((t) => t.rank === "SPECIES");
+  return {
+    colUsageKey: c?.usage?.key ?? null,
+    // The name alone: the legend sets it in italics, and the authors aren't.
+    colUsageName: withoutAuthorship(c?.usage?.name, c?.usage?.authorship),
+    colUsageRank: c?.usage?.rank ?? null,
+    colStatus: c?.taxonomicStatus ?? null,
+    colSpeciesKey: species?.key ?? null,
+    colSpeciesName: species?.name ?? null,
+    colPath: (c?.classification ?? []).map((t) => t.key).filter((k): k is string => !!k),
+  };
+}
+
 function toFeatures(results: GbifRecord[]) {
   // De-duplicated by gbifID: the issue and missing queries overlap for records
   // whose coordinates were invalid enough that GBIF dropped them entirely.
@@ -435,6 +469,7 @@ function toFeatures(results: GbifRecord[]) {
       gbifIssues: shownIssuesByKey.get(r.key) ?? [],
       ...passThrough(r),
       images: imagesOf(r),
+      ...colFiling(r),
     },
     // null for records with no coordinates — valid GeoJSON, and the signal the
     // map uses to skip them while the list still shows their locality.
@@ -466,6 +501,10 @@ export async function GET(request: NextRequest) {
   // "Load more records without coordinates": pages that set alone, from its own
   // offset, so it can't disturb where the mapped set has got to.
   const onlyMissing = searchParams.get("onlyMissing") === "true";
+  // "context": the rest of the CoL species a part-of record is filed under,
+  // which the count leaves to that species (occurrence-taxa.ts). Drawn beside
+  // the species' own records when asked for, never counted with them.
+  const context = searchParams.get("scope") === "context";
   /**
    * Named records, whatever page of the species they would otherwise fall on.
    *
@@ -492,11 +531,18 @@ export async function GET(request: NextRequest) {
     // Shared across all three record sets; each bucket adds its own
     // hasCoordinate/hasGeospatialIssue pair on top.
     const baseParams = new URLSearchParams({
-      speciesKey,
       checklistKey: GBIF_CHECKLIST_KEY,
     });
-    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
-    setKeys(baseParams, "speciesKey", await liveGbifKeys(speciesKey));
+    // Every CoL taxon the count claims (occurrence-taxa.ts), each as the ids
+    // GBIF's live index files its records under (gbif-live-keys.ts). GBIF ORs
+    // repeated taxonKeys and files each record once, so nothing is fetched twice.
+    const taxa = await occurrenceTaxa(speciesKey);
+    const asked = context ? taxa.context : taxa.counted.map((t) => t.key);
+    if (asked.length === 0) {
+      return NextResponse.json({ type: "FeatureCollection", features: [], metadata: { speciesKey, count: 0, total: 0, totals: { mapped: 0, issue: 0, missing: 0 }, bbox: null, taxa } }, { headers: CACHE_5M });
+    }
+    const liveKeys = [...new Set((await Promise.all(asked.map((k) => liveGbifKeys(k)))).flat())];
+    setKeys(baseParams, "taxonKey", liveKeys);
 
     if (country) {
       baseParams.set("country", country.toUpperCase());
@@ -555,6 +601,18 @@ export async function GET(request: NextRequest) {
 
     const features = toFeatures([...georeferenced.results, ...(missing?.results ?? [])]);
 
+    // Each counted taxon's own mapped total, for the legend: a sample of the
+    // union says little about a taxon with a few hundred records among millions.
+    // Asked only with the first page, and only when there is more than one.
+    const taxonTotals: Record<string, number> = {};
+    if (!context && offset === 0 && !onlyMissing && taxa.counted.length > 1) {
+      await Promise.all(taxa.counted.map(async (t) => {
+        const own = new URLSearchParams(baseParams);
+        setKeys(own, "taxonKey", await liveGbifKeys(t.key));
+        taxonTotals[t.key] = await countBucket(own, "mapped").catch(() => -1);
+      }));
+    }
+
     // Calculate bbox from the mapped features only. Flagged records are exactly
     // the ones whose coordinates can't be trusted — this species' single flagged
     // record sits at (0, 0), which would stretch the map's auto-fit from the
@@ -590,6 +648,9 @@ export async function GET(request: NextRequest) {
           missing: missingTotal,
         },
         bbox: positionedCount > 0 ? [minLon, minLat, maxLon, maxLat] : null,
+        // What was asked for: the taxa the count claims, and the context.
+        taxa,
+        taxonTotals,
       },
     }, { headers: CACHE_5M });
   } catch (error) {
