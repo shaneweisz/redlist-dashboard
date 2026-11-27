@@ -3245,10 +3245,37 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                         const isSscSection = sscMode;
                         const catchAllRow = section.catchAllId != null ? rows.find(r => r.group === section.catchAllId) : undefined;
                         const namedRows = catchAllRow ? rows.filter(r => r.group !== section.catchAllId) : rows;
+                        // Where a Table 1a row's click goes when it isn't a view root:
+                        // the tree node under a virtual root (e.g. molluscs →
+                        // invertebrates). row.group is a tree node id. Aggregating parent
+                        // rows (e.g. "insecta", which spans 8 order taxon groups) match a
+                        // child by node id; single-group rows match by taxon group.
+                        const table1aTarget = (group: string): { rootId: string; childId: string } | null => {
+                          const stripPrefix = (id: string) => id.replace(/^(inv-|pl-|fu-)/, "");
+                          for (const rootId of TAXONOMY_VIEWS.default.roots) {
+                            const rootNode = findNode(rootId);
+                            const matchingChild =
+                              rootNode?.children?.find(c => stripPrefix(c.id) === group)
+                              ?? rootNode?.children?.find(c =>
+                                c.filter.taxonGroups.length === 1 && c.filter.taxonGroups[0] === group
+                              )
+                              ?? rootNode?.children?.find(c =>
+                                c.filter.taxonGroups.includes(group)
+                              );
+                            if (matchingChild) return { rootId, childId: matchingChild.id };
+                          }
+                          return null;
+                        };
+                        // What a row's click opens, for the triage preview: an SSC
+                        // group's own node, a view root, or Table 1a's tree node.
+                        const hoverId = (group: string): string | null =>
+                          sscMode || TAXONOMY_VIEWS.default.roots.includes(group) ? group : table1aTarget(group)?.childId ?? null;
                         const renderGroupRow = (row: (typeof rows)[number]) => (
                         <tr
                           key={row.group}
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer"
+                          onMouseEnter={() => onHoverTaxon?.(hoverId(row.group))}
+                          onMouseLeave={() => onHoverTaxon?.(null)}
                           onClick={(e) => {
                             if (sscMode) {
                               // SSC groups are pre-filtered sub-populations of a real view-root
@@ -3267,26 +3294,8 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
                               onLayoutModeChange(null);
                               onToggleTaxon(row.group, e);
                             } else if (onNavigateToSubgroup) {
-                              // Table 1a group under a virtual root (e.g. molluscs → invertebrates).
-                              // row.group is a tree node id. Aggregating parent rows (e.g. "insecta",
-                              // which spans 8 order taxon groups) match a child by node id; single-group
-                              // rows match by taxon group.
-                              const stripPrefix = (id: string) => id.replace(/^(inv-|pl-|fu-)/, "");
-                              for (const rootId of defaultRoots) {
-                                const rootNode = findNode(rootId);
-                                const matchingChild =
-                                  rootNode?.children?.find(c => stripPrefix(c.id) === row.group)
-                                  ?? rootNode?.children?.find(c =>
-                                    c.filter.taxonGroups.length === 1 && c.filter.taxonGroups[0] === row.group
-                                  )
-                                  ?? rootNode?.children?.find(c =>
-                                    c.filter.taxonGroups.includes(row.group)
-                                  );
-                                if (matchingChild) {
-                                  onNavigateToSubgroup(rootId, matchingChild.id);
-                                  break;
-                                }
-                              }
+                              const target = table1aTarget(row.group);
+                              if (target) onNavigateToSubgroup(target.rootId, target.childId);
                             }
                           }}
                         >
