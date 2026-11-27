@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ASSESSMENT_NARRATIVES,
   loadAssessment,
   type LoadedAssessment,
   type NarrativeField,
@@ -9,7 +10,7 @@ import {
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
 import { stripHtml } from "@/lib/html-text";
-import { AssessmentSections } from "@/components/redlist/AssessmentSections";
+import { AssessmentSections, type AssessmentSection } from "@/components/redlist/AssessmentSections";
 import { chartControlClass } from "@/components/redlist/chart-controls";
 
 interface PreviousAssessment {
@@ -83,21 +84,26 @@ function CategoryBadge({ code, small }: { code: string; small?: boolean }) {
 }
 
 /**
- * The narrative sections, in the order this tab offers them: the rationale
- * first, because it is the assessors' own summary of why the species is in its
- * category. The field list and labels come from the shared module, so a field
- * the route starts returning can't appear in the nearby-species panel and be
- * missing here.
+ * The tabs, in the Red List website's order and under its names, Assessment
+ * Information first: the rationale is the assessors' own summary of why the
+ * species is in its category, and the credits go with it. The website's
+ * Taxonomy and External Data are left out; the species row has Catalogue of
+ * Life, GBIF and CITES tabs of its own.
  */
 const NARRATIVE_FIELDS = [
   "rationale",
+  "range",
   "population",
   "habitat",
   "threats",
-  "conservation_actions",
   "use_trade",
-  "range",
+  "conservation_actions",
 ] as const satisfies readonly NarrativeField[];
+const SECTIONS: readonly AssessmentSection[] = [...NARRATIVE_FIELDS, "bibliography"];
+const SECTION_LABELS: Partial<Record<AssessmentSection, string>> = {
+  ...Object.fromEntries(ASSESSMENT_NARRATIVES.map((n) => [n.field, n.title])),
+  rationale: "Assessment Information",
+};
 
 // Comparison view showing diff between two assessments
 function AssessmentComparison({
@@ -176,7 +182,8 @@ function AssessmentComparison({
         <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
           <AssessmentSections
             assessment={newer}
-            sections={NARRATIVE_FIELDS}
+            sections={SECTIONS}
+            labels={SECTION_LABELS}
             compare={{
               older: { assessment: older, label: `${yearOf(older)} assessment` },
               newer: { assessment: newer, label: `${yearOf(newer)} assessment` },
@@ -309,6 +316,11 @@ export default function RedListAssessments({
   // instead of an assessment.
   const isLoading = !!selectedAssessment && !held[selectedAssessment.assessment_id];
   const hasError = !!selectedAssessment && !!held[selectedAssessment.assessment_id]?.error;
+  // The assessment being read, not just the species: an older one in the
+  // timeline opens as that assessment on the website.
+  const selectedUrl = selectedDetail
+    ? selectedDetail.url || `https://www.iucnredlist.org/species/${selectedDetail.sis_taxon_id}/${selectedDetail.assessment_id}`
+    : speciesUrl;
   const isCompareLoading = !!olderAssessment && !held[olderAssessment.assessment_id];
 
   return (
@@ -339,7 +351,7 @@ export default function RedListAssessments({
 
           {/* IUCN link */}
           <a
-            href={speciesUrl}
+            href={selectedUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-blue-500 hover:underline flex items-center gap-1"
@@ -460,7 +472,22 @@ function AssessmentDetailView({
   const trendText = getTrendText(detail.population_trend);
   const assessmentUrl =
     detail.url || `https://www.iucnredlist.org/species/${detail.sis_taxon_id}/${detail.assessment_id}`;
-  const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]);
+  // Assessment credits, in the Red List's own billing order: who made the call,
+  // who checked it, then who else was involved. Filed under Assessment
+  // Information, as on the website. Each line is dropped when empty rather than
+  // shown as blank: contributors and institutions are absent on most
+  // assessments (67% and 81%).
+  const credits = (assessment.assessors || assessment.reviewers || assessment.facilitators
+    || assessment.contributors || assessment.institutions) && (
+    <div className="mb-2 space-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+      {assessment.assessors && <div><span className="font-medium">Assessors:</span> {assessment.assessors}</div>}
+      {assessment.reviewers && <div><span className="font-medium">Reviewers:</span> {assessment.reviewers}</div>}
+      {assessment.facilitators && <div><span className="font-medium">Facilitators:</span> {assessment.facilitators}</div>}
+      {assessment.contributors && <div><span className="font-medium">Contributors:</span> {assessment.contributors}</div>}
+      {assessment.institutions && <div><span className="font-medium">Institutions:</span> {assessment.institutions}</div>}
+    </div>
+  );
+  const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]) || !!detail.references?.length;
 
   return (
     <div className="space-y-3">
@@ -513,33 +540,14 @@ function AssessmentDetailView({
         )}
       </div>
 
-      {/* Assessment credits, in the Red List's own billing order: who made the
-          call, who checked it, then who else was involved. Each line is dropped
-          when empty rather than shown as blank — contributors and institutions
-          are absent on most assessments (67% and 81%), so printing empty labels
-          would add three rows of nothing to the common case. */}
-      {(assessment.assessors || assessment.reviewers || assessment.facilitators
-        || assessment.contributors || assessment.institutions) && (
-        <div className="text-xs text-zinc-500 dark:text-zinc-400 space-y-0.5">
-          {assessment.assessors && <div><span className="font-medium">Assessors:</span> {assessment.assessors}</div>}
-          {assessment.reviewers && <div><span className="font-medium">Reviewers:</span> {assessment.reviewers}</div>}
-          {assessment.facilitators && <div><span className="font-medium">Facilitators:</span> {assessment.facilitators}</div>}
-          {assessment.contributors && <div><span className="font-medium">Contributors:</span> {assessment.contributors}</div>}
-          {assessment.institutions && <div><span className="font-medium">Institutions:</span> {assessment.institutions}</div>}
-        </div>
-      )}
-
       {hasNarrative ? (
         <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-          <AssessmentSections assessment={detail} sections={NARRATIVE_FIELDS} />
-          <a
-            href={assessmentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block border-t border-zinc-100 pt-1 text-xs text-blue-500 hover:underline dark:border-zinc-800"
-          >
-            Open this assessment on the IUCN Red List ↗
-          </a>
+          <AssessmentSections
+            assessment={detail}
+            sections={SECTIONS}
+            labels={SECTION_LABELS}
+            lead={{ rationale: credits }}
+          />
         </div>
       ) : (
         <div className="text-sm text-zinc-400 py-2 italic">

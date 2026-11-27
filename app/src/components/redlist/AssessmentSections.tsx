@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { narrativeLabel, type NarrativeField, type RedListAssessment } from "@/lib/redlist/assessment";
 import { stripHtml } from "@/lib/html-text";
 import { CitationProse } from "@/components/redlist/CitationProse";
@@ -15,8 +15,13 @@ export interface ComparedAssessment {
   label: string;
 }
 
-function sectionText(a: Assessment, field: NarrativeField): string {
-  const raw = a[field];
+/** A tab: one of the narratives, or the assessment's bibliography. */
+export type AssessmentSection = NarrativeField | "bibliography";
+
+/** What a tab holds, as text, so "is it empty" and "did it change" have one answer. */
+function sectionText(a: Assessment, section: AssessmentSection): string {
+  if (section === "bibliography") return (a.references ?? []).map((r) => stripHtml(r.citation)).join("\n");
+  const raw = a[section];
   return raw ? stripHtml(String(raw)) : "";
 }
 
@@ -33,6 +38,11 @@ function sectionText(a: Assessment, field: NarrativeField): string {
  * side, older first, and a tab whose text did not change between them is dimmed.
  * The threat summary is left out of a comparison: it is one assessment's answer.
  *
+ * `labels` renames a tab (the assessments tab uses the Red List website's own
+ * names), and `lead` puts something above a tab's text outside a comparison:
+ * the assessments tab files its credits under the rationale, as "Assessment
+ * Information" does on the website.
+ *
  * Text size is inherited, so each reader keeps its own type.
  */
 export function AssessmentSections({
@@ -40,15 +50,20 @@ export function AssessmentSections({
   sections,
   initial,
   compare,
+  labels,
+  lead,
 }: {
   assessment: Assessment;
-  sections: readonly NarrativeField[];
-  initial?: NarrativeField;
+  sections: readonly AssessmentSection[];
+  initial?: AssessmentSection;
   compare?: { older: ComparedAssessment; newer: ComparedAssessment };
+  labels?: Partial<Record<AssessmentSection, string>>;
+  lead?: Partial<Record<AssessmentSection, ReactNode>>;
 }) {
-  const [section, setSection] = useState<NarrativeField>(initial ?? sections[0]);
+  const [section, setSection] = useState<AssessmentSection>(initial ?? sections[0]);
+  const label = (s: AssessmentSection) => labels?.[s] ?? (s === "bibliography" ? "Bibliography" : narrativeLabel(s));
 
-  const quiet = (field: NarrativeField) =>
+  const quiet = (field: AssessmentSection) =>
     compare
       ? sectionText(compare.older.assessment, field) === sectionText(compare.newer.assessment, field)
       : !sectionText(assessment, field);
@@ -67,7 +82,7 @@ export function AssessmentSections({
               section !== field && quiet(field) ? "opacity-50" : ""
             }`}
           >
-            {narrativeLabel(field)}
+            {label(field)}
           </button>
         ))}
       </div>
@@ -77,32 +92,45 @@ export function AssessmentSections({
           {[compare.older, compare.newer].map((side, i) => (
             <div key={i} className="min-w-0">
               <div className="mb-1 text-[11px] font-medium text-zinc-400">{side.label}</div>
-              <SectionProse assessment={side.assessment} field={section} />
+              <SectionBody assessment={side.assessment} section={section} label={label(section)} />
             </div>
           ))}
         </div>
       ) : (
         <>
+          {lead?.[section]}
           {section === "threats" && <ThreatSummary assessment={assessment} />}
-          <SectionProse assessment={assessment} field={section} />
+          <SectionBody assessment={assessment} section={section} label={label(section)} />
         </>
       )}
     </div>
   );
 }
 
-function SectionProse({ assessment, field }: { assessment: Assessment; field: NarrativeField }) {
-  const text = sectionText(assessment, field);
-  if (!text) {
+function SectionBody({
+  assessment,
+  section,
+  label,
+}: {
+  assessment: Assessment;
+  section: AssessmentSection;
+  label: string;
+}) {
+  if (!sectionText(assessment, section)) {
+    return <span className="block text-zinc-400">This assessment records no {label.toLowerCase()}.</span>;
+  }
+  if (section === "bibliography") {
     return (
-      <span className="block text-zinc-400">
-        This assessment records no {narrativeLabel(field).toLowerCase()} text.
-      </span>
+      <ol className="space-y-1">
+        {(assessment.references ?? []).map((r, i) => (
+          <li key={i} className="pl-4 -indent-4">
+            {stripHtml(r.citation)}
+          </li>
+        ))}
+      </ol>
     );
   }
-  return (
-    <CitationProse text={text} references={assessment.references ?? []} className="whitespace-pre-line" />
-  );
+  return <CitationProse text={sectionText(assessment, section)} references={assessment.references ?? []} />;
 }
 
 /**
