@@ -537,7 +537,7 @@ export async function GET(request: NextRequest) {
     // GBIF's live index files its records under (gbif-live-keys.ts). GBIF ORs
     // repeated taxonKeys and files each record once, so nothing is fetched twice.
     const taxa = await occurrenceTaxa(speciesKey);
-    const asked = context ? taxa.context : taxa.counted.map((t) => t.key);
+    const asked = context ? taxa.context.map((t) => t.key) : taxa.counted.map((t) => t.key);
     if (asked.length === 0) {
       return NextResponse.json({ type: "FeatureCollection", features: [], metadata: { speciesKey, count: 0, total: 0, totals: { mapped: 0, issue: 0, missing: 0 }, bbox: null, taxa } }, { headers: CACHE_5M });
     }

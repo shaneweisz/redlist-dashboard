@@ -17,6 +17,14 @@
  * when asked (*Pararge xiphioides* is filed under *P. aegeria*: its 4.9k
  * records count, *P. aegeria*'s other 3.5M don't).
  *
+ * Also context: the CoL species split from it, where CoL raised a subspecies of
+ * the Red List species to a species of its own (col-split-candidates, the
+ * evidence behind the CoL-differences card's "split"). *Giraffa camelopardalis*
+ * is assessed as one species; CoL holds *G. giraffa*, *G. reticulata* and
+ * *G. tippelskirchi*, each keeping an old *G. camelopardalis* subspecies as a
+ * synonym. The count doesn't take them (they are on the NE list, needing their
+ * own assessments), and the map can show them beside the species.
+ *
  * Anything that fails falls back to the key alone, which is what the panels
  * asked for before this existed.
  */
@@ -34,10 +42,16 @@ export interface CountedTaxon {
   speciesKey: string;
 }
 
+/** A CoL species the map can draw beside the species' own records, uncounted. */
+export interface ContextTaxon {
+  key: string;
+  /** "rest": the rest of a part-of record's species; "split": a species CoL split from it. */
+  why: "rest" | "split";
+}
+
 export interface OccurrenceTaxa {
   counted: CountedTaxon[];
-  /** The species of the part-of records: their other records count elsewhere. */
-  context: string[];
+  context: ContextTaxon[];
 }
 
 const TTL = 60 * 60 * 1000;
@@ -48,24 +62,41 @@ export async function loadOccurrenceTaxa(gbifSpeciesKey: string): Promise<Occurr
   const conn = await getConn();
   // An assessed species by its GBIF key, as getSpeciesByGbifKey finds it; an
   // NE species has no link rows, and counts its own key.
-  const sql = `
-    WITH s AS (SELECT id FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE gbif_species_key = $key LIMIT 1)
-    SELECT l.relation, l.col_species_id, l.col_taxon_id
-    FROM read_parquet('${parquetUri("assessment_link.parquet")}') l JOIN s ON l.sis_taxon_id = s.id
-    WHERE l.counted AND l.relation IN ('is', 'split into', 'part of')
-    ORDER BY l.role = 'primary' DESC, l.relation, l.col_taxon_id`;
-  const rows = (await conn.runAndReadAll(sql, { key: gbifSpeciesKey })).getRowObjects();
-  return taxaFromLinkRows(gbifSpeciesKey, rows.map((r) => ({
-    relation: String(r.relation) as CountedRelation,
-    col_species_id: r.col_species_id == null ? null : String(r.col_species_id),
-    col_taxon_id: r.col_taxon_id == null ? null : String(r.col_taxon_id),
-  })));
+  const sis = (await conn.runAndReadAll(
+    `SELECT id FROM read_parquet('${parquetUri("assessed.parquet")}') WHERE gbif_species_key = $key LIMIT 1`,
+    { key: gbifSpeciesKey },
+  )).getRowObjects()[0]?.id;
+  if (sis == null) return taxaFromLinkRows(gbifSpeciesKey, []);
+  const [rows, splits] = await Promise.all([
+    conn.runAndReadAll(`
+      SELECT relation, col_species_id, col_taxon_id
+      FROM read_parquet('${parquetUri("assessment_link.parquet")}')
+      WHERE sis_taxon_id = $sis AND counted AND relation IN ('is', 'split into', 'part of')
+      ORDER BY role = 'primary' DESC, relation, col_taxon_id`, { sis: Number(sis) }),
+    // As the CoL-differences card reads it: the likeliest parent only (rn = 1),
+    // and only species on the NE list, the described ones needing their own
+    // assessment (a provisionally accepted *Giraffa senaariensis* is neither).
+    conn.runAndReadAll(`
+      SELECT sc.ne_col_id FROM read_parquet('${parquetUri("col-split-candidates.parquet")}') sc
+      JOIN read_parquet('${parquetUri("ne.parquet")}') ne ON ne.col_id = sc.ne_col_id
+      WHERE sc.parent_id = $sis AND sc.rn = 1 ORDER BY sc.ne_col_id`, { sis: Number(sis) }),
+  ]);
+  return taxaFromLinkRows(
+    gbifSpeciesKey,
+    rows.getRowObjects().map((r) => ({
+      relation: String(r.relation) as CountedRelation,
+      col_species_id: r.col_species_id == null ? null : String(r.col_species_id),
+      col_taxon_id: r.col_taxon_id == null ? null : String(r.col_taxon_id),
+    })),
+    splits.getRowObjects().map((r) => String(r.ne_col_id)),
+  );
 }
 
 /** Link rows → taxa, the species' own key first. Pure, for tests. */
 export function taxaFromLinkRows(
   gbifSpeciesKey: string,
   rows: { relation: CountedRelation; col_species_id: string | null; col_taxon_id: string | null }[],
+  splitFrom: string[] = [],
 ): OccurrenceTaxa {
   const counted: CountedTaxon[] = [];
   const seen = new Set<string>();
@@ -75,10 +106,15 @@ export function taxaFromLinkRows(
     seen.add(key);
     counted.push({ key, relation: r.relation, speciesKey: r.col_species_id ?? key });
   }
-  if (counted.length === 0) return { counted: [{ key: gbifSpeciesKey, relation: "is", speciesKey: gbifSpeciesKey }], context: [] };
+  if (counted.length === 0) counted.push({ key: gbifSpeciesKey, relation: "is", speciesKey: gbifSpeciesKey });
   counted.sort((a, b) => Number(b.key === gbifSpeciesKey) - Number(a.key === gbifSpeciesKey));
   const whole = new Set(counted.filter((t) => t.relation !== "part of").map((t) => t.speciesKey));
-  const context = [...new Set(counted.filter((t) => t.relation === "part of" && !whole.has(t.speciesKey)).map((t) => t.speciesKey))];
+  const context: ContextTaxon[] = [];
+  const add = (key: string, why: ContextTaxon["why"]) => {
+    if (!whole.has(key) && !context.some((c) => c.key === key)) context.push({ key, why });
+  };
+  for (const t of counted) if (t.relation === "part of") add(t.speciesKey, "rest");
+  for (const key of splitFrom) add(key, "split");
   return { counted, context };
 }
 

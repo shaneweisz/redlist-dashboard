@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath, shapePolygon, ALL_SHAPES, type ColFiling, type CountedTaxon,
+  taxonGroups, groupKeyOf, groupNote, isClaimed, contextGroups, contextNote, shapeSdf, shapeSvgPath, shapePolygon, ALL_SHAPES, type ColFiling, type CountedTaxon,
 } from "../occurrence-taxa-groups";
 import { taxaFromLinkRows } from "@/lib/data/occurrence-taxa";
 
@@ -59,6 +59,21 @@ describe("taxonGroups", () => {
   });
 });
 
+describe("contextGroups", () => {
+  it("gives each context species a shape, the most records first, and says why it is there", () => {
+    const g = (key: string, name: string): ColFiling => ({ colUsageKey: key, colStatus: "ACCEPTED", colSpeciesKey: key, colSpeciesName: name });
+    const groups = contextGroups(
+      [g("3G3KQ", "Giraffa reticulata"), g("3G3KP", "Giraffa giraffa"), g("3G3KP", "Giraffa giraffa")],
+      [{ key: "3G3KP", why: "split" }, { key: "3G3KQ", why: "split" }],
+    );
+    expect(groups.map((x) => [x.name, x.loaded, x.shape, x.why])).toEqual([
+      ["Giraffa giraffa", 2, "circle", "split"],
+      ["Giraffa reticulata", 1, "triangle", "split"],
+    ]);
+    expect(contextNote("split", "Giraffa camelopardalis")).toBe("A CoL species split from Giraffa camelopardalis. It needs its own assessment.");
+  });
+});
+
 describe("isClaimed", () => {
   it("keeps the context to what the count leaves to the other species", () => {
     expect(isClaimed(xiphioides, pararge)).toBe(true);
@@ -75,11 +90,16 @@ describe("taxaFromLinkRows", () => {
       { relation: "is", col_species_id: "NZ6J", col_taxon_id: "NZ6J" },
     ]).counted.map((t) => t.key)).toEqual(["NZ6J", "NZ6M"]);
     expect(taxaFromLinkRows("946KG", [{ relation: "part of", col_species_id: "75R3T", col_taxon_id: "946KG" }]))
-      .toEqual({ counted: [{ key: "946KG", relation: "part of", speciesKey: "75R3T" }], context: ["75R3T"] });
+      .toEqual({ counted: [{ key: "946KG", relation: "part of", speciesKey: "75R3T" }], context: [{ key: "75R3T", why: "rest" }] });
   });
 
   it("falls back to the key alone for a species with no link rows (Not Evaluated)", () => {
     expect(taxaFromLinkRows("ABC", [])).toEqual({ counted: [{ key: "ABC", relation: "is", speciesKey: "ABC" }], context: [] });
+  });
+
+  it("adds the species CoL split from it, for context (Giraffa camelopardalis)", () => {
+    expect(taxaFromLinkRows("3G3KN", [{ relation: "is", col_species_id: "3G3KN", col_taxon_id: "3G3KN" }], ["3G3KP", "3G3KQ", "3G3KN"]).context)
+      .toEqual([{ key: "3G3KP", why: "split" }, { key: "3G3KQ", why: "split" }]);
   });
 
   it("has no context where the species is also counted whole", () => {
@@ -91,7 +111,7 @@ describe("taxaFromLinkRows", () => {
 });
 
 describe("shape images", () => {
-  it("gives every shape the circle's area, centred where a circle would be", () => {
+  it("sizes every shape between the circle's area and its reach, centred where a circle would be", () => {
     for (const shape of ALL_SHAPES) {
       const poly = shapePolygon(shape);
       if (!poly) continue;
@@ -100,7 +120,12 @@ describe("shape images", () => {
         const cross = poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
         a += cross; cx += (poly[j][0] + poly[i][0]) * cross; cy += (poly[j][1] + poly[i][1]) * cross;
       }
-      expect(Math.abs(a) / 2).toBeCloseTo(Math.PI, 6);
+      // No more area than the circle, and no less than equal reach would give.
+      const area = Math.abs(a) / 2;
+      const reach = Math.max(...poly.map(([x, y]) => Math.hypot(x, y)));
+      expect(area).toBeLessThanOrEqual(Math.PI + 1e-9);
+      expect(area / reach ** 2).toBeLessThan(Math.PI + 1e-9);
+      expect(reach).toBeGreaterThanOrEqual(1 - 1e-9);
       expect(cx / (3 * a)).toBeCloseTo(0, 6);
       expect(cy / (3 * a)).toBeCloseTo(0, 6);
     }
@@ -109,6 +134,9 @@ describe("shape images", () => {
   it("encodes the edge where MapLibre's SDF shader draws it", () => {
     for (const shape of ALL_SHAPES) {
       const { width, data } = shapeSdf(shape);
+      // Hollow: empty at the centre, drawn at the edge.
+      const hollow = shapeSdf(shape, true);
+      expect(hollow.data[((hollow.width / 2) * hollow.width + hollow.width / 2) * 4 + 3]).toBeLessThan(192);
       const alpha = (x: number, y: number) => data[(y * width + x) * 4 + 3];
       const c = width / 2;
       expect(alpha(c, c)).toBeGreaterThan(192); // inside: past the edge's 0.75

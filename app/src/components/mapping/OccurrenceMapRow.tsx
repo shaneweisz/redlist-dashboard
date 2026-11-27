@@ -60,7 +60,8 @@ import { ELEVATION_ATTRIBUTION, elevationAt, formatElevation } from "@/lib/mappi
 import { effortGroupFor } from "@/lib/mapping/sampling-effort";
 import {
   taxonGroups, groupKeyOf, groupNote, isClaimed, shapeSdf, shapeSvgPath,
-  ALL_SHAPES, LEGEND_BOX, OTHER_SHAPE, SHAPE_IMAGE_PREFIX, SHAPE_RADIUS, type CountedTaxon, type Shape, type TaxonGroup,
+  ALL_SHAPES, LEGEND_BOX, OTHER_SHAPE, SHAPE_IMAGE_PREFIX, HOLLOW_IMAGE_PREFIX, SHAPE_RADIUS, contextGroups, contextNote,
+  type ContextTaxon, type CountedTaxon, type Shape, type TaxonGroup,
 } from "@/lib/mapping/occurrence-taxa-groups";
 import { formatDistance, pathLengthMetres } from "@/lib/mapping/geo-distance";
 import {
@@ -631,6 +632,8 @@ function registerShapeImages(map: {
     for (const shape of ALL_SHAPES) {
       const id = SHAPE_IMAGE_PREFIX + shape;
       if (!map.hasImage(id)) map.addImage(id, shapeSdf(shape), { sdf: true });
+      const hollow = HOLLOW_IMAGE_PREFIX + shape;
+      if (!map.hasImage(hollow)) map.addImage(hollow, shapeSdf(shape, true), { sdf: true });
     }
   };
   add();
@@ -641,11 +644,21 @@ function registerShapeImages(map: {
 
 /** A marker shape for the legend, in the colours it is drawn in. */
 function ShapeGlyph({ shape, fill, stroke, className = "" }: { shape: Shape; fill: string; stroke: string; className?: string }) {
+  // fill "none" draws the hollow form the context layer uses.
   return (
     <svg className={`w-3.5 h-3.5 shrink-0 ${className}`} viewBox={`${-LEGEND_BOX} ${-LEGEND_BOX} ${2 * LEGEND_BOX} ${2 * LEGEND_BOX}`} aria-hidden>
       <path d={shapeSvgPath(shape)} fill={fill} stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   );
+}
+
+/** The context row's label, before and after the records load. */
+function contextLabel(context: ContextTaxon[], restOf: string | null) {
+  const splits = context.filter((c) => c.why === "split").length;
+  const rest = context.some((c) => c.why === "rest");
+  if (rest && !splits) return <>The rest of {restOf ? <span className="italic">{restOf}</span> : "its CoL species"}, not counted</>;
+  if (splits && !rest) return <>{splits === 1 ? "A CoL species" : `${splits} CoL species`} split from it, not counted</>;
+  return <>Related CoL species ({context.length}), not counted</>;
 }
 
 export default function OccurrenceMapRow({
@@ -1412,7 +1425,7 @@ export default function OccurrenceMapRow({
    * Where there is more than one name, each gets a marker shape and a legend
    * row (lib/mapping/occurrence-taxa-groups.ts).
    */
-  const [countedTaxa, setCountedTaxa] = useState<{ counted: CountedTaxon[]; context: string[] } | null>(null);
+  const [countedTaxa, setCountedTaxa] = useState<{ counted: CountedTaxon[]; context: ContextTaxon[] } | null>(null);
   /** Each claimed taxon's own mapped total, by its key. */
   const [taxonTotals, setTaxonTotals] = useState<Record<string, number>>({});
   /** Name groups switched off in the legend: the map only, like a neighbour's layer. */
@@ -1424,6 +1437,8 @@ export default function OccurrenceMapRow({
   const [showContext, setShowContext] = useState(false);
   const [contextOccurrences, setContextOccurrences] = useState<OccurrenceFeature[] | null>(null);
   const [contextTotal, setContextTotal] = useState<number | null>(null);
+  /** Context species switched off in the legend. */
+  const [hiddenContextGroups, setHiddenContextGroups] = useState<Set<string>>(() => new Set());
 
   /**
    * The three point sets are toggled independently rather than being one
@@ -1787,6 +1802,7 @@ export default function OccurrenceMapRow({
     setTaxaShownFor(speciesKey);
     setHiddenTaxonGroups(new Set());
     setShowContext(false);
+    setHiddenContextGroups(new Set());
   }
 
   // The context, once asked for: one sample, under the same limit.
@@ -2238,22 +2254,41 @@ export default function OccurrenceMapRow({
     }
     return counts;
   }, [mappedOccurrences]);
-  /** The context's records the map can draw: mapped, and not claimed by this species. */
-  const contextShown = useMemo(
-    () => (contextOccurrences ?? []).filter((o) =>
-      hasPosition(o) && o.properties.coordinateStatus === "mapped" && !isClaimed(o.properties, countedTaxa?.counted ?? [])),
-    [contextOccurrences, countedTaxa]
+  /**
+   * The context's records the map can draw: mapped, and not claimed by this
+   * species. Each says why it is there, which the record panel reads to offer
+   * nothing but GBIF for it: these aren't this species' records, so they can't
+   * be excluded, georeferenced or found in the list.
+   */
+  const contextShown = useMemo(() => {
+    const why = new Map((countedTaxa?.context ?? []).map((c) => [c.key, c.why]));
+    const first = countedTaxa?.context[0]?.why ?? "rest";
+    return (contextOccurrences ?? [])
+      .filter((o) => hasPosition(o) && o.properties.coordinateStatus === "mapped" && !isClaimed(o.properties, countedTaxa?.counted ?? []))
+      .map((o) => ({ ...o, properties: { ...o.properties, context: why.get(o.properties.colSpeciesKey ?? "") ?? first } }));
+  }, [contextOccurrences, countedTaxa]);
+  const contextGroupList = useMemo(
+    () => contextGroups(contextShown.map((o) => o.properties), countedTaxa?.context ?? []),
+    [contextShown, countedTaxa]
   );
-  const contextName = useMemo(() => {
-    const names = new Set(contextShown.map((o) => o.properties.colSpeciesName).filter(Boolean));
-    if (names.size === 1) return [...names][0] as string;
-    const ofPartOf = taxonGroupList.find((g) => g.relation === "part of")?.speciesName;
-    return ofPartOf ?? null;
-  }, [contextShown, taxonGroupList]);
-  const contextGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
-    type: "FeatureCollection",
-    features: contextShown.map((o) => ({ type: "Feature" as const, properties: {}, geometry: o.geometry as GeoJSON.Point })),
-  }), [contextShown]);
+  /** The part-of name's species, for the legend before the context has loaded. */
+  const restOfName = useMemo(
+    () => taxonGroupList.find((g) => g.relation === "part of")?.speciesName ?? null,
+    [taxonGroupList]
+  );
+  const contextGeoJson = useMemo<GeoJSON.FeatureCollection>(() => {
+    const shape = new Map(contextGroupList.map((g) => [g.key, g.shape]));
+    return {
+      type: "FeatureCollection",
+      features: contextShown
+        .filter((o) => !hiddenContextGroups.has(o.properties.colSpeciesKey ?? "?"))
+        .map((o) => ({
+          type: "Feature" as const,
+          properties: { gbifID: o.properties.gbifID, _shape: shape.get(o.properties.colSpeciesKey ?? "?") ?? "circle" },
+          geometry: o.geometry as GeoJSON.Point,
+        })),
+    };
+  }, [contextShown, contextGroupList, hiddenContextGroups]);
   const struckOutCount = useMemo(
     () => filteredOccurrences.filter((o) => hasPosition(o) && exclusions[o.properties.gbifID]).length,
     [filteredOccurrences, exclusions]
@@ -3253,9 +3288,11 @@ export default function OccurrenceMapRow({
 
   // Loaded records by gbifID — the map hands back only what it stored on a
   // feature, which for the assessor-georeference layer is just an id.
+  // The context's records too, so hovering or clicking one opens its panel;
+  // the species' own record wins where the two share an id.
   const occurrencesByGbifId = useMemo(
-    () => new Map(occurrences.map((o) => [o.properties.gbifID, o])),
-    [occurrences]
+    () => new Map([...contextShown, ...occurrences].map((o) => [o.properties.gbifID, o])),
+    [occurrences, contextShown]
   );
   // Read by the click handler, which is declared above this and so can't take
   // the map itself as a dependency.
@@ -3863,6 +3900,7 @@ export default function OccurrenceMapRow({
               interactiveLayerIds={[
                 `occ-circles-${panelId}`,
                 `occ-shapes-${panelId}`,
+                `occ-context-shapes-${panelId}`,
                 `georef-point-${panelId}`,
                 `nearby-points-circle-${panelId}`,
                 `nearby-radius-grab-${panelId}`,
@@ -4051,23 +4089,24 @@ export default function OccurrenceMapRow({
                   <Layer {...shapeLayerStyle} beforeId={slotId("records", panelId)} />
                 </Source>
               )}
-              {/* The rest of the CoL species a part-of name is filed under:
-                  hollow and grey, under the species' own records, and not
-                  interactive — they aren't this species' records, and the list
-                  and the point file never hold them. */}
+              {/* Related CoL species, uncounted: the rest of the species a
+                  part-of name is filed under, and species CoL split from this
+                  one. Hollow and grey, a shape each, under the species' own
+                  records. They open a record panel like any other, but the
+                  list and the point file never hold them. */}
               {showGbif && showContext && contextShown.length > 0 && (
                 <Source id={`occ-context-${panelId}`} type="geojson" data={contextGeoJson}>
                   <Layer
-                    id={`occ-context-circles-${panelId}`}
-                    type="circle"
+                    id={`occ-context-shapes-${panelId}`}
+                    type="symbol"
                     beforeId={`occ-circles-${panelId}`}
-                    paint={{
-                      "circle-radius": 3.5,
-                      "circle-color": "rgba(0,0,0,0)",
-                      "circle-stroke-color": "#71717a",
-                      "circle-stroke-width": 1.25,
-                      "circle-stroke-opacity": 0.7,
+                    layout={{
+                      "icon-image": ["concat", HOLLOW_IMAGE_PREFIX, ["get", "_shape"]] as unknown as string,
+                      "icon-size": 0.9,
+                      "icon-allow-overlap": true,
+                      "icon-ignore-placement": true,
                     }}
+                    paint={{ "icon-color": "#52525b", "icon-opacity": 0.85 }}
                   />
                 </Source>
               )}
@@ -4318,7 +4357,8 @@ export default function OccurrenceMapRow({
                 // Built here because this is where the assessor's own
                 // coordinates, the cleaning flags and the native-range check
                 // all live.
-                const editorBelow = fullscreen && (isGeoreferenceable(shown.properties) || !!mine);
+                // A context record isn't this species': nothing to edit on it.
+                const editorBelow = fullscreen && !shown.properties.context && (isGeoreferenceable(shown.properties) || !!mine);
                 const { fields, notes } = recordFields(shown, mine, hInat, { editorBelow });
                 return (
                   <MapOccurrenceTooltip
@@ -4383,7 +4423,9 @@ export default function OccurrenceMapRow({
                         />
                       ) : undefined
                     }
-                    actions={renderRecordActions(shown.properties.gbifID, { showInTable: true })}
+                    actions={shown.properties.context
+                      ? renderContextActions(shown.properties.gbifID)
+                      : renderRecordActions(shown.properties.gbifID, { showInTable: true })}
                     // Always there, pinned or not. It used to appear only
                     // once the panel was pinned, and since these controls are
                     // right-aligned, it arrived exactly where the next-record
@@ -5394,6 +5436,9 @@ export default function OccurrenceMapRow({
       // The CoL name it is filed under, where that isn't the species itself: a
       // synonym or a subspecies, which the map's shapes tell apart.
       if (p.colUsageName && p.colUsageName !== p.species) add("Filed as", p.colUsageName);
+      // First among the notes: everything else about the record is read
+      // differently once you know it isn't this species'.
+      if (p.context) notes.push({ label: "Not counted", value: contextNote(p.context, scientificName) });
       add("Basis", formatBasisOfRecord(p.basisOfRecord));
       // The assessor's own reading of the label wins over GBIF's transcription,
       // and says so — the same bargain as their coordinates.
@@ -5490,7 +5535,7 @@ export default function OccurrenceMapRow({
       }
       return { fields: rows, notes };
     },
-    [pointFileByGbifId, institutionNames, assessorDates, assessorNotes]
+    [pointFileByGbifId, institutionNames, assessorDates, assessorNotes, scientificName]
   );
 
   /**
@@ -5943,6 +5988,25 @@ export default function OccurrenceMapRow({
     link.click();
     URL.revokeObjectURL(url);
   }, [exportablePoints, scientificName]);
+
+  /**
+   * A context record's one action: it isn't this species' record, so it can't
+   * be excluded, georeferenced or shown in the list, but it can be read on GBIF.
+   */
+  const renderContextActions = (gbifID: number) => (
+    <button
+      onClick={() => {
+        window.open(`https://www.gbif.org/occurrence/${gbifID}`, "_blank", "noopener,noreferrer");
+        closeTooltip();
+      }}
+      className="flex w-full items-center gap-1.5 px-1 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+    >
+      <svg className="w-3 h-3 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14 3h7v7M10 14L21 3M21 14v7h-7M3 10V3h7" />
+      </svg>
+      Open on GBIF
+    </button>
+  );
 
   const renderRecordActions = (
     gbifID: number,
@@ -6591,26 +6655,59 @@ export default function OccurrenceMapRow({
             </label>
           )}
           {hasContext && (
-            <label
-              title="Records of the same CoL species filed under other names. The count leaves them to that species; drawn for context, and never in the list or the point file."
-              className="flex items-start gap-1.5 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
-            >
-              <input
-                type="checkbox"
-                checked={showContext}
-                onChange={() => setShowContext((v) => !v)}
-                className="w-3 h-3 rounded accent-zinc-500 shrink-0 mt-0.5"
-              />
-              <svg className="w-3 h-3 shrink-0 mt-0.5" viewBox="0 0 12 12" aria-hidden>
-                <circle cx="6" cy="6" r="3.5" fill="none" stroke="#71717a" strokeWidth={1.25} />
-              </svg>
-              <span className="min-w-0 flex-1 text-zinc-500 dark:text-zinc-400">
-                The rest of {contextName ? <span className="italic">{contextName}</span> : "its CoL species"}, not counted
-              </span>
-              <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
-                {showContext ? (contextOccurrences ? <>{contextShown.length.toLocaleString()}{contextTotal != null && <> of {Math.max(0, contextTotal - (recordSetTotals?.mapped ?? 0)).toLocaleString()}</>}</> : "…") : ""}
-              </span>
-            </label>
+            <>
+              <label
+                title="CoL species beside this one that its count doesn't take: the rest of the species its name is filed under, or species CoL split from it, which need their own assessments. Drawn for context; never in the list or the point file."
+                className="flex items-start gap-1.5 py-0.5 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+              >
+                <input
+                  type="checkbox"
+                  checked={showContext}
+                  onChange={() => setShowContext((v) => !v)}
+                  className="w-3 h-3 rounded accent-zinc-500 shrink-0 mt-0.5"
+                />
+                <ShapeGlyph shape="circle" fill="none" stroke="#52525b" className="mt-px" />
+                <span className="min-w-0 flex-1 text-zinc-500 dark:text-zinc-400">
+                  {contextLabel(countedTaxa?.context ?? [], restOfName)}
+                </span>
+                <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">
+                  {showContext ? (contextOccurrences ? <>{contextShown.length.toLocaleString()}{contextTotal != null && <> of {Math.max(0, contextTotal - ((countedTaxa?.context ?? []).some((c) => c.why === "rest") ? recordSetTotals?.mapped ?? 0 : 0)).toLocaleString()}</>}</> : (
+                    <svg className="w-3 h-3 animate-spin text-zinc-400" fill="none" viewBox="0 0 24 24" aria-label="Loading">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  )) : ""}
+                </span>
+              </label>
+              {/* Once loaded, a row per species, with its hollow shape. */}
+              {showContext && contextGroupList.length > 0 && contextGroupList.map((g) => (
+                <label
+                  key={g.key}
+                  title={`${g.name}: ${contextNote(g.why, scientificName)}`}
+                  className="flex items-start gap-1.5 py-0.5 pl-4 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer text-[11px] rounded"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hiddenContextGroups.has(g.key)}
+                    onChange={() =>
+                      setHiddenContextGroups((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(g.key)) next.delete(g.key);
+                        else next.add(g.key);
+                        return next;
+                      })
+                    }
+                    className="w-3 h-3 rounded accent-zinc-500 shrink-0 mt-0.5"
+                  />
+                  <ShapeGlyph shape={g.shape} fill="none" stroke="#52525b" className="mt-px" />
+                  <span className="min-w-0 flex-1 text-zinc-500 dark:text-zinc-400">
+                    <span className="italic">{g.name}</span>
+                    {g.why === "split" ? " split from it in CoL" : g.why === "rest" ? ", the rest of the species" : ""}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-[10px] text-zinc-400">{g.loaded.toLocaleString()}</span>
+                </label>
+              ))}
+            </>
           )}
         </div>
       )}
