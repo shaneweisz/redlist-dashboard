@@ -108,8 +108,8 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   colors: Record<string, string>;
   box: PriorityBox | null;
   onBoxChange: (box: PriorityBox | null) => void;
-  /** Clicking a dot: page and scroll the species table to this species. */
-  onPointClick: (key: string) => void;
+  /** Clicking a dot: page and scroll the species table to this species. `added`: a ⌘/Ctrl-click that just added it to the selection. */
+  onPointClick: (key: string, added?: boolean) => void;
   selectedKey?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -316,7 +316,20 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       return;
     }
     const i = inPlot(x, y) ? hitTest(x, y) : null;
-    if (i != null) onPointClick(layout.ordered[i].key);
+    if (i != null) {
+      const key = layout.ordered[i].key;
+      // ⌘/Ctrl-click toggles the dot in the selection; one it adds also
+      // opens, so the last one ⌘-clicked is the one shown.
+      if (drag.add) {
+        const keys = new Set(box?.keys);
+        const had = keys.delete(key);
+        if (!had) keys.add(key);
+        onBoxChange(keys.size > 0 ? { rects: box?.rects ?? [], keys } : null);
+        if (!had) onPointClick(key, true);
+        return;
+      }
+      onPointClick(key);
+    }
     else if (box && !drag.add) onBoxChange(null);
   };
 

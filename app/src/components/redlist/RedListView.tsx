@@ -3561,8 +3561,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // ── Single species mode: show info card instead of charts ──────────
   // Only activate when arrived via the main search bar (which sets the
   // `species` URL param). Filters that incidentally narrow results to one
-  // species should keep showing the regular charts view.
-  const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
+  // species should keep showing the regular charts view: a triage selection
+  // of one dot (⌘-clicked) too, which also opens that species.
+  const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null && !priorityBox;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
   // The page is wide (see the data-wide-taxon-layout marker) for any taxon's
@@ -3574,15 +3575,18 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // A dot outside the scatter's own box is faded but still clickable; its
   // species isn't in the table, so the box is cleared first.
   const [scrollToSpecies, setScrollToSpecies] = useState<string | null>(null);
-  const openSpeciesFromScatter = useCallback((key: string) => {
+  const openSpeciesFromScatter = useCallback((key: string, added?: boolean) => {
     // On home there's no species table: the dot opens in its own group's
     // table (Fishes for a fish), a fraction of All Species' work to build
-    // (the rows are already cached, in the All Species list).
-    if (onHome) setSelectedTaxa(new Set([triagePoints.find((p) => p.key === key)?.taxon ?? "all"]));
-    if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
+    // (the rows are already cached, in the All Species list). A ⌘-click that
+    // added it to a selection goes to All Species with the selection instead.
+    if (onHome) setSelectedTaxa(new Set([added ? "all" : triagePoints.find((p) => p.key === key)?.taxon ?? "all"]));
+    // A dot outside the selection drops it. Read from the latest state: a
+    // ⌘-click has just added this dot, in the same event.
+    setPriorityBox((b) => (b && !b.keys.has(key) ? null : b));
     setSelectedSpeciesKey(key);
     setScrollToSpecies(key);
-  }, [priorityBox, setSelectedSpeciesKey, onHome, setSelectedTaxa, triagePoints]);
+  }, [setSelectedSpeciesKey, onHome, setSelectedTaxa, triagePoints]);
   useEffect(() => {
     if (!scrollToSpecies) return;
     const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
@@ -5514,7 +5518,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
                       ↓ table
                     </button>
-                    <span title="Hold ⌘ (Ctrl on Windows) while dragging to add another box to the selection"> · ⌘-drag to add</span>
+                    <span title="Hold ⌘ (Ctrl on Windows) and drag to add a box, or click a dot to add or remove it"> · ⌘ to add</span>
                   </>
                 ) : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
             </div>
