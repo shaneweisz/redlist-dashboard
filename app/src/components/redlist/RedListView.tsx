@@ -1780,6 +1780,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     () => false,
   );
   const triageInSidebar = isWide;
+  // The window's height, for capping the summary triage panel at it.
+  const viewportHeight = useSyncExternalStore(
+    (cb) => { window.addEventListener("resize", cb); return () => window.removeEventListener("resize", cb); },
+    () => window.innerHeight,
+    () => 0,
+  );
   // Always starts collapsed: the sidebar is opt-in on every visit, opened
   // from its rail, and not remembered.
   const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
@@ -5558,12 +5564,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
    *  marker). The collapsed rail needs none: it sits in the page's own right
    *  margin, so entering a taxon doesn't move the page. */
   const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
-  // Where the rail and panel sit. On home, the summary table's height (an
-  // absolutely placed panel in a stretched grid cell, so the panel never makes
-  // the row taller): the page doesn't grow for it. Elsewhere the viewport's
-  // height, sticky, like a docked panel beside the long page.
-  const triageSidebarPlace = summaryTriage ? "absolute inset-x-0 top-0 h-full" : "sticky top-4 h-[calc(100vh-2rem)]";
-  const triageSidebarStyle = summaryTriage && summaryBox?.height ? { top: summaryBox.top, height: summaryBox.height } : undefined;
+  // Where the rail and panel sit. On home and the Country view, the summary
+  // content's height (in a stretched grid cell, so the panel never makes the
+  // row taller): the page doesn't grow for it. That is capped at the
+  // viewport's, sticky, for a table taller than the window (SSC groups,
+  // Table 1a), so the panel stays in view beside it as in a taxon. Until
+  // measured, the cell's height. Elsewhere the viewport's height, sticky, like
+  // a docked panel beside the long page.
+  // Sticky only when capped: a shorter panel's cell also holds the caption
+  // below the table, so a sticky panel would drift down against the table.
+  const summaryCapped = summaryTriage && summaryBox != null && summaryBox.height > viewportHeight - 32;
+  const triageSidebarPlace = !summaryTriage || summaryCapped ? "sticky top-4 h-[calc(100vh-2rem)]" : "absolute inset-x-0 top-0 h-full";
+  const triageSidebarStyle = summaryCapped ? { marginTop: summaryBox!.top }
+    : summaryTriage && summaryBox?.height ? { top: summaryBox.top, height: summaryBox.height } : undefined;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim rail in the page's triage column, styled like the
@@ -7941,7 +7954,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         <img alt="" className="block w-48 h-48 object-cover" />
       </div>
     </div>
-    {summaryTriage && triageSidebar ? <div className="relative">{triageSidebar}</div> : triageSidebar}
+    {/* Capped, the cell ends where the table does, so the sticky panel stops level with it. */}
+    {summaryTriage && triageSidebar ? <div className="relative" style={summaryCapped ? { height: summaryBox!.top + summaryBox!.height } : undefined}>{triageSidebar}</div> : triageSidebar}
     </div>
   );
 }
