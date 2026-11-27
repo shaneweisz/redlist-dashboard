@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { decodeHtmlEntities } from "@/lib/html-text";
 
 // Cache for assessment details (1 hour)
 const assessmentCache = new Map<
@@ -26,6 +27,27 @@ function getLocalizedText(
   if (typeof desc === "string") return desc;
   return desc.en || null;
 }
+
+/**
+ * Decode HTML entities in every string under `value`. The structured fields
+ * arrive with them encoded ("Divakar, A. Crespo &amp; Lumbsch") and are shown
+ * as text, so they are decoded here. The narratives are not passed through
+ * this: they are HTML, and the reader's stripHtml decodes them once.
+ */
+function decodeDeep<T>(value: T): T {
+  if (typeof value === "string") return decodeHtmlEntities(value) as T;
+  if (Array.isArray(value)) return value.map(decodeDeep) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, decodeDeep(v)])) as T;
+  }
+  return value;
+}
+
+/** The response fields that are HTML, which decodeDeep must leave alone. */
+const HTML_FIELDS = new Set([
+  "rationale", "population", "habitat", "threats", "conservation_actions", "use_trade", "range",
+  "trend_justification", "references", "url",
+]);
 
 export async function GET(
   request: NextRequest,
@@ -122,11 +144,13 @@ export async function GET(
               description?: { en?: string } | string;
               suitability?: string;
               majorImportance?: string;
+              season?: string | null;
             }) => ({
               code: h.code || "",
               name: getLocalizedText(h.description) || h.code || "",
               suitability: h.suitability || null,
               major_importance: h.majorImportance === "Yes",
+              season: h.season || null,
             })
           )
         : null,
@@ -213,49 +237,112 @@ export async function GET(
             })
           )
         : null,
-      // Supplementary info: quantitative metrics
+      /**
+       * The assessment's parameters (EOO, AOO, population size, generation
+       * length, ...), as the API gives them: flat strings keyed by name. The
+       * in-place conservation actions it also carries are lifted out below.
+       */
       supplementary_info: data.supplementary_info
+        ? Object.fromEntries(
+            Object.entries(data.supplementary_info as Record<string, unknown>).filter(
+              ([k, v]) => k !== "conservation_actions_in_place" && v != null && v !== "" && typeof v !== "object"
+            )
+          )
+        : null,
+      /** "In-place research and monitoring": [{ name, value }], as on the website. */
+      conservation_in_place: Array.isArray(data.supplementary_info?.conservation_actions_in_place)
+        ? data.supplementary_info.conservation_actions_in_place.map(
+            (g: { name?: string; actions?: { name?: string; value?: string }[] }) => ({
+              name: g.name ?? "",
+              actions: (g.actions ?? []).map((a) => ({ name: a.name ?? "", value: a.value ?? "" })),
+            })
+          )
+        : null,
+      research_needed: Array.isArray(data.researches)
+        ? data.researches.map((r: { code?: string; description?: { en?: string } | string }) => ({
+            code: r.code || "",
+            name: getLocalizedText(r.description) || r.code || "",
+          }))
+        : null,
+      use_trade_classification: Array.isArray(data.use_and_trade)
+        ? data.use_and_trade.map(
+            (u: {
+              code?: string;
+              description?: { en?: string } | string;
+              subsistence?: boolean | null;
+              national?: boolean | null;
+              international?: boolean | null;
+              other?: boolean | null;
+            }) => ({
+              code: u.code || "",
+              name: getLocalizedText(u.description) || u.code || "",
+              subsistence: u.subsistence ?? null,
+              national: u.national ?? null,
+              international: u.international ?? null,
+            })
+          )
+        : null,
+      /** Countries and other areas, with how the species occurs there. */
+      locations: Array.isArray(data.locations)
+        ? data.locations.map(
+            (l: {
+              code?: string;
+              description?: { en?: string } | string;
+              presence?: string;
+              origin?: string;
+              seasonality?: string[] | string | null;
+            }) => ({
+              code: l.code || "",
+              name: getLocalizedText(l.description) || l.code || "",
+              presence: l.presence || null,
+              origin: l.origin || null,
+              seasonality: Array.isArray(l.seasonality) ? l.seasonality.join(", ") || null : l.seasonality || null,
+            })
+          )
+        : null,
+      realms: Array.isArray(data.biogeographical_realms)
+        ? data.biogeographical_realms
+            .map((r: { description?: { en?: string } | string }) => getLocalizedText(r.description))
+            .filter(Boolean)
+        : null,
+      trend_justification: doc.trend_justification || null,
+      /** The taxon as the Red List files it: lineage, names, notes, SSC group. */
+      taxonomy: data.taxon
         ? {
-            estimated_extent_of_occurence:
-              data.supplementary_info.estimated_extent_of_occurence ?? null,
-            estimated_area_of_occupancy:
-              data.supplementary_info.estimated_area_of_occupancy ?? null,
-            population_size:
-              data.supplementary_info.population_size ?? null,
-            number_of_locations:
-              data.supplementary_info.number_of_locations ?? null,
-            no_of_subpopulations:
-              data.supplementary_info.no_of_subpopulations ?? null,
-            generational_length:
-              data.supplementary_info.generational_length ?? null,
-            upper_elevation_limit:
-              data.supplementary_info.upper_elevation_limit ?? null,
-            lower_elevation_limit:
-              data.supplementary_info.lower_elevation_limit ?? null,
-            upper_depth_limit:
-              data.supplementary_info.upper_depth_limit ?? null,
-            lower_depth_limit:
-              data.supplementary_info.lower_depth_limit ?? null,
-            movement_patterns:
-              data.supplementary_info.movement_patterns ?? null,
-            congregatory:
-              data.supplementary_info.congregatory ?? null,
-            population_severely_fragmented:
-              data.supplementary_info.population_severely_fragmented ?? null,
-            population_continuing_decline:
-              data.supplementary_info.population_continuing_decline ?? null,
-            continuing_decline_in_extent_of_occurence:
-              data.supplementary_info
-                .continuing_decline_in_extent_of_occurence ?? null,
-            continuing_decline_in_area_of_occupancy:
-              data.supplementary_info
-                .continuing_decline_in_area_of_occupancy ?? null,
-            continuing_decline_in_number_of_locations:
-              data.supplementary_info
-                .continuing_decline_in_number_of_locations ?? null,
+            kingdom: data.taxon.kingdom_name ?? null,
+            phylum: data.taxon.phylum_name ?? null,
+            class: data.taxon.class_name ?? null,
+            order: data.taxon.order_name ?? null,
+            family: data.taxon.family_name ?? null,
+            genus: data.taxon.genus_name ?? null,
+            scientific_name: data.taxon.scientific_name ?? null,
+            authority: data.taxon.authority ?? null,
+            common_names: Array.isArray(data.taxon.common_names)
+              ? data.taxon.common_names.map((c: { name?: string; language?: string; main?: boolean }) => ({
+                  name: c.name ?? "",
+                  language: c.language ?? null,
+                  main: !!c.main,
+                }))
+              : [],
+            synonyms: Array.isArray(data.taxon.synonyms)
+              ? data.taxon.synonyms.map((x: { name?: string }) => x.name ?? "").filter(Boolean)
+              : [],
+            notes: doc.taxonomic_notes || null,
+            ssc_groups: Array.isArray(data.taxon.ssc_groups)
+              ? data.taxon.ssc_groups.map((g: { name?: string; url?: string }) => ({
+                  name: g.name ?? "",
+                  url: g.url ?? null,
+                }))
+              : [],
           }
         : null,
     };
+
+    for (const [k, v] of Object.entries(result)) {
+      if (!HTML_FIELDS.has(k)) (result as Record<string, unknown>)[k] = decodeDeep(v);
+    }
+    // Taxonomic notes are HTML too; decodeDeep reached them through taxonomy.
+    if (result.taxonomy) result.taxonomy.notes = data.documentation?.taxonomic_notes || null;
 
     // Cache the result
     assessmentCache.set(assessmentId, {

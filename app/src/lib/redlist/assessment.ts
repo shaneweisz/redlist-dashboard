@@ -51,8 +51,58 @@ export interface RedListAssessment {
         score: string | null;
         /** The species or pathogen named on an invasive-species threat. */
         named?: string | null;
+        /** What the threat does to the species ("Species mortality"). */
+        stresses?: string[] | null;
       }[]
     | null;
+  /*
+   * The structured half of the assessment, the cards and tables the Red List
+   * website shows beside each narrative. Optional because a response cached
+   * before the route returned them has none.
+   */
+  habitats?: {
+    code: string;
+    name: string;
+    suitability: string | null;
+    major_importance: boolean;
+    season?: string | null;
+  }[] | null;
+  /** Conservation actions needed. */
+  conservation_actions_classification?: { code: string; name: string }[] | null;
+  conservation_in_place?: { name: string; actions: { name: string; value: string }[] }[] | null;
+  research_needed?: { code: string; name: string }[] | null;
+  use_trade_classification?: {
+    code: string;
+    name: string;
+    subsistence: boolean | null;
+    national: boolean | null;
+    international: boolean | null;
+  }[] | null;
+  locations?: {
+    code: string;
+    name: string;
+    presence: string | null;
+    origin: string | null;
+    seasonality: string | null;
+  }[] | null;
+  realms?: string[] | null;
+  /** EOO, AOO, population size, generation length, ...: flat strings keyed by the API's names. */
+  supplementary_info?: Record<string, string | number | boolean> | null;
+  trend_justification?: string | null;
+  taxonomy?: {
+    kingdom: string | null;
+    phylum: string | null;
+    class: string | null;
+    order: string | null;
+    family: string | null;
+    genus: string | null;
+    scientific_name: string | null;
+    authority: string | null;
+    common_names: { name: string; language: string | null; main: boolean }[];
+    synonyms: string[];
+    notes: string | null;
+    ssc_groups: { name: string; url: string | null }[];
+  } | null;
   cached?: boolean;
   error?: string;
 }
