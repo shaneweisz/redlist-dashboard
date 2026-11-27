@@ -16,8 +16,9 @@
  * Shapes, in order (ggplot2's order, and the research behind it: a shape is told
  * from a circle by its points, so the most pointed comes first): circle,
  * triangle, square, star, inverted triangle. No diamond, which imported point
- * files already draw, and no hexagon, which at a 5px dot is a circle. Each has
- * a circle's area, so no name looks more prominent than another. Five is about
+ * files already draw, and no hexagon, which at a 5px dot is a circle. Each is
+ * sized to look as big as the circle (shapeScale), so no name looks more
+ * prominent than another. Five is about
  * as many as a reader can hold; a sixth name and beyond share a plus, as
  * "other names".
  */
@@ -232,9 +233,15 @@ function polygonArea(poly: [number, number][]): number {
 }
 
 /**
- * A shape's outline, as a polygon around 0 with the unit circle's area, π
- * (circle: none). Centred on its centroid, so a triangle sits where a circle
- * would.
+ * A shape's outline, as a polygon around 0 that looks as big as the unit
+ * circle (circle: none). Centred on its centroid, so a triangle sits where a
+ * circle would.
+ *
+ * The scale is the geometric mean of two that each get it wrong. Equal area
+ * makes a pointed shape look bigger, because at a few pixels the eye judges a
+ * marker by how far it reaches: a triangle with a circle's area reaches 1.56
+ * times as far. Equal reach makes it look smaller, with 41% of the ink. Between
+ * them, a triangle reaches 1.25 times as far with 64% of the area.
  */
 export function shapePolygon(shape: Shape): [number, number][] | null {
   const ring = (n: number, start: number, radius: (i: number) => number = () => 1) =>
@@ -257,8 +264,15 @@ export function shapePolygon(shape: Shape): [number, number][] | null {
     }
   })();
   if (!raw) return null;
-  const k = Math.sqrt(Math.PI / polygonArea(raw));
+  const k = shapeScale(raw);
   return raw.map(([x, y]) => [x * k, y * k]);
+}
+
+/** The scale for a raw polygon: the geometric mean of equal area and equal reach. */
+function shapeScale(raw: [number, number][]): number {
+  const byArea = Math.sqrt(Math.PI / polygonArea(raw));
+  const byReach = 1 / Math.max(...raw.map(([x, y]) => Math.hypot(x, y)));
+  return Math.sqrt(byArea * byReach);
 }
 
 /** How far a shape reaches from its centre, in units of the circle's radius. */

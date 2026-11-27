@@ -111,7 +111,7 @@ describe("taxaFromLinkRows", () => {
 });
 
 describe("shape images", () => {
-  it("gives every shape the circle's area, centred where a circle would be", () => {
+  it("sizes every shape between the circle's area and its reach, centred where a circle would be", () => {
     for (const shape of ALL_SHAPES) {
       const poly = shapePolygon(shape);
       if (!poly) continue;
@@ -120,7 +120,12 @@ describe("shape images", () => {
         const cross = poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1];
         a += cross; cx += (poly[j][0] + poly[i][0]) * cross; cy += (poly[j][1] + poly[i][1]) * cross;
       }
-      expect(Math.abs(a) / 2).toBeCloseTo(Math.PI, 6);
+      // No more area than the circle, and no less than equal reach would give.
+      const area = Math.abs(a) / 2;
+      const reach = Math.max(...poly.map(([x, y]) => Math.hypot(x, y)));
+      expect(area).toBeLessThanOrEqual(Math.PI + 1e-9);
+      expect(area / reach ** 2).toBeLessThan(Math.PI + 1e-9);
+      expect(reach).toBeGreaterThanOrEqual(1 - 1e-9);
       expect(cx / (3 * a)).toBeCloseTo(0, 6);
       expect(cy / (3 * a)).toBeCloseTo(0, 6);
     }
