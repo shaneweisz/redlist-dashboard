@@ -487,7 +487,7 @@ function AssessmentDetailView({
           ]}
         />
       </Block>
-      {detail.rationale && <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Justification</div>}
+      {detail.rationale && <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Rationale</div>}
     </div>
   );
   const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]) || !!detail.references?.length || !!detail.taxonomy;

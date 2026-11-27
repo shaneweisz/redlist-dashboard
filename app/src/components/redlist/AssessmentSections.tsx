@@ -150,18 +150,16 @@ function Bibliography({ references }: { references: { citation: string }[] }) {
     stripHtml(x.citation).localeCompare(stripHtml(y.citation), "en", { sensitivity: "base" })
   );
   return (
-    <div>
-      <div className="mb-1 text-[11px] text-zinc-400">
-        {sorted.length} reference{sorted.length === 1 ? "" : "s"}
-      </div>
-      <ol className="divide-y divide-zinc-100 text-xs leading-relaxed dark:divide-zinc-800">
-        {sorted.map((r, i) => (
-          <li key={i} className="py-1.5 [overflow-wrap:anywhere]">
+    <ol className="divide-y divide-zinc-100 text-xs leading-relaxed dark:divide-zinc-800">
+      {sorted.map((r, i) => (
+        <li key={i} className="flex gap-2 py-1.5 [overflow-wrap:anywhere]">
+          <span className="w-5 shrink-0 text-right tabular-nums text-zinc-400">{i + 1}.</span>
+          <span className="min-w-0">
             <CitationText html={r.citation} />
-          </li>
-        ))}
-      </ol>
-    </div>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 

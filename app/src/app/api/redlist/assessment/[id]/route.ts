@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { decodeHtmlEntities } from "@/lib/html-text";
 
 // Cache for assessment details (1 hour)
 const assessmentCache = new Map<
@@ -26,6 +27,27 @@ function getLocalizedText(
   if (typeof desc === "string") return desc;
   return desc.en || null;
 }
+
+/**
+ * Decode HTML entities in every string under `value`. The structured fields
+ * arrive with them encoded ("Divakar, A. Crespo &amp; Lumbsch") and are shown
+ * as text, so they are decoded here. The narratives are not passed through
+ * this: they are HTML, and the reader's stripHtml decodes them once.
+ */
+function decodeDeep<T>(value: T): T {
+  if (typeof value === "string") return decodeHtmlEntities(value) as T;
+  if (Array.isArray(value)) return value.map(decodeDeep) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, decodeDeep(v)])) as T;
+  }
+  return value;
+}
+
+/** The response fields that are HTML, which decodeDeep must leave alone. */
+const HTML_FIELDS = new Set([
+  "rationale", "population", "habitat", "threats", "conservation_actions", "use_trade", "range",
+  "trend_justification", "references", "url",
+]);
 
 export async function GET(
   request: NextRequest,
@@ -315,6 +337,12 @@ export async function GET(
           }
         : null,
     };
+
+    for (const [k, v] of Object.entries(result)) {
+      if (!HTML_FIELDS.has(k)) (result as Record<string, unknown>)[k] = decodeDeep(v);
+    }
+    // Taxonomic notes are HTML too; decodeDeep reached them through taxonomy.
+    if (result.taxonomy) result.taxonomy.notes = data.documentation?.taxonomic_notes || null;
 
     // Cache the result
     assessmentCache.set(assessmentId, {
