@@ -181,6 +181,9 @@ interface Props {
    * its view toggle. null when there's no single selected row, or it hasn't
    * loaded yet. notEvaluated is null when the row has no CoL count. */
   onSelectedRow?: (row: SelectedRow | null) => void;
+  /** The taxon or sub-group row under the pointer (null on leaving it), so the
+   *  triage sidebar can preview what clicking it would show. */
+  onHoverTaxon?: (id: string | null) => void;
   /** Which GBIF records the GBIF columns count (src/lib/gbif-records.ts). */
   gbifRecordMode?: GbifRecordMode;
 }
@@ -1482,7 +1485,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, onSelectedRow, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, onSelectedRow, onHoverTaxon, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -2698,6 +2701,8 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               ? "bg-violet-50 dark:bg-violet-900/20"
               : "hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30"
           }`}
+          onMouseEnter={() => onHoverTaxon?.(sg.id)}
+          onMouseLeave={() => onHoverTaxon?.(null)}
           onClick={() => {
             if (sgHasChildren && isSgSelected) {
               // Already selected → toggle expand/collapse
@@ -2798,6 +2803,8 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           className={`transition-colors ${
             isSelected ? "bg-zinc-100 dark:bg-zinc-800" : ""
           } ${taxon.available ? "hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer" : "opacity-50 cursor-not-allowed"}`}
+          onMouseEnter={() => { if (taxon.available) onHoverTaxon?.(taxon.id); }}
+          onMouseLeave={() => onHoverTaxon?.(null)}
           onClick={(e) => {
             if (!taxon.available) return;
             if (e.metaKey || e.ctrlKey) setTaxaExpanded(true);
@@ -3122,7 +3129,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             )}
           </div>
         )}
-        <div ref={scrollRef} className={`relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-x-auto ${countryMode ? "flex-1 [zoom:.75]" : "mb-4"}`}>
+        <div ref={scrollRef} data-summary-table className={`relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-x-auto ${countryMode ? "flex-1 [zoom:.75]" : "mb-4"}`}>
           <table className="w-full">
             {renderHead()}
         <tbody className="transition-opacity duration-200">
