@@ -48,7 +48,8 @@ export interface PriorityPoint {
  * are jittered a few pixels, so a tight box around one dot could miss its
  * unjittered position and select nothing.
  */
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
+/** A selection: one or more rectangles, in plot units (⌘/Ctrl-drag adds one), and the species inside any of them. */
+export interface PriorityBox { rects: readonly { x0: number; x1: number; y0: number; y1: number }[]; keys: ReadonlySet<string> }
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
@@ -117,7 +118,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   const [measuredHeight, setMeasuredHeight] = useState(DEFAULT_HEIGHT);
   const HEIGHT = fill ? Math.max(160, measuredHeight) : DEFAULT_HEIGHT;
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
-  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; add: boolean } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -260,14 +261,16 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   // to back, before React re-renders), and the drag is followed on the window:
   // the 0-record dots sit on the x axis, so a box around them is released
   // below the plot, often off the chart, where leaving used to cancel it.
-  const dragStart = useRef<{ x0: number; y0: number } | null>(null);
+  // ⌘/Ctrl held at the start adds the drag's rectangle to the selection
+  // (the dashboard's multi-select convention); without, it replaces it.
+  const dragStart = useRef<{ x0: number; y0: number; add: boolean } | null>(null);
   const onMouseDown = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
     if (!inPlot(x, y)) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const at = (ev: MouseEvent) => ({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
-    dragStart.current = { x0: x, y0: y };
-    setDrag({ x0: x, y0: y, x1: x, y1: y });
+    dragStart.current = { x0: x, y0: y, add: e.metaKey || e.ctrlKey };
+    setDrag({ x0: x, y0: y, x1: x, y1: y, add: e.metaKey || e.ctrlKey });
     const move = (ev: MouseEvent) => {
       const start = dragStart.current;
       if (!start) return;
@@ -301,18 +304,20 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       const { ix, iy } = scales;
       const left = Math.min(drag.x0, x), right = Math.max(drag.x0, x);
       const top = Math.min(drag.y0, y), bottom = Math.max(drag.y0, y);
-      const keys = new Set<string>();
+      const base = drag.add && box ? box : null;
+      const keys = new Set<string>(base?.keys);
       const { ordered, xy } = layout;
       for (let i = 0; i < ordered.length; i++) {
         const px = xy[i * 2], py = xy[i * 2 + 1];
         if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
       }
-      onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
+      const r = { x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top) };
+      onBoxChange({ rects: base ? [...base.rects, r] : [r], keys });
       return;
     }
     const i = inPlot(x, y) ? hitTest(x, y) : null;
     if (i != null) onPointClick(layout.ordered[i].key);
-    else if (box) onBoxChange(null);
+    else if (box && !drag.add) onBoxChange(null);
   };
 
   // Boxes are clamped to the plot plus EDGE px: dots on an axis (the 0-record
@@ -324,8 +329,8 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const cy = (v: number) => Math.min(Math.max(v, M.top - EDGE), M.top + plotH + EDGE);
     return { left: cx(l), top: cy(t), width: cx(r) - cx(l), height: cy(b) - cy(t) };
   };
-  const boxPx = box && width > 0
-    ? toRect(scales.sx(box.x0), scales.sy(box.y1), scales.sx(box.x1), scales.sy(box.y0)) : null;
+  const boxPxs = box && width > 0
+    ? box.rects.map((r) => toRect(scales.sx(r.x0), scales.sy(r.y1), scales.sx(r.x1), scales.sy(r.y0))) : [];
   const dragPx = drag
     ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;
 
@@ -391,10 +396,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
           </div>
         );
       })()}
-      {(dragPx ?? boxPx) && (
-        <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
-          style={dragPx ?? boxPx ?? undefined} />
-      )}
+      {/* The selection's rectangles; while dragging, the new one too, and
+          the old ones only if it adds to them (⌘/Ctrl). */}
+      {[...(drag && !drag.add ? [] : boxPxs), ...(dragPx ? [dragPx] : [])].map((r, i) => (
+        <div key={i} className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
+          style={r} />
+      ))}
       {selected >= 0 && (
         <div className="pointer-events-none absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full ring-2 ring-zinc-900 dark:ring-white"
           style={{ left: layout.xy[selected * 2], top: layout.xy[selected * 2 + 1] }} />

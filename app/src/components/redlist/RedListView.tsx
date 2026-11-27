@@ -33,7 +33,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { NEEDS_UPDATING_LINE, type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -606,10 +606,6 @@ const SKIP_PRIORITY = skipSet("priority");
  *  the chart stays in More Filters. Keep in step with the min-[1400px] widths
  *  in the grid below and page.tsx. */
 const SIDEBAR_QUERY = "(min-width: 1400px)";
-/** How many of a triage selection's species the sidebar lists. */
-const TRIAGE_LIST_MAX = 200;
-/** The sidebar list's default order, by the y axis metric, for its heading. */
-const TRIAGE_LIST_ORDER: Record<GbifMetric, string> = { total: "most records", new: "most new records", pctNew: "highest % new" };
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -3017,19 +3013,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return triagePoints.some(test) ? test : null;
   }, [triageHover, triageInSidebar, triageSidebarCollapsed, triagePoints, homeTriage, homeAllSpecies, taxaFilteredSpecies]);
-  /** The sidebar's species list, highest on the y axis first: the box's
-   *  species, or without a box a default answer: in the reassessment triage
-   *  those past the needs-updating line (more than 10 years), in the first-
-   *  assessment triage every plotted species. The first TRIAGE_LIST_MAX are
-   *  listed; total counts them all. */
-  const triageList = useMemo(() => {
-    const keep = priorityBox
-      ? (p: PriorityPoint) => priorityBox.keys.has(p.key)
-      : isNewAssessments ? () => true : (p: PriorityPoint) => p.years > NEEDS_UPDATING_LINE.at;
-    const all = triagePoints.filter(keep);
-    all.sort((a, b) => b.value - a.value || b.years - a.years);
-    return { rows: all.slice(0, TRIAGE_LIST_MAX), total: all.length };
-  }, [triagePoints, priorityBox, isNewAssessments]);
 
   // Number of Assessments chart (#423 item 1): apply all filters EXCEPT the
   // assessment-count selection itself. NE species have no assessment history
@@ -5508,17 +5491,32 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       // Off home: sticky, not fixed, it starts level with the page's top, then
       // stays in view while the charts and table scroll past, the viewport's
       // height, like a docked panel. On home: the summary table's height (see
-      // triageSidebarPlace). The plot is one height in both (below), and the
-      // selection's species list takes the rest.
+      // triageSidebarPlace). The plot fills it in both.
       <aside data-triage-sidebar aria-label={triageTitle}
         style={triageSidebarStyle}
         className={`${triageSidebarPlace} flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{triageTitle}</div>
+            {/* How to use it; with a box, the selection in its place (same
+                small text, so drawing a box shifts nothing): clear it, or go
+                down to it in the table. */}
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
               {homeNeTriage ? "Pick a group to plot"
-                : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
+                : priorityBox ? (
+                  <>
+                    <button type="button" onClick={() => setPriorityBox(null)} title="Clear the selection"
+                      className="font-semibold text-zinc-800 dark:text-zinc-100 hover:underline">
+                      {priorityInBox.toLocaleString()} of {triagePoints.length.toLocaleString()} selected ×
+                    </button>
+                    {" · "}
+                    <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                      ↓ table
+                    </button>
+                    <span title="Hold ⌘ (Ctrl on Windows) while dragging to add another box to the selection"> · ⌘-drag to add</span>
+                  </>
+                ) : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
@@ -5580,67 +5578,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
         )}
         {!homeNeTriage && <>
-        {/* The plot: on home it fills the table-high panel (there's no list
-            there); elsewhere 21rem, the same height, so it doesn't resize
-            between home and a taxon, and a taxon's taller panel gives the
-            rest to the species list. */}
-        <div className={`${homeTriage ? "flex-1 min-h-0" : "h-[21rem] shrink-0"} mt-2`}>
+        {/* The plot fills the panel: home's table-high one, or a taxon's
+            viewport-high one. */}
+        <div className="flex-1 min-h-0 mt-2">
           {(homeTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
               <Spinner />{homeTriage && "Loading all species…"}
             </div>
           ) : renderTriageScatter(true)}
         </div>
-        {/* The species list: the box's species, with the selection's chip
-            and a way down to the table; or, without a box, a default answer
-            (see triageList), its heading saying what it ranks. Each row opens
-            in the table, as its dot does. Not on home: its table-high panel
-            has no room, and a selection there moves to All Species. */}
-        {!homeTriage && <div className="mt-2 flex-1 min-h-0 flex flex-col border-t border-zinc-100 dark:border-zinc-800 pt-2">
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-            {priorityBox ? (
-              <>
-                <button type="button" onClick={() => setPriorityBox(null)}
-                  className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                  {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-                </button>
-                <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
-                  ↓ table
-                </button>
-              </>
-            ) : (
-              <span className="font-medium text-zinc-600 dark:text-zinc-300">
-                {isNewAssessments
-                  ? "Most GBIF records first"
-                  : `Needs updating (10+ yrs) · ${TRIAGE_LIST_ORDER[gbifKeyParts(priorityKey).metric]} first`}
-                {triageList.total > 0 && <span className="font-normal text-zinc-400 dark:text-zinc-500"> · {triageList.total.toLocaleString()}</span>}
-              </span>
-            )}
-          </div>
-          <ul className="mt-1 -mx-2 flex-1 min-h-0 overflow-y-auto text-[12px]" aria-label={priorityBox ? "Selected species" : "Species list"}>
-            {triageList.rows.map((p) => (
-              <li key={p.key}>
-                <button type="button" onClick={() => openSpeciesFromScatter(p.key)}
-                  className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${selectedSpeciesKey === p.key ? "bg-zinc-100 dark:bg-zinc-800" : ""}`}>
-                  <span aria-hidden className="w-2 h-2 shrink-0 rounded-full" style={{ background: (isNewAssessments ? NE_TRIAGE_COLORS : CATEGORY_COLORS)[p.category] ?? "#a1a1aa" }} />
-                  <span className="min-w-0 flex-1 truncate italic text-zinc-800 dark:text-zinc-200" title={p.commonName ? `${p.name} (${p.commonName})` : p.name}>{p.name}</span>
-                  <span className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">
-                    {Math.floor(p.years)}y · {!isNewAssessments && gbifKeyParts(priorityKey).metric === "pctNew" ? `${Math.round(p.value)}%` : Math.round(p.value).toLocaleString()}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {triageList.total > triageList.rows.length && (
-              <li className="px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                and {(triageList.total - triageList.rows.length).toLocaleString()} more in the table
-              </li>
-            )}
-            {triageList.total === 0 && (
-              <li className="px-2 py-1 text-[11px] text-zinc-400 dark:text-zinc-500">None plotted.</li>
-            )}
-          </ul>
-        </div>}
         </>}
       </aside>
     )
