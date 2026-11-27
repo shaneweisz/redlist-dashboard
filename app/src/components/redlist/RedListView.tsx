@@ -3031,21 +3031,34 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     contributors: getSpeciesContributors, institutions: getSpeciesInstitutions,
   };
   // On home the sidebar is the summary table's height (its card, not the
-  // caption line below it), measured as the table loads and resizes.
+  // caption line below it), measured as the table loads and resizes. On the
+  // Country view it is level with the map's card, or with a picked country's
+  // map and table (not the pills above them, nor the caption below).
   const summaryWrapRef = useRef<HTMLDivElement>(null);
-  const [summaryTableHeight, setSummaryTableHeight] = useState<number | null>(null);
+  const [summaryBox, setSummaryBox] = useState<{ top: number; height: number } | null>(null);
+  const countryPicked = selectedCountries.size > 0;
   useEffect(() => {
     const wrap = summaryWrapRef.current;
     if (!summaryTriage || !wrap) return;
-    const measure = () => {
-      const card = wrap.querySelector<HTMLElement>("[data-summary-table]");
-      setSummaryTableHeight(card ? card.offsetHeight : null);
-    };
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => measure());
+    let observed: HTMLElement | null = null;
+    function measure() {
+      const el = wrap!.querySelector<HTMLElement>(onCountryView ? "[data-country-content]" : "[data-summary-table]");
+      if (el && el !== observed) { if (observed) ro.unobserve(observed); ro.observe(el); observed = el; }
+      if (!el) { setSummaryBox(null); return; }
+      const r = el.getBoundingClientRect();
+      const top = Math.round(r.top - wrap!.getBoundingClientRect().top), height = Math.round(r.height);
+      setSummaryBox((prev) => (prev && prev.top === top && prev.height === height ? prev : { top, height }));
+    }
     ro.observe(wrap);
+    // The card may not be rendered yet (the table or map still loading) while
+    // the wrapper keeps its size: watch for it to appear.
+    const mo = new MutationObserver(() => { measure(); if (observed) mo.disconnect(); });
+    mo.observe(wrap, { childList: true, subtree: true });
     measure();
-    return () => ro.disconnect();
-  }, [summaryTriage]);
+    if (observed) mo.disconnect();
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, [summaryTriage, onCountryView, countryPicked]);
   // A click on a hovered row navigates, and its row may never see the pointer
   // leave: a new selection drops the hover.
   const [triageHoverTaxa, setTriageHoverTaxa] = useState(selectedTaxa);
@@ -5550,8 +5563,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // the row taller): the page doesn't grow for it. Elsewhere the viewport's
   // height, sticky, like a docked panel beside the long page.
   const triageSidebarPlace = summaryTriage ? "absolute inset-x-0 top-0 h-full" : "sticky top-4 h-[calc(100vh-2rem)]";
-  // On the Country view, the height of its map and table (h-full).
-  const triageSidebarStyle = onHome && summaryTriage && summaryTableHeight ? { height: summaryTableHeight } : undefined;
+  const triageSidebarStyle = summaryTriage && summaryBox?.height ? { top: summaryBox.top, height: summaryBox.height } : undefined;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim rail in the page's triage column, styled like the
@@ -5698,7 +5710,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // is display: contents, leaving the flex chain below as it was.
     <div className={!triageSidebarShown ? "contents" : `${triageSidebarOpen
       ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem]"
-      : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem]"} gap-4 ${summaryTriage ? "items-stretch" : "items-start"}${onCountryView ? " flex-1 min-h-0" : ""}`}>
+      : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem]"} gap-4 ${summaryTriage ? "items-stretch" : "items-start"}${onCountryView && !countryPicked ? " flex-1 min-h-0" : ""}`}>
     <div className="space-y-1 min-w-0 flex-1 flex flex-col min-h-0">
       {/* Always show Taxa Summary table */}
       {/* Country View's landing map is sized by a flex chain that runs from

@@ -3086,7 +3086,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         below is zoomed down (zoom-[.75]) to compensate for the narrower
         (1/2, was 2/3) column. */}
     {countryMode && !scoped && (
-      <div className="flex flex-col flex-1 min-h-0 mb-4">{countryModeContent}</div>
+      <div data-country-content className="flex flex-col flex-1 min-h-0 mb-4">{countryModeContent}</div>
     )}
     {countryMode && scoped && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-1.5">
@@ -3094,7 +3094,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <div>{countryPillsContent}</div>
       </div>
     )}
-    <div className={countryMode ? (scoped ? "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4" : "hidden") : "contents"}>
+    <div data-country-content={countryMode && scoped ? "" : undefined} className={countryMode ? (scoped ? "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4" : "hidden") : "contents"}>
       {countryMode && scoped && <div>{countryModeContent}</div>}
       <div className={countryMode ? "min-w-0 flex flex-col h-full" : "contents"}>
         {/* No "country name atop the table" heading here anymore — a country
