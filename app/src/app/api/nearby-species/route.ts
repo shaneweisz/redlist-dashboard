@@ -18,6 +18,7 @@ import { gbifJson } from "@/lib/gbif-fetch";
 import { normalizeCategory } from "@/config/taxa";
 import { threatTags } from "@/lib/mapping/nearby-threats";
 import { getAssessedByGbifKeys, getUnassessedByGbifKeys } from "@/lib/data/species-duckdb";
+import { creditToOwners, ownersOfSpeciesKeys } from "@/lib/data/occurrence-taxa";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_CATEGORIES,
@@ -97,7 +98,15 @@ export async function GET(request: NextRequest) {
     ])) as [GbifSearchResponse, GbifSearchResponse];
 
     const counts: GbifFacetCount[] = faceted?.facets?.[0]?.counts ?? [];
-    const byKey = new Map(counts.map((c) => [String(c.name), c.count]));
+    // GBIF facets by CoL species; a Red List species can count several (a
+    // split's other species), so each key's records go to the assessed species
+    // that counts it whole (occurrence-taxa.ts), and its points route asks for
+    // the same taxa. A key nothing counts stays as itself.
+    const facetKeys = counts.map((c) => String(c.name));
+    const byKey = creditToOwners(
+      new Map(counts.map((c) => [String(c.name), c.count])),
+      await ownersOfSpeciesKeys(facetKeys).catch(() => new Map<string, string>()),
+    );
     if (exclude) byKey.delete(exclude);
 
     const assessed = await getAssessedByGbifKeys([...byKey.keys()]);

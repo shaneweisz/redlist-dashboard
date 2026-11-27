@@ -21,6 +21,7 @@
  * asked for before this existed.
  */
 import { getConn, parquetUri } from "@/lib/data/species-duckdb";
+import { liveGbifKeys } from "@/lib/gbif-live-keys";
 
 export type CountedRelation = "is" | "split into" | "part of";
 
@@ -92,4 +93,41 @@ export function occurrenceTaxa(gbifSpeciesKey: string): Promise<OccurrenceTaxa> 
   });
   cache.set(gbifSpeciesKey, { at: Date.now(), value });
   return value;
+}
+
+/**
+ * The species keys GBIF facets records by, mapped to the assessed species whose
+ * count takes each whole (its *is* or *split into* rows): the other direction
+ * of occurrenceTaxa. Nearby species uses it so records under a split's other
+ * species are credited to the Red List species that counts them (*Butorides
+ * virescens*'s records to *B. striata*), not dropped for matching no key.
+ * Keys nothing counts whole are left out.
+ */
+export async function ownersOfSpeciesKeys(keys: readonly string[]): Promise<Map<string, string>> {
+  if (!keys.length) return new Map();
+  const conn = await getConn();
+  const list = keys.map((k) => `'${String(k).replace(/'/g, "''")}'`).join(",");
+  const rows = (await conn.runAndReadAll(`
+    SELECT l.col_species_id AS key, min(a.gbif_species_key) AS owner
+    FROM read_parquet('${parquetUri("assessment_link.parquet")}') l
+    JOIN read_parquet('${parquetUri("assessed.parquet")}') a ON a.id = l.sis_taxon_id
+    WHERE l.counted AND l.relation IN ('is', 'split into') AND l.col_species_id IN (${list})
+    GROUP BY 1`)).getRowObjects();
+  return new Map(rows.filter((r) => r.owner != null).map((r) => [String(r.key), String(r.owner)]));
+}
+
+/** Facet counts by species key → counts by the species that owns them. Pure, for tests. */
+export function creditToOwners(byKey: Map<string, number>, owners: Map<string, string>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [key, n] of byKey) {
+    const owner = owners.get(key) ?? key;
+    out.set(owner, (out.get(owner) ?? 0) + n);
+  }
+  return out;
+}
+
+/** The live GBIF ids for every taxon a species' count claims: what a route asks GBIF for. */
+export async function countedGbifKeys(gbifSpeciesKey: string): Promise<string[]> {
+  const { counted } = await occurrenceTaxa(gbifSpeciesKey);
+  return [...new Set((await Promise.all(counted.map((t) => liveGbifKeys(t.key)))).flat())];
 }

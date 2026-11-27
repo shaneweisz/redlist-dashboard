@@ -13,7 +13,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
 import { gbifJson } from "@/lib/gbif-fetch";
-import { liveGbifKeys, setKeys } from "@/lib/gbif-live-keys";
+import { setKeys } from "@/lib/gbif-live-keys";
+import { countedGbifKeys } from "@/lib/data/occurrence-taxa";
 import { isPolygonWkt, GBIF_URL_BUDGET } from "@/lib/mapping/gbif-geometry";
 import {
   NEARBY_POINTS_LIMIT,
@@ -71,9 +72,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // The ids GBIF's live index files this species' records under (gbif-live-keys.ts).
+    // Every CoL taxon the species' count claims, as the ids GBIF's live index
+    // files them under (occurrence-taxa.ts): the records the list credited it.
     const url = new URL(nearbyPointsUrl({ ...where, speciesKey }));
-    setKeys(url.searchParams, "taxonKey", await liveGbifKeys(speciesKey));
+    setKeys(url.searchParams, "taxonKey", await countedGbifKeys(speciesKey));
     const data = (await gbifJson(url.toString())) as {
       results?: GbifOccurrence[];
       count?: number;

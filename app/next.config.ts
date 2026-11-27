@@ -171,6 +171,8 @@ const nextConfig: NextConfig = {
     // (occurrence-taxa.ts): the same DuckDB-over-R2 query as the routes above.
     "/api/occurrences": DUCKDB_TRACE,
     "/api/species/*/breakdown": DUCKDB_TRACE,
+    "/api/gbif-link": DUCKDB_TRACE,
+    "/api/nearby-species/points": DUCKDB_TRACE,
     // Free-text search across assessment narratives — reads the narrative
     // index, word list and prose from R2 over the same DuckDB connection
     // (the [assessmentId] route expands one result), so both need
@@ -247,6 +249,8 @@ const nextConfig: NextConfig = {
     // and otherwise talks only to GBIF, so nothing under data/ belongs in them.
     "/api/occurrences": ["**/data/**"],
     "/api/species/*/breakdown": ["**/data/**"],
+    "/api/gbif-link": ["**/data/**"],
+    "/api/nearby-species/points": ["**/data/**"],
     // Same bargain: every byte it reads comes from R2, and the narrative
     // parquets are 170 MB between them — bundling either would put the function
     // straight past Vercel's cap, and flip USE_R2 off into the bargain.
