@@ -2799,8 +2799,10 @@ export default function OccurrenceMapRow({
           _strokeWidth: struckOut ? 1.75 : strokeWidth,
           _fillOpacity: struckOut ? 0 : 1,
           _strokeOpacity: struckOut ? 0.85 : 1,
-          // The CoL name it is filed under, as a marker shape.
-          _shape: showTaxonGroups ? shapeByGroup.get(groupKeyOf(feature.properties)) ?? "circle" : "circle",
+          // The CoL name it is filed under, as a marker shape. A struck-out
+          // record stays the hollow ring the legend keys: an SDF shape has one
+          // opacity for fill and outline, so it can't be drawn hollow.
+          _shape: showTaxonGroups && !struckOut ? shapeByGroup.get(groupKeyOf(feature.properties)) ?? "circle" : "circle",
         },
         geometry: feature.geometry,
       };
