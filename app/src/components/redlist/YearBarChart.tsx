@@ -40,6 +40,8 @@ interface YearBarChartProps {
    * order. Omit to leave the chart click-only.
    */
   onRangeSelect?: (codes: string[], event: MouseEvent | React.MouseEvent) => void;
+  /** The year under the pointer on each change, and null on leaving the chart (see FilterBarChart's). */
+  onBarHover?: (code: string | null) => void;
 }
 
 // Recharts' BarChart onClick handler state carries the hovered category + payload
@@ -55,6 +57,7 @@ export default function YearBarChart({
   barColor = "#3b82f6",
   yMax,
   onRangeSelect,
+  onBarHover,
 }: YearBarChartProps) {
   // Capture the mouse event alongside recharts' synthetic state so multi-select
   // (Cmd/Ctrl+click) still works when clicks are handled at the chart level.
@@ -97,7 +100,14 @@ export default function YearBarChart({
     mouseEvent.preventDefault();
     setDrag({ start: code, end: code });
   };
+  const hoveredCode = useRef<string | null>(null);
+  const reportHover = (code: string | null) => {
+    if (hoveredCode.current === code) return;
+    hoveredCode.current = code;
+    onBarHover?.(code);
+  };
   const handleChartMouseMove = (nextState: unknown) => {
+    if (onBarHover) reportHover(codeFrom(nextState as BarChartClickState) ?? null);
     if (!drag) return;
     const code = codeFrom(nextState as BarChartClickState);
     if (!code || code === drag.end) return;
@@ -137,7 +147,8 @@ export default function YearBarChart({
   const insetX = PLOT_LEFT + PLOT_RIGHT;
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+    <div style={{ width: "100%", height: "100%", position: "relative" }}
+      onMouseLeave={onBarHover ? () => reportHover(null) : undefined}>
       {dragBand && (
         <div
           style={{

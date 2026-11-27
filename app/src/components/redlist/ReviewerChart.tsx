@@ -42,6 +42,8 @@ interface AssessorChartProps {
   onBarClick: (data: { payload?: { code?: string } }, event: React.MouseEvent) => void;
   /** Shift+drag across the bars to select everyone swept over */
   onRangeSelect?: (codes: string[], event: MouseEvent | React.MouseEvent) => void;
+  /** The name under the pointer, and null on leaving the chart (see FilterBarChart's). */
+  onBarHover?: (code: string | null) => void;
   onItemToggle: (code: string) => void;
   loading?: boolean;
   viewMode: ViewMode;
@@ -59,6 +61,7 @@ export default function AssessorChart({
   selectedItems,
   onBarClick,
   onRangeSelect,
+  onBarHover,
   onItemToggle,
   loading,
   viewMode,
@@ -211,6 +214,7 @@ export default function AssessorChart({
             selectedItems={selectedItems}
             onBarClick={onBarClick}
             onRangeSelect={onRangeSelect}
+            onBarHover={onBarHover}
             barColor={activeColor}
             yAxisWidth={yAxisWidth}
             leftMargin={-30}
