@@ -142,13 +142,22 @@ type Species = RedListSpecies;
  * switching mode re-derives from them.
  */
 function inGbifMode(s: Species, mode: GbifRecordMode): Species {
-  return {
-    ...s,
-    gbif_records: gbifRecordCount(s, mode),
-    gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
-    countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
-  };
+  // Kept per cached row and mode: copying ~175k rows (All Species) took
+  // seconds, and a row's copy never changes, so each is made once.
+  const memo = inGbifModeMemo[mode];
+  let out = memo.get(s);
+  if (!out) {
+    out = {
+      ...s,
+      gbif_records: gbifRecordCount(s, mode),
+      gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
+      countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
+    };
+    memo.set(s, out);
+  }
+  return out;
 }
+const inGbifModeMemo: Record<GbifRecordMode, WeakMap<Species, Species>> = { all: new WeakMap(), georeferenced: new WeakMap() };
 
 /** IUCN threat classification hierarchy */
 const THREAT_CATEGORIES: { code: string; label: string; children: { code: string; label: string }[] }[] = [
@@ -375,13 +384,19 @@ const CATEGORY_ORDER: Record<string, number> = {
  * Missing values compare as -1 throughout, which parks them at the bottom under
  * the desc default — matching how the table reads "no data" as "least".
  */
+/** A date string's time, parsed once per distinct date: sorting ~175k rows
+ *  compares millions of times, over only a few thousand dates. 0 for none. */
+const dateMsCache = new Map<string, number>();
+function dateMs(date: string | null | undefined): number {
+  if (!date) return 0;
+  let t = dateMsCache.get(date);
+  if (t === undefined) { t = new Date(date).getTime(); dateMsCache.set(date, t); }
+  return t;
+}
 function compareBy(field: SortField, a: Species, b: Species): number {
   switch (field) {
-    case "year": {
-      const dateA = a.assessment_date ? new Date(a.assessment_date).getTime() : 0;
-      const dateB = b.assessment_date ? new Date(b.assessment_date).getTime() : 0;
-      return dateA - dateB;
-    }
+    case "year":
+      return dateMs(a.assessment_date) - dateMs(b.assessment_date);
     case "category":
       return (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99);
     case "totalGbif":
@@ -1949,6 +1964,25 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   useEffect(() => { if (homeTriageOpen) cache.request(homeAllUrl); }, [homeTriageOpen, homeAllUrl, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps -- cache.request, as for the fetch effect below
   const homeAllEntry = cache.entries[homeAllUrl];
   const homeAllSpecies = homeTriage && homeAllEntry && !homeAllEntry.tooLarge ? homeAllEntry.species : null;
+  // While the home triage is up, make All Species' record-mode copies
+  // (inGbifMode, kept per row) in idle moments, a chunk at a time: a box or a
+  // dot then moves to All Species or a group without making them all at once.
+  useEffect(() => {
+    if (!homeAllSpecies) return;
+    const rows = homeAllSpecies;
+    let i = 0, cancelled = false;
+    const idle = (cb: (d: { timeRemaining(): number }) => void) =>
+      typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(cb) : window.setTimeout(() => cb({ timeRemaining: () => 8 }), 1);
+    const step = (d: { timeRemaining(): number }) => {
+      if (cancelled) return;
+      while (i < rows.length && d.timeRemaining() > 1) {
+        for (const end = Math.min(i + 500, rows.length); i < end; i++) inGbifMode(rows[i], gbifRecordMode);
+      }
+      if (i < rows.length) idle(step);
+    };
+    idle(step);
+    return () => { cancelled = true; };
+  }, [homeAllSpecies, gbifRecordMode]);
   const error = useMemo(() => {
     if (selectedTaxa.size === 0) return null;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -2019,15 +2053,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
-  // Every memo below reads the GBIF counts of the record mode in force.
-  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
+  // Every memo below reads the GBIF counts of the record mode in force: the
+  // rows are put in it (inGbifMode) after the taxa filter, which reads none of
+  // the fields it sets, so a taxon picked from the cached All Species list
+  // only copies its own rows.
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
   // filtered count (see countryStatsForMapTotal below), since every memo past
   // this point narrows further.
   const taxaFilteredSpeciesBase = useMemo(() => {
-    let filtered = species;
+    let filtered = assessedSpecies;
     // In new-assessments mode with a sub-group selected, species were fetched per sub-group
     // (taxon_id = the sub-group), so the speciesMatchesNode filter below is authoritative —
     // skip the parent taxon_id filter, which would otherwise drop them.
@@ -2075,8 +2111,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         filtered = filtered.filter(s => s.sis_taxon_id == null || !ids.has(s.sis_taxon_id));
       }
     }
-    return filtered;
-  }, [species, selectedTaxa, selectedSubgroups, isNewAssessments, breakdownFilter]);
+    return filtered.map((s) => inGbifMode(s, gbifRecordMode));
+  }, [assessedSpecies, gbifRecordMode, selectedTaxa, selectedSubgroups, isNewAssessments, breakdownFilter]);
 
   // The taxon header's photo. iNaturalist's own default photo for the taxon
   // when it has one (looked up by the rank name, e.g. "Primates"). Otherwise,
@@ -3549,12 +3585,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // species isn't in the table, so the box is cleared first.
   const [scrollToSpecies, setScrollToSpecies] = useState<string | null>(null);
   const openSpeciesFromScatter = useCallback((key: string) => {
-    // On home there's no species table: the dot opens in All Species' table.
-    if (onHome) setSelectedTaxa(new Set(["all"]));
+    // On home there's no species table: the dot opens in its own group's
+    // table (Fishes for a fish), a fraction of All Species' work to build
+    // (the rows are already cached, in the All Species list).
+    if (onHome) setSelectedTaxa(new Set([triagePoints.find((p) => p.key === key)?.taxon ?? "all"]));
     if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
     setSelectedSpeciesKey(key);
     setScrollToSpecies(key);
-  }, [priorityBox, setSelectedSpeciesKey, onHome, setSelectedTaxa]);
+  }, [priorityBox, setSelectedSpeciesKey, onHome, setSelectedTaxa, triagePoints]);
   useEffect(() => {
     if (!scrollToSpecies) return;
     const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
@@ -5432,9 +5470,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Beside a taxon's section (wideTaxonLayout: a taxon selected, not a scope
   // layout or a single species), in either view, each with its own chart; and
   // on the home summary, so it's always to hand. Home has no species table for
-  // it to filter, so there anything that filters (a box, a dot, a legend
-  // entry, the shortcut) moves to All Species, the panel staying open beside
-  // it. In Awaiting 1st Assessment, home's panel offers the groups instead
+  // it to filter, so there anything that filters (a box, a legend entry, the
+  // shortcut) moves to All Species, the panel staying open beside it; a dot
+  // opens in its own group (see openSpeciesFromScatter). In Awaiting 1st Assessment, home's panel offers the groups instead
   // (all not-evaluated species are too many to load at once).
   const triageSidebarShown = homeTriage || (wideTaxonLayout && (showPriority || isNewAssessments));
   const homeNeTriage = homeTriage && isNewAssessments;
@@ -5538,7 +5576,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               : nePoints.length > 0 ? "Every species here has a year described" : "\u00a0"}
           </div>
         ) : (
-        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter.">
+        // The hover clears on leaving the legend, not each entry: the gaps
+        // between entries would otherwise flash the whole plot back between them.
+        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter."
+          onMouseLeave={() => setTriageHover(null)}>
           {TRIAGE_LEGEND.map((c) => {
             const active = selectedCategories.has(c);
             const dimmed = selectedCategories.size > 0 && !active;
@@ -5546,7 +5587,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               <button key={c} type="button" aria-pressed={active}
                 onClick={(e) => { triageLeaveHome(); handleCategoryClick({ payload: { code: c } }, e); }}
                 onMouseEnter={() => setTriageHover({ kind: "category", id: c })}
-                onMouseLeave={() => setTriageHover(null)}
                 title={`Show only ${c} · ⌘/Ctrl-click to add or remove`}
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"} ${dimmed ? "opacity-40" : ""}`}>
                 <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
