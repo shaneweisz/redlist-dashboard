@@ -646,8 +646,13 @@ function cachedYearsSince(date: string): number {
 function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
   if (s.category === "NE" || !s.assessment_date) return null;
   const years = cachedYearsSince(s.assessment_date);
-  const value = gbifMetricValue(s, key);
-  return isNaN(years) || value == null ? null : { years, value };
+  if (isNaN(years)) return null;
+  let value = gbifMetricValue(s, key);
+  // An assessment dated after the sync has no "since assessment" window yet
+  // (the sync leaves New empty, and the table shows "—"). On the scatter it
+  // belongs where a just-assessed species sits: nothing new, at 0 years.
+  if (value == null && years < 0 && gbifRecordCount(s, gbifKeyParts(key).mode) != null) value = 0;
+  return value == null ? null : { years: Math.max(0, years), value };
 }
 
 // Explain IUCN Red List criteria codes
