@@ -27,7 +27,22 @@ function addYears(dayMs: number, n: number): number {
  * anniversary. NaN for an unparseable date.
  */
 export function yearsSince(date: string | Date, now: Date = new Date()): number {
-  const from = utcDay(new Date(date)), to = utcDay(now);
+  const to = utcDay(now);
+  if (typeof date !== "string") return yearsBetween(utcDay(date), to);
+  // Memoised per day and date string: the dashboard asks for ~175k species'
+  // dates, which share a few thousand values, on every filter pass.
+  let memo = yearsSinceMemo.get(to);
+  if (!memo) {
+    if (yearsSinceMemo.size >= 4) yearsSinceMemo.clear();
+    memo = new Map();
+    yearsSinceMemo.set(to, memo);
+  }
+  let y = memo.get(date);
+  if (y === undefined) { y = yearsBetween(utcDay(new Date(date)), to); memo.set(date, y); }
+  return y;
+}
+const yearsSinceMemo = new Map<number, Map<string, number>>();
+function yearsBetween(from: number, to: number): number {
   if (isNaN(from)) return NaN;
   let full = new Date(to).getUTCFullYear() - new Date(from).getUTCFullYear();
   if (addYears(from, full) > to) full--;

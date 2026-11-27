@@ -9,7 +9,7 @@ import { SpeciesSearchBar } from "../components/SpeciesSearchBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { AuthStatus } from "../components/AuthStatus";
 import { useBrand } from "../components/BrandProvider";
-import { parseParams, type ViewMode } from "../hooks/useFilterParams";
+import { parseParams, TRIAGE_SELECTION_PARAMS, type ViewMode } from "../hooks/useFilterParams";
 import { prettifyQs } from "../lib/query-string";
 import { buildGeneralIssueUrl } from "../lib/github-issue";
 import { SpeciesCacheProvider } from "../contexts/SpeciesCacheContext";
@@ -59,6 +59,9 @@ export default function RedListPage() {
     const params = new URLSearchParams(window.location.search);
     if (mode === "reassessments") params.delete("view");
     else params.set("view", "new-assessments");
+    // Except a triage selection: each view's triage plots different species
+    // on different axes, so a selection from one means nothing in the other.
+    for (const k of TRIAGE_SELECTION_PARAMS) params.delete(k);
     // Re-serializing the whole query here would re-encode the taxa token's `~`/`:`
     // that buildQs deliberately leaves bare, so the toggle briefly pushes an uglier
     // URL than the one it replaced. Same treatment keeps it stable.

@@ -980,6 +980,9 @@ describe("OWN_PARAM_NAMES stays in sync with buildQs", () => {
       mapSortDirection: "asc" as const,
       species: "sis-12345",
       tab: "literature" as const,
+      triage: { rects: [{ x0: 10, x1: 15.5, y0: 3, y1: 5 }], add: ["sis-1"], del: ["sis-2"] },
+      triageKey: "pctNew.all" as const,
+      triageNeMode: "georeferenced" as const,
     };
 
     const qs = buildQs(kitchenSink);
@@ -1172,5 +1175,41 @@ describe("SPECIES_SCOPED_RESET", () => {
     // with it, so the URL is bare — exactly what a fresh visit produces.
     const next = { ...parseParams(searched), taxa: new Set<string>(), subgroups: new Set<string>(), ...SPECIES_SCOPED_RESET };
     expect(buildQs(next as unknown as Parameters<typeof buildQs>[0])).toBe("");
+  });
+});
+
+describe("triage selection in the URL", () => {
+  it("round-trips boxes, ⌘-clicked dots and the y axes", () => {
+    const qs = "?taxa=mammals&tbox=10.25,15.5,3,5.125;1,2,0,1&tadd=sis-1,sis-2&tdel=sis-3&ty=pctNew.all&tyn=all";
+    const parsed = parseParams(qs);
+    expect(parsed.triage).toEqual({
+      rects: [{ x0: 10.25, x1: 15.5, y0: 3, y1: 5.125 }, { x0: 1, x1: 2, y0: 0, y1: 1 }],
+      add: ["sis-1", "sis-2"],
+      del: ["sis-3"],
+    });
+    expect(parsed.triageKey).toBe("pctNew.all");
+    expect(parsed.triageNeMode).toBe("all");
+    const out = new URLSearchParams(buildQs(parsed));
+    expect(out.get("tbox")).toBe("10.25,15.5,3,5.125;1,2,0,1");
+    expect(out.get("tadd")).toBe("sis-1,sis-2");
+    expect(out.get("tdel")).toBe("sis-3");
+    expect(out.get("ty")).toBe("pctNew.all");
+  });
+
+  it("rounds boxes to 3 decimals and drops malformed ones", () => {
+    const parsed = parseParams("?tbox=1.23456,2,0,1;bad;1,2,3");
+    expect(parsed.triage?.rects).toEqual([{ x0: 1.23456, x1: 2, y0: 0, y1: 1 }]);
+    expect(new URLSearchParams(buildQs(parsed)).get("tbox")).toBe("1.235,2,0,1");
+  });
+
+  it("is null without boxes or added dots, and ignores an unknown y axis", () => {
+    expect(parseParams("?tdel=sis-1").triage).toBeNull();
+    expect(parseParams("?ty=nonsense").triageKey).toBeUndefined();
+  });
+
+  it("survives a taxa change's species reset (home's box carries to All Species)", () => {
+    // A taxa navigation's SPECIES_SCOPED_RESET leaves it (home → All Species
+    // keeps a box made on home); RedListView's clearAllFilters drops it.
+    expect(Object.keys(SPECIES_SCOPED_RESET)).not.toContain("triage");
   });
 });

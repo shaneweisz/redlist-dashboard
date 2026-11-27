@@ -33,7 +33,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { inTriageSelection, triageTest, type PriorityBox, type PriorityPoint, type TriageSelection, type YScale } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -142,13 +142,22 @@ type Species = RedListSpecies;
  * switching mode re-derives from them.
  */
 function inGbifMode(s: Species, mode: GbifRecordMode): Species {
-  return {
-    ...s,
-    gbif_records: gbifRecordCount(s, mode),
-    gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
-    countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
-  };
+  // Kept per cached row and mode: copying ~175k rows (All Species) took
+  // seconds, and a row's copy never changes, so each is made once.
+  const memo = inGbifModeMemo[mode];
+  let out = memo.get(s);
+  if (!out) {
+    out = {
+      ...s,
+      gbif_records: gbifRecordCount(s, mode),
+      gbif_records_since_assessment: gbifRecordsSinceAssessment(s, mode),
+      countries: mode === "all" && s.category === "NE" && s.gbif_all_records_countries ? s.gbif_all_records_countries : s.countries,
+    };
+    memo.set(s, out);
+  }
+  return out;
 }
+const inGbifModeMemo: Record<GbifRecordMode, WeakMap<Species, Species>> = { all: new WeakMap(), georeferenced: new WeakMap() };
 
 /** IUCN threat classification hierarchy */
 const THREAT_CATEGORIES: { code: string; label: string; children: { code: string; label: string }[] }[] = [
@@ -375,13 +384,19 @@ const CATEGORY_ORDER: Record<string, number> = {
  * Missing values compare as -1 throughout, which parks them at the bottom under
  * the desc default — matching how the table reads "no data" as "least".
  */
+/** A date string's time, parsed once per distinct date: sorting ~175k rows
+ *  compares millions of times, over only a few thousand dates. 0 for none. */
+const dateMsCache = new Map<string, number>();
+function dateMs(date: string | null | undefined): number {
+  if (!date) return 0;
+  let t = dateMsCache.get(date);
+  if (t === undefined) { t = new Date(date).getTime(); dateMsCache.set(date, t); }
+  return t;
+}
 function compareBy(field: SortField, a: Species, b: Species): number {
   switch (field) {
-    case "year": {
-      const dateA = a.assessment_date ? new Date(a.assessment_date).getTime() : 0;
-      const dateB = b.assessment_date ? new Date(b.assessment_date).getTime() : 0;
-      return dateA - dateB;
-    }
+    case "year":
+      return dateMs(a.assessment_date) - dateMs(b.assessment_date);
     case "category":
       return (CATEGORY_ORDER[a.category] ?? 99) - (CATEGORY_ORDER[b.category] ?? 99);
     case "totalGbif":
@@ -631,8 +646,13 @@ function cachedYearsSince(date: string): number {
 function priorityOf(s: Species, key: GbifRangeKey): { years: number; value: number } | null {
   if (s.category === "NE" || !s.assessment_date) return null;
   const years = cachedYearsSince(s.assessment_date);
-  const value = gbifMetricValue(s, key);
-  return isNaN(years) || value == null ? null : { years, value };
+  if (isNaN(years)) return null;
+  let value = gbifMetricValue(s, key);
+  // An assessment dated after the sync has no "since assessment" window yet
+  // (the sync leaves New empty, and the table shows "—"). On the scatter it
+  // belongs where a just-assessed species sits: nothing new, at 0 years.
+  if (value == null && years < 0 && gbifRecordCount(s, gbifKeyParts(key).mode) != null) value = 0;
+  return value == null ? null : { years: Math.max(0, years), value };
 }
 
 // Explain IUCN Red List criteria codes
@@ -1481,6 +1501,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedDescribedYears, setSelectedDescribedYears,
     selectedCountries, setSelectedCountries,
     gbifRanges, setGbifRanges, gbifChartKey: gbifChartKeyParam, setGbifChartKey,
+    triageSelection, setTriageSelection, triageKey, triageNeMode, setTriageAxis,
     gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, setGbifRecordMode,
     selectedAssessmentCounts, setSelectedAssessmentCounts,
     selectedSystems, setSelectedSystems,
@@ -1933,6 +1954,39 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // taxon separate, since their URLs differ
   // (`?taxon=birds` vs `?taxon=birds&category=NE`) without needing an explicit
   // mode-prefixed cache key.
+  // The home summary (no taxon picked) has the triage rail too. Its dots are
+  // All Species', built straight from the cached list (home has no filters):
+  // not through the page's own species pipeline, which would compute every
+  // chart for 175k species each time the panel opened. Requested on first
+  // opening and cached after, so closing and reopening is instant. (Awaiting
+  // 1st Assessment can't load "all", too many species, so its home panel
+  // offers the groups.)
+  const onHome = selectedTaxa.size === 0 && !isScopeLayout(layoutMode) && urlSpecies == null;
+  const homeTriage = triageInSidebar && onHome;
+  const homeTriageOpen = homeTriage && !triageSidebarCollapsed && !isNewAssessments;
+  const homeAllUrl = speciesApiUrl("all", "");
+  useEffect(() => { if (homeTriageOpen) cache.request(homeAllUrl); }, [homeTriageOpen, homeAllUrl, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps -- cache.request, as for the fetch effect below
+  const homeAllEntry = cache.entries[homeAllUrl];
+  const homeAllSpecies = homeTriage && homeAllEntry && !homeAllEntry.tooLarge ? homeAllEntry.species : null;
+  // While the home triage is up, make All Species' record-mode copies
+  // (inGbifMode, kept per row) in idle moments, a chunk at a time: a box or a
+  // dot then moves to All Species or a group without making them all at once.
+  useEffect(() => {
+    if (!homeAllSpecies) return;
+    const rows = homeAllSpecies;
+    let i = 0, cancelled = false;
+    const idle = (cb: (d: { timeRemaining(): number }) => void) =>
+      typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(cb) : window.setTimeout(() => cb({ timeRemaining: () => 8 }), 1);
+    const step = (d: { timeRemaining(): number }) => {
+      if (cancelled) return;
+      while (i < rows.length && d.timeRemaining() > 1) {
+        for (const end = Math.min(i + 500, rows.length); i < end; i++) inGbifMode(rows[i], gbifRecordMode);
+      }
+      if (i < rows.length) idle(step);
+    };
+    idle(step);
+    return () => { cancelled = true; };
+  }, [homeAllSpecies, gbifRecordMode]);
   const error = useMemo(() => {
     if (selectedTaxa.size === 0) return null;
     const fetchSet = isNewAssessments && selectedSubgroups.size > 0 ? [...selectedSubgroups] : [...selectedTaxa];
@@ -2003,15 +2057,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   // assessedSpecies already contains NE species in new-assessments mode (the
   // main fetch above handles that); in Assessed mode it's assessed-only.
-  // Every memo below reads the GBIF counts of the record mode in force.
-  const species = useMemo(() => assessedSpecies.map((s) => inGbifMode(s, gbifRecordMode)), [assessedSpecies, gbifRecordMode]);
+  // Every memo below reads the GBIF counts of the record mode in force: the
+  // rows are put in it (inGbifMode) after the taxa filter, which reads none of
+  // the fields it sets, so a taxon picked from the cached All Species list
+  // only copies its own rows.
 
   // Filter by selected taxa + subgroup only — no other filters applied. This is
   // the "true total" baseline the Country map tooltip shows alongside its fully
   // filtered count (see countryStatsForMapTotal below), since every memo past
   // this point narrows further.
   const taxaFilteredSpeciesBase = useMemo(() => {
-    let filtered = species;
+    let filtered = assessedSpecies;
     // In new-assessments mode with a sub-group selected, species were fetched per sub-group
     // (taxon_id = the sub-group), so the speciesMatchesNode filter below is authoritative —
     // skip the parent taxon_id filter, which would otherwise drop them.
@@ -2059,8 +2115,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         filtered = filtered.filter(s => s.sis_taxon_id == null || !ids.has(s.sis_taxon_id));
       }
     }
-    return filtered;
-  }, [species, selectedTaxa, selectedSubgroups, isNewAssessments, breakdownFilter]);
+    return filtered.map((s) => inGbifMode(s, gbifRecordMode));
+  }, [assessedSpecies, gbifRecordMode, selectedTaxa, selectedSubgroups, isNewAssessments, breakdownFilter]);
 
   // The taxon header's photo. iNaturalist's own default photo for the taxon
   // when it has one (looked up by the rank name, e.g. "Primates"). Otherwise,
@@ -2506,36 +2562,34 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // because a row from the NE list was keyed on its CoL id while the same species from
   // search was keyed on its GBIF one — two different keys for one species. Both sides
   // resolve through assessment_link to the same `col-…` key now, so the keys match.
-  // Reassessment triage scatter: the box dragged on it filters
-  // the page like any chart. Local state for now, not in the URL.
-  const [priorityBox, setPriorityBox] = useState<PriorityBox | null>(null);
-  // The scatter's y axis (Total / New / % New, all records / georeferenced),
-  // its own choice rather than the GBIF Records chart's. Starts on New in the
-  // page's record mode.
-  const [priorityKey, setPriorityKey] = useState<GbifRangeKey>(() => `new.${gbifRecordMode}`);
-  const changePriorityKey = useCallback((k: GbifRangeKey) => {
-    setPriorityKey(k);
-    setPriorityBox(null); // the box is in the old metric's units
-  }, []);
+  // The triage scatter's selection (boxes, and dots ⌘-clicked in or out)
+  // filters the page like any chart; it's in the URL (useFilterParams), as
+  // are the scatter's y axes. Its species are those whose plotted place is in
+  // a box, or ⌘-clicked in, and not ⌘-clicked out (inTriageSelection): worked
+  // out per species here, for the filter, and per dot below, for the scatter.
+  // Switching view drops it (page.tsx), as does going home (Clear all).
+  //
+  // The reassessment scatter's y axis (Total / New / % New, all records /
+  // georeferenced), its own choice rather than the GBIF Records chart's:
+  // New in the page's record mode unless set.
+  const priorityKey: GbifRangeKey = triageKey ?? `new.${gbifRecordMode}`;
+  const changePriorityKey = useCallback((k: GbifRangeKey) => setTriageAxis({ key: k }), [setTriageAxis]);
   // The first-assessment triage's (Awaiting 1st Assessment) y axis: total GBIF
   // records, all or georeferenced. Its own choice, like priorityKey.
-  const [neTriageMode, setNeTriageMode] = useState<GbifRecordMode>(gbifRecordMode);
-  const changeNeTriageMode = useCallback((m: GbifRecordMode) => {
-    setNeTriageMode(m);
-    setPriorityBox(null);
-  }, []);
-  // Each view's triage plots a different set of species, so a box from one
-  // means nothing in the other: switching views drops it. (Adjusted during
-  // render, React's pattern for state that follows a prop, not in an effect.)
-  const [triageBoxView, setTriageBoxView] = useState(isNewAssessments);
-  if (triageBoxView !== isNewAssessments) {
-    setTriageBoxView(isNewAssessments);
-    setPriorityBox(null);
-  }
-  const matchesPriorityBox = useCallback(
-    (s: Species): boolean => !priorityBox || priorityBox.keys.has(s.species_key),
-    [priorityBox],
-  );
+  const neTriageMode: GbifRecordMode = triageNeMode ?? gbifRecordMode;
+  const changeNeTriageMode = useCallback((m: GbifRecordMode) => setTriageAxis({ neMode: m }), [setTriageAxis]);
+  const triageScale: YScale = !isNewAssessments && gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log";
+  const triageAsOfYear = (dataAsOf ?? new Date()).getFullYear();
+  const triageT = useMemo(() => (triageSelection ? triageTest(triageSelection) : null), [triageSelection]);
+  const matchesPriorityBox = useCallback((s: Species): boolean => {
+    if (!triageT) return true;
+    let place: { years: number; value: number } | null;
+    if (isNewAssessments) {
+      place = s.category === "NE" && s.described_year != null
+        ? { years: Math.max(0, triageAsOfYear - s.described_year), value: gbifRecordCount(s, neTriageMode) ?? 0 } : null;
+    } else place = priorityOf(s, priorityKey);
+    return inTriageSelection(triageT, s.species_key, place?.years ?? NaN, place?.value ?? NaN, triageScale);
+  }, [triageT, isNewAssessments, triageAsOfYear, neTriageMode, priorityKey, triageScale]);
 
   const taxaFilteredSpecies = useMemo(() => {
     if (!singleSpeciesPreview) return taxaFilteredSpeciesNoPreview;
@@ -2847,39 +2901,40 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
 
   // Triage scatter: every assessed species passing every filter but its own box.
+  // On home, All Species' straight from the cached list (see homeAllSpecies).
   const priorityPoints = useMemo((): PriorityPoint[] => {
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
     const { mode } = gbifKeyParts(priorityKey);
-    for (const s of taxaFilteredSpecies) {
+    const source = homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpecies;
+    for (const s of source) {
       const p = priorityOf(s, priorityKey);
-      if (!p || !matchesFilters(s, SKIP_PRIORITY)) continue;
+      if (!p || (!homeTriage && !matchesFilters(s, SKIP_PRIORITY))) continue;
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
-        total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
+        taxon: s.taxon_id, total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
         assessmentDate: s.assessment_date!, ...p,
       });
     }
     return out;
-  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey]);
+  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey, homeTriage, homeAllSpecies]);
   // The axes' extents from the whole taxon, filters ignored, so applying or
   // changing a filter never rescales the chart and selections stay comparable.
   const priorityExtent = useMemo(() => {
     let maxYears = 0, maxValue = 0;
-    for (const s of taxaFilteredSpeciesBase) {
+    for (const s of homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpeciesBase) {
       const p = priorityOf(s, priorityKey);
       if (!p) continue;
       if (p.years > maxYears) maxYears = p.years;
       if (p.value > maxValue) maxValue = p.value;
     }
     return { maxYears, maxValue };
-  }, [taxaFilteredSpeciesBase, priorityKey]);
+  }, [taxaFilteredSpeciesBase, priorityKey, homeTriage, homeAllSpecies]);
   // First-assessment triage (Awaiting 1st Assessment): every not-evaluated
   // species with a year described, passing every filter but its own box (the
   // Year Described selection included), years since described across and its
   // total GBIF records up. Those with no year described can't be placed, and
   // are counted so the chart can say so.
-  const triageAsOfYear = (dataAsOf ?? new Date()).getFullYear();
   const { nePoints, neNoYear } = useMemo(() => {
     const out: PriorityPoint[] = [];
     let noYear = 0;
@@ -2908,10 +2963,56 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpeciesBase, neTriageMode, triageAsOfYear]);
   // The current view's triage points, for the selection's count.
   const triagePoints = isNewAssessments ? nePoints : priorityPoints;
-  const priorityInBox = useMemo(
-    () => priorityBox ? triagePoints.filter((p) => priorityBox.keys.has(p.key)).length : 0,
-    [triagePoints, priorityBox],
-  );
+  /** The selection with its plotted species, for the scatter to draw. */
+  const priorityBox = useMemo((): PriorityBox | null => {
+    if (!triageSelection || !triageT) return null;
+    const keys = new Set<string>();
+    for (const p of triagePoints) if (inTriageSelection(triageT, p.key, p.years, p.value, triageScale)) keys.add(p.key);
+    return { ...triageSelection, keys };
+  }, [triageSelection, triageT, triagePoints, triageScale]);
+  const priorityInBox = priorityBox?.keys.size ?? 0;
+  // Hovering what a click would filter to (a row of the summary table, a
+  // triage legend entry) hides the other dots, as a preview. A top-level
+  // taxon matches by taxon_id; a sub-group row by node membership. A hover
+  // matching none of the plotted species (another taxon's row, from inside a
+  // taxon) changes nothing.
+  const [triageHover, setTriageHover] = useState<{ kind: "taxon" | "category"; id: string } | null>(null);
+  // On home the sidebar is the summary table's height (its card, not the
+  // caption line below it), measured as the table loads and resizes.
+  const summaryWrapRef = useRef<HTMLDivElement>(null);
+  const [summaryTableHeight, setSummaryTableHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const wrap = summaryWrapRef.current;
+    if (!homeTriage || !wrap) return;
+    const measure = () => {
+      const card = wrap.querySelector<HTMLElement>("[data-summary-table]");
+      setSummaryTableHeight(card ? card.offsetHeight : null);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    measure();
+    return () => ro.disconnect();
+  }, [homeTriage]);
+  // A click on a hovered row navigates, and its row may never see the pointer
+  // leave: a new selection drops the hover.
+  const [triageHoverTaxa, setTriageHoverTaxa] = useState(selectedTaxa);
+  if (triageHoverTaxa !== selectedTaxa) {
+    setTriageHoverTaxa(selectedTaxa);
+    setTriageHover(null);
+  }
+  const triageHighlight = useMemo((): ((p: PriorityPoint) => boolean) | null => {
+    if (!triageHover || !triageInSidebar || triageSidebarCollapsed) return null;
+    const { kind, id } = triageHover;
+    let test: (p: PriorityPoint) => boolean;
+    if (kind === "category") test = (p) => p.category === id;
+    else if (TAXA.some((t) => t.id === id)) test = (p) => p.taxon === id;
+    else {
+      const keys = new Set<string>();
+      for (const s of homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpecies) if (speciesMatchesNode(s, id)) keys.add(s.species_key);
+      test = (p) => keys.has(p.key);
+    }
+    return triagePoints.some(test) ? test : null;
+  }, [triageHover, triageInSidebar, triageSidebarCollapsed, triagePoints, homeTriage, homeAllSpecies, taxaFilteredSpecies]);
 
   // Number of Assessments chart (#423 item 1): apply all filters EXCEPT the
   // assessment-count selection itself. NE species have no assessment history
@@ -3460,8 +3561,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // ── Single species mode: show info card instead of charts ──────────
   // Only activate when arrived via the main search bar (which sets the
   // `species` URL param). Filters that incidentally narrow results to one
-  // species should keep showing the regular charts view.
-  const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null;
+  // species should keep showing the regular charts view: a triage selection
+  // of one dot (⌘-clicked) too, which also opens that species.
+  const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null && !priorityBox;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
   // The page is wide (see the data-wide-taxon-layout marker) for any taxon's
@@ -3473,11 +3575,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // A dot outside the scatter's own box is faded but still clickable; its
   // species isn't in the table, so the box is cleared first.
   const [scrollToSpecies, setScrollToSpecies] = useState<string | null>(null);
-  const openSpeciesFromScatter = useCallback((key: string) => {
-    if (priorityBox && !priorityBox.keys.has(key)) setPriorityBox(null);
+  const openSpeciesFromScatter = useCallback((key: string, added?: boolean) => {
+    // On home there's no species table: the dot opens in its own group's
+    // table (Fishes for a fish), a fraction of All Species' work to build
+    // (the rows are already cached, in the All Species list). A ⌘-click that
+    // added it to a selection goes to All Species with the selection instead.
+    if (onHome) setSelectedTaxa(new Set([added ? "all" : triagePoints.find((p) => p.key === key)?.taxon ?? "all"]));
+    // A dot outside the selection drops it (not one a ⌘-click just added).
+    if (!added && priorityBox && !priorityBox.keys.has(key)) setTriageSelection(null);
     setSelectedSpeciesKey(key);
     setScrollToSpecies(key);
-  }, [priorityBox, setSelectedSpeciesKey]);
+  }, [setSelectedSpeciesKey, onHome, setSelectedTaxa, triagePoints, priorityBox, setTriageSelection]);
   useEffect(() => {
     if (!scrollToSpecies) return;
     const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
@@ -3580,7 +3688,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedTaxa, selectedCategories, selectedYearRanges, selectedAssessmentYears, selectedDescribedYears, gbifRanges, selectedAssessors, selectedReviewers, searchFilter, selectedCountries, showOnlyStarred]);
+  }, [selectedTaxa, selectedCategories, selectedYearRanges, selectedAssessmentYears, selectedDescribedYears, gbifRanges, selectedAssessors, selectedReviewers, searchFilter, selectedCountries, showOnlyStarred, triageSelection]);
+  // And whenever the page is past the last one: a filter not listed above
+  // (threats, habitat, ...) narrowing the table left it on an empty page.
+  useEffect(() => {
+    if (currentPage > Math.max(1, totalPages)) setCurrentPage(1); // eslint-disable-line react-hooks/set-state-in-effect -- corrects a page the filters left out of range
+  }, [currentPage, totalPages]);
 
   // Auto-navigate to the page containing the URL-selected species
   useEffect(() => {
@@ -5261,7 +5374,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
       <div className="flex flex-wrap items-center gap-1">
         {priorityBox && (
-          <button type="button" onClick={() => setPriorityBox(null)}
+          <button type="button" onClick={() => setTriageSelection(null)}
             className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
             {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
           </button>
@@ -5269,28 +5382,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
     </div>
   );
-  // A one-click filter for the usual question: species past the
-  // needs-updating threshold whose GBIF data has substantially changed since.
-  // It sets the page's own filters (Years Since Assessed's "10+ yrs old", and
-  // GBIF Records' New and % New ranges, in the chart's record mode), so the
-  // rule shows as ordinary pills, the charts show their selections, each part
-  // can be changed or removed on its own, and it's in the URL. The ranges'
-  // edges set the thresholds: more than 10 new records, 50% or more new.
-  // Clicking it again, while exactly those filters are set, removes them.
-  const triageMode = gbifKeyParts(priorityKey).mode;
-  const OVERDUE_NEW = ["11-100", "101-1K", "1K-10K", "10K+"];
-  const OVERDUE_PCT = ["50%+"];
-  const sameSet = (a: ReadonlySet<string>, b: readonly string[]) => a.size === b.length && b.every((x) => a.has(x));
-  const overdueFilterOn = isOutdatedSelected
-    && sameSet(gbifRanges[`new.${triageMode}`], OVERDUE_NEW)
-    && sameSet(gbifRanges[`pctNew.${triageMode}`], OVERDUE_PCT);
-  const toggleOverdueFilter = () => {
-    const on = !overdueFilterOn;
-    setExactFilters({ outdated: on ? "yes" : null });
-    setGbifRanges(`new.${triageMode}`, new Set(on ? OVERDUE_NEW : []));
-    setGbifRanges(`pctNew.${triageMode}`, new Set(on ? OVERDUE_PCT : []));
-    setPriorityBox(null);
-  };
   // The chart itself, per view: the reassessment triage (years since last
   // assessed × a GBIF metric, coloured by category, with the needs-updating
   // line) or the first-assessment triage (years since described × total GBIF
@@ -5312,7 +5403,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </span>
       }
       box={priorityBox}
-      onBoxChange={setPriorityBox}
+      highlight={triageHighlight}
+      onBoxChange={onTriageBoxChange}
       onPointClick={openSpeciesFromScatter}
       selectedKey={selectedSpeciesKey}
       yScale="log"
@@ -5341,22 +5433,37 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </span>
       }
       box={priorityBox}
-      onBoxChange={setPriorityBox}
+      highlight={triageHighlight}
+      onBoxChange={onTriageBoxChange}
       onPointClick={openSpeciesFromScatter}
       selectedKey={selectedSpeciesKey}
-      yScale={gbifKeyParts(priorityKey).metric === "pctNew" ? "pct" : "log"}
+      yScale={triageScale}
       maxYears={priorityExtent.maxYears}
       maxValue={priorityExtent.maxValue}
     />
   );
-  // Only beside a taxon's section (wideTaxonLayout: a taxon selected, not a
-  // scope layout or a single species), in either view, each with its own
-  // chart; never on the home summary, where there is no section to filter.
-  const triageSidebarShown = wideTaxonLayout && (showPriority || isNewAssessments);
+  // Beside a taxon's section (wideTaxonLayout: a taxon selected, not a scope
+  // layout or a single species), in either view, each with its own chart; and
+  // on the home summary, so it's always to hand. Home has no species table for
+  // it to filter, so there anything that filters (a box, a legend entry, the
+  // shortcut) moves to All Species, the panel staying open beside it; a dot
+  // opens in its own group (see openSpeciesFromScatter). In Awaiting 1st Assessment, home's panel offers the groups instead
+  // (all not-evaluated species are too many to load at once).
+  const triageSidebarShown = homeTriage || (wideTaxonLayout && (showPriority || isNewAssessments));
+  const homeNeTriage = homeTriage && isNewAssessments;
+  /** On home, move to All Species before a triage action filters the page. */
+  const triageLeaveHome = () => { if (onHome) setSelectedTaxa(new Set(["all"])); };
+  const onTriageBoxChange = (sel: TriageSelection | null) => { if (sel) triageLeaveHome(); setTriageSelection(sel); };
   /** The page makes room for the open sidebar (see the data-triage-column
    *  marker). The collapsed rail needs none: it sits in the page's own right
    *  margin, so entering a taxon doesn't move the page. */
   const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
+  // Where the rail and panel sit. On home, the summary table's height (an
+  // absolutely placed panel in a stretched grid cell, so the panel never makes
+  // the row taller): the page doesn't grow for it. Elsewhere the viewport's
+  // height, sticky, like a docked panel beside the long page.
+  const triageSidebarPlace = homeTriage ? "absolute inset-x-0 top-0 h-full" : "sticky top-4 h-[calc(100vh-2rem)]";
+  const triageSidebarStyle = homeTriage && summaryTableHeight ? { height: summaryTableHeight } : undefined;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim rail in the page's triage column, styled like the
@@ -5377,7 +5484,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         title={isNewAssessments
           ? "Show First Assessment Triage: years since described against GBIF records"
           : "Show Reassessment Triage: years since assessment against GBIF records"}
-        className="sticky top-4 w-12 h-[min(calc(100vh-2rem),42rem)] flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors">
+        style={triageSidebarStyle}
+        className={`${triageSidebarPlace} w-12 flex flex-col items-center gap-3 py-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-100 cursor-pointer transition-colors`}>
         <LuPanelRightOpen aria-hidden size={16} />
         <MdScatterPlot aria-hidden size={18} />
         <span className="[writing-mode:vertical-rl] rotate-180 text-sm font-semibold text-zinc-700 dark:text-zinc-200 whitespace-nowrap">{triageTitle}</span>
@@ -5388,16 +5496,35 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </button>
     ) : (
-      // Sticky, not fixed: it scrolls up with its section, then stays in view
-      // while the charts and table scroll past. Capped height so the plot keeps
-      // a readable aspect rather than becoming a tall strip.
+      // Off home: sticky, not fixed, it starts level with the page's top, then
+      // stays in view while the charts and table scroll past, the viewport's
+      // height, like a docked panel. On home: the summary table's height (see
+      // triageSidebarPlace). The plot fills it in both.
       <aside data-triage-sidebar aria-label={triageTitle}
-        className="sticky top-4 h-[min(calc(100vh-2rem),42rem)] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
+        style={triageSidebarStyle}
+        className={`${triageSidebarPlace} flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{triageTitle}</div>
+            {/* How to use it; with a box, the selection in its place (same
+                small text, so drawing a box shifts nothing): clear it, or go
+                down to it in the table. */}
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
-              {triagePoints.length.toLocaleString()} species plotted
+              {homeNeTriage ? "Pick a group to plot"
+                : priorityBox ? (
+                  <>
+                    <button type="button" onClick={() => setTriageSelection(null)} title="Clear the selection"
+                      className="font-semibold text-zinc-800 dark:text-zinc-100 hover:underline">
+                      {priorityInBox.toLocaleString()} of {triagePoints.length.toLocaleString()} selected ×
+                    </button>
+                    {" · "}
+                    <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                      ↓ table
+                    </button>
+                    <span title="Hold ⌘ (Ctrl on Windows) and drag to add a box, or click a dot to add or remove it"> · ⌘ to add</span>
+                  </>
+                ) : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
@@ -5413,7 +5540,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             select one, again to clear, Cmd/Ctrl-click to add or remove), so
             the table, the other charts and these dots all follow. Unselected
             entries dim while a selection is active, as that chart's bars do. */}
-        {isNewAssessments ? (
+        {homeNeTriage ? (
+          // Awaiting 1st Assessment on home: "all" can't be loaded, so the
+          // panel offers the groups. Picking one moves the page to it, the
+          // panel still open, plotting it.
+          <div className="mt-4 text-sm text-zinc-600 dark:text-zinc-300">
+            <p>Not-evaluated species are too many to plot at once. Pick a group to see its triage:</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {TAXA.filter((g) => g.id !== "all").map((g) => (
+                <button key={g.id} type="button" onClick={(e) => handleToggleTaxon(g.id, e)}
+                  className="px-3 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : isNewAssessments ? (
           // One colour (all not evaluated), so no legend: instead, what the
           // chart can't show. Species with no year described have no place on
           // the x axis (common for plants and fungi, whose CoL records often
@@ -5424,13 +5566,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               : nePoints.length > 0 ? "Every species here has a year described" : "\u00a0"}
           </div>
         ) : (
-        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter.">
+        // The hover clears on leaving the legend, not each entry: the gaps
+        // between entries would otherwise flash the whole plot back between them.
+        <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter."
+          onMouseLeave={() => setTriageHover(null)}>
           {TRIAGE_LEGEND.map((c) => {
             const active = selectedCategories.has(c);
             const dimmed = selectedCategories.size > 0 && !active;
             return (
               <button key={c} type="button" aria-pressed={active}
-                onClick={(e) => handleCategoryClick({ payload: { code: c } }, e)}
+                onClick={(e) => { triageLeaveHome(); handleCategoryClick({ payload: { code: c } }, e); }}
+                onMouseEnter={() => setTriageHover({ kind: "category", id: c })}
                 title={`Show only ${c} · ⌘/Ctrl-click to add or remove`}
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"} ${dimmed ? "opacity-40" : ""}`}>
                 <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
@@ -5439,49 +5585,32 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           })}
         </div>
         )}
+        {!homeNeTriage && <>
+        {/* The plot fills the panel: home's table-high one, or a taxon's
+            viewport-high one. */}
         <div className="flex-1 min-h-0 mt-2">
-          {speciesLoading && assessedSpecies.length === 0 ? (
-            <div className="h-full flex items-center justify-center"><Spinner /></div>
+          {(homeTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
+            <div className="h-full flex flex-col items-center justify-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+              <Spinner />{homeTriage && "Loading all species…"}
+            </div>
           ) : renderTriageScatter(true)}
         </div>
-        {/* A caption below the plot: before a selection, how to make one, and
-            a one-click filter whose label is its criteria (so it can be
-            checked, not just trusted); after, the selection itself in the
-            same place. Fixed height (two lines), so the swap never resizes the
-            plot above. */}
-        <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-          {priorityBox ? (
-            // The selection, and a way down to it in the table when wanted
-            // (a selection doesn't scroll there itself, unlike clicking a dot:
-            // you may be refining it, and the charts above follow it too).
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPriorityBox(null)}
-                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-              </button>
-              <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
-                ↓ table
-              </button>
-            </div>
-          ) : (
-            <>
-              <span>Drag to select · click a dot to open it</span>
-              {!isNewAssessments && <button type="button" onClick={toggleOverdueFilter} aria-pressed={overdueFilterOn}
-                title={overdueFilterOn
-                  ? "Remove these filters"
-                  : "Sets the page's filters to species assessed 10 or more years ago with more than 10 new GBIF records since, making up half or more of all their records"}
-                className={`text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100 ${overdueFilterOn ? "font-semibold text-zinc-800 dark:text-zinc-100" : ""}`}>
-                {overdueFilterOn ? "✓ " : ""}Filter to 10+ yrs since assessed · &gt;10 new records · 50%+ new
-              </button>}
-            </>
-          )}
-        </div>
+        </>}
       </aside>
     )
   ) : null;
 
   return (
+    // On a sidebar-wide screen, the page reaches past its right edge (-mr: the
+    // triage column plus its 1rem gap) as two columns: everything at the
+    // page's width, and the sticky triage sidebar (27rem, in the column
+    // page.tsx reserves for it) or its rail (4rem, in the page's own right
+    // margin), level with the page's top: the summary table, on home and in a
+    // taxon alike, so entering a taxon never moves it. Otherwise the wrapper
+    // is display: contents, leaving the flex chain below as it was.
+    <div className={!triageSidebarShown ? "contents" : `${triageSidebarOpen
+      ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem]"
+      : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem]"} gap-4 ${homeTriage ? "items-stretch" : "items-start"}`}>
     <div className="space-y-1 min-w-0 flex-1 flex flex-col min-h-0">
       {/* Always show Taxa Summary table */}
       {/* Country View's landing map is sized by a flex chain that runs from
@@ -5495,7 +5624,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           grid whose height comes from the table beside it, and in every
           non-country layout this wrapper holds the full taxa table, which
           should keep sizing to its own content. */}
-      <div
+      <div ref={summaryWrapRef}
         className={layoutMode === "country" && !countryScope ? "flex-1 min-h-0 flex flex-col" : undefined}
       >
       <TaxaSummary
@@ -5511,6 +5640,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
         onSelectedRow={setSelectedRow}
+        onHoverTaxon={(id) => setTriageHover(id ? { kind: "taxon", id } : null)}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -5725,15 +5855,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           )}
         </div>
       ) : (
-      // In the reassessed view, on a sidebar-wide screen, this section reaches
-      // past the page's right edge (-mr: the column plus its 1rem gap) as two
-      // columns: the charts and table at the page's width, and the sticky
-      // triage chart (27rem, in the column page.tsx reserves for it) or its
-      // rail (4rem, in the page's own right margin), level with the first
-      // charts. Otherwise it's the page's width, as on main.
-      <div className={!triageSidebarShown ? undefined : triageSidebarOpen
-        ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start"
-        : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem] gap-4 items-start"}>
+      // (The triage sidebar sits beside the whole page: see the root.)
       <div className="space-y-3 min-w-0">
 
           {/* Single species header — skeleton while loading */}
@@ -6467,7 +6589,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   // the taxa will change, since that's the only time it's read.
                   if (selectedTaxa.size > 0) skipClearOnTaxaChangeRef.current = true;
                   clearAllFiltersAndTaxa({ replace: switchView });
-                  setPriorityBox(null);
+                  setTriageSelection(null);
                   setShowOnlyStarred(false);
                   setExpandedThreat(new Set());
                   setExpandedCriteria(new Set());
@@ -7687,8 +7809,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </div>
       </div>
-      {triageSidebar}
-      </div>
       ))}
 
       {/* Fixed image preview portal */}
@@ -7699,6 +7819,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       >
         <img alt="" className="block w-48 h-48 object-cover" />
       </div>
+    </div>
+    {homeTriage && triageSidebar ? <div className="relative">{triageSidebar}</div> : triageSidebar}
     </div>
   );
 }

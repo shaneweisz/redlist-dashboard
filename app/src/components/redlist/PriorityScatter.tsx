@@ -18,6 +18,7 @@
  * Canvas rather than SVG: "All species" is ~175k dots. Hover and the drag box
  * are DOM overlays, so the canvas only redraws when the data or box changes.
  */
+import type { TriageSelection, TriageRect } from "@/hooks/useFilterParams";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { yearsMonthsSince } from "@/lib/outdated";
 
@@ -26,6 +27,8 @@ export interface PriorityPoint {
   name: string;
   commonName?: string | null;
   category: string;
+  /** The species' top-level taxon (taxon_id), for a hover on the summary table's row. */
+  taxon?: string | null;
   /** Years since the latest assessment. */
   years: number;
   /** The plotted GBIF value: a record count, or a percentage for "pct". */
@@ -46,11 +49,30 @@ export interface PriorityPoint {
  * are jittered a few pixels, so a tight box around one dot could miss its
  * unjittered position and select nothing.
  */
-export interface PriorityBox { x0: number; x1: number; y0: number; y1: number; keys: ReadonlySet<string> }
+/** A selection as drawn: boxes in plot units (⌘/Ctrl-drag adds one), and
+ *  dots ⌘/Ctrl-clicked in or out of them. Kept in the URL (useFilterParams). */
+export type { TriageSelection, TriageRect } from "@/hooks/useFilterParams";
+/** A selection with its species worked out (see inTriageSelection): what the scatter draws. */
+export interface PriorityBox extends TriageSelection { keys: ReadonlySet<string> }
 
 export type YScale = "log" | "pct";
 /** Plot units up the y axis: log10(count + 1), or the percentage itself. */
 export const toPlotY = (value: number, scale: YScale) => (scale === "pct" ? value : Math.log10(value + 1));
+/** A dot's place inside a box, in plot units (not its jittered pixel). */
+export const inTriageRect = (years: number, value: number, r: TriageRect, scale: YScale) => {
+  const y = toPlotY(value, scale);
+  return years >= r.x0 && years <= r.x1 && y >= r.y0 && y <= r.y1;
+};
+/** A selection ready to test species against (its key lists as sets). */
+export interface TriageTest { rects: readonly TriageRect[]; add: ReadonlySet<string>; del: ReadonlySet<string> }
+export const triageTest = (sel: TriageSelection): TriageTest => ({ rects: sel.rects, add: new Set(sel.add), del: new Set(sel.del) });
+/** Is a species (its key and plotted place) in the selection: in a box or
+ *  ⌘-clicked in, and not ⌘-clicked out. One rule for the page's filter, the
+ *  dots and a link's selection. */
+export function inTriageSelection(t: TriageTest, key: string, years: number, value: number, scale: YScale): boolean {
+  if (t.del.has(key)) return false;
+  return t.add.has(key) || t.rects.some((r) => inTriageRect(years, value, r, scale));
+}
 
 // Draw order: least concerning first, so threatened dots sit on top.
 const DRAW_RANK: Record<string, number> = { LC: 0, NT: 1, DD: 2, VU: 3, EN: 4, CR: 5, EW: 6, EX: 7 };
@@ -86,7 +108,9 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE, highlight = null }: {
+  /** A hover preview elsewhere on the page: only the dots it matches are drawn. */
+  highlight?: ((p: PriorityPoint) => boolean) | null;
   /** The x axis title. */
   xTitle?: string;
   /** A labelled reference line on the x axis, or null for none. */
@@ -102,9 +126,10 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   maxValue: number;
   colors: Record<string, string>;
   box: PriorityBox | null;
-  onBoxChange: (box: PriorityBox | null) => void;
-  /** Clicking a dot: page and scroll the species table to this species. */
-  onPointClick: (key: string) => void;
+  /** The selection as drawn, or null for none; the caller works out its species (`box`). */
+  onBoxChange: (sel: TriageSelection | null) => void;
+  /** Clicking a dot: page and scroll the species table to this species. `added`: a ⌘/Ctrl-click that just added it to the selection. */
+  onPointClick: (key: string, added?: boolean) => void;
   selectedKey?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -113,7 +138,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   const [measuredHeight, setMeasuredHeight] = useState(DEFAULT_HEIGHT);
   const HEIGHT = fill ? Math.max(160, measuredHeight) : DEFAULT_HEIGHT;
   const [hover, setHover] = useState<{ p: PriorityPoint; px: number; py: number } | null>(null);
-  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; add: boolean } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -219,6 +244,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const r = big ? 1.2 : 2.4;
     for (let i = 0; i < ordered.length; i++) {
       const p = ordered[i];
+      if (highlight && !highlight(p)) continue;
       const dim = box ? !box.keys.has(p.key) : false;
       ctx.globalAlpha = dim ? 0.12 : big ? 0.5 : 0.75;
       ctx.fillStyle = colors[p.category] || "#a1a1aa";
@@ -227,7 +253,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
-  }, [layout, scales, width, HEIGHT, box, colors, yScale, xTitle, refLine]);
+  }, [layout, scales, width, HEIGHT, box, colors, yScale, xTitle, refLine, highlight]);
 
   const localXY = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -255,14 +281,16 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   // to back, before React re-renders), and the drag is followed on the window:
   // the 0-record dots sit on the x axis, so a box around them is released
   // below the plot, often off the chart, where leaving used to cancel it.
-  const dragStart = useRef<{ x0: number; y0: number } | null>(null);
+  // ⌘/Ctrl held at the start adds the drag's rectangle to the selection
+  // (the dashboard's multi-select convention); without, it replaces it.
+  const dragStart = useRef<{ x0: number; y0: number; add: boolean } | null>(null);
   const onMouseDown = (e: React.MouseEvent) => {
     const { x, y } = localXY(e);
     if (!inPlot(x, y)) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const at = (ev: MouseEvent) => ({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
-    dragStart.current = { x0: x, y0: y };
-    setDrag({ x0: x, y0: y, x1: x, y1: y });
+    dragStart.current = { x0: x, y0: y, add: e.metaKey || e.ctrlKey };
+    setDrag({ x0: x, y0: y, x1: x, y1: y, add: e.metaKey || e.ctrlKey });
     const move = (ev: MouseEvent) => {
       const start = dragStart.current;
       if (!start) return;
@@ -296,18 +324,41 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
       const { ix, iy } = scales;
       const left = Math.min(drag.x0, x), right = Math.max(drag.x0, x);
       const top = Math.min(drag.y0, y), bottom = Math.max(drag.y0, y);
-      const keys = new Set<string>();
-      const { ordered, xy } = layout;
-      for (let i = 0; i < ordered.length; i++) {
-        const px = xy[i * 2], py = xy[i * 2 + 1];
-        if (px >= left && px <= right && py >= top && py <= bottom) keys.add(ordered[i].key);
+      // Plot units, to 3 decimals as in the URL, so a link reproduces it.
+      const q = (v: number) => Math.round(v * 1000) / 1000;
+      const r = { x0: q(ix(left)), x1: q(ix(right)), y0: q(iy(bottom)), y1: q(iy(top)) };
+      if (drag.add && box) {
+        // Added to the selection: a dot ⌘-clicked out but inside the new box is back in.
+        const inR = new Set(points.filter((p) => inTriageRect(p.years, p.value, r, yScale)).map((p) => p.key));
+        onBoxChange({ rects: [...box.rects, r], add: box.add, del: box.del.filter((k) => !inR.has(k)) });
+      } else {
+        onBoxChange({ rects: [r], add: [], del: [] });
       }
-      onBoxChange({ x0: ix(left), x1: ix(right), y0: iy(bottom), y1: iy(top), keys });
       return;
     }
     const i = inPlot(x, y) ? hitTest(x, y) : null;
-    if (i != null) onPointClick(layout.ordered[i].key);
-    else if (box) onBoxChange(null);
+    if (i != null) {
+      const key = layout.ordered[i].key;
+      // ⌘/Ctrl-click toggles the dot in the selection; one it adds also
+      // opens, so the last one ⌘-clicked is the one shown.
+      if (drag.add) {
+        const rects = box?.rects ?? [], add = box?.add ?? [], del = box?.del ?? [];
+        const had = box?.keys.has(key) ?? false;
+        let next: TriageSelection;
+        if (had) {
+          // Out: un-add it, or exclude it from its box.
+          next = add.includes(key) ? { rects, add: add.filter((k) => k !== key), del } : { rects, add, del: [...del, key] };
+        } else {
+          // In: un-exclude it (it's in a box), or add it.
+          next = del.includes(key) ? { rects, add, del: del.filter((k) => k !== key) } : { rects, add: [...add, key], del };
+        }
+        onBoxChange(next.rects.length || next.add.length ? next : null);
+        if (!had) onPointClick(key, true);
+        return;
+      }
+      onPointClick(key);
+    }
+    else if (box && !drag.add) onBoxChange(null);
   };
 
   // Boxes are clamped to the plot plus EDGE px: dots on an axis (the 0-record
@@ -319,8 +370,8 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const cy = (v: number) => Math.min(Math.max(v, M.top - EDGE), M.top + plotH + EDGE);
     return { left: cx(l), top: cy(t), width: cx(r) - cx(l), height: cy(b) - cy(t) };
   };
-  const boxPx = box && width > 0
-    ? toRect(scales.sx(box.x0), scales.sy(box.y1), scales.sx(box.x1), scales.sy(box.y0)) : null;
+  const boxPxs = box && width > 0
+    ? box.rects.map((r) => toRect(scales.sx(r.x0), scales.sy(r.y1), scales.sx(r.x1), scales.sy(r.y0))) : [];
   const dragPx = drag
     ? toRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)) : null;
 
@@ -386,10 +437,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
           </div>
         );
       })()}
-      {(dragPx ?? boxPx) && (
-        <div className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
-          style={dragPx ?? boxPx ?? undefined} />
-      )}
+      {/* The selection's rectangles; while dragging, the new one too, and
+          the old ones only if it adds to them (⌘/Ctrl). */}
+      {[...(drag && !drag.add ? [] : boxPxs), ...(dragPx ? [dragPx] : [])].map((r, i) => (
+        <div key={i} className="pointer-events-none absolute rounded-sm border border-zinc-500/70 bg-zinc-500/10 dark:border-zinc-300/70 dark:bg-zinc-300/10"
+          style={r} />
+      ))}
       {selected >= 0 && (
         <div className="pointer-events-none absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full ring-2 ring-zinc-900 dark:ring-white"
           style={{ left: layout.xy[selected * 2], top: layout.xy[selected * 2 + 1] }} />
