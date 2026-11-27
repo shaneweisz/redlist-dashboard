@@ -148,6 +148,51 @@ function partOfAbove(f: ColFiling, partOf: Map<string, CountedTaxon>): CountedTa
   return undefined;
 }
 
+/** A CoL species drawn for context (occurrence-taxa.ts ContextTaxon): why it is there. */
+export interface ContextTaxon {
+  key: string;
+  why: "rest" | "split";
+}
+
+export interface ContextGroup {
+  /** The CoL species' key. */
+  key: string;
+  name: string;
+  why: ContextTaxon["why"];
+  shape: Shape;
+  loaded: number;
+}
+
+/**
+ * The context's records by the CoL species each leads to, the most records
+ * first, a shape each (hollow on the map: none of them count). A record whose
+ * species isn't one asked for (a re-filed id) goes to the first.
+ */
+export function contextGroups(records: ColFiling[], context: ContextTaxon[]): ContextGroup[] {
+  const why = new Map(context.map((c) => [c.key, c.why]));
+  const groups = new Map<string, ContextGroup>();
+  for (const f of records) {
+    const key = f.colSpeciesKey ?? f.colUsageKey ?? "?";
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, name: f.colSpeciesName ?? f.colUsageName ?? "?", why: why.get(key) ?? context[0]?.why ?? "rest", shape: "circle", loaded: 0 };
+      groups.set(key, g);
+    }
+    g.loaded++;
+  }
+  return [...groups.values()]
+    .sort((a, b) => b.loaded - a.loaded || a.name.localeCompare(b.name))
+    .map((g, i) => ({ ...g, shape: SHAPES[i] ?? OTHER_SHAPE }));
+}
+
+/** What the legend and the record panel say about a context species. */
+export function contextNote(why: ContextTaxon["why"], speciesName: string | null | undefined): string {
+  const of = speciesName ? ` ${speciesName}` : " this species";
+  return why === "split"
+    ? `A CoL species split from${of}. It needs its own assessment.`
+    : `Filed by CoL under the same species as${of}, but not under its name.`;
+}
+
 /** Is a record one the count claims? For the context layer, which shows only the others. */
 export function isClaimed(f: ColFiling, counted: CountedTaxon[]): boolean {
   const keys = new Set(counted.map((t) => t.key));
@@ -170,8 +215,11 @@ export function groupNote(g: TaxonGroup): string {
 
 // ─── Marker images ───────────────────────────────────────────────────────────
 
-/** The image ids the symbol layer draws: `occ-shape-<shape>`. */
+/** The image ids the symbol layer draws: `occ-shape-<shape>`, and `occ-shape-hollow-<shape>` for context. */
 export const SHAPE_IMAGE_PREFIX = "occ-shape-";
+export const HOLLOW_IMAGE_PREFIX = "occ-shape-hollow-";
+/** A hollow shape's outline width, in pixels. */
+const HOLLOW_WIDTH = 1.4;
 /** The shape's half-width, in image pixels: icon-size = radius / SHAPE_RADIUS. A dot's own radius, so icon-size stays near 1: scaled down, MapLibre widens an SDF's antialiasing into a haze. */
 export const SHAPE_RADIUS = 5;
 const SDF_RADIUS = 8;
@@ -238,7 +286,7 @@ function polygonDistance(x: number, y: number, poly: [number, number][]): number
  * and outlines (`icon-halo-*`) per feature: the same encoding as its glyphs
  * (TinySDF's radius 8, cutoff 0.25), so a halo of N pixels is N pixels.
  */
-export function shapeSdf(shape: Shape): { width: number; height: number; data: Uint8Array } {
+export function shapeSdf(shape: Shape, hollow = false): { width: number; height: number; data: Uint8Array } {
   const SIZE = 2 * Math.ceil(SHAPE_RADIUS * extent(shape) + SDF_RADIUS + 2);
   const data = new Uint8Array(SIZE * SIZE * 4);
   const poly = shapePolygon(shape);
@@ -246,7 +294,9 @@ export function shapeSdf(shape: Shape): { width: number; height: number; data: U
   for (let py = 0; py < SIZE; py++) {
     for (let px = 0; px < SIZE; px++) {
       const x = (px + 0.5 - c) / SHAPE_RADIUS, y = (py + 0.5 - c) / SHAPE_RADIUS;
-      const d = (poly ? polygonDistance(x, y, poly) : Math.hypot(x, y) - 1) * SHAPE_RADIUS;
+      const edge = (poly ? polygonDistance(x, y, poly) : Math.hypot(x, y) - 1) * SHAPE_RADIUS;
+      // Hollow: the outline alone, a band either side of the edge.
+      const d = hollow ? Math.abs(edge) - HOLLOW_WIDTH / 2 : edge;
       const a = Math.round(255 - 255 * (d / SDF_RADIUS + 0.25));
       data[(py * SIZE + px) * 4 + 3] = Math.max(0, Math.min(255, a));
     }

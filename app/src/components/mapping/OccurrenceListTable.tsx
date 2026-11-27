@@ -81,6 +81,8 @@ export interface OccurrenceFeature {
     colSpeciesKey?: string | null;
     colSpeciesName?: string | null;
     colPath?: string[] | null;
+    /** Set on a context record (not this species', drawn beside it): why it is shown. */
+    context?: "rest" | "split";
     /** Which record set this came from — see CoordinateStatus in the API route. */
     coordinateStatus?: "mapped" | "issue" | "missing";
     /** GBIF's own geospatial issues with this record's coordinates. */
