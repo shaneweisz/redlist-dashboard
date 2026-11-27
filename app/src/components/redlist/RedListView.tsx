@@ -4255,7 +4255,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const countryMapCard = (
     <div>
       {speciesLoading && assessedSpecies.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 h-full flex flex-col">
           <div className="flex items-center justify-between mb-1 min-h-[24px]">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
               Country
@@ -4270,9 +4270,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               spinner moves. */}
           {/* Same 200px floor as WorldMap's own map area, so the skeleton is
               the loaded card's height (it reserved 320px, so the whole chart
-              row shrank by ~65px once the map arrived). */}
+              row shrank by ~65px once the map arrived). In reassessments mode
+              the card sits beside the Assessors chart, whose loading body is
+              240px, not 180px: match that instead, or the skeleton is ~40px
+              shorter than its neighbour (h-full also stretches it to the
+              row, as the loaded map does). */}
           <div className="min-h-[200px]">
-            <div style={{ height: 180 }} className="flex items-center justify-center">
+            <div style={{ height: isNewAssessments ? 180 : 240 }} className="flex items-center justify-center">
               <Spinner />
             </div>
           </div>
