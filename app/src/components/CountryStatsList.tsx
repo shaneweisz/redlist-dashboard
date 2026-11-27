@@ -50,6 +50,8 @@ interface CountryStatsListProps {
   sortKey?: SortKey;
   sortDir?: SortDir;
   onSortChange?: (key: SortKey, dir: SortDir) => void;
+  /** The row under the pointer's country code, and null on leaving the list. */
+  onCountryHover?: (countryCode: string | null) => void;
 }
 
 // How many rows a page holds is measured, not fixed: this list is absolutely
@@ -170,6 +172,7 @@ export default function CountryStatsList({
   sortKey: controlledSortKey,
   sortDir: controlledSortDir,
   onSortChange,
+  onCountryHover,
 }: CountryStatsListProps) {
   const [localSortKey, setLocalSortKey] = useState<SortKey>("species");
   const [localSortDir, setLocalSortDir] = useState<SortDir>("desc");
@@ -388,7 +391,7 @@ export default function CountryStatsList({
               )}
             </tr>
           </thead>
-          <tbody>
+          <tbody onMouseLeave={onCountryHover ? () => onCountryHover(null) : undefined}>
             {pageRows.map((row) => {
               const isSelected = selectedCountries.has(row.code);
               return (
@@ -396,6 +399,7 @@ export default function CountryStatsList({
                   key={row.code}
                   data-country-row=""
                   onClick={(e) => onCountrySelect(row.code, row.name, e)}
+                  onMouseEnter={onCountryHover ? () => onCountryHover(row.code) : undefined}
                   className={`cursor-pointer border-b border-zinc-100 dark:border-zinc-800/50 last:border-0 ${
                     isSelected ? "bg-blue-50 dark:bg-blue-900/30" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                   }`}

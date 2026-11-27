@@ -1780,6 +1780,12 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     () => false,
   );
   const triageInSidebar = isWide;
+  // The window's height, for capping the summary triage panel at it.
+  const viewportHeight = useSyncExternalStore(
+    (cb) => { window.addEventListener("resize", cb); return () => window.removeEventListener("resize", cb); },
+    () => window.innerHeight,
+    () => 0,
+  );
   // Always starts collapsed: the sidebar is opt-in on every visit, opened
   // from its rail, and not remembered.
   const [triageSidebarCollapsed, setTriageSidebarCollapsed] = useState(true);
@@ -1961,13 +1967,23 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // opening and cached after, so closing and reopening is instant. (Awaiting
   // 1st Assessment can't load "all", too many species, so its home panel
   // offers the groups.)
+  // The Country view (its map, or a country's summary table, before a taxon
+  // is picked) has it too, the same way: All Species' rows, narrowed to the
+  // selected countries. It has no other filters, and no Awaiting view.
   const onHome = selectedTaxa.size === 0 && !isScopeLayout(layoutMode) && urlSpecies == null;
-  const homeTriage = triageInSidebar && onHome;
-  const homeTriageOpen = homeTriage && !triageSidebarCollapsed && !isNewAssessments;
+  const onCountryView = selectedTaxa.size === 0 && layoutMode === "country" && urlSpecies == null;
+  const summaryTriage = triageInSidebar && (onHome || onCountryView);
+  const summaryTriageOpen = summaryTriage && !triageSidebarCollapsed && !isNewAssessments;
   const homeAllUrl = speciesApiUrl("all", "");
-  useEffect(() => { if (homeTriageOpen) cache.request(homeAllUrl); }, [homeTriageOpen, homeAllUrl, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps -- cache.request, as for the fetch effect below
+  useEffect(() => { if (summaryTriageOpen) cache.request(homeAllUrl); }, [summaryTriageOpen, homeAllUrl, cache.request]); // eslint-disable-line react-hooks/exhaustive-deps -- cache.request, as for the fetch effect below
   const homeAllEntry = cache.entries[homeAllUrl];
-  const homeAllSpecies = homeTriage && homeAllEntry && !homeAllEntry.tooLarge ? homeAllEntry.species : null;
+  const homeAllSpecies = summaryTriage && homeAllEntry && !homeAllEntry.tooLarge ? homeAllEntry.species : null;
+  /** The summary triage's species: All Species, or on the Country view those
+   *  recorded in a selected country (the summary table's own rule). */
+  const summarySpecies = useMemo(() => {
+    if (!homeAllSpecies || !onCountryView || selectedCountries.size === 0) return homeAllSpecies;
+    return homeAllSpecies.filter((s) => s.countries.some((c) => selectedCountries.has(c)));
+  }, [homeAllSpecies, onCountryView, selectedCountries]);
   // While the home triage is up, make All Species' record-mode copies
   // (inGbifMode, kept per row) in idle moments, a chunk at a time: a box or a
   // dot then moves to All Species or a group without making them all at once.
@@ -2901,15 +2917,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   }, [taxaFilteredSpecies, matchesFilters, gbifChartKey]);
 
   // Triage scatter: every assessed species passing every filter but its own box.
-  // On home, All Species' straight from the cached list (see homeAllSpecies).
+  // On home and the Country view, straight from the cached list (see summarySpecies).
   const priorityPoints = useMemo((): PriorityPoint[] => {
     if (isNewAssessments) return [];
     const out: PriorityPoint[] = [];
     const { mode } = gbifKeyParts(priorityKey);
-    const source = homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpecies;
+    const source = summaryTriage ? (summarySpecies ?? []) : taxaFilteredSpecies;
     for (const s of source) {
       const p = priorityOf(s, priorityKey);
-      if (!p || (!homeTriage && !matchesFilters(s, SKIP_PRIORITY))) continue;
+      if (!p || (!summaryTriage && !matchesFilters(s, SKIP_PRIORITY))) continue;
       out.push({
         key: s.species_key, name: s.scientific_name, commonName: s.common_name, category: s.category,
         taxon: s.taxon_id, total: gbifRecordCount(s, mode), newRecords: gbifRecordsSinceAssessment(s, mode),
@@ -2917,19 +2933,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       });
     }
     return out;
-  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey, homeTriage, homeAllSpecies]);
+  }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey, summaryTriage, summarySpecies]);
   // The axes' extents from the whole taxon, filters ignored, so applying or
   // changing a filter never rescales the chart and selections stay comparable.
   const priorityExtent = useMemo(() => {
     let maxYears = 0, maxValue = 0;
-    for (const s of homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpeciesBase) {
+    // All Species' on the Country view too, as a country is a filter.
+    for (const s of summaryTriage ? (homeAllSpecies ?? []) : taxaFilteredSpeciesBase) {
       const p = priorityOf(s, priorityKey);
       if (!p) continue;
       if (p.years > maxYears) maxYears = p.years;
       if (p.value > maxValue) maxValue = p.value;
     }
     return { maxYears, maxValue };
-  }, [taxaFilteredSpeciesBase, priorityKey, homeTriage, homeAllSpecies]);
+  }, [taxaFilteredSpeciesBase, priorityKey, summaryTriage, homeAllSpecies]);
   // First-assessment triage (Awaiting 1st Assessment): every not-evaluated
   // species with a year described, passing every filter but its own box (the
   // Year Described selection included), years since described across and its
@@ -2971,28 +2988,83 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     return { ...triageSelection, keys };
   }, [triageSelection, triageT, triagePoints, triageScale]);
   const priorityInBox = priorityBox?.keys.size ?? 0;
-  // Hovering what a click would filter to (a row of the summary table, a
-  // triage legend entry) hides the other dots, as a preview. A top-level
-  // taxon matches by taxon_id; a sub-group row by node membership. A hover
-  // matching none of the plotted species (another taxon's row, from inside a
-  // taxon) changes nothing.
-  const [triageHover, setTriageHover] = useState<{ kind: "taxon" | "category"; id: string } | null>(null);
+  // Hovering anything a click would filter to previews it on the scatter:
+  // only the matching dots are drawn. A summary table row (a taxon, or a
+  // sub-group by node membership), a triage legend entry, a bar of any filter
+  // chart, a chip or pill, a country on a map or its list. Each says what it
+  // matches with the same rule its click filters by. A hover matching none of
+  // the plotted species (another taxon's row, from inside a taxon; a bar of
+  // an axis that already has another selection) changes nothing.
+  const [triageHover, setTriageHover] = useState<{ id: string; match: (s: Species) => boolean } | null>(null);
+  // Only while the panel is open: closed, a hover sets nothing (and costs no render).
+  const triageHoverOn = triageInSidebar && !triageSidebarCollapsed;
+  /** Preview `match` on the scatter, under an id naming what is hovered (the
+   *  same id keeps the current preview); null clears it. */
+  const previewOnTriage = useCallback((id: string | null, match?: (s: Species) => boolean) => {
+    setTriageHover((prev) => (id == null || !match ? null : prev?.id === id ? prev : { id, match }));
+  }, []);
+  /** A chart's onBarHover: `matcher` turns a bar's key into what it matches. */
+  const barHover = (axis: string, matcher: (key: string) => ((s: Species) => boolean) | null | undefined) =>
+    triageHoverOn ? (key: string | null) => {
+      const match = key == null ? null : matcher(key);
+      previewOnTriage(match ? `${axis}:${key}` : null, match ?? undefined);
+    } : undefined;
+  /** A chip's or pill's onMouseEnter, and their row's onMouseLeave: the hover
+   *  clears on leaving the row, so crossing a gap doesn't flash every dot back. */
+  const hoverEnter = (id: string, match: (s: Species) => boolean) =>
+    triageHoverOn ? () => previewOnTriage(id, match) : undefined;
+  const hoverLeave = triageHoverOn ? () => previewOnTriage(null) : undefined;
+  const hoverTaxon = useCallback((id: string | null) => {
+    if (id == null) { previewOnTriage(null); return; }
+    previewOnTriage(`taxon:${id}`, TAXA.some((t) => t.id === id) ? (s) => s.taxon_id === id : (s) => speciesMatchesNode(s, id));
+  }, [previewOnTriage]);
+  const hoverCountry = useCallback((code: string | null) => {
+    previewOnTriage(code && `country:${code}`, (s) => s.countries.includes(code!));
+  }, [previewOnTriage]);
+  // One value of a filter, matched as selecting just it would (the filter
+  // predicates above, given a one-value selection).
+  const matchCriterion = (sel: string) => (s: Species) =>
+    parseCriteriaCodes(s.criteria).some((code) => code === sel || code.startsWith(sel));
+  const matchThreat = (sel: string) => (s: Species) =>
+    (threatsScope !== "threatened" || THREATENED_SET.has(s.category))
+    && (s.threat_codes?.some((tc) => tc === sel || tc.startsWith(sel + ".")) ?? false);
+  const matchHabitat = (sel: string) => (s: Species) => matchesHabitatCriteria(s.habitat_codes, {
+    selectedHabitat: new Set([sel]), breadth: habitatBreadth, importance: selectedHabitatImportance,
+    seasons: selectedHabitatSeasons, suitability: selectedHabitatSuitability,
+  });
+  const creditNames: Record<string, (s: Species) => string[]> = {
+    assessors: getSpeciesAssessors, reviewers: getSpeciesReviewers, facilitators: getSpeciesFacilitators,
+    contributors: getSpeciesContributors, institutions: getSpeciesInstitutions,
+  };
   // On home the sidebar is the summary table's height (its card, not the
-  // caption line below it), measured as the table loads and resizes.
+  // caption line below it), measured as the table loads and resizes. On the
+  // Country view it is level with the map's card, or with a picked country's
+  // map and table (not the pills above them, nor the caption below).
   const summaryWrapRef = useRef<HTMLDivElement>(null);
-  const [summaryTableHeight, setSummaryTableHeight] = useState<number | null>(null);
+  const [summaryBox, setSummaryBox] = useState<{ top: number; height: number } | null>(null);
+  const countryPicked = selectedCountries.size > 0;
   useEffect(() => {
     const wrap = summaryWrapRef.current;
-    if (!homeTriage || !wrap) return;
-    const measure = () => {
-      const card = wrap.querySelector<HTMLElement>("[data-summary-table]");
-      setSummaryTableHeight(card ? card.offsetHeight : null);
-    };
-    const ro = new ResizeObserver(measure);
+    if (!summaryTriage || !wrap) return;
+    const ro = new ResizeObserver(() => measure());
+    let observed: HTMLElement | null = null;
+    function measure() {
+      const el = wrap!.querySelector<HTMLElement>(onCountryView ? "[data-country-content]" : "[data-summary-table]");
+      if (el && el !== observed) { if (observed) ro.unobserve(observed); ro.observe(el); observed = el; }
+      if (!el) { setSummaryBox(null); return; }
+      const r = el.getBoundingClientRect();
+      const top = Math.round(r.top - wrap!.getBoundingClientRect().top), height = Math.round(r.height);
+      setSummaryBox((prev) => (prev && prev.top === top && prev.height === height ? prev : { top, height }));
+    }
     ro.observe(wrap);
+    // The card may not be rendered yet (the table or map still loading) while
+    // the wrapper keeps its size: watch for it to appear.
+    const mo = new MutationObserver(() => { measure(); if (observed) mo.disconnect(); });
+    mo.observe(wrap, { childList: true, subtree: true });
     measure();
-    return () => ro.disconnect();
-  }, [homeTriage]);
+    if (observed) mo.disconnect();
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, [summaryTriage, onCountryView, countryPicked]);
   // A click on a hovered row navigates, and its row may never see the pointer
   // leave: a new selection drops the hover.
   const [triageHoverTaxa, setTriageHoverTaxa] = useState(selectedTaxa);
@@ -3000,19 +3072,21 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     setTriageHoverTaxa(selectedTaxa);
     setTriageHover(null);
   }
+  // Each plotted dot's species, for matching a hover against.
+  const triagePointSpecies = useMemo(() => {
+    const byKey = new Map<string, Species>();
+    for (const s of summaryTriage ? (summarySpecies ?? []) : taxaFilteredSpecies) byKey.set(s.species_key, s);
+    return triagePoints.map((p) => byKey.get(p.key));
+  }, [triagePoints, summaryTriage, summarySpecies, taxaFilteredSpecies]);
   const triageHighlight = useMemo((): ((p: PriorityPoint) => boolean) | null => {
-    if (!triageHover || !triageInSidebar || triageSidebarCollapsed) return null;
-    const { kind, id } = triageHover;
-    let test: (p: PriorityPoint) => boolean;
-    if (kind === "category") test = (p) => p.category === id;
-    else if (TAXA.some((t) => t.id === id)) test = (p) => p.taxon === id;
-    else {
-      const keys = new Set<string>();
-      for (const s of homeTriage ? (homeAllSpecies ?? []) : taxaFilteredSpecies) if (speciesMatchesNode(s, id)) keys.add(s.species_key);
-      test = (p) => keys.has(p.key);
-    }
-    return triagePoints.some(test) ? test : null;
-  }, [triageHover, triageInSidebar, triageSidebarCollapsed, triagePoints, homeTriage, homeAllSpecies, taxaFilteredSpecies]);
+    if (!triageHover || !triageHoverOn) return null;
+    const keys = new Set<string>();
+    triagePoints.forEach((p, i) => {
+      const s = triagePointSpecies[i];
+      if (s && triageHover.match(s)) keys.add(p.key);
+    });
+    return keys.size > 0 ? (p) => keys.has(p.key) : null;
+  }, [triageHover, triageHoverOn, triagePoints, triagePointSpecies]);
 
   // Number of Assessments chart (#423 item 1): apply all filters EXCEPT the
   // assessment-count selection itself. NE species have no assessment history
@@ -3580,12 +3654,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // table (Fishes for a fish), a fraction of All Species' work to build
     // (the rows are already cached, in the All Species list). A ⌘-click that
     // added it to a selection goes to All Species with the selection instead.
-    if (onHome) setSelectedTaxa(new Set([added ? "all" : triagePoints.find((p) => p.key === key)?.taxon ?? "all"]));
+    // The Country view does the same, keeping its countries.
+    const taxon = added ? "all" : triagePoints.find((p) => p.key === key)?.taxon ?? "all";
+    if (onHome) setSelectedTaxa(new Set([taxon]));
+    else if (onCountryView) exitLayoutModeForTaxon(taxon, "country");
     // A dot outside the selection drops it (not one a ⌘-click just added).
     if (!added && priorityBox && !priorityBox.keys.has(key)) setTriageSelection(null);
     setSelectedSpeciesKey(key);
     setScrollToSpecies(key);
-  }, [setSelectedSpeciesKey, onHome, setSelectedTaxa, triagePoints, priorityBox, setTriageSelection]);
+  }, [setSelectedSpeciesKey, onHome, onCountryView, setSelectedTaxa, exitLayoutModeForTaxon, triagePoints, priorityBox, setTriageSelection]);
   useEffect(() => {
     if (!scrollToSpecies) return;
     const index = sortedSpecies.findIndex((s) => s.species_key === scrollToSpecies);
@@ -4202,9 +4279,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // special-case region vs. multi-select here.
   const countryScope = selectedCountries.size > 0 ? [...selectedCountries] : null;
 
-  // Country view's own map click select — click-only (no hover preview: the
-  // table only appears once a country is actually locked in, so scanning the
-  // map with the mouse never itself changes what's shown below it). A plain
+  // Country view's own map click select — click-only for the table (it only
+  // appears once a country is actually locked in, so scanning the map with
+  // the mouse never itself changes what's shown below it; with the triage
+  // panel open, a hover does preview the country's dots there). A plain
   // click always REPLACES the selection with just that country (clicking a
   // second country swaps to it, it doesn't add to the first) — except
   // clicking the already-sole-selected country again clears back to the
@@ -4286,6 +4364,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       gbifRecordMode={gbifRecordMode}
       selectedCountries={selectedCountries}
       onCountrySelect={handleCountryDrilldown}
+      selectOnHover={triageHoverOn}
+      onCountryHover={hoverCountry}
       precomputedStats={countryLandingStats}
       selectedTaxa={selectedTaxa}
       speciesLabel={isNewAssessments ? "# Unassessed" : undefined}
@@ -4400,6 +4480,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           gbifRecordMode={gbifRecordMode}
           selectedCountries={selectedCountries}
           onCountrySelect={handleCountrySelect}
+          selectOnHover={triageHoverOn}
+          onCountryHover={hoverCountry}
           precomputedStats={countryStatsForMap}
           precomputedStatsTotal={countryStatsForMapTotal}
           selectedTaxa={selectedTaxa}
@@ -4508,6 +4590,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           return next;
                         });
                       }}
+                      onBarHover={barHover("match", (code) => {
+                        const k = keyFor.get(code);
+                        return k ? (s: Species) => matchesMatchFilter(s, new Set([k])) : null;
+                      })}
                       barColor={GROUP_COLOR[g]}
                       yAxisWidth={190}
                       rightMargin={60}
@@ -4632,6 +4718,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     return next;
                   });
                 }}
+                onBarHover={barHover("revision", (code) => {
+                  const reasons = new Set(reasonsForLabel(code));
+                  return reasons.size ? (s: Species) => matchesRevisionFilter(s.col_revision, null, reasons) : null;
+                })}
                 // This chart's bars are keyed by their display label, not the
                 // reason id (FilterBarChart renders `code` as the axis tick), so
                 // a swept range comes back as short labels — map them before
@@ -4833,7 +4923,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       const drillCat = THREAT_CATEGORIES.find(c => c.code === rawCode);
       if (!drillCat) return null;
       return (
-        <div className="flex flex-wrap gap-1 pb-1" style={{ paddingLeft: 160 }}>
+        <div className="flex flex-wrap gap-1 pb-1" style={{ paddingLeft: 160 }} onMouseLeave={hoverLeave}>
           {drillCat.children.map(child => {
             const count = threatCounts[child.code] ?? 0;
             if (count === 0) return null;
@@ -4849,6 +4939,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     return new Set([child.code]);
                   });
                 }}
+                onMouseEnter={hoverEnter(`threat:${child.code}`, matchThreat(child.code))}
                 className={chartControlClass(isSelected, "bg-violet-500 text-white border-violet-500")}
               >
                 {child.label} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()} · {threatTotal > 0 ? Math.round((count / threatTotal) * 100) : 0}%</span>
@@ -4932,6 +5023,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 });
                 setExpandedThreat(prev => { const next = new Set(prev); if (next.has(code)) next.delete(code); else next.add(code); return next; });
               },
+              onBarHover: barHover("threat", (label) => {
+                const code = threatLabelToCode.get(label);
+                return code ? matchThreat(code) : null;
+              }),
               barColor: "#fb923c",
               yAxisWidth: 155,
               rightMargin: 80,
@@ -4974,7 +5069,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       const drillCat = HABITAT_CATEGORIES.find(c => c.code === rawCode);
       if (!drillCat) return null;
       return (
-        <div className="flex flex-wrap gap-1 pb-1" style={{ paddingLeft: 160 }}>
+        <div className="flex flex-wrap gap-1 pb-1" style={{ paddingLeft: 160 }} onMouseLeave={hoverLeave}>
           {drillCat.children.map(child => {
             const count = habitatCounts[child.code] ?? 0;
             if (count === 0) return null;
@@ -4990,6 +5085,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     return new Set([child.code]);
                   });
                 }}
+                onMouseEnter={hoverEnter(`habitat:${child.code}`, matchHabitat(child.code))}
                 className={chartControlClass(isSelected, "bg-teal-600 text-white border-teal-600")}
               >
                 {child.label} <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()} · {habitatTotal > 0 ? Math.round((count / habitatTotal) * 100) : 0}%</span>
@@ -5188,6 +5284,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   });
                   setExpandedHabitat(prev => { const next = new Set(prev); if (next.has(code)) next.delete(code); else next.add(code); return next; });
                 },
+                onBarHover: barHover("habitat", (label) => {
+                  const code = habitatLabelToCode.get(label);
+                  return code ? matchHabitat(code) : null;
+                }),
                 barColor: "#0d9488",
                 yAxisWidth: 155,
                 rightMargin: 80,
@@ -5233,7 +5333,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // (yAxisWidth 42 + leftMargin 5 = 47), same principle as Threats/Habitat's
     // top-level pills; deeper levels keep the original 10px-per-level
     // staircase on top of that base.
-    <div className="flex flex-wrap gap-1" style={{ paddingLeft: 47 + (depth - 1) * 10 }}>
+    <div className="flex flex-wrap gap-1" style={{ paddingLeft: 47 + (depth - 1) * 10 }} onMouseLeave={hoverLeave}>
       {nodes.map(node => {
         const isSelected = selectedCriteria.has(node.code);
         const count = criteriaCounts[node.code] ?? 0;
@@ -5252,6 +5352,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 setExpandedCriteria(prev => { const next = new Set(prev); if (next.has(node.code)) next.delete(node.code); else next.add(node.code); return next; });
               }
             }}
+            onMouseEnter={hoverEnter(`criteria:${node.code}`, matchCriterion(node.code))}
             className={chartControlClass(isSelected, "bg-indigo-500 text-white border-indigo-500")}
             title={node.label}
           >
@@ -5348,6 +5449,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   setExpandedCriteria(prev => { const next = new Set(prev); if (next.has(code)) next.delete(code); else next.add(code); return next; });
                 }
               },
+              onBarHover: barHover("criteria", matchCriterion),
               barColor: "#6366f1",
               yAxisWidth: 42,
               rightMargin: 85,
@@ -5449,21 +5551,32 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // shortcut) moves to All Species, the panel staying open beside it; a dot
   // opens in its own group (see openSpeciesFromScatter). In Awaiting 1st Assessment, home's panel offers the groups instead
   // (all not-evaluated species are too many to load at once).
-  const triageSidebarShown = homeTriage || (wideTaxonLayout && (showPriority || isNewAssessments));
-  const homeNeTriage = homeTriage && isNewAssessments;
+  const triageSidebarShown = summaryTriage || (wideTaxonLayout && (showPriority || isNewAssessments));
+  const homeNeTriage = summaryTriage && isNewAssessments;
   /** On home, move to All Species before a triage action filters the page. */
-  const triageLeaveHome = () => { if (onHome) setSelectedTaxa(new Set(["all"])); };
+  // On the Country view, to All Species in its countries (as a taxon row's click does).
+  const triageLeaveHome = () => {
+    if (onHome) setSelectedTaxa(new Set(["all"]));
+    else if (onCountryView) exitLayoutModeForTaxon("all", "country");
+  };
   const onTriageBoxChange = (sel: TriageSelection | null) => { if (sel) triageLeaveHome(); setTriageSelection(sel); };
   /** The page makes room for the open sidebar (see the data-triage-column
    *  marker). The collapsed rail needs none: it sits in the page's own right
    *  margin, so entering a taxon doesn't move the page. */
   const triageSidebarOpen = triageSidebarShown && !triageSidebarCollapsed;
-  // Where the rail and panel sit. On home, the summary table's height (an
-  // absolutely placed panel in a stretched grid cell, so the panel never makes
-  // the row taller): the page doesn't grow for it. Elsewhere the viewport's
-  // height, sticky, like a docked panel beside the long page.
-  const triageSidebarPlace = homeTriage ? "absolute inset-x-0 top-0 h-full" : "sticky top-4 h-[calc(100vh-2rem)]";
-  const triageSidebarStyle = homeTriage && summaryTableHeight ? { height: summaryTableHeight } : undefined;
+  // Where the rail and panel sit. On home and the Country view, the summary
+  // content's height (in a stretched grid cell, so the panel never makes the
+  // row taller): the page doesn't grow for it. That is capped at the
+  // viewport's, sticky, for a table taller than the window (SSC groups,
+  // Table 1a), so the panel stays in view beside it as in a taxon. Until
+  // measured, the cell's height. Elsewhere the viewport's height, sticky, like
+  // a docked panel beside the long page.
+  // Sticky only when capped: a shorter panel's cell also holds the caption
+  // below the table, so a sticky panel would drift down against the table.
+  const summaryCapped = summaryTriage && summaryBox != null && summaryBox.height > viewportHeight - 32;
+  const triageSidebarPlace = !summaryTriage || summaryCapped ? "sticky top-4 h-[calc(100vh-2rem)]" : "absolute inset-x-0 top-0 h-full";
+  const triageSidebarStyle = summaryCapped ? { marginTop: summaryBox!.top }
+    : summaryTriage && summaryBox?.height ? { top: summaryBox.top, height: summaryBox.height } : undefined;
   const triageSidebar = triageSidebarShown ? (
     triageSidebarCollapsed ? (
       // Collapsed: a slim rail in the page's triage column, styled like the
@@ -5569,14 +5682,14 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         // The hover clears on leaving the legend, not each entry: the gaps
         // between entries would otherwise flash the whole plot back between them.
         <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter."
-          onMouseLeave={() => setTriageHover(null)}>
+          onMouseLeave={() => previewOnTriage(null)}>
           {TRIAGE_LEGEND.map((c) => {
             const active = selectedCategories.has(c);
             const dimmed = selectedCategories.size > 0 && !active;
             return (
               <button key={c} type="button" aria-pressed={active}
                 onClick={(e) => { triageLeaveHome(); handleCategoryClick({ payload: { code: c } }, e); }}
-                onMouseEnter={() => setTriageHover({ kind: "category", id: c })}
+                onMouseEnter={() => previewOnTriage(`category:${c}`, (s) => s.category === c)}
                 title={`Show only ${c} · ⌘/Ctrl-click to add or remove`}
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${active ? "bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"} ${dimmed ? "opacity-40" : ""}`}>
                 <span className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[c] }} />{c}
@@ -5589,9 +5702,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         {/* The plot fills the panel: home's table-high one, or a taxon's
             viewport-high one. */}
         <div className="flex-1 min-h-0 mt-2">
-          {(homeTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
+          {(summaryTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <Spinner />{homeTriage && "Loading all species…"}
+              <Spinner />{summaryTriage && "Loading all species…"}
             </div>
           ) : renderTriageScatter(true)}
         </div>
@@ -5610,7 +5723,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     // is display: contents, leaving the flex chain below as it was.
     <div className={!triageSidebarShown ? "contents" : `${triageSidebarOpen
       ? "-mr-[27rem] grid grid-cols-[minmax(0,1fr)_26rem]"
-      : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem]"} gap-4 ${homeTriage ? "items-stretch" : "items-start"}`}>
+      : "-mr-[4rem] grid grid-cols-[minmax(0,1fr)_3rem]"} gap-4 ${summaryTriage ? "items-stretch" : "items-start"}${onCountryView && !countryPicked ? " flex-1 min-h-0" : ""}`}>
     <div className="space-y-1 min-w-0 flex-1 flex flex-col min-h-0">
       {/* Always show Taxa Summary table */}
       {/* Country View's landing map is sized by a flex chain that runs from
@@ -5640,7 +5753,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
         onSelectedRow={setSelectedRow}
-        onHoverTaxon={(id) => setTriageHover(id ? { kind: "taxon", id } : null)}
+        onHoverTaxon={hoverTaxon}
         onToggleSubgroup={(sgId) => {
           // Clicking a view root ancestor → clear subgroups to show its children.
           // If the currently-selected subgroup is an SSC group, we got here by
@@ -5925,6 +6038,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <button
                     type="button"
                     onClick={handleThreatenedClick}
+                    onMouseEnter={hoverEnter("threatened", (s) => THREATENED_SET.has(s.category))}
+                    onMouseLeave={hoverLeave}
                     className={chartControlClass(isThreatenedSelected, "bg-red-600 text-white border-red-600")}
                     aria-pressed={isThreatenedSelected}
                     title="Select Critically Endangered, Endangered and Vulnerable"
@@ -5954,6 +6069,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     selectedItems={selectedCategories}
                     onBarClick={handleCategoryClick}
                     onRangeSelect={rangeSelectCategories}
+                    onBarHover={barHover("category", (c) => (s: Species) => s.category === c)}
                     yAxisWidth={26}
                     rightMargin={55}
                     labelFormatter={(code) => ({
@@ -5989,6 +6105,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <button
                       type="button"
                       onClick={handleOutdatedClick}
+                      onMouseEnter={hoverEnter("outdated", (s) => s.category !== "NE" && isOutdated(s.assessment_date, dataAsOf))}
+                      onMouseLeave={hoverLeave}
                       className={chartControlClass(isOutdatedSelected, "bg-red-600 text-white border-red-600")}
                       aria-pressed={isOutdatedSelected}
                       title={`Filter to species last assessed before ${outdatedCutoffDate(dataAsOf).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
@@ -6055,6 +6173,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         selectedItems={yearRangeSelectedItems}
                         onBarClick={handleYearClick}
                         onRangeSelect={rangeSelectYearRanges}
+                        onBarHover={barHover("years", (r) => (s: Species) => s.category !== "NE" && matchesYearRangeFilter(s.assessment_date, new Set([r])))}
                         barColor="#3b82f6"
                         yAxisWidth={36}
                         rightMargin={85}
@@ -6068,6 +6187,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       selectedItems={assessmentYearSelectedItems}
                       onBarClick={handleAssessmentYearClick}
                       onRangeSelect={rangeSelectAssessmentYears}
+                      onBarHover={barHover("assessmentYear", (y) => (s: Species) => s.category !== "NE" && matchesAssessmentYearFilter(s.assessment_date, new Set([y])))}
                       barColor="#3b82f6"
                       yMax={yearsGlobalMax}
                     />
@@ -6106,6 +6226,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     selectedItems={gbifRanges[gbifChartKey]}
                     onBarClick={handleObsClick}
                     onRangeSelect={rangeSelectObsRanges}
+                    onBarHover={barHover(`obs.${gbifChartKey}`, (r) => (s: Species) => gbifBucket(gbifMetricValue(s, gbifChartKey), gbifKeyParts(gbifChartKey).metric) === r)}
                     barColor="#10b981"
                     yAxisWidth={42}
                     rightMargin={85}
@@ -6155,6 +6276,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     selectedItems={selectedDescribedYears}
                     onBarClick={handleDescribedYearClick}
                     onRangeSelect={rangeSelectDescribedYears}
+                    onBarHover={barHover("describedYear", (r) => (s: Species) => describedYearBucket(s.described_year) === r)}
                     barColor="#3b82f6"
                     yAxisWidth={64}
                     rightMargin={85}
@@ -6191,6 +6313,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     selectedItems={gbifRanges[gbifChartKey]}
                     onBarClick={handleObsClick}
                     onRangeSelect={rangeSelectObsRanges}
+                    onBarHover={barHover(`obs.${gbifChartKey}`, (r) => (s: Species) => gbifBucket(gbifMetricValue(s, gbifChartKey), gbifKeyParts(gbifChartKey).metric) === r)}
                     barColor="#10b981"
                     yAxisWidth={42}
                     rightMargin={85}
@@ -6272,6 +6395,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     selectedItems={creditSelection[assessorReviewerMode].selected}
                     onBarClick={makeAssessorClick(creditSelection[assessorReviewerMode].setter)}
                     onRangeSelect={makeRangeSelect(creditSelection[assessorReviewerMode].setter)}
+                    onBarHover={barHover(`credit.${assessorReviewerMode}`, (name) => {
+                      const names = creditNames[assessorReviewerMode], n = name.toLowerCase();
+                      return (s: Species) => names(s).some((x) => x.toLowerCase().includes(n));
+                    })}
                     onItemToggle={makeAssessorToggle(creditSelection[assessorReviewerMode].setter)}
                     loading={speciesLoading && assessedSpecies.length === 0}
                   />
@@ -6350,7 +6477,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   return (
                     <div className="flex items-start gap-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2">
                       <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 shrink-0 w-20 pt-1">Growth</span>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5" onMouseLeave={hoverLeave}>
                         {sorted.map(([gf, count]) => {
                           const isSelected = selectedGrowthForms.has(gf);
                           return (
@@ -6364,6 +6491,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                   return new Set([gf]);
                                 });
                               }}
+                              onMouseEnter={hoverEnter(`growth:${gf}`, (s) => !!s.growth_forms?.includes(gf))}
                               className={chartControlClass(isSelected, "bg-lime-600 text-white border-lime-600")}
                             >
                               {gf}{!isSingleSpecies && <> <span className={isSelected ? "text-white/80" : "text-zinc-400 dark:text-zinc-500"}>{count.toLocaleString()}</span></>}
@@ -6381,7 +6509,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {/* Realm */}
                   <div className={CHIP_CARD}>
                     <span className={CHIP_CARD_TITLE}>Realm</span>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1" onMouseLeave={hoverLeave}>
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
                       ) : isSingleSpecies && singleSpecies ? (
@@ -6395,6 +6523,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           active={selectedSystems.has(system)}
                           activeColors={colors}
                           onClick={(e) => setSelectedSystems(prev => chipSelection(prev, system, e))}
+                          onMouseEnter={hoverEnter(`realm:${system}`, (s) => !!s.systems?.includes(system))}
                         />
                       ))}
                     </div>
@@ -6404,7 +6533,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {!isNewAssessments && (
                     <div className={CHIP_CARD}>
                       <span className={CHIP_CARD_TITLE}>Movement</span>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1" onMouseLeave={hoverLeave}>
                         {speciesLoading && assessedSpecies.length === 0 ? (
                           <Spinner className="h-4 w-4" />
                         ) : isSingleSpecies && singleSpecies ? (
@@ -6422,6 +6551,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                               active={selectedMovementPatterns.has(pattern)}
                               activeColors="bg-teal-600 text-white border-teal-600"
                               onClick={(e) => setSelectedMovementPatterns(prev => chipSelection(prev, pattern, e))}
+                              onMouseEnter={hoverEnter(`movement:${pattern}`, (s) => s.movement_pattern === pattern)}
                             />
                           );
                         })}
@@ -6432,7 +6562,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   {/* Trend */}
                   <div className={CHIP_CARD}>
                     <span className={CHIP_CARD_TITLE}>Trend</span>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1" onMouseLeave={hoverLeave}>
                       {speciesLoading && assessedSpecies.length === 0 ? (
                         <Spinner className="h-4 w-4" />
                       ) : isSingleSpecies && singleSpecies ? (
@@ -6446,6 +6576,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           active={selectedPopulationTrends.has(trend)}
                           activeColors="bg-orange-500 text-white border-orange-500"
                           onClick={(e) => setSelectedPopulationTrends(prev => chipSelection(prev, trend, e))}
+                          onMouseEnter={hoverEnter(`trend:${trend}`, (s) => s.population_trend === trend)}
                         />
                       ))}
                     </div>
@@ -6485,6 +6616,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                         <button
                           type="button"
                           onClick={handleReassessedClick}
+                          onMouseEnter={hoverEnter("reassessed", (s) => (s.assessment_count ?? 1) >= 2)}
+                          onMouseLeave={hoverLeave}
                           className={chartControlClass(isReassessedSelected, "bg-red-600 text-white border-red-600")}
                           aria-pressed={isReassessedSelected}
                           title="Filter to species assessed 2 or more times (reassessed at least once)"
@@ -6507,6 +6640,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                             selectedItems={selectedAssessmentCounts}
                             onBarClick={handleAssessmentCountClick}
                             onRangeSelect={rangeSelectAssessmentCounts}
+                            onBarHover={barHover("assessmentCount", (r) => (s: Species) => assessmentCountBucket(s.assessment_count) === r)}
                             barColor="#8b5cf6"
                             yAxisWidth={42}
                             rightMargin={85}
@@ -7820,7 +7954,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         <img alt="" className="block w-48 h-48 object-cover" />
       </div>
     </div>
-    {homeTriage && triageSidebar ? <div className="relative">{triageSidebar}</div> : triageSidebar}
+    {/* Capped, the cell ends where the table does, so the sticky panel stops level with it. */}
+    {summaryTriage && triageSidebar ? <div className="relative" style={summaryCapped ? { height: summaryBox!.top + summaryBox!.height } : undefined}>{triageSidebar}</div> : triageSidebar}
     </div>
   );
 }

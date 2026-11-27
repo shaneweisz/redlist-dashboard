@@ -659,6 +659,7 @@ function WorldMap({ selectedCountries, onCountrySelect, selectedTaxon, precomput
             sortKey={sortKey}
             sortDir={sortDir}
             onSortChange={setSort}
+            onCountryHover={selectOnHover ? onCountryHover : undefined}
           />
         </div>
       )}

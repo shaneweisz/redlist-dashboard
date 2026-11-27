@@ -56,12 +56,12 @@ export function chartSegmentClass(selected: boolean): string {
  * A filter chip with an icon and a count: Realm/Movement/Trend's options. The
  * same box as the other controls, with the count a step quieter than the label.
  */
-export function ChartChip({ icon: Icon, label, count, active, activeColors, onClick, title }: {
+export function ChartChip({ icon: Icon, label, count, active, activeColors, onClick, onMouseEnter, title }: {
   icon: IconType; label: string; count: number; active: boolean; activeColors: string;
-  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; title?: string;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; onMouseEnter?: () => void; title?: string;
 }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={active} title={title}
+    <button type="button" onClick={onClick} onMouseEnter={onMouseEnter} aria-pressed={active} title={title}
       className={`inline-flex items-center gap-1 ${chartControlClass(active, activeColors)}`}>
       <Icon aria-hidden className="w-3 h-3 shrink-0" />
       <span>{label}</span>

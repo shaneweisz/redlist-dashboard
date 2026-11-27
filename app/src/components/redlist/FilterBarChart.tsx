@@ -45,6 +45,12 @@ interface FilterBarChartProps {
    * holds) in chart order. Omit to leave the chart click-only.
    */
   onRangeSelect?: (keys: string[], event: MouseEvent | React.MouseEvent) => void;
+  /**
+   * The bar row under the pointer (its key, as `selectedItems` holds it), on
+   * each change, and null on leaving the chart. For previewing what a click
+   * would select elsewhere, such as on the triage scatter.
+   */
+  onBarHover?: (key: string | null) => void;
 }
 
 export default function FilterBarChart({
@@ -61,6 +67,7 @@ export default function FilterBarChart({
   highlightedItems,
   yAxisTickMaxLength,
   onRangeSelect,
+  onBarHover,
 }: FilterBarChartProps) {
   // Which bar row the cursor is over, from its Y position within the plot area
   // (rows are evenly spaced, so this is pure arithmetic — no recharts state).
@@ -93,7 +100,20 @@ export default function FilterBarChart({
     setDrag({ start: index, end: index });
   };
 
+  // The last row reported to onBarHover, so it is told only of changes.
+  const hoveredKey = useRef<string | null>(null);
+  const reportHover = (key: string | null) => {
+    if (hoveredKey.current === key) return;
+    hoveredKey.current = key;
+    onBarHover?.(key);
+  };
+
   const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (onBarHover) {
+      const index = rowIndexAt(event);
+      const entry = index == null ? null : data[index];
+      reportHover(entry ? entry.code || entry.range || null : null);
+    }
     if (!drag) return;
     const index = rowIndexAt(event, true);
     if (index == null || index === drag.end) return;
@@ -146,6 +166,7 @@ export default function FilterBarChart({
       onClick={handleClick}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
+      onMouseLeave={onBarHover ? () => reportHover(null) : undefined}
       style={{ width: "100%", height: "100%", cursor: "pointer", position: "relative", userSelect: drag ? "none" : undefined }}
     >
       {dragBand && (
