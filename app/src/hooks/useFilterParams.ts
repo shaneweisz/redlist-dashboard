@@ -74,6 +74,33 @@ export const EMPTY_EXACT_FILTERS: ExactFilters = {
 
 const FILTER_RANKS: FilterRank[] = ["class", "order", "family", "genus", "species"];
 
+/**
+ * A triage selection: the boxes drawn on the triage scatter, in plot units
+ * (x: years; y: the plotted y, log10(count + 1) or a percentage), plus the
+ * dots ⌘-clicked in (`add`) or out of the boxes (`del`), by row key. Its
+ * species are worked out from these against the plotted species, so a link
+ * carries the boxes' meaning ("assessed 10-16 years ago, 1K-250K new
+ * records"), not a frozen list. In the URL: `tbox=x0,x1,y0,y1;...`,
+ * `tadd=key,...`, `tdel=key,...`.
+ */
+export interface TriageRect { x0: number; x1: number; y0: number; y1: number }
+export interface TriageSelection { rects: TriageRect[]; add: string[]; del: string[] }
+/** The selection's URL params: a view switch drops them (page.tsx). */
+export const TRIAGE_SELECTION_PARAMS = ["tbox", "tadd", "tdel"] as const;
+
+function parseTriageSelection(p: URLSearchParams): TriageSelection | null {
+  const rects: TriageRect[] = [];
+  for (const part of (p.get("tbox") ?? "").split(";")) {
+    const n = part.split(",").map(Number);
+    if (n.length === 4 && n.every(Number.isFinite)) rects.push({ x0: n[0], x1: n[1], y0: n[2], y1: n[3] });
+  }
+  const list = (k: string) => (p.get(k) ?? "").split(",").filter(Boolean);
+  const add = list("tadd"), del = list("tdel");
+  return rects.length || add.length ? { rects, add, del } : null;
+}
+/** Plot units to 3 decimals: a box's edges to well under a pixel. */
+const roundTriage = (v: number) => Math.round(v * 1000) / 1000;
+
 // The full set of param names this hook reads/writes — used by syncUrl to know
 // which keys in the URL belong to it, so it can merge its own writes into the
 // URL without clobbering params it doesn't own (utm_* and the like). Keep in
@@ -91,6 +118,7 @@ export const OWN_PARAM_NAMES = [
   "assessors", "reviewers", "facilitators", "contributors", "institutions",
   "search", "outdated",
   "species", "tab", "sort", "dir", "sort2", "dir2", "mapview", "mapsort", "mapdir",
+  ...TRIAGE_SELECTION_PARAMS, "ty", "tyn",
   GBIF_RECORDS_PARAM, GBIF_CHART_PARAM,
   ...Object.values(GBIF_RANGE_PARAM),
 ];
@@ -368,6 +396,12 @@ export function parseParams(search: string) {
     // pre-namespace bare-number form so existing links keep working — see its doc.
     species: speciesKey,
     tab: (p.get("tab") || null) as DetailTabParam | null,
+    // The triage scatter's selection, and its y axis (a display choice, like
+    // the GBIF chart's key: left alone by clearing filters). Unset, the y axis
+    // follows the page's record mode (RedListView).
+    triage: parseTriageSelection(p),
+    triageKey: p.get("ty") && (GBIF_RANGE_KEYS as readonly string[]).includes(p.get("ty")!) ? (p.get("ty") as GbifRangeKey) : undefined,
+    triageNeMode: p.get("tyn") ? parseGbifRecordMode(p.get("tyn")) : undefined,
   };
 }
 
@@ -448,6 +482,9 @@ export function buildQs(state: {
   mapSortDirection?: "asc" | "desc";
   species: string | null;
   tab: DetailTabParam | null;
+  triage?: TriageSelection | null;
+  triageKey?: GbifRangeKey;
+  triageNeMode?: GbifRecordMode;
 }): string {
   const p = new URLSearchParams();
   if (state.viewMode === "new-assessments") p.set("view", "new-assessments");
@@ -516,6 +553,14 @@ export function buildQs(state: {
   if (state.gbifChartKey && state.gbifChartKey !== DEFAULT_GBIF_CHART_KEY) p.set(GBIF_CHART_PARAM, state.gbifChartKey);
   if (state.mapSortKey && state.mapSortKey !== "species") p.set("mapsort", state.mapSortKey);
   if (state.mapSortDirection === "asc") p.set("mapdir", "asc");
+  if (state.triage) {
+    const { rects, add, del } = state.triage;
+    if (rects.length) p.set("tbox", rects.map((r) => [r.x0, r.x1, r.y0, r.y1].map(roundTriage).join(",")).join(";"));
+    if (add.length) p.set("tadd", add.join(","));
+    if (del.length) p.set("tdel", del.join(","));
+  }
+  if (state.triageKey) p.set("ty", state.triageKey);
+  if (state.triageNeMode) p.set("tyn", state.triageNeMode);
   const qs = prettifyQs(p.toString());
   return qs ? `?${qs}` : "";
 }
@@ -1161,6 +1206,36 @@ export function useFilterParams() {
     [syncUrl]
   );
 
+  // The triage selection: replaced in place (no history entry per drag or
+  // ⌘-click), like the chart filters.
+  const setTriageSelection = useCallback(
+    (sel: TriageSelection | null) => {
+      setState(prev => {
+        const next = { ...prev, triage: sel };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+  // The triage y axis (reassessment key, first-assessment record mode); a
+  // change drops the selection, whose boxes are in the old axis' units.
+  const setTriageAxis = useCallback(
+    (axis: { key?: GbifRangeKey; neMode?: GbifRecordMode }) => {
+      setState(prev => {
+        const next = {
+          ...prev,
+          ...("key" in axis ? { triageKey: axis.key } : {}),
+          ...("neMode" in axis ? { triageNeMode: axis.neMode } : {}),
+          triage: null,
+        };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setGbifChartKey = useCallback(
     (key: GbifRangeKey) => {
       setState(prev => {
@@ -1259,6 +1334,7 @@ export function useFilterParams() {
         sortDirection2: "desc" as const,
         species: null,
         tab: null,
+        triage: null,
       };
       queueMicrotask(() => syncUrl(next, false));
       return next;
@@ -1311,6 +1387,7 @@ export function useFilterParams() {
         sortDirection2: "desc" as const,
         species: null,
         tab: null,
+        triage: null,
       };
       queueMicrotask(() => syncUrl(next, !opts?.replace));
       return next;
@@ -1330,6 +1407,9 @@ export function useFilterParams() {
     selectedCountries: state.countries,
     gbifRanges: state.gbifRanges,
     gbifChartKey: state.gbifChartKey ?? DEFAULT_GBIF_CHART_KEY,
+    triageSelection: state.triage ?? null,
+    triageKey: state.triageKey,
+    triageNeMode: state.triageNeMode,
     selectedAssessmentCounts: state.assessmentCounts,
     selectedSystems: state.systems,
     selectedPopulationTrends: state.populationTrends,
@@ -1383,6 +1463,8 @@ export function useFilterParams() {
     setSelectedCountries,
     setGbifRanges,
     setGbifChartKey,
+    setTriageSelection,
+    setTriageAxis,
     setSelectedAssessmentCounts,
     setSelectedSystems,
     setSelectedPopulationTrends,
