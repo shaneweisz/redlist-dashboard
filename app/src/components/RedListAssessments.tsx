@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
 import { stripHtml } from "@/lib/html-text";
 import { AssessmentSections, type AssessmentSection } from "@/components/redlist/AssessmentSections";
+import { Block, Pairs } from "@/components/redlist/AssessmentFacts";
 import { chartControlClass } from "@/components/redlist/chart-controls";
 
 interface PreviousAssessment {
@@ -470,14 +471,23 @@ function AssessmentDetailView({
   // Information, as on the website. Each line is dropped when empty rather than
   // shown as blank: contributors and institutions are absent on most
   // assessments (67% and 81%).
-  const credits = (assessment.assessors || assessment.reviewers || assessment.facilitators
-    || assessment.contributors || assessment.institutions) && (
-    <div className="mb-2 space-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-      {assessment.assessors && <div><span className="font-medium">Assessors:</span> {assessment.assessors}</div>}
-      {assessment.reviewers && <div><span className="font-medium">Reviewers:</span> {assessment.reviewers}</div>}
-      {assessment.facilitators && <div><span className="font-medium">Facilitators:</span> {assessment.facilitators}</div>}
-      {assessment.contributors && <div><span className="font-medium">Contributors:</span> {assessment.contributors}</div>}
-      {assessment.institutions && <div><span className="font-medium">Institutions:</span> {assessment.institutions}</div>}
+  const scope = (detail.scopes ?? []).map((x) => (typeof x === "string" ? x : x.description || x.code)).join(", ");
+  const credits = (
+    <div className="mb-3 space-y-3">
+      <Block>
+        <Pairs
+          narrow
+          rows={[
+            ["Assessors", assessment.assessors],
+            ["Reviewers", assessment.reviewers],
+            ["Facilitators", assessment.facilitators],
+            ["Contributors", assessment.contributors],
+            ["Institutions", assessment.institutions],
+            ["Scope", scope || null],
+          ]}
+        />
+      </Block>
+      {detail.rationale && <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Justification</div>}
     </div>
   );
   const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]) || !!detail.references?.length || !!detail.taxonomy;

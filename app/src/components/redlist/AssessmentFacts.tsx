@@ -71,7 +71,7 @@ const HEAD = "mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400
 const TH = "py-0.5 pr-3 text-left align-bottom font-normal text-zinc-400 dark:text-zinc-500";
 const TD = "py-0.5 pr-3 align-top";
 
-function Block({ title, children }: { title?: string; children: ReactNode }) {
+export function Block({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <div className={FACTS}>
       {title && <div className={HEAD}>{title}</div>}
@@ -81,7 +81,7 @@ function Block({ title, children }: { title?: string; children: ReactNode }) {
 }
 
 /** Label/value pairs, two to a row where there is room. */
-function Pairs({ rows, narrow }: { rows: [string, ReactNode][]; narrow?: boolean }) {
+export function Pairs({ rows, narrow }: { rows: [string, ReactNode][]; narrow?: boolean }) {
   const shown = rows.filter(([, v]) => v != null && v !== "");
   if (shown.length === 0) return null;
   return (
