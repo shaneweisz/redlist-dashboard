@@ -16,6 +16,6 @@ export const BRAND: Brand = {
   title: "Dash for Life",
   subtitle: "A Dashboard for Conservation of Threatened Species",
   tabTitle: "Dash for Life",
-  description: "A dashboard for biodiversity data about life on Earth",
+  description: "A dashboard for conservation of threatened species",
   showGlobe: true,
 };
