@@ -2938,7 +2938,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     [triagePoints, priorityBox],
   );
   // Hovering what a click would filter to (a row of the summary table, a
-  // triage legend entry) mutes the other dots, as a preview. A top-level
+  // triage legend entry) hides the other dots, as a preview. A top-level
   // taxon matches by taxon_id; a sub-group row by node membership. A hover
   // matching none of the plotted species (another taxon's row, from inside a
   // taxon) changes nothing.
@@ -5483,11 +5483,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         )}
       </button>
     ) : (
-      // Sticky, not fixed: it starts level with the page's top, then stays in
-      // view while the charts and table scroll past. The viewport's height,
-      // like a docked panel; the plot's height is capped (below) so it keeps a
-      // readable aspect rather than becoming a tall strip, and the selection's
-      // species list takes the rest.
+      // Off home: sticky, not fixed, it starts level with the page's top, then
+      // stays in view while the charts and table scroll past, the viewport's
+      // height, like a docked panel. On home: the summary table's height (see
+      // triageSidebarPlace). The plot is one height in both (below), and the
+      // selection's species list takes the rest.
       <aside data-triage-sidebar aria-label={triageTitle}
         style={triageSidebarStyle}
         className={`${triageSidebarPlace} flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4`}>
@@ -5556,9 +5556,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         </div>
         )}
         {!homeNeTriage && <>
-        {/* The plot: up to 30rem tall (about 1.3 times its width), shrinking
-            on a short screen down to 16rem. */}
-        <div className="flex-[0_1_30rem] min-h-[16rem] mt-2">
+        {/* The plot: one height everywhere, what fits in home's table-high
+            panel, so it doesn't resize between home and a taxon; a taxon's
+            taller panel gives the rest to the selection's list. */}
+        <div className="h-[17rem] shrink-0 mt-2">
           {(homeTriage ? !homeAllSpecies : speciesLoading && assessedSpecies.length === 0) ? (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
               <Spinner />{homeTriage && "Loading all species…"}

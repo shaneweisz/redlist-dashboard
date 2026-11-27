@@ -89,7 +89,7 @@ function formatCount(n: number): string {
 }
 
 export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE, highlight = null }: {
-  /** A hover preview elsewhere on the page: dots it doesn't match are muted, and drawn under those it does. */
+  /** A hover preview elsewhere on the page: only the dots it matches are drawn. */
   highlight?: ((p: PriorityPoint) => boolean) | null;
   /** The x axis title. */
   xTitle?: string;
@@ -221,19 +221,15 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     const { ordered, xy } = layout;
     const big = ordered.length > 20000;
     const r = big ? 1.2 : 2.4;
-    // With a highlight, two passes: the muted dots, then the matching ones on top.
-    for (const pass of highlight ? [false, true] : [null]) {
-      for (let i = 0; i < ordered.length; i++) {
-        const p = ordered[i];
-        if (pass != null && highlight!(p) !== pass) continue;
-        // Muted by a highlight: grey and faint, so only the matching dots keep their colour.
-        const dim = pass === false || (box ? !box.keys.has(p.key) : false);
-        ctx.globalAlpha = pass === false ? 0.08 : dim ? 0.12 : big ? 0.5 : 0.75;
-        ctx.fillStyle = pass === false ? "#a1a1aa" : colors[p.category] || "#a1a1aa";
-        const x = xy[i * 2], y = xy[i * 2 + 1];
-        if (big) ctx.fillRect(x - r, y - r, r * 2, r * 2);
-        else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
-      }
+    for (let i = 0; i < ordered.length; i++) {
+      const p = ordered[i];
+      if (highlight && !highlight(p)) continue;
+      const dim = box ? !box.keys.has(p.key) : false;
+      ctx.globalAlpha = dim ? 0.12 : big ? 0.5 : 0.75;
+      ctx.fillStyle = colors[p.category] || "#a1a1aa";
+      const x = xy[i * 2], y = xy[i * 2 + 1];
+      if (big) ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      else { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
   }, [layout, scales, width, HEIGHT, box, colors, yScale, xTitle, refLine, highlight]);
