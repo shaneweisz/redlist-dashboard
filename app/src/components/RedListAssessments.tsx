@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ASSESSMENT_NARRATIVES,
   loadAssessment,
   type LoadedAssessment,
   type NarrativeField,
@@ -9,10 +8,9 @@ import {
 } from "@/lib/redlist/assessment";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { CATEGORY_COLORS, CATEGORY_NAMES, normalizeCategory } from "@/config/taxa";
-import { stripHtml, truncateSections } from "@/lib/html-text";
-import { CitationProse } from "@/components/redlist/CitationProse";
+import { stripHtml } from "@/lib/html-text";
+import { AssessmentSections } from "@/components/redlist/AssessmentSections";
 import { chartControlClass } from "@/components/redlist/chart-controls";
-import type { AssessmentReference } from "@/lib/mapping/nearby-citations";
 
 interface PreviousAssessment {
   year: string;
@@ -84,21 +82,14 @@ function CategoryBadge({ code, small }: { code: string; small?: boolean }) {
   );
 }
 
-// How much assessment narrative is shown inline, as one budget spent across
-// all seven sections in order — not per section. The assessments run long; past
-// this the IUCN Red List page has the full text, one click away.
-const NARRATIVE_WORD_LIMIT = 200;
-
-// The assessment's narrative fields, in display order.
 /**
- * The narratives, in the order this tab reads them, with the long titles.
- *
- * Both the field list and the titles come from the shared module: the
- * nearby-species panel reads the same assessments in its own order and with
- * shorter labels, and a field the route starts returning should not be able to
- * appear in one of them and not the other.
+ * The narrative sections, in the order this tab offers them: the rationale
+ * first, because it is the assessors' own summary of why the species is in its
+ * category. The field list and labels come from the shared module, so a field
+ * the route starts returning can't appear in the nearby-species panel and be
+ * missing here.
  */
-const NARRATIVE_FIELDS = ([
+const NARRATIVE_FIELDS = [
   "rationale",
   "population",
   "habitat",
@@ -106,68 +97,7 @@ const NARRATIVE_FIELDS = ([
   "conservation_actions",
   "use_trade",
   "range",
-] as const satisfies readonly NarrativeField[]).map((field) => ({
-  field,
-  title: ASSESSMENT_NARRATIVES.find((n) => n.field === field)!.title,
-}));
-
-// Collapsible section for narrative text. The text arrives already capped;
-// `fullTextUrl` is passed only to the last section shown, where the narrative
-// stops, so the "read the full assessment" link appears once.
-function NarrativeSection({
-  title,
-  text,
-  references,
-  fullTextUrl,
-}: {
-  title: string;
-  text: string;
-  references: AssessmentReference[];
-  fullTextUrl?: string;
-}) {
-  const [expanded, setExpanded] = useState(true);
-
-  return (
-    <div className="border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-      <button
-        className="flex items-center gap-2 w-full py-2 text-left text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <svg
-          className={`w-3 h-3 flex-shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-90" : ""}`}
-          fill="currentColor"
-          viewBox="0 0 20 20"
-        >
-          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-        </svg>
-        {title}
-      </button>
-      {expanded && (
-        <div className="pb-3 pl-5 text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-line leading-relaxed">
-          {/* "(Oldfield 1997)" means nothing on its own, and the bibliography
-              that resolves it is on this same assessment — the same component
-              the nearby-species panel and the text search read it with. Inline
-              and colourless on purpose, so this section keeps its own type. */}
-          <CitationProse text={text} references={references} className="whitespace-pre-line" />
-          {fullTextUrl && "\u2026"}
-          {fullTextUrl && (
-            <>
-              {" "}
-              <a
-                href={fullTextUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-500 hover:underline whitespace-nowrap"
-              >
-                read the full assessment on the IUCN Red List ↗
-              </a>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+] as const satisfies readonly NarrativeField[];
 
 // Comparison view showing diff between two assessments
 function AssessmentComparison({
@@ -188,14 +118,10 @@ function AssessmentComparison({
   const improved = newerOrder > olderOrder; // higher order = less threatened
   const worsened = newerOrder < olderOrder;
 
-  const sections: { key: string; title: string; field: keyof RedListAssessment }[] = [
-    { key: "rationale", title: "Rationale", field: "rationale" },
-    { key: "population", title: "Population", field: "population" },
-    { key: "habitat", title: "Habitat & Ecology", field: "habitat" },
-    { key: "threats", title: "Threats", field: "threats" },
-    { key: "conservation", title: "Conservation Actions", field: "conservation_actions" },
-    { key: "range", title: "Geographic Range", field: "range" },
-  ];
+  const yearOf = (a: RedListAssessment) => a.year_published || a.assessment_date?.split("-")[0] || "?";
+  const unchanged = NARRATIVE_FIELDS.every(
+    (f) => (older[f] ? stripHtml(String(older[f])) : "") === (newer[f] ? stripHtml(String(newer[f])) : "")
+  );
 
   return (
     <div className="space-y-4">
@@ -242,86 +168,20 @@ function AssessmentComparison({
         </div>
       )}
 
-      {/* Narrative sections - show only where content differs */}
-      {sections.map(({ key, title, field }) => {
-        const olderText = older[field] ? stripHtml(older[field] as string) : null;
-        const newerText = newer[field] ? stripHtml(newer[field] as string) : null;
-        if (!olderText && !newerText) return null;
-        if (olderText === newerText) return null;
-
-        return (
-          <ComparisonSection
-            key={key}
-            title={title}
-            olderText={olderText}
-            newerText={newerText}
-            olderYear={older.year_published || older.assessment_date?.split("-")[0] || "?"}
-            newerYear={newer.year_published || newer.assessment_date?.split("-")[0] || "?"}
-          />
-        );
-      })}
-
-      {/* If all narrative sections are the same, show a note */}
-      {sections.every(({ field }) => {
-        const ot = older[field] ? stripHtml(older[field] as string) : null;
-        const nt = newer[field] ? stripHtml(newer[field] as string) : null;
-        return ot === nt;
-      }) && (
+      {unchanged ? (
         <div className="text-sm text-zinc-400 italic py-2">
           No changes in narrative text between these assessments.
         </div>
-      )}
-    </div>
-  );
-}
-
-function ComparisonSection({
-  title,
-  olderText,
-  newerText,
-  olderYear,
-  newerYear,
-}: {
-  title: string;
-  olderText: string | null;
-  newerText: string | null;
-  olderYear: string;
-  newerYear: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="border border-zinc-100 dark:border-zinc-800 rounded-lg overflow-hidden">
-      <button
-        className="flex items-center gap-2 w-full px-3 py-2 text-left text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <svg
-          className={`w-3 h-3 flex-shrink-0 text-zinc-400 transition-transform ${expanded ? "rotate-90" : ""}`}
-          fill="currentColor"
-          viewBox="0 0 20 20"
-        >
-          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-        </svg>
-        {title}
-        <span className="text-xs text-zinc-400 font-normal">
-          (changed)
-        </span>
-      </button>
-      {expanded && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-0 divide-y md:divide-y-0 md:divide-x divide-zinc-100 dark:divide-zinc-800">
-          <div className="p-3">
-            <div className="text-xs font-medium text-zinc-400 mb-1">{olderYear} assessment</div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-pre-line leading-relaxed max-h-60 overflow-y-auto">
-              {olderText || <span className="italic">Not available</span>}
-            </div>
-          </div>
-          <div className="p-3">
-            <div className="text-xs font-medium text-zinc-400 mb-1">{newerYear} assessment</div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-pre-line leading-relaxed max-h-60 overflow-y-auto">
-              {newerText || <span className="italic">Not available</span>}
-            </div>
-          </div>
+      ) : (
+        <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+          <AssessmentSections
+            assessment={newer}
+            sections={NARRATIVE_FIELDS}
+            compare={{
+              older: { assessment: older, label: `${yearOf(older)} assessment` },
+              newer: { assessment: newer, label: `${yearOf(newer)} assessment` },
+            }}
+          />
         </div>
       )}
     </div>
@@ -600,13 +460,7 @@ function AssessmentDetailView({
   const trendText = getTrendText(detail.population_trend);
   const assessmentUrl =
     detail.url || `https://www.iucnredlist.org/species/${detail.sis_taxon_id}/${detail.assessment_id}`;
-  const { sections: narratives, truncated: narrativeCutShort } = truncateSections(
-    NARRATIVE_FIELDS.flatMap(({ title, field }) => {
-      const text = detail[field] ? stripHtml(detail[field] as string) : "";
-      return text ? [{ title, text }] : [];
-    }),
-    NARRATIVE_WORD_LIMIT
-  );
+  const hasNarrative = NARRATIVE_FIELDS.some((f) => !!detail[f]);
 
   return (
     <div className="space-y-3">
@@ -675,29 +529,22 @@ function AssessmentDetailView({
         </div>
       )}
 
-      {/* Narrative sections */}
-      <div className="border border-zinc-100 dark:border-zinc-800 rounded-lg overflow-hidden px-3 divide-y divide-zinc-100 dark:divide-zinc-800">
-        {narratives.map((n, i) => (
-          <NarrativeSection
-            key={n.title}
-            title={n.title}
-            text={n.text}
-            references={detail.references ?? []}
-            fullTextUrl={narrativeCutShort && i === narratives.length - 1 ? assessmentUrl : undefined}
-          />
-        ))}
-      </div>
-
-      {/* No narrative data message */}
-      {narratives.length === 0 && (
-        <div className="text-sm text-zinc-400 py-2 italic">
-          No detailed narrative data available for this assessment. View the full assessment on{" "}
+      {hasNarrative ? (
+        <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+          <AssessmentSections assessment={detail} sections={NARRATIVE_FIELDS} />
           <a
             href={assessmentUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-500 hover:underline"
+            className="block border-t border-zinc-100 pt-1 text-xs text-blue-500 hover:underline dark:border-zinc-800"
           >
+            Open this assessment on the IUCN Red List ↗
+          </a>
+        </div>
+      ) : (
+        <div className="text-sm text-zinc-400 py-2 italic">
+          No detailed narrative data available for this assessment. View the full assessment on{" "}
+          <a href={assessmentUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
             IUCN Red List
           </a>
           .

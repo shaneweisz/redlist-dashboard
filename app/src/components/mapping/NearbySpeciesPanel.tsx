@@ -20,17 +20,14 @@ import { createPortal } from "react-dom";
 import { CATEGORY_COLORS, normalizeCategory } from "@/config/taxa";
 import { findNode } from "@/lib/taxonomy-utils";
 import { TAXON_GROUP_NAMES } from "@/config/taxonomy-groups";
-import { stripHtml } from "@/lib/html-text";
-import { CitationProse } from "@/components/redlist/CitationProse";
+import { AssessmentSections } from "@/components/redlist/AssessmentSections";
 import TaxaIcon from "@/components/TaxaIcon";
 import { cachedThumbnail, loadThumbnail, type InatThumbnail } from "@/lib/redlist/inat-thumbnail";
 import {
   cachedAssessment,
   loadAssessment,
-  narrativeLabel,
   type LoadedAssessment,
   type NarrativeField,
-  type RedListAssessment,
 } from "@/lib/redlist/assessment";
 import {
   NEARBY_RADII_KM,
@@ -41,7 +38,6 @@ import {
   NEARBY_RECORDS_NOTE,
   NEARBY_SEARCH_COLOR,
   THREAT_TOP_LEVEL,
-  THREAT_SUB_LEVEL,
   compareThreatCodes,
   NEARBY_STALENESS_NOTE,
   nearbyGbifSiteUrl,
@@ -133,8 +129,6 @@ const SECTION_ORDER = [
   "use_trade",
   "conservation_actions",
 ] as const satisfies readonly NarrativeField[];
-type SectionKey = (typeof SECTION_ORDER)[number];
-const SECTIONS = SECTION_ORDER.map((field) => [field, narrativeLabel(field)] as const);
 
 
 /**
@@ -154,9 +148,6 @@ function SpeciesDetail({
   redListHref: string | null;
 }) {
   const [state, setState] = useState<LoadedAssessment | null>(() => cachedAssessment(assessmentId) ?? null);
-  const [section, setSection] = useState<SectionKey>("threats");
-  /** Whether the scoring behind the threat summary is showing. */
-  const [tableOpen, setTableOpen] = useState(false);
 
   useEffect(() => {
     if (cachedAssessment(assessmentId)) return;
@@ -179,163 +170,9 @@ function SpeciesDetail({
   }
   if (state.error) return <span className="text-amber-600 dark:text-amber-400">{state.error}</span>;
 
-  const a = (state.assessment ?? {}) as Partial<RedListAssessment>;
-  const refs = a.references ?? [];
-  const rows =
-    section === "threats"
-      ? [...(a.threat_classification ?? [])].sort((x, y) => compareThreatCodes(x.code, y.code))
-      : [];
-  const raw = a[section];
-  const text = raw ? stripHtml(String(raw)) : "";
-
-  /**
-   * The classification rolled up to its twelve top-level categories.
-   *
-   * Opened straight into the full table, a species with a dozen scored leaves
-   * buried the one thing a reader wants first — that this is an agriculture
-   * problem, or a harvesting one. The summary answers that, and the table is
-   * a click away for the scoring behind it.
-   */
-  const summary = (() => {
-    const byTop = new Map<string, { label: string; leaves: number; worst: string | null }>();
-    for (const r of rows) {
-      const top = r.code.replace(/_/g, ".").split(".")[0];
-      const at = byTop.get(top) ?? { label: THREAT_TOP_LEVEL[top] ?? top, leaves: 0, worst: null };
-      at.leaves += 1;
-      // "Low Impact: 5" — the number ranks them, and the highest is the one
-      // the species is actually up against.
-      const score = Number((r.score ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
-      const best = Number((at.worst ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
-      if (Number.isFinite(score) && (!Number.isFinite(best) || score > best)) at.worst = r.score;
-      byTop.set(top, at);
-    }
-    // By code. Sorted by weight the summary reordered itself between species
-    // and you could not run your eye down the column to compare two.
-    return [...byTop.entries()].sort((x, y) => compareThreatCodes(x[0], y[0]));
-  })();
-
   return (
     <div className="space-y-1.5">
-      {/* Every section, with the ones this assessment has nothing to say about
-          left visibly empty rather than hidden — "no use and trade recorded" is
-          itself worth knowing when you are comparing neighbours. */}
-      <div className="flex flex-wrap gap-1 border-b border-zinc-100 pb-1 dark:border-zinc-800">
-        {SECTIONS.map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setSection(key)}
-            aria-pressed={section === key}
-            className={`rounded-md ${chartSegmentClass(section === key)} ${
-              section !== key && !a[key] ? "opacity-50" : ""
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* What was ticked comes before what was written about it. The
-          classification is the assessment's own answer to "what is threatening
-          this?" — a line of it — where the narrative is several paragraphs of
-          argument, and a reader comparing neighbours wants the answer first and
-          the argument underneath. */}
-      {summary.length > 0 && (
-        <div>
-          <button
-            onClick={() => setTableOpen((v) => !v)}
-            className="flex w-full items-center gap-1.5 text-left"
-          >
-            <svg
-              className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${tableOpen ? "rotate-90" : ""}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-            <span className="flex flex-wrap gap-1">
-              {summary.map(([code, t]) => (
-                // Just the pressure, named: "Pollution", "Climate change".
-                // The code and the tally are what the table below is for, and
-                // in the summary they turned a plain-English line into
-                // something to be decoded.
-                <span
-                  key={code}
-                  className="rounded bg-zinc-100 px-1 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
-                  title={
-                    `${code}. ${t.label} — ${t.leaves} scored` + (t.worst ? `, worst ${t.worst}` : "")
-                  }
-                >
-                  {t.label}
-                </span>
-              ))}
-            </span>
-            <span className="ml-auto shrink-0 text-zinc-400">
-              {tableOpen ? "Hide scoring" : "Show scoring"}
-            </span>
-          </button>
-
-          {tableOpen && (
-            <table className="mt-1 w-full border-collapse">
-              <thead>
-                <tr className="text-left align-bottom text-zinc-400 dark:text-zinc-500">
-                  <th className="pr-2 font-normal">Threat</th>
-                  <th className="pr-2 font-normal">Timing</th>
-                  <th className="pr-2 font-normal">Scope</th>
-                  <th className="pr-2 font-normal">Severity</th>
-                  <th className="font-normal">Impact</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((t, i) => {
-                  // "5_4_1" is a path, not a label: the assessment names only
-                  // its own leaf, so the two levels above it come from the
-                  // classification itself.
-                  const parts = t.code.replace(/_/g, ".").split(".");
-                  const top = parts[0];
-                  const sub = parts.slice(0, 2).join(".");
-                  const levels = [
-                    { code: top, label: THREAT_TOP_LEVEL[top] },
-                    parts.length > 1 ? { code: sub, label: THREAT_SUB_LEVEL[sub] } : null,
-                    parts.length > 2 ? { code: parts.join("."), label: t.name } : null,
-                  ].filter(Boolean) as { code: string; label?: string }[];
-                  // A two-level code carries its own name at the second level.
-                  if (parts.length === 2 && levels[1]) levels[1].label = levels[1].label ?? t.name;
-                  return (
-                    <tr key={`${t.code}-${i}`} className="align-top border-t border-zinc-50 dark:border-zinc-800/60">
-                      <td className="py-0.5 pr-2 text-zinc-700 dark:text-zinc-200">
-                        {levels.map((l, depth) => (
-                          <span key={l.code} className="block" style={{ paddingLeft: depth * 10 }}>
-                            <span className="tabular-nums text-zinc-400">{l.code}.</span> {l.label ?? "—"}
-                          </span>
-                        ))}
-                        {t.named && (
-                          <span className="block italic text-zinc-500 dark:text-zinc-400" style={{ paddingLeft: levels.length * 10 }}>
-                            {t.named}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
-                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
-                      <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
-                      <td className="py-0.5 text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {text ? (
-        <CitationProse text={text} references={refs} />
-      ) : (
-        <span className="block text-zinc-400">
-          This assessment records no {SECTIONS.find(([k]) => k === section)?.[1].toLowerCase()} text.
-        </span>
-      )}
+      <AssessmentSections assessment={state.assessment ?? {}} sections={SECTION_ORDER} initial="threats" />
 
       {/* Last, after everything this panel can tell you: the point of the link
           is what to do once the panel has run out. */}

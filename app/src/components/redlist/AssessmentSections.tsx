@@ -1,0 +1,222 @@
+"use client";
+
+import { useState } from "react";
+import { narrativeLabel, type NarrativeField, type RedListAssessment } from "@/lib/redlist/assessment";
+import { stripHtml } from "@/lib/html-text";
+import { CitationProse } from "@/components/redlist/CitationProse";
+import { chartSegmentClass } from "@/components/redlist/chart-controls";
+import { THREAT_SUB_LEVEL, THREAT_TOP_LEVEL, compareThreatCodes } from "@/lib/mapping/nearby-species";
+
+type Assessment = Partial<RedListAssessment>;
+
+/** One side of a comparison: the assessment and what to call it ("2008 assessment"). */
+export interface ComparedAssessment {
+  assessment: Assessment;
+  label: string;
+}
+
+function sectionText(a: Assessment, field: NarrativeField): string {
+  const raw = a[field];
+  return raw ? stripHtml(String(raw)) : "";
+}
+
+/**
+ * An assessment's narrative, one section at a time behind a row of tabs.
+ *
+ * Shared by the dashboard's Red List Assessments tab and the nearby-species
+ * panel, which differ only in the sections they offer, the order and which one
+ * opens first (the panel leads with threats, which is what it is for). Every
+ * section in `sections` gets a tab, and one this assessment says nothing about
+ * stays visible but dimmed: "no use and trade recorded" is itself worth knowing.
+ *
+ * Given `compare`, each tab shows the section from both assessments side by
+ * side, older first, and a tab whose text did not change between them is dimmed.
+ * The threat summary is left out of a comparison: it is one assessment's answer.
+ *
+ * Text size is inherited, so each reader keeps its own type.
+ */
+export function AssessmentSections({
+  assessment,
+  sections,
+  initial,
+  compare,
+}: {
+  assessment: Assessment;
+  sections: readonly NarrativeField[];
+  initial?: NarrativeField;
+  compare?: { older: ComparedAssessment; newer: ComparedAssessment };
+}) {
+  const [section, setSection] = useState<NarrativeField>(initial ?? sections[0]);
+
+  const quiet = (field: NarrativeField) =>
+    compare
+      ? sectionText(compare.older.assessment, field) === sectionText(compare.newer.assessment, field)
+      : !sectionText(assessment, field);
+
+  return (
+    <div className="space-y-1.5">
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-zinc-100 pb-1 dark:border-zinc-800">
+        {sections.map((field) => (
+          <button
+            key={field}
+            role="tab"
+            onClick={() => setSection(field)}
+            aria-selected={section === field}
+            title={compare && quiet(field) ? "Same text in both assessments" : undefined}
+            className={`rounded-md text-[11px] leading-[14px] ${chartSegmentClass(section === field)} ${
+              section !== field && quiet(field) ? "opacity-50" : ""
+            }`}
+          >
+            {narrativeLabel(field)}
+          </button>
+        ))}
+      </div>
+
+      {compare ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {[compare.older, compare.newer].map((side, i) => (
+            <div key={i} className="min-w-0">
+              <div className="mb-1 text-[11px] font-medium text-zinc-400">{side.label}</div>
+              <SectionProse assessment={side.assessment} field={section} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          {section === "threats" && <ThreatSummary assessment={assessment} />}
+          <SectionProse assessment={assessment} field={section} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SectionProse({ assessment, field }: { assessment: Assessment; field: NarrativeField }) {
+  const text = sectionText(assessment, field);
+  if (!text) {
+    return (
+      <span className="block text-zinc-400">
+        This assessment records no {narrativeLabel(field).toLowerCase()} text.
+      </span>
+    );
+  }
+  return (
+    <CitationProse text={text} references={assessment.references ?? []} className="whitespace-pre-line" />
+  );
+}
+
+/**
+ * The threat classification rolled up to its twelve top-level categories, with
+ * the full scoring a click away.
+ *
+ * What was ticked comes before what was written about it: the classification is
+ * the assessment's own answer to "what is threatening this?", a line of it,
+ * where the narrative is paragraphs of argument. Opened straight into the full
+ * table, a species with a dozen scored leaves buried the answer, so the summary
+ * comes first and the table is behind it.
+ */
+function ThreatSummary({ assessment }: { assessment: Assessment }) {
+  const [tableOpen, setTableOpen] = useState(false);
+  const rows = [...(assessment.threat_classification ?? [])].sort((x, y) => compareThreatCodes(x.code, y.code));
+
+  const byTop = new Map<string, { label: string; leaves: number; worst: string | null }>();
+  for (const r of rows) {
+    const top = r.code.replace(/_/g, ".").split(".")[0];
+    const at = byTop.get(top) ?? { label: THREAT_TOP_LEVEL[top] ?? top, leaves: 0, worst: null };
+    at.leaves += 1;
+    // "Low Impact: 5": the number ranks them, and the highest is the one the
+    // species is actually up against.
+    const score = Number((r.score ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
+    const best = Number((at.worst ?? "").match(/(\d+)\s*$/)?.[1] ?? NaN);
+    if (Number.isFinite(score) && (!Number.isFinite(best) || score > best)) at.worst = r.score;
+    byTop.set(top, at);
+  }
+  // By code: sorted by weight, the summary reordered itself between species and
+  // you could not run your eye down the column to compare two.
+  const summary = [...byTop.entries()].sort((x, y) => compareThreatCodes(x[0], y[0]));
+  if (summary.length === 0) return null;
+
+  return (
+    <div>
+      <button onClick={() => setTableOpen((v) => !v)} className="flex w-full items-center gap-1.5 text-left">
+        <svg
+          className={`h-3 w-3 shrink-0 text-zinc-400 transition-transform ${tableOpen ? "rotate-90" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="flex flex-wrap gap-1">
+          {summary.map(([code, t]) => (
+            // Just the pressure, named. The code and the tally are what the
+            // table is for, and in the summary they made a plain-English line
+            // into something to decode.
+            <span
+              key={code}
+              className="rounded bg-zinc-100 px-1 text-[11px] text-zinc-600 dark:bg-zinc-700 dark:text-zinc-200"
+              title={`${code}. ${t.label} — ${t.leaves} scored` + (t.worst ? `, worst ${t.worst}` : "")}
+            >
+              {t.label}
+            </span>
+          ))}
+        </span>
+        <span className="ml-auto shrink-0 text-[11px] text-zinc-400">{tableOpen ? "Hide scoring" : "Show scoring"}</span>
+      </button>
+
+      {tableOpen && (
+        <table className="mt-1 w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="text-left align-bottom text-zinc-400 dark:text-zinc-500">
+              <th className="pr-2 font-normal">Threat</th>
+              <th className="pr-2 font-normal">Timing</th>
+              <th className="pr-2 font-normal">Scope</th>
+              <th className="pr-2 font-normal">Severity</th>
+              <th className="font-normal">Impact</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t, i) => {
+              // "5_4_1" is a path, not a label: the assessment names only its
+              // own leaf, so the two levels above it come from the classification.
+              const parts = t.code.replace(/_/g, ".").split(".");
+              const top = parts[0];
+              const sub = parts.slice(0, 2).join(".");
+              const levels = [
+                { code: top, label: THREAT_TOP_LEVEL[top] },
+                parts.length > 1 ? { code: sub, label: THREAT_SUB_LEVEL[sub] } : null,
+                parts.length > 2 ? { code: parts.join("."), label: t.name } : null,
+              ].filter(Boolean) as { code: string; label?: string }[];
+              // A two-level code carries its own name at the second level.
+              if (parts.length === 2 && levels[1]) levels[1].label = levels[1].label ?? t.name;
+              return (
+                <tr key={`${t.code}-${i}`} className="border-t border-zinc-50 align-top dark:border-zinc-800/60">
+                  <td className="py-0.5 pr-2 text-zinc-700 dark:text-zinc-200">
+                    {levels.map((l, depth) => (
+                      <span key={l.code} className="block" style={{ paddingLeft: depth * 10 }}>
+                        <span className="tabular-nums text-zinc-400">{l.code}.</span> {l.label ?? "—"}
+                      </span>
+                    ))}
+                    {t.named && (
+                      <span
+                        className="block italic text-zinc-500 dark:text-zinc-400"
+                        style={{ paddingLeft: levels.length * 10 }}
+                      >
+                        {t.named}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.timing ?? "—"}</td>
+                  <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.scope ?? "—"}</td>
+                  <td className="py-0.5 pr-2 text-zinc-500 dark:text-zinc-400">{t.severity ?? "—"}</td>
+                  <td className="py-0.5 text-zinc-500 dark:text-zinc-400">{t.score ?? "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
