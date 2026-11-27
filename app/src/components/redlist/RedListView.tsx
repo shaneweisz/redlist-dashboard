@@ -33,7 +33,7 @@ import { speciesMatchesNode, getNodeDef, getViewRootForNode, findNode, matchesBr
 import { dynamicNodeDisplayName } from "@/lib/dynamic-taxon";
 import { search } from "@/lib/search-shards/client";
 import ReviewerChart from "./ReviewerChart";
-import PriorityScatter, { type PriorityBox, type PriorityPoint } from "./PriorityScatter";
+import PriorityScatter, { NEEDS_UPDATING_LINE, type PriorityBox, type PriorityPoint } from "./PriorityScatter";
 import { CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartChip, ChartPager, chartControlClass, chartSegmentClass, CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { ColLink, linkNames, NoMatchLine } from "@/components/redlist/revision-links";
 import { REVISION_BARS, visibleBars, barForReason, acceptedNameSentence, GENUS_DIFFERS_REASON, RENAMED_REASON, REVISION_REASON_SHORT, REVISION_REASON_SUMMARY, revisionReasons, matchesRevisionFilter, isFlagged, colUrl, colDatasetUrl, colTaxonUrl, splitSummary, lumpSentence, type SplitSummary, newRevisionTally, tallyRevision, barTotal, REVISION_CAVEAT, colReleaseNote, type ColRevision } from "@/lib/col-revision";
@@ -608,6 +608,8 @@ const SKIP_PRIORITY = skipSet("priority");
 const SIDEBAR_QUERY = "(min-width: 1400px)";
 /** How many of a triage selection's species the sidebar lists. */
 const TRIAGE_LIST_MAX = 200;
+/** The sidebar list's default order, by the y axis metric, for its heading. */
+const TRIAGE_LIST_ORDER: Record<GbifMetric, string> = { total: "most records", new: "most new records", pctNew: "highest % new" };
 const SKIP_ASSESSMENT_COUNTS = skipSet("assessmentCounts");
 const SKIP_COUNTRIES = skipSet("countries");
 // Threats, Criteria and Habitat additionally ignore the endemics and growth-form
@@ -3015,14 +3017,19 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return triagePoints.some(test) ? test : null;
   }, [triageHover, triageInSidebar, triageSidebarCollapsed, triagePoints, homeTriage, homeAllSpecies, taxaFilteredSpecies]);
-  /** The sidebar's list of the box's species, highest on the y axis first,
-   *  the first TRIAGE_LIST_MAX of them (the table has the rest). */
-  const triageBoxList = useMemo(
-    () => priorityBox
-      ? triagePoints.filter((p) => priorityBox.keys.has(p.key)).sort((a, b) => b.value - a.value || b.years - a.years).slice(0, TRIAGE_LIST_MAX)
-      : [],
-    [triagePoints, priorityBox],
-  );
+  /** The sidebar's species list, highest on the y axis first: the box's
+   *  species, or without a box a default answer: in the reassessment triage
+   *  those past the needs-updating line (more than 10 years), in the first-
+   *  assessment triage every plotted species. The first TRIAGE_LIST_MAX are
+   *  listed; total counts them all. */
+  const triageList = useMemo(() => {
+    const keep = priorityBox
+      ? (p: PriorityPoint) => priorityBox.keys.has(p.key)
+      : isNewAssessments ? () => true : (p: PriorityPoint) => p.years > NEEDS_UPDATING_LINE.at;
+    const all = triagePoints.filter(keep);
+    all.sort((a, b) => b.value - a.value || b.years - a.years);
+    return { rows: all.slice(0, TRIAGE_LIST_MAX), total: all.length };
+  }, [triagePoints, priorityBox, isNewAssessments]);
 
   // Number of Assessments chart (#423 item 1): apply all filters EXCEPT the
   // assessment-count selection itself. NE species have no assessment history
@@ -5384,29 +5391,6 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       </div>
     </div>
   );
-  // A one-click filter for the usual question: species past the
-  // needs-updating threshold whose GBIF data has substantially changed since.
-  // It sets the page's own filters (Years Since Assessed's "10+ yrs old", and
-  // GBIF Records' New and % New ranges, in the chart's record mode), so the
-  // rule shows as ordinary pills, the charts show their selections, each part
-  // can be changed or removed on its own, and it's in the URL. The ranges'
-  // edges set the thresholds: more than 10 new records, 50% or more new.
-  // Clicking it again, while exactly those filters are set, removes them.
-  const triageMode = gbifKeyParts(priorityKey).mode;
-  const OVERDUE_NEW = ["11-100", "101-1K", "1K-10K", "10K+"];
-  const OVERDUE_PCT = ["50%+"];
-  const sameSet = (a: ReadonlySet<string>, b: readonly string[]) => a.size === b.length && b.every((x) => a.has(x));
-  const overdueFilterOn = isOutdatedSelected
-    && sameSet(gbifRanges[`new.${triageMode}`], OVERDUE_NEW)
-    && sameSet(gbifRanges[`pctNew.${triageMode}`], OVERDUE_PCT);
-  const toggleOverdueFilter = () => {
-    const on = !overdueFilterOn;
-    if (on) triageLeaveHome();
-    setExactFilters({ outdated: on ? "yes" : null });
-    setGbifRanges(`new.${triageMode}`, new Set(on ? OVERDUE_NEW : []));
-    setGbifRanges(`pctNew.${triageMode}`, new Set(on ? OVERDUE_PCT : []));
-    setPriorityBox(null);
-  };
   // The chart itself, per view: the reassessment triage (years since last
   // assessed × a GBIF metric, coloured by category, with the needs-updating
   // line) or the first-assessment triage (years since described × total GBIF
@@ -5534,7 +5518,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{triageTitle}</div>
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
               {homeNeTriage ? "Pick a group to plot"
-                : `${triagePoints.length.toLocaleString()} species plotted${homeTriage ? " · all species" : ""}`}
+                : `${triagePoints.length.toLocaleString()} species plotted · drag to select · click a dot to open it`}
             </div>
           </div>
           <button type="button" onClick={() => setTriageSidebarCollapsed(true)}
@@ -5606,66 +5590,56 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             </div>
           ) : renderTriageScatter(true)}
         </div>
-        {/* A caption below the plot: before a selection, how to make one, and
-            a one-click filter whose label is its criteria (so it can be
-            checked, not just trusted); after, the selection itself in the
-            same place. Fixed height (two lines), so the swap never resizes the
-            plot above. */}
-        <div className="mt-2 h-10 flex flex-col justify-center items-start gap-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-          {priorityBox ? (
-            // The selection, and a way down to it in the table when wanted
-            // (a selection doesn't scroll there itself, unlike clicking a dot:
-            // you may be refining it, and the charts above follow it too).
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPriorityBox(null)}
-                className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
-                {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
-              </button>
-              <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
-                ↓ table
-              </button>
-            </div>
-          ) : (
-            <>
-              <span>Drag to select · click a dot to open it</span>
-              {!isNewAssessments && <button type="button" onClick={toggleOverdueFilter} aria-pressed={overdueFilterOn}
-                title={overdueFilterOn
-                  ? "Remove these filters"
-                  : "Sets the page's filters to species assessed 10 or more years ago with more than 10 new GBIF records since, making up half or more of all their records"}
-                className={`text-left underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100 ${overdueFilterOn ? "font-semibold text-zinc-800 dark:text-zinc-100" : ""}`}>
-                {overdueFilterOn ? "✓ " : ""}Filter to 10+ yrs since assessed · &gt;10 new records · 50%+ new
-              </button>}
-            </>
-          )}
-        </div>
-        {/* The rest of the panel's height: the selection's species, highest
-            on the y axis first. Each opens in the table, as its dot does. */}
-        <div className="flex-1 min-h-0 mt-2 -mx-2 overflow-y-auto border-t border-zinc-100 dark:border-zinc-800 pt-2">
-          {priorityBox ? (
-            <ul className="text-[12px]" aria-label="Selected species">
-              {triageBoxList.map((p) => (
-                <li key={p.key}>
-                  <button type="button" onClick={() => openSpeciesFromScatter(p.key)}
-                    className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${selectedSpeciesKey === p.key ? "bg-zinc-100 dark:bg-zinc-800" : ""}`}>
-                    <span aria-hidden className="w-2 h-2 shrink-0 rounded-full" style={{ background: (isNewAssessments ? NE_TRIAGE_COLORS : CATEGORY_COLORS)[p.category] ?? "#a1a1aa" }} />
-                    <span className="min-w-0 flex-1 truncate italic text-zinc-800 dark:text-zinc-200" title={p.commonName ? `${p.name} (${p.commonName})` : p.name}>{p.name}</span>
-                    <span className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">
-                      {Math.floor(p.years)}y · {!isNewAssessments && gbifKeyParts(priorityKey).metric === "pctNew" ? `${Math.round(p.value)}%` : Math.round(p.value).toLocaleString()}
-                    </span>
-                  </button>
-                </li>
-              ))}
-              {priorityInBox > triageBoxList.length && (
-                <li className="px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                  and {(priorityInBox - triageBoxList.length).toLocaleString()} more in the table
-                </li>
-              )}
-            </ul>
-          ) : (
-            <p className="px-2 text-[11px] text-zinc-400 dark:text-zinc-500">Drag a box on the plot to list its species here.</p>
-          )}
-        </div>
+        {/* The species list: the box's species, with the selection's chip
+            and a way down to the table; or, without a box, a default answer
+            (see triageList), its heading saying what it ranks. Each row opens
+            in the table, as its dot does. Not on home: its table-high panel
+            has no room, and a selection there moves to All Species. */}
+        {!homeTriage && <div className="mt-2 flex-1 min-h-0 flex flex-col border-t border-zinc-100 dark:border-zinc-800 pt-2">
+          <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+            {priorityBox ? (
+              <>
+                <button type="button" onClick={() => setPriorityBox(null)}
+                  className={`inline-flex items-center gap-1 ${chartControlClass(true, "bg-zinc-800 text-white border-zinc-800 dark:bg-zinc-200 dark:text-zinc-900 dark:border-zinc-200")}`}>
+                  {priorityInBox.toLocaleString()} species selected <span aria-hidden>×</span>
+                </button>
+                <button type="button" onClick={() => speciesTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="underline decoration-dotted underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-100">
+                  ↓ table
+                </button>
+              </>
+            ) : (
+              <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                {isNewAssessments
+                  ? "Most GBIF records first"
+                  : `Needs updating (10+ yrs) · ${TRIAGE_LIST_ORDER[gbifKeyParts(priorityKey).metric]} first`}
+                {triageList.total > 0 && <span className="font-normal text-zinc-400 dark:text-zinc-500"> · {triageList.total.toLocaleString()}</span>}
+              </span>
+            )}
+          </div>
+          <ul className="mt-1 -mx-2 flex-1 min-h-0 overflow-y-auto text-[12px]" aria-label={priorityBox ? "Selected species" : "Species list"}>
+            {triageList.rows.map((p) => (
+              <li key={p.key}>
+                <button type="button" onClick={() => openSpeciesFromScatter(p.key)}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${selectedSpeciesKey === p.key ? "bg-zinc-100 dark:bg-zinc-800" : ""}`}>
+                  <span aria-hidden className="w-2 h-2 shrink-0 rounded-full" style={{ background: (isNewAssessments ? NE_TRIAGE_COLORS : CATEGORY_COLORS)[p.category] ?? "#a1a1aa" }} />
+                  <span className="min-w-0 flex-1 truncate italic text-zinc-800 dark:text-zinc-200" title={p.commonName ? `${p.name} (${p.commonName})` : p.name}>{p.name}</span>
+                  <span className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">
+                    {Math.floor(p.years)}y · {!isNewAssessments && gbifKeyParts(priorityKey).metric === "pctNew" ? `${Math.round(p.value)}%` : Math.round(p.value).toLocaleString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+            {triageList.total > triageList.rows.length && (
+              <li className="px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                and {(triageList.total - triageList.rows.length).toLocaleString()} more in the table
+              </li>
+            )}
+            {triageList.total === 0 && (
+              <li className="px-2 py-1 text-[11px] text-zinc-400 dark:text-zinc-500">None plotted.</li>
+            )}
+          </ul>
+        </div>}
         </>}
       </aside>
     )

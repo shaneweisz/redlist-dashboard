@@ -211,7 +211,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
     if (refLine && xMax > refLine.at) {
       const x = Math.round(sx(refLine.at)) + 0.5;
       ctx.save();
-      ctx.strokeStyle = "rgba(113, 113, 122, 0.75)";
+      ctx.strokeStyle = "rgba(239, 68, 68, 0.8)"; // red-500: needs updating
       ctx.setLineDash([4, 3]);
       ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, M.top + plotH); ctx.stroke();
       ctx.restore();
@@ -385,7 +385,7 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
         const fitsRight = lineX + 3 + needsLabelW <= M.left + scales.plotW;
         return (
           <div ref={needsLabelRef}
-            className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-zinc-500 dark:text-zinc-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
+            className="pointer-events-none absolute z-10 px-1 rounded text-[10px] leading-[14px] text-red-500 dark:text-red-400 bg-white/85 dark:bg-zinc-900/85 whitespace-nowrap"
             style={{ left: fitsRight ? lineX + 3 : lineX - 3 - needsLabelW, top: M.top + 2 }}>
             {refLine.label}
           </div>
