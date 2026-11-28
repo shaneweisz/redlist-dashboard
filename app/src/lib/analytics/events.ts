@@ -51,6 +51,11 @@ export const FILTER_PARAMS: Record<string, string> = {
   criteria: "criteria",
   habitat: "habitat",
   habitatBreadth: "habitat_breadth",
+  habitatImportance: "habitat_importance",
+  habitatSeasons: "habitat_season",
+  habitatSuitability: "habitat_suitability",
+  threatsScope: "threat_scope",
+  match: "gbif_match",
   endemics: "endemics_only",
   growthForms: "growth_form",
   colMatch: "col_match",
@@ -80,6 +85,7 @@ const FILTER_VALUE_SAFE = new Set([
   "describedYears", "gbifTotal", "gbifTotalGeo", "gbifNew", "gbifNewGeo", "gbifPctNew", "gbifPctNewGeo",
   "assessmentCounts", "systems", "trends",
   "movement", "threats", "criteria", "habitat", "habitatBreadth", "endemics",
+  "habitatImportance", "habitatSeasons", "habitatSuitability", "threatsScope", "match",
   "growthForms", "colMatch", "outdated",
 ]);
 
@@ -154,6 +160,17 @@ export function reportFilterUsage(search: string): void {
       ...(value === null ? {} : { value }),
     });
   }
+}
+
+/**
+ * Tags the rest of this page's events as the dashboard's own traffic, so
+ * analysis can leave it out. Called once /api/auth/me says the signed-in
+ * account is internal; events sent before that answer (the first pageview) go
+ * untagged.
+ */
+export function markInternalTraffic(): void {
+  if (!enabled()) return;
+  posthog.register({ internal: true });
 }
 
 /** Test seam: drop the remembered baselines. */

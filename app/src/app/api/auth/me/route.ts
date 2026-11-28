@@ -13,5 +13,13 @@ export async function GET() {
     email: user?.email ?? null,
     avatarUrl: user?.user_metadata?.avatar_url ?? null,
     canViewRangeMap: await isAdmin(supabase, user?.id),
+    internal: isInternalEmail(user?.email),
   });
+}
+
+/** The maintainer's account: its analytics events are tagged internal. */
+const INTERNAL_EMAIL = "shaneweisz@gmail.com";
+
+function isInternalEmail(email: string | null | undefined): boolean {
+  return email?.toLowerCase() === INTERNAL_EMAIL;
 }
