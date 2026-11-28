@@ -3655,6 +3655,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   const isSingleSpecies = filteredSpecies.length === 1 && urlSpecies != null && !priorityBox;
   const singleSpecies = isSingleSpecies ? filteredSpecies[0] : null;
   const showPriority = !isNewAssessments && !(isSingleSpecies && singleSpecies);
+  // Filters set inside the More Filters panel, for the count on its toggle.
+  const moreFiltersActive = selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0)
+    + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0)
+    + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size
+    + selectedPopulationTrends.size + selectedCriteria.size + (priorityBox ? 1 : 0);
   // The page is wide (see the data-wide-taxon-layout marker) for any taxon's
   // section on a sidebar-wide screen, in either view: not for a single species.
   const wideTaxonLayout = triageInSidebar && selectedTaxa.size > 0 && !isScopeLayout(layoutMode) && !(isSingleSpecies && singleSpecies);
@@ -6441,10 +6446,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   <svg className={`w-3.5 h-3.5 transition-transform ${moreFiltersOpen ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
-                  More Filters
-                  {(selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + (priorityBox ? 1 : 0) > 0) && (
-                    <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
-                      {selectedGrowthForms.size + selectedHabitat.size + (habitatBreadth ? 1 : 0) + (habitatImportanceActive ? 1 : 0) + (habitatSeasonsActive ? 1 : 0) + (habitatSuitabilityActive ? 1 : 0) + selectedAssessmentCounts.size + selectedSystems.size + selectedMovementPatterns.size + selectedPopulationTrends.size + selectedCriteria.size + (priorityBox ? 1 : 0)} active
+                  <span className="shrink-0">More Filters</span>
+                  {/* What's inside, in panel order (#523): "More Filters" alone hid
+                      Habitat and Threats from anyone who didn't open it. */}
+                  <span className="hidden sm:block min-w-0 truncate font-normal text-zinc-400 dark:text-zinc-500">
+                    · {[
+                      taxaFilteredSpecies.some(s => s.growth_forms?.length) && "Growth form",
+                      "Realm", "Movement", "Trend", "Criteria", "Number of assessments",
+                      "Habitat", "Threats", "GBIF matching", "Taxonomic differences",
+                      showPriority && !triageInSidebar && "Reassessment triage",
+                    ].filter(Boolean).join(", ")}
+                  </span>
+                  {moreFiltersActive > 0 && (
+                    <span className="shrink-0 ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
+                      {moreFiltersActive} active
                     </span>
                   )}
                 </button>

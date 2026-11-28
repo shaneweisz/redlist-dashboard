@@ -179,7 +179,7 @@ export default function RedListPage() {
             >
               sw984@cam.ac.uk
             </a>
-            . Or better yet,{" "}
+            , or{" "}
             {/* href carries the plain draft so this is a real link — middle-click,
                 "copy link address" and a JS-less load all still work. The click
                 handler re-builds it with the URL the reader is actually on, which
@@ -203,7 +203,7 @@ export default function RedListPage() {
             >
               create a GitHub Issue
             </a>
-            . I&apos;ll take a look as soon as I can.
+            .
           </p>
         </footer>
       </div>
