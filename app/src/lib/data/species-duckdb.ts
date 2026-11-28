@@ -1157,8 +1157,15 @@ export async function warmConnection(): Promise<void> {
 // Lazy per-species assessment history (index 0 = latest), fetched when a detail
 // panel opens. assessments.parquet is sorted by sis_taxon_id, so this prunes to
 // a single row group.
-export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
+export async function getAssessmentHistory(sisTaxonId: number, region?: string | null): Promise<PreviousAssessment[]> {
   const conn = await getConn();
+  // A region's history (lib/region-scope.ts): the same columns, per region.
+  if (region) {
+    const rows = (await conn.runAndReadAll(
+      `SELECT * FROM '${parquetUri("regional-assessments.parquet")}' WHERE sis_taxon_id = $id AND region = $region ORDER BY seq`,
+      { id: sisTaxonId, region })).getRowObjects();
+    return rows.map(historyRow);
+  }
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
   // rebuilt by a separate scheduled sync (scripts/sync/dbt/models/lists/), not by this
   // deploy, so there's a window where the deployed code expects a column the
@@ -1172,7 +1179,22 @@ export async function getAssessmentHistory(sisTaxonId: number): Promise<Previous
     WHERE sis_taxon_id = $id
     ORDER BY seq`;
   const rows = (await conn.runAndReadAll(sql, { id: sisTaxonId })).getRowObjects();
-  return rows.map((pa) => ({
+  return rows.map(historyRow);
+}
+
+/** The scopes a species is assessed in: global (scope null) and each region, with each one's latest assessment. */
+export async function getAssessmentScopes(sisTaxonId: number): Promise<{ scope: string | null; assessmentId: number; category: string; date: string | null }[]> {
+  const conn = await getConn();
+  const rows = (await conn.runAndReadAll(
+    `SELECT NULL::VARCHAR AS scope, assessment_id, iucn_category, assessment_date FROM ${assessedSource(null)} WHERE id = $id
+     UNION ALL
+     SELECT region, assessment_id, iucn_category, assessment_date FROM read_parquet('${parquetUri("regional-assessed.parquet")}') WHERE id = $id
+     ORDER BY scope NULLS FIRST`, { id: sisTaxonId })).getRowObjects();
+  return rows.map((r) => ({ scope: (r.scope as string) ?? null, assessmentId: Number(r.assessment_id), category: String(r.iucn_category ?? ""), date: (r.assessment_date as string) ?? null }));
+}
+
+function historyRow(pa: Record<string, unknown>): PreviousAssessment {
+  return ({
     id: Number(pa.id),
     year: String(pa.year ?? ""),
     category: String(pa.category ?? ""),
@@ -1183,7 +1205,7 @@ export async function getAssessmentHistory(sisTaxonId: number): Promise<Previous
     facilitators: (pa.facilitators as string) ?? null,
     contributors: (pa.contributors as string) ?? null,
     institutions: (pa.institutions as string) ?? null,
-  }));
+  });
 }
 
 // ─── CoL backbone: arbitrary-rank species listing (#271, Phase 3) ────────────

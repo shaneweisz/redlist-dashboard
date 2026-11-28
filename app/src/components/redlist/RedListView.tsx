@@ -18,6 +18,7 @@ import { countNoteText } from "@/lib/count-note";
 import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchReview, type SuggestedRecord } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
+import ScopedRedListAssessments from "./ScopedRedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
@@ -1541,8 +1542,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     fromPopstateRef,
   } = useFilterParams();
   // Not Evaluated species have no assessment, so no New or % New: the chart
-  // shows Total there whatever the URL asks for.
-  const gbifChartKeys = isNewAssessments ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
+  // shows Total there whatever the URL asks for. Nor under a region scope: the
+  // since-assessment counts are measured from the global assessment's date.
+  const showNewCounts = !isNewAssessments && !assessmentScope;
+  const gbifChartKeys = !showNewCounts ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
   const gbifChartKey: GbifRangeKey = gbifChartKeys.includes(gbifChartKeyParam) ? gbifChartKeyParam : "total.all";
 
   // Both habitat checkbox-dropdowns default to "everything checked" (see
@@ -7254,7 +7257,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
-                {!isNewAssessments && (
+                {showNewCounts && (
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("newGbif", e)}
@@ -7271,7 +7274,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
-                {!isNewAssessments && (
+                {showNewCounts && (
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("pctNewGbif", e)}
@@ -7370,7 +7373,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 )}
                 {/* One heading over the GBIF columns, with the record-mode toggle:
                     the mode is said once here, not under every column. */}
-                <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
+                <th colSpan={showNewCounts ? 3 : 1} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
                     <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records</span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
@@ -7639,7 +7642,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       ) : "—"}
                     </td>
                     {/* New GBIF */}
-                    {!isNewAssessments && (
+                    {showNewCounts && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? (
                         <span className="text-zinc-400">N/A</span>
@@ -7671,7 +7674,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     </td>
                     )}
                     {/* % New GBIF */}
-                    {!isNewAssessments && (
+                    {showNewCounts && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
                         const total = s.gbif_records;
@@ -7696,7 +7699,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 6 : 7} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 6 : showNewCounts ? 7 : 5} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -7869,6 +7872,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {s.category !== "NE" && (visitedTabs.has("redlist")) && (
                             <div style={{ display: activeDetailTab === "redlist" ? undefined : "none" }}>
+                              {s.sis_taxon_id ? (
+                              // With a switch between the species' global and regional assessments.
+                              <ScopedRedListAssessments
+                                sisTaxonId={s.sis_taxon_id}
+                                pageScope={assessmentScope}
+                                current={{ assessmentId: s.assessment_id ?? 0, category: s.category, date: s.assessment_date ?? null }}
+                                globalHistory={assessmentScope ? null : (assessmentHistory[s.sis_taxon_id] ?? null)}
+                              />
+                              ) : (
                               <RedListAssessments
                                 sisTaxonId={s.sis_taxon_id ?? undefined}
                                 currentAssessmentId={s.assessment_id ?? 0}
@@ -7877,6 +7889,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 previousAssessments={((s.sis_taxon_id ? assessmentHistory[s.sis_taxon_id] : null) ?? s.previous_assessments ?? []).map((a) => ({ year: a.year, assessment_id: a.id, category: a.category, assessors: a.assessors, reviewers: a.reviewers, facilitators: a.facilitators, contributors: a.contributors, institutions: a.institutions }))}
                                 speciesUrl={`https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}`}
                               />
+                              )}
                             </div>
                           )}
                           {SHOW_WIKIPEDIA_TAB && (visitedTabs.has("wikipedia")) && (
@@ -7904,7 +7917,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 6 : 7} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 6 : showNewCounts ? 7 : 5} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>

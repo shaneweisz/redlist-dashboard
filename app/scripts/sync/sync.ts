@@ -163,7 +163,7 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
     await exportDbtTables(T, BUILD_DIR);
     // assessed.parquet's columns for each region, from the global rows it reuses.
-    await buildRegionalAssessed({ regionalAssessments: T.regionalAssessments, assessed: T.assessed }, T.regionalAssessed);
+    await buildRegionalAssessed({ regionalAssessments: T.regionalAssessments, assessed: T.assessed }, { assessed: T.regionalAssessed, history: T.regionalHistory });
     done();
   }
 

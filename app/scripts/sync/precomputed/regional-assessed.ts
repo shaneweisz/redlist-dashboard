@@ -9,6 +9,11 @@
  *
  * Columns: region, then exactly assessed.parquet's, in its order.
  *
+ * Also lists/regional-assessments: the history, as lists/assessments is for
+ * global ones (dbt/models/lists/assessment_history.sql, same rules), per region:
+ * region, then that table's columns. The species panel's Red List tab reads it
+ * when switched to a region.
+ *
  * Decisions:
  *   - One row per species and region: its latest assessment in that region.
  *   - The assessment's own columns (category, dates, criteria, countries,
@@ -26,7 +31,8 @@
 import { lit, openDuckDB } from "../sql";
 import { output, parquet } from "../paths";
 
-export async function buildRegionalAssessed(files: { regionalAssessments: string; assessed: string }, out: string): Promise<void> {
+export async function buildRegionalAssessed(files: { regionalAssessments: string; assessed: string },
+  out: { assessed: string; history: string }): Promise<void> {
   const conn = await openDuckDB();
   const list = (c: string) => `CASE WHEN ${c} IS NULL OR len(${c}) = 0 THEN NULL ELSE array_to_string(${c}, ';') END`;
   const sameAssessment = (c: string) => `CASE WHEN g.assessment_id = r.assessment_id THEN g.${c} END AS ${c}`;
@@ -65,17 +71,29 @@ export async function buildRegionalAssessed(files: { regionalAssessments: string
     LEFT JOIN history h ON h.region = r.region AND h.sis_taxon_id = r.sis_taxon_id
     WHERE r.is_latest
     ORDER BY r.region, r.sis_taxon_id
-  ) TO ${lit(output(out))} (FORMAT parquet, COMPRESSION zstd)`);
+  ) TO ${lit(output(out.assessed))} (FORMAT parquet, COMPRESSION zstd)`);
+
+  await conn.run(`COPY (
+    SELECT region, sis_taxon_id,
+           (row_number() OVER (PARTITION BY region, sis_taxon_id ORDER BY year_published DESC, is_latest DESC, assessment_date DESC NULLS LAST, assessment_id DESC) - 1)::INTEGER AS seq,
+           assessment_id AS id, year_published AS "year", category, CAST(assessment_date AS VARCHAR) AS "date", criteria,
+           assessors, reviewers, facilitators, contributors, institutions
+    FROM ${parquet(files.regionalAssessments)}
+    WHERE year_published IS NOT NULL
+      AND (region, sis_taxon_id) IN (SELECT (region, sis_taxon_id) FROM ${parquet(files.regionalAssessments)} WHERE is_latest)
+    QUALIFY row_number() OVER (PARTITION BY region, sis_taxon_id, year_published ORDER BY is_latest DESC, assessment_date DESC NULLS LAST, assessment_id DESC) = 1
+    ORDER BY region, sis_taxon_id, seq
+  ) TO ${lit(output(out.history))} (FORMAT parquet, COMPRESSION zstd)`);
 
   // Same columns as assessed.parquet, in its order, or the app's queries break under a region.
   const cols = async (f: string) => (await conn.runAndReadAll(`DESCRIBE SELECT * FROM ${parquet(f)}`)).getRowObjects()
     .map((r) => `${r.column_name} ${r.column_type}`);
   const want = await cols(files.assessed);
-  const got = (await cols(out)).slice(1);
+  const got = (await cols(out.assessed)).slice(1);
   if (want.join(",") !== got.join(",")) {
     throw new Error(`regional-assessed: columns differ from assessed.parquet:\n  want ${want.join(", ")}\n  got  ${got.join(", ")}`);
   }
-  const summary = (await conn.runAndReadAll(`SELECT region, count(*)::INT AS n FROM ${parquet(out)} GROUP BY 1 ORDER BY 2 DESC`)).getRowObjects();
+  const summary = (await conn.runAndReadAll(`SELECT region, count(*)::INT AS n FROM ${parquet(out.assessed)} GROUP BY 1 ORDER BY 2 DESC`)).getRowObjects();
   console.log(`   ${summary.reduce((s, r) => s + Number(r.n), 0).toLocaleString()} regional species rows in ${summary.length} regions ` +
     `(${summary.slice(0, 3).map((r) => `${r.region} ${Number(r.n).toLocaleString()}`).join(", ")}, …)`);
 }

@@ -63,6 +63,7 @@ export function tables(buildDir = BUILD_DIR) {
     specialistGroupSpecies: working("lists", "specialist_group_species.parquet"),
     assessed: data("assessed.parquet"),
     regionalAssessed: data("regional-assessed.parquet"),
+    regionalHistory: data("regional-assessments.parquet"),
     assessmentHistory: data("assessments.parquet"),
     species: data("species"),
     ne: data("ne.parquet"),
