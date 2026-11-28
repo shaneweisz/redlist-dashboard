@@ -65,6 +65,7 @@ export function tables(buildDir = BUILD_DIR) {
     species: data("species"),
     ne: data("ne.parquet"),
     literatureWorks: data("literature-works.parquet"),
+    regionalAssessments: data("regional-assessments.parquet"),
     appTaxa: data("taxa.parquet"),
     appLink: data("assessment_link.parquet"),
     // 5. Precomputed

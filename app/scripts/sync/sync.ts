@@ -45,6 +45,7 @@ import { ensureMatcher } from "./inputs/matcher";
 import { buildTaxa, demotedCount } from "./sources/taxa";
 import { readSourcesReleases, sourcesMismatch, writeSourcesReleases } from "./sources-releases";
 import { buildAssessments, REDLIST_DB } from "./sources/assessments";
+import { buildRegionalAssessments } from "./sources/regional-assessments";
 import { buildOccurrences } from "./sources/occurrences";
 import { buildCommonNames } from "./sources/common-names";
 import { buildLiteratureMentions, localOpenAlexWorks } from "./sources/literature";
@@ -134,6 +135,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
         `the curated release the XR was built from should demote none`);
     }
     await buildAssessments(T.assessments);
+    // Published as built: only the Regional view reads it.
+    await buildRegionalAssessments(T.regionalAssessments);
     await buildOccurrences({ snapshotCounts: snapshot.dir, sourceRows: snapshot.sourceRows, taxa: T.taxa },
       { occurrences: T.occurrences, occurrenceCountries: T.occurrenceCountries });
     await buildCommonNames({ colVernacularNames: col.vernacularNames, taxa: T.taxa, inatNames: inat }, T.commonNames);

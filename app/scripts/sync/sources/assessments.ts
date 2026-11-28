@@ -64,7 +64,7 @@ const IN_SCOPE = `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon
  * columns k, p, c, o, plus a count of how many match (must be 1).
  */
 const RANK_COL = { kingdom_name: "k", phylum_name: "p", class_name: "c", order_name: "o" } as const;
-function groupSql(): { caseSql: string; matchCount: string } {
+export function groupSql(): { caseSql: string; matchCount: string } {
   const conds = TAXA_DEFINITIONS.map((t) => ({
     id: t.id,
     cond: t.redlist.map((q) => `${RANK_COL[q.filterColumn]} IN (${q.filterValues.map(lit).join(", ")})`).join(" OR "),

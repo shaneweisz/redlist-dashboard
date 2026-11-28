@@ -1764,6 +1764,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             router.push("/mapping");
             return;
           }
+          // Regional assessments (Europe, Mediterranean, …): their own data
+          // and route (app/regional), separate from every global count here.
+          if (v === "regional") {
+            router.push("/regional");
+            return;
+          }
           onLayoutModeChange(v === "taxonomic" ? null : (v as LayoutMode));
         }}
         className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
@@ -1775,6 +1781,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <option value="ssc">By SSC Specialist Group (WIP)</option>
         <option value="text">By Assessment Text (search)</option>
         <option value="near">Near a Location (map)</option>
+        <option value="regional">Regional Assessments</option>
         <option value="table1a">Table 1a</option>
       </select>
     </span>
