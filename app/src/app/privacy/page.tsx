@@ -42,7 +42,8 @@ export default function PrivacyPage() {
             PostHog
           </a>{" "}
           (hosted in the EU). This data is not linked to your identity, even if
-          you are signed in. We do <strong>not</strong> use analytics cookies or
+          you are signed in; usage by the dashboard&rsquo;s own team is
+          marked as such so it can be left out. We do <strong>not</strong> use analytics cookies or
           store any analytics identifier on your device, so no cookie banner is
           needed. We also use{" "}
           <a

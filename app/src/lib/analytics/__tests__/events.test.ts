@@ -7,20 +7,23 @@ import {
   resetFilterBaselines,
   captureSearchResultSelected,
   captureSearchNoResults,
+  markInternalTraffic,
   FILTER_PARAMS,
 } from "../events";
 import { OWN_PARAM_NAMES } from "@/hooks/useFilterParams";
 
 vi.mock("posthog-js", () => ({
-  default: { capture: vi.fn() },
+  default: { capture: vi.fn(), register: vi.fn() },
 }));
 const posthog = (await import("posthog-js")).default as unknown as {
   capture: ReturnType<typeof vi.fn>;
+  register: ReturnType<typeof vi.fn>;
 };
 
 beforeEach(() => {
   resetFilterBaselines();
   posthog.capture.mockClear();
+  posthog.register.mockClear();
   process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
   // These helpers are client-only and guard on `window` so an accidental
   // server-side import is inert. The suite runs in node (the project has no DOM
@@ -52,6 +55,13 @@ describe("activeFilters", () => {
   it("treats endemics=0 as not filtering", () => {
     expect(activeFilters("?endemics=0")).toEqual({});
     expect(activeFilters("?endemics=1")).toEqual({ endemics_only: "1" });
+  });
+
+  it("reports the Habitat and Threats sub-controls", () => {
+    expect(activeFilters("?habitatImportance=Major&threatsScope=all")).toEqual({
+      habitat_importance: "Major",
+      threat_scope: "all",
+    });
   });
 
   it("ignores an empty param value", () => {
@@ -222,5 +232,18 @@ describe("search events", () => {
       captureSearchNoResults("notaspecies");
       expect(posthog.capture).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("markInternalTraffic", () => {
+  it("tags later events as internal", () => {
+    markInternalTraffic();
+    expect(posthog.register).toHaveBeenCalledWith({ internal: true });
+  });
+
+  it("does nothing when PostHog is not configured", () => {
+    delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+    markInternalTraffic();
+    expect(posthog.register).not.toHaveBeenCalled();
   });
 });
