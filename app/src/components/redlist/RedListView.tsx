@@ -1364,8 +1364,10 @@ const TRIAGE_METRIC_LABEL: Record<GbifMetric, string> = { total: "Total", new: "
 /** The first-assessment triage's one colour (every dot is not evaluated):
  *  the Year Described chart's blue, so the two read as the same data. */
 const NE_TRIAGE_COLORS: Record<string, string> = { NE: "#3b82f6" };
-/** Red List categories in the triage legend, in severity order. */
-const TRIAGE_LEGEND = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"] as const;
+/** Red List categories in the triage legend, in severity order. RE and NA
+ *  exist only in regional assessments (lib/region-scope.ts): shown when plotted. */
+const TRIAGE_LEGEND = ["EX", "EW", "RE", "CR", "EN", "VU", "NT", "LC", "DD", "NA"] as const;
+const REGIONAL_ONLY_CATEGORIES: ReadonlySet<string> = new Set(["RE", "NA"]);
 function GbifChartControls({ value, onChange, showMetric, what = "the chart" }: {
   value: GbifRangeKey; onChange: (k: GbifRangeKey) => void; showMetric: boolean;
   /** Names the control's subject in its aria-labels, where a page has two sets ("the scatter's y axis"). */
@@ -1546,7 +1548,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // since-assessment counts are measured from the global assessment's date.
   const showNewCounts = !isNewAssessments && !assessmentScope;
   const gbifChartKeys = !showNewCounts ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
-  const gbifChartKey: GbifRangeKey = gbifChartKeys.includes(gbifChartKeyParam) ? gbifChartKeyParam : "total.all";
+  // A New / % New choice falls back to Total in the same record mode (all / georeferenced).
+  const gbifChartKey: GbifRangeKey = gbifChartKeys.includes(gbifChartKeyParam) ? gbifChartKeyParam : `total.${gbifKeyParts(gbifChartKeyParam).mode}`;
 
   // Both habitat checkbox-dropdowns default to "everything checked" (see
   // useFilterParams.ts) — only a proper subset actually restricts anything,
@@ -2600,8 +2603,11 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   //
   // The reassessment scatter's y axis (Total / New / % New, all records /
   // georeferenced), its own choice rather than the GBIF Records chart's:
-  // New in the page's record mode unless set.
-  const priorityKey: GbifRangeKey = triageKey ?? `new.${gbifRecordMode}`;
+  // New in the page's record mode unless set. Under a region scope, Total only
+  // (as the GBIF Records chart, showNewCounts): the since-assessment counts are
+  // measured from the global assessment's date.
+  const priorityKeyParam: GbifRangeKey = triageKey ?? `new.${gbifRecordMode}`;
+  const priorityKey: GbifRangeKey = showNewCounts ? priorityKeyParam : `total.${gbifKeyParts(priorityKeyParam).mode}`;
   const changePriorityKey = useCallback((k: GbifRangeKey) => setTriageAxis({ key: k }), [setTriageAxis]);
   // The first-assessment triage's (Awaiting 1st Assessment) y axis: total GBIF
   // records, all or georeferenced. Its own choice, like priorityKey.
@@ -2949,6 +2955,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     }
     return out;
   }, [taxaFilteredSpecies, matchesFilters, isNewAssessments, priorityKey, summaryTriage, summarySpecies]);
+  const triageLegend = useMemo(() => {
+    const plotted = new Set(priorityPoints.map((p) => p.category));
+    return TRIAGE_LEGEND.filter((c) => !REGIONAL_ONLY_CATEGORIES.has(c) || plotted.has(c));
+  }, [priorityPoints]);
   // The axes' extents from the whole taxon, filters ignored, so applying or
   // changing a filter never rescales the chart and selections stay comparable.
   const priorityExtent = useMemo(() => {
@@ -5541,16 +5551,22 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       fill={fill}
       points={priorityPoints}
       colors={CATEGORY_COLORS}
+      showNewRecords={showNewCounts}
       yAxis={
         // The y axis title is its controls, read as a phrase, above the
         // plot: "GBIF records: [New since assessment ▾] [all records ▾]",
         // each select sized to its chosen option where the browser supports it.
         <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
           GBIF records:
-          <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
-            onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
-            {GBIF_METRICS.map((m) => <option key={m} value={m}>{TRIAGE_METRIC_LABEL[m]}</option>)}
-          </select>
+          {showNewCounts ? (
+            <select aria-label="Which GBIF metric the scatter's y axis shows" value={gbifKeyParts(priorityKey).metric} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
+              onChange={(e) => changePriorityKey(`${e.target.value as GbifMetric}.${gbifKeyParts(priorityKey).mode}`)}>
+              {GBIF_METRICS.map((m) => <option key={m} value={m}>{TRIAGE_METRIC_LABEL[m]}</option>)}
+            </select>
+          ) : (
+            // Region scope: Total only (see priorityKey), so no metric to pick.
+            <span>{TRIAGE_METRIC_LABEL.total}</span>
+          )}
           <select aria-label="Which GBIF records the scatter's y axis counts" value={gbifKeyParts(priorityKey).mode} className={CHART_SELECT_CLASS} style={FIT_CONTENT}
             onChange={(e) => changePriorityKey(`${gbifKeyParts(priorityKey).metric}.${e.target.value as GbifRecordMode}`)}>
             {GBIF_RECORD_MODES.map((m) => <option key={m} value={m}>{m === "all" ? "all records" : "georeferenced only"}</option>)}
@@ -5706,7 +5722,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         // between entries would otherwise flash the whole plot back between them.
         <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5 text-[11px]" role="group" aria-label="Dot colour: Red List category. Click to filter."
           onMouseLeave={() => previewOnTriage(null)}>
-          {TRIAGE_LEGEND.map((c) => {
+          {triageLegend.map((c) => {
             const active = selectedCategories.has(c);
             const dimmed = selectedCategories.size > 0 && !active;
             return (
@@ -6239,7 +6255,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
-                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
+                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={showNewCounts} />
               </div>
               <div className="flex-1 min-h-[150px] flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (
@@ -6326,7 +6342,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 flex flex-col">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">GBIF Records{gbifSnapshotInfo}</span>
-                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={!isNewAssessments} />
+                <GbifChartControls value={gbifChartKey} onChange={setGbifChartKey} showMetric={showNewCounts} />
               </div>
               <div style={{ height: 180 }} className="flex items-center justify-center">
                 {speciesLoading && assessedSpecies.length === 0 ? (

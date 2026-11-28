@@ -9,7 +9,7 @@ import { ALL_HABITAT_SEASONS, ALL_HABITAT_IMPORTANCE, ALL_HABITAT_SUITABILITY } 
 import { parseSpeciesParam } from "@/lib/species-row-key";
 import { prettifyQs } from "@/lib/query-string";
 import { primeFilterBaseline, reportFilterUsage } from "@/lib/analytics/events";
-import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
+import { DEFAULT_GBIF_RECORD_MODE, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode, GBIF_RANGE_KEYS, GBIF_RANGE_PARAM, GBIF_CHART_PARAM, DEFAULT_GBIF_CHART_KEY, emptyGbifRanges, parseGbifChartKey, gbifKeyParts, type GbifRangeKey, type GbifRanges } from "@/lib/gbif-records";
 
 // Both habitat checkbox-dropdowns (Importance, Season) default to "everything
 // checked" (nothing excluded) rather than "nothing checked" — see
@@ -1079,8 +1079,26 @@ export function useFilterParams() {
   const setAssessmentScope = useCallback(
     (value: string | null) => {
       setState(prev => {
-        const next = { ...prev, assessmentScope: value };
-        queueMicrotask(() => syncUrl(next, false));
+        let next: typeof prev = { ...prev, assessmentScope: value };
+        // A region scope shows GBIF Total only (its since-assessment counts would
+        // be measured from the global assessment's date), so entering one drops
+        // what New / % New were doing: their GBIF Records selections, a sort on
+        // those columns (hidden there), and a triage selection drawn on a New /
+        // % New y axis (the scatter replots on Total).
+        if (value && !prev.assessmentScope) {
+          const isNewMetric = (k: GbifRangeKey) => gbifKeyParts(k).metric !== "total";
+          const isNewSort = (f: SortField | null) => f === "newGbif" || f === "pctNewGbif";
+          const triageOnNew = isNewMetric(prev.triageKey ?? `new.${prev.gbifRecordMode ?? DEFAULT_GBIF_RECORD_MODE}`);
+          next = {
+            ...next,
+            gbifRanges: Object.fromEntries(GBIF_RANGE_KEYS.map((k) => [k, isNewMetric(k) ? new Set<string>() : prev.gbifRanges[k]])) as GbifRanges,
+            ...(isNewSort(prev.sortField) ? { sortField: null, sortDirection: "desc" as const } : {}),
+            ...(isNewSort(prev.sortField2) ? { sortField2: null, sortDirection2: "desc" as const } : {}),
+            ...(triageOnNew ? { triage: null } : {}),
+          };
+        }
+        const settled = next;
+        queueMicrotask(() => syncUrl(settled, false));
         return next;
       });
     },
