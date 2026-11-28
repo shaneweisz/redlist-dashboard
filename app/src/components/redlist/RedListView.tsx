@@ -5853,9 +5853,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           // border and full-contrast text instead. Small switches keep the fill.
           <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
             {([
-              // Under a region scope the count is that region's assessments: said here,
-              // on the card every taxon opens with, so it can't be read as global.
-              ["reassessments", assessmentScope ? `Species Assessed for ${assessmentScope}` : "Species Assessed", selectedRow?.assessed],
+              ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
             ] as const).filter(([mode]) => !(assessmentScope && mode === "new-assessments")).map(([mode, label, count]) => (
               <button
@@ -5952,7 +5950,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
               )}
               <div className="min-w-0">
-                <div className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</span>
+                  {/* Under a region scope everything on the page is that region's
+                      assessments: said on the card every taxon opens with, in the
+                      words of the list's chip, so it can't be read as global. */}
+                  {assessmentScope && (
+                    <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {assessmentScope} assessments
+                    </span>
+                  )}
+                </div>
                 {rankLine && <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{rankLine}</div>}
               </div>
             </div>
