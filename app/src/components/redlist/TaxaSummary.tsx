@@ -102,6 +102,19 @@ const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchA
   { nodeId: "ssc-fungi-groups", parentTaxon: "fungi", title: "FUNGI SPECIALIST GROUPS", catchAllId: "ssc-other-fungi" },
 ];
 
+// The Scope picker's regions (lib/region-scope.ts): one request per session,
+// started when this module loads so it is usually back before the toolbar draws.
+let loadedRegions: string[] | null = null;
+let regionsRequest: Promise<string[]> | null = null;
+function loadRegions(): Promise<string[]> {
+  regionsRequest ??= fetch("/api/redlist/regions")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => (loadedRegions = ((d?.regions ?? []) as { region: string }[]).map((x) => x.region)))
+    .catch(() => { regionsRequest = null; return []; });
+  return regionsRequest;
+}
+if (typeof window !== "undefined") void loadRegions();
+
 // Ordered categories for the breakdown bar (most threatened first)
 const BAR_CATEGORIES = Object.keys(CATEGORY_ORDER).sort(
   (a, b) => CATEGORY_ORDER[a] - CATEGORY_ORDER[b]
@@ -1751,16 +1764,24 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // (+ their "Exit ... View" states). "Country view" needs real per-country
   // location data, which Not Evaluated species don't have (no assessment means no
   // assessment_locations row), so it's disabled under New Assessments.
-  // The regions a scope can be (lib/region-scope.ts), from the data: none means
-  // the sync has no regional assessments, and the picker stays hidden.
-  const [regions, setRegions] = useState<{ region: string; species: number }[]>([]);
+  // The regions a scope can be (lib/region-scope.ts), from the data. Requested
+  // once per session, as soon as this module loads, and the picker is drawn at
+  // once with whatever is known (Global, and the URL's own scope): waiting on the
+  // request to draw it made it pop in after the rest of the toolbar.
+  const [regions, setRegions] = useState<string[]>(() => loadedRegions ?? []);
   useEffect(() => {
+    // Always through the shared request (cheap once it has come back): skipping
+    // when loadedRegions was set missed a response landing between the first
+    // render and this effect, leaving the picker with Global only.
     if (!onAssessmentScopeChange) return;
-    fetch("/api/redlist/regions").then((r) => (r.ok ? r.json() : null)).then((d) => setRegions(d?.regions ?? [])).catch(() => {});
+    let live = true;
+    loadRegions().then((r) => { if (live) setRegions(r); });
+    return () => { live = false; };
   }, [onAssessmentScopeChange]);
+  const regionOptions = assessmentScope && !regions.includes(assessmentScope) ? [assessmentScope, ...regions] : regions;
   // Which assessments everything on the page reads: IUCN's global ones, or one
   // region's (Europe, Mediterranean, …), assessed under the regional guidelines.
-  const scopeSelect = onAssessmentScopeChange && regions.length > 0 ? (
+  const scopeSelect = onAssessmentScopeChange ? (
     <span className="inline-flex items-center gap-2">
       <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Scope</span>
       <select
@@ -1771,7 +1792,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
         <option value="">Global</option>
-        {regions.map((r) => <option key={r.region} value={r.region}>{r.region}</option>)}
+        {regionOptions.map((r) => <option key={r} value={r}>{r}</option>)}
       </select>
     </span>
   ) : null;
@@ -1809,9 +1830,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
-        <option value="ssc">By SSC Specialist Group (WIP)</option>
-        <option value="text">By Assessment Text (search)</option>
-        <option value="near">Near a Location (map)</option>
+        <option value="ssc">By Specialist Group</option>
+        <option value="text">By Assessment Text</option>
+        <option value="near">By Location</option>
         <option value="table1a">Table 1a</option>
       </select>
     </span>
