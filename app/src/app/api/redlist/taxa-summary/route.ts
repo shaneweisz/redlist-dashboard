@@ -20,11 +20,8 @@ interface TaxonSummary {
   lastUpdated: string | null;
   byCategory: Record<string, number>;
   totalGbifObservations?: number;
-  meanGbifObsPerSpecies?: number;
-  medianGbifObsPerSpecies?: number;
   gbifSpeciesCount?: number;
   gbifNeSpeciesCount?: number;
-  gbifObsDistribution?: Record<string, number>;
   /** The gbif* fields for each record mode, so the client can switch without refetching. */
   gbifByMode?: Record<GbifRecordMode, GbifFields>;
   // Catalogue of Life backbone (#271): extant accepted universe in this group and the
@@ -38,33 +35,22 @@ interface GbifFields {
   gbifSpeciesCount: number;
   gbifNeSpeciesCount: number;
   totalGbifObservations: number;
-  meanGbifObsPerSpecies?: number;
-  medianGbifObsPerSpecies?: number;
 }
 
-/** GBIF figures for groups merged into one row, for every record mode. A median only survives for a single group. */
+/** GBIF figures for groups merged into one row, for every record mode. */
 function gbifByMode(rows: TaxaSummaryRow[]): Record<GbifRecordMode, GbifFields> {
   return Object.fromEntries(GBIF_RECORD_MODES.map((m) => {
     const sum = (k: "species_count" | "ne_species_count" | "records") => rows.reduce((s, r) => s + Number(r.gbif?.[m]?.[k] ?? 0), 0);
     const species = sum("species_count");
-    const records = sum("records");
-    const median = rows.length === 1 ? rows[0].gbif?.[m]?.median : null;
-    return [m, {
-      gbifSpeciesCount: species, gbifNeSpeciesCount: sum("ne_species_count"), totalGbifObservations: records,
-      meanGbifObsPerSpecies: species > 0 ? records / species : undefined,
-      medianGbifObsPerSpecies: median != null ? Number(median) : undefined,
-    }];
+    return [m, { gbifSpeciesCount: species, gbifNeSpeciesCount: sum("ne_species_count"), totalGbifObservations: sum("records") }];
   })) as Record<GbifRecordMode, GbifFields>;
 }
 
-/** The "all" row's GBIF figures: its groups' summed, per mode (no median across groups). */
+/** The "all" row's GBIF figures: its groups' summed, per mode. */
 function sumGbifByMode(rows: { gbifByMode?: Record<GbifRecordMode, GbifFields> }[]): Record<GbifRecordMode, GbifFields> {
   return Object.fromEntries(GBIF_RECORD_MODES.map((m) => {
     const sum = (k: "gbifSpeciesCount" | "gbifNeSpeciesCount" | "totalGbifObservations") => rows.reduce((s, r) => s + (r.gbifByMode?.[m]?.[k] ?? 0), 0);
-    const species = sum("gbifSpeciesCount");
-    const records = sum("totalGbifObservations");
-    return [m, { gbifSpeciesCount: species, gbifNeSpeciesCount: sum("gbifNeSpeciesCount"), totalGbifObservations: records,
-      meanGbifObsPerSpecies: species > 0 ? records / species : undefined }];
+    return [m, { gbifSpeciesCount: sum("gbifSpeciesCount"), gbifNeSpeciesCount: sum("gbifNeSpeciesCount"), totalGbifObservations: sum("totalGbifObservations") }];
   })) as Record<GbifRecordMode, GbifFields>;
 }
 
@@ -147,10 +133,6 @@ export async function GET(request: NextRequest) {
             colDescribed,
             colNe,
             totalGbifObservations,
-            meanGbifObsPerSpecies: gbifSpeciesCount > 0 ? totalGbifObservations / gbifSpeciesCount : undefined,
-            medianGbifObsPerSpecies: matchedRows.length === 1 && matchedRows[0].gbif?.[mode]?.median != null
-              ? Number(matchedRows[0].gbif[mode].median)
-              : undefined,
             gbifByMode: gbifByMode(matchedRows),
           };
         }),
@@ -223,14 +205,6 @@ export async function GET(request: NextRequest) {
         );
         const colDescribed = matchedRows.reduce((sum, r) => sum + Number(r.col_described ?? 0), 0);
         const colNe = matchedRows.reduce((sum, r) => sum + Number(r.col_ne ?? 0), 0);
-        const meanGbifObsPerSpecies =
-          gbifSpeciesCount > 0 ? totalGbifObservations / gbifSpeciesCount : undefined;
-
-        const medianGbifObsPerSpecies =
-          matchedRows.length === 1 && matchedRows[0].gbif?.[mode]?.median != null
-            ? Number(matchedRows[0].gbif[mode].median)
-            : undefined;
-
         const estimatedDescribed = node.estimatedDescribed ?? 0;
 
         return {
@@ -250,8 +224,6 @@ export async function GET(request: NextRequest) {
           lastUpdated: null,
           byCategory,
           totalGbifObservations: available ? totalGbifObservations : undefined,
-          meanGbifObsPerSpecies: available ? meanGbifObsPerSpecies : undefined,
-          medianGbifObsPerSpecies: available ? medianGbifObsPerSpecies : undefined,
           gbifSpeciesCount: available ? gbifSpeciesCount : undefined,
           gbifNeSpeciesCount: available ? gbifNeSpeciesCount : undefined,
           gbifByMode: available ? gbifByMode(matchedRows) : undefined,
@@ -282,7 +254,6 @@ export async function GET(request: NextRequest) {
       allEntry.totalGbifObservations = totalGbif;
       allEntry.gbifSpeciesCount = gbifCount;
       allEntry.gbifNeSpeciesCount = gbifNeCount;
-      allEntry.meanGbifObsPerSpecies = gbifCount > 0 ? totalGbif / gbifCount : undefined;
       allEntry.gbifByMode = sumGbifByMode(perTaxonRows);
       allEntry.colDescribed = perTaxonRows.reduce((s, t) => s + (t.colDescribed ?? 0), 0);
       allEntry.colNe = perTaxonRows.reduce((s, t) => s + (t.colNe ?? 0), 0);
