@@ -1789,7 +1789,9 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         onChange={(e) => onAssessmentScopeChange(e.target.value || null)}
         aria-label="Scope"
         title="Global Red List assessments, or one region's (assessed under IUCN's regional guidelines)"
-        className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+        // Fixed to fit the longest region name, so the picker doesn't widen when
+        // the regions arrive after it is drawn.
+        className="w-40 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
         <option value="">Global</option>
         {regionOptions.map((r) => <option key={r} value={r}>{r}</option>)}

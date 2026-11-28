@@ -5853,7 +5853,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
           // border and full-contrast text instead. Small switches keep the fill.
           <div role="tablist" aria-label="View" className={`flex gap-1 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 text-sm ${inCard ? "w-full md:w-[33rem] shrink-0" : ""}`}>
             {([
-              ["reassessments", "Species Assessed", selectedRow?.assessed],
+              // Under a region scope the count is that region's assessments: said here,
+              // on the card every taxon opens with, so it can't be read as global.
+              ["reassessments", assessmentScope ? `Species Assessed for ${assessmentScope}` : "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
             ] as const).filter(([mode]) => !(assessmentScope && mode === "new-assessments")).map(([mode, label, count]) => (
               <button
