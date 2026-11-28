@@ -108,7 +108,7 @@ function formatCount(n: number): string {
   return String(n);
 }
 
-export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE, highlight = null }: {
+export default function PriorityScatter({ points, colors, box, onBoxChange, onPointClick, selectedKey, yScale, yAxis, maxYears, maxValue, fill = false, xTitle = "Years since last assessed", refLine = NEEDS_UPDATING_LINE, highlight = null, showNewRecords = true }: {
   /** A hover preview elsewhere on the page: only the dots it matches are drawn. */
   highlight?: ((p: PriorityPoint) => boolean) | null;
   /** The x axis title. */
@@ -125,6 +125,8 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
   maxYears: number;
   maxValue: number;
   colors: Record<string, string>;
+  /** The tooltip's New / % new rows: off under a region scope, whose counts since assessment would be measured from the global one. */
+  showNewRecords?: boolean;
   box: PriorityBox | null;
   /** The selection as drawn, or null for none; the caller works out its species (`box`). */
   onBoxChange: (sel: TriageSelection | null) => void;
@@ -482,8 +484,12 @@ export default function PriorityScatter({ points, colors, box, onBoxChange, onPo
                 <table className="mt-1 tabular-nums text-zinc-700 dark:text-zinc-300">
                   <tbody>
                     <tr><td className="pr-3">Total records</td><td className="text-right font-semibold text-zinc-900 dark:text-zinc-100">{hover.p.total?.toLocaleString() ?? "—"}</td></tr>
-                    <tr><td className="pr-3">New records</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
-                    <tr><td className="pr-3">% new records</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
+                    {showNewRecords && (
+                      <>
+                        <tr><td className="pr-3">New records</td><td className="text-right">{hover.p.newRecords?.toLocaleString() ?? "—"}</td></tr>
+                        <tr><td className="pr-3">% new records</td><td className="text-right">{pctNewText(hover.p)}</td></tr>
+                      </>
+                    )}
                   </tbody>
                 </table>
               </>
