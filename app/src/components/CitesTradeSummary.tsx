@@ -165,9 +165,7 @@ function Pager({
 
 /**
  * A paginated horizontal bar chart that doubles as a cross-filter: clicking a
- * bar calls onToggle(key) to add/remove that category, and hovering one calls
- * onHover(key) so the rest of the panel can preview it (onHover(null) on
- * leaving the list). De-selected bars are
+ * bar calls onToggle(key) to add/remove that category, and de-selected bars are
  * dimmed but stay visible so they can be toggled back on. Shows PAGE_SIZE rows
  * at a time with Prev/Next, and an optional search box (used by Commodity).
  */
@@ -175,7 +173,6 @@ function FilterBarChart({
   title,
   bars,
   onToggle,
-  onHover,
   search,
   onSearchChange,
   searchPlaceholder,
@@ -184,7 +181,6 @@ function FilterBarChart({
   title: string;
   bars: FilterBar[];
   onToggle?: (key: string) => void;
-  onHover?: (key: string | null) => void;
   search?: string;
   onSearchChange?: (value: string) => void;
   searchPlaceholder?: string;
@@ -223,23 +219,13 @@ function FilterBarChart({
           />
         )}
       </div>
-      <div className="space-y-1" onMouseLeave={onHover ? () => onHover(null) : undefined}>
+      <div className="space-y-1">
         {pageBars.map((b) => {
           const pct = max > 0 ? (b.value / max) * 100 : 0;
           return (
             <div
               key={b.key}
-              onClick={
-                onToggle
-                  ? () => {
-                      // A click commits; end the preview (hovering a picked
-                      // purpose would otherwise preview a second click: reset).
-                      onHover?.(null);
-                      onToggle(b.key);
-                    }
-                  : undefined
-              }
-              onMouseEnter={onHover ? () => onHover(b.key) : undefined}
+              onClick={onToggle ? () => onToggle(b.key) : undefined}
               title={b.title}
               className={`flex items-center gap-2 text-xs select-none transition-opacity ${
                 onToggle ? "cursor-pointer" : ""
@@ -880,25 +866,8 @@ export default function CitesTradeSummary({
 
   // Every commodity the reporter reported, and the one in force.
   const allCommodities = useMemo(() => commodities(shipments, reporter), [shipments, reporter]);
-  const committedCommodity =
-    allCommodities.find((c) => c.key === chosenCommodity) ?? allCommodities[0] ?? null;
-
-  // Hovering a commodity, purpose or source previews it across the panel: the
-  // map, headline, country lists, trend, the other charts and the rows show
-  // what a click would give. Each chart ignores its own dimension, so the
-  // hovered list itself doesn't reshuffle under the pointer.
-  const [hover, setHover] = useState<{ kind: "commodity" | "purpose" | "source"; key: string } | null>(null);
   const commodity =
-    (hover?.kind === "commodity" && allCommodities.find((c) => c.key === hover.key)) || committedCommodity;
-  const effSources = useMemo(
-    () => (hover?.kind === "source" ? isolateState(checkedSources, allSourceCodes, hover.key) : checkedSources),
-    [hover, checkedSources, allSourceCodes]
-  );
-  const effPurposes = useMemo(
-    () => (hover?.kind === "purpose" ? isolateState(checkedPurposes, allPurposeCodes, hover.key) : checkedPurposes),
-    [hover, checkedPurposes, allPurposeCodes]
-  );
-  const previewing = hover !== null;
+    allCommodities.find((c) => c.key === chosenCommodity) ?? allCommodities[0] ?? null;
   const unitLabel = commodity ? commodityLabel(commodity.term, commodity.unit) : "";
 
   // Clicking a bar isolates that category (selects only it); clicking the
@@ -929,15 +898,15 @@ export default function CitesTradeSummary({
   const filterRows = useCallback(
     (skip: Skip) =>
       shipments.filter((r) => {
-        if (!skip.source && effSources[r.s] === false) return false;
-        if (!skip.purpose && effPurposes[r.p] === false) return false;
+        if (!skip.source && checkedSources[r.s] === false) return false;
+        if (!skip.purpose && checkedPurposes[r.p] === false) return false;
         if (!skip.commodity && commodity && commodityKey(r.t, r.u) !== commodity.key) return false;
         if (!skip.years && brush && (r.y < brush[0] || r.y > brush[1])) return false;
         if (!skip.country && selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
           return false;
         return true;
       }),
-    [shipments, effSources, effPurposes, commodity, brush, selectedCountry]
+    [shipments, checkedSources, checkedPurposes, commodity, brush, selectedCountry]
   );
 
   // The trend shows every year (the trim is drawn on it, not applied to it).
@@ -1034,7 +1003,7 @@ export default function CitesTradeSummary({
       sublabel: c.unit || undefined,
       value: c.quantity,
       valueLabel: fmtQty(c.quantity),
-      active: c.key === committedCommodity?.key,
+      active: c.key === commodity?.key,
       title: `${fmtFull(c.quantity)} ${commodityLabel(c.term, c.unit)} (${REPORTER_LABEL[reporter].toLowerCase()}). Click to show this commodity.`,
     }));
 
@@ -1083,12 +1052,7 @@ export default function CitesTradeSummary({
           </span>
         )}
       </span>
-      {previewing && (
-        <span className="text-[10px] uppercase tracking-wider font-semibold text-violet-600 dark:text-violet-400">
-          Preview
-        </span>
-      )}
-      {hasActiveFilters && !previewing && (
+      {hasActiveFilters && (
         <button
           type="button"
           className="text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 underline decoration-dotted"
@@ -1111,7 +1075,7 @@ export default function CitesTradeSummary({
       <label className="flex items-center gap-1.5">
         <span>Commodity</span>
         <select
-          value={committedCommodity?.key ?? ""}
+          value={commodity?.key ?? ""}
           onChange={(e) => setChosenCommodity(e.target.value)}
           className={`${CHART_SELECT_CLASS} max-w-[16rem]`}
         >
@@ -1208,24 +1172,13 @@ export default function CitesTradeSummary({
           title="Commodity"
           bars={commodityBars}
           onToggle={setChosenCommodity}
-          onHover={(key) => setHover(key === null ? null : { kind: "commodity", key })}
           search={termSearch}
           onSearchChange={setTermSearch}
           searchPlaceholder="Search…"
           emptyHint={commoditySearch ? `No commodities match “${termSearch}”.` : undefined}
         />
-        <FilterBarChart
-          title="Purpose"
-          bars={purposeBars}
-          onToggle={isolatePurpose}
-          onHover={(key) => setHover(key === null ? null : { kind: "purpose", key })}
-        />
-        <FilterBarChart
-          title="Source"
-          bars={sourceBars}
-          onToggle={isolateSource}
-          onHover={(key) => setHover(key === null ? null : { kind: "source", key })}
-        />
+        <FilterBarChart title="Purpose" bars={purposeBars} onToggle={isolatePurpose} />
+        <FilterBarChart title="Source" bars={sourceBars} onToggle={isolateSource} />
       </div>
 
       <RecordsTable rows={displayRows} reporter={reporter} />
