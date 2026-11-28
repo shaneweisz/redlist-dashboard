@@ -18,8 +18,18 @@ import {
   CartesianGrid,
 } from "recharts";
 import { countryName, fmtQty } from "./cites-utils";
-import { CHART_INPUT_CLASS, CHART_SELECT_CLASS, ChartPager } from "@/components/redlist/chart-controls";
-import type { CountryAnnotation, TradeFlow } from "./TradeFlowMap";
+import { CHART_INPUT_CLASS, CHART_SELECT_CLASS, CHART_SEGMENTED_CLASS, ChartPager, chartSegmentClass } from "@/components/redlist/chart-controls";
+import type { CountryAnnotation } from "./TradeFlowMap";
+import {
+  aggregate,
+  commodities,
+  commodityKey,
+  commodityLabel,
+  reportedQty,
+  type CompactRecord,
+  type Reporter,
+  type Total,
+} from "@/lib/cites-trade";
 
 const TradeFlowMap = dynamic(() => import("./TradeFlowMap"), { ssr: false });
 
@@ -27,65 +37,22 @@ const TradeFlowMap = dynamic(() => import("./TradeFlowMap"), { ssr: false });
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface CompactRecord {
-  y: number;
-  s: string;
-  p: string;
-  t: string;
-  u: string; // unit ("" = unit-less)
-  q: number;
-  e: string;
-  i: string;
-  o: string; // origin (re-export) — "" when same as exporter
-}
-
-interface YearData {
-  year: number;
-  quantity: number;
-  records: number;
-}
-
-interface CodedData {
-  code: string;
-  label: string;
-  records: number;
-}
-
-interface TermCount {
-  term: string;
-  records: number;
-}
-
-interface TermUnitData {
-  term: string;
-  unit: string;
-  records: number;
-  quantity: number;
-}
-
-interface CountryData {
-  code: string;
-  records: number;
-  quantity: number;
-}
-
 interface TradeData {
   found: boolean;
   taxonId: string;
-  totalRecords: number;
   yearRange: [number, number];
-  byYear: YearData[];
-  topPurposes: CodedData[];
-  topSources: CodedData[];
-  topExporters: CountryData[];
-  topImporters: CountryData[];
-  topFlows?: TradeFlow[];
   shipments?: CompactRecord[];
-  allSources?: CodedData[];
-  allPurposes?: CodedData[];
-  allTerms?: TermCount[];
-  allTermsByUnit?: TermUnitData[];
 }
+
+/** A quantity in full, e.g. "5,852" or "12.5". */
+function fmtFull(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+const REPORTER_LABEL: Record<Reporter, string> = {
+  exporter: "Exporter-reported",
+  importer: "Importer-reported",
+};
 
 // Sources that indicate wild take — key concern for assessors
 const WILD_SOURCE_CODES = new Set(["W", "X", "R", "U"]);
@@ -127,11 +94,6 @@ const PURPOSE_LABELS: Record<string, string> = {
  */
 const PROVISIONAL_YEARS = 3;
 
-/** Stable key for a term+unit combination. */
-function termUnitKey(term: string, unit: string): string {
-  return `${term}|${unit}`;
-}
-
 /**
  * "Isolate" a category within a filter dimension: clicking a bar selects only
  * that one. Clicking the already-isolated category resets the dimension to all
@@ -151,149 +113,6 @@ function isolateState(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Aggregation                                                        */
-/* ------------------------------------------------------------------ */
-
-interface Aggregated {
-  totalRecords: number;
-  byYear: YearData[];
-  topSources: CodedData[];
-  topPurposes: CodedData[];
-  topExporters: CountryData[];
-  topImporters: CountryData[];
-  topFlows: TradeFlow[];
-  reExportFlows: TradeFlow[];
-  termsByUnit: TermUnitData[];
-}
-
-/** Aggregate a set of compact shipment records into the derived views. */
-function aggregateShipments(rows: CompactRecord[]): Aggregated {
-  const yearMap = new Map<number, { quantity: number; records: number }>();
-  const sourceMap = new Map<string, number>();
-  const purposeMap = new Map<string, number>();
-  const exporterMap = new Map<string, { records: number; quantity: number }>();
-  const importerMap = new Map<string, { records: number; quantity: number }>();
-  const flowMap = new Map<string, { records: number; quantity: number }>();
-  const reExportMap = new Map<string, { records: number; quantity: number }>();
-  const termUnitMap = new Map<string, TermUnitData>();
-
-  for (const r of rows) {
-    const yEntry = yearMap.get(r.y) || { quantity: 0, records: 0 };
-    yEntry.records++;
-    yEntry.quantity += r.q;
-    yearMap.set(r.y, yEntry);
-
-    // Count blanks too, under code "" → "Unspecified", so they're filterable.
-    sourceMap.set(r.s, (sourceMap.get(r.s) || 0) + 1);
-    purposeMap.set(r.p, (purposeMap.get(r.p) || 0) + 1);
-
-    if (r.e) {
-      const e = exporterMap.get(r.e) || { records: 0, quantity: 0 };
-      e.records++;
-      e.quantity += r.q;
-      exporterMap.set(r.e, e);
-    }
-    if (r.i) {
-      const e = importerMap.get(r.i) || { records: 0, quantity: 0 };
-      e.records++;
-      e.quantity += r.q;
-      importerMap.set(r.i, e);
-    }
-    if (r.e && r.i) {
-      const key = `${r.e}->${r.i}`;
-      const e = flowMap.get(key) || { records: 0, quantity: 0 };
-      e.records++;
-      e.quantity += r.q;
-      flowMap.set(key, e);
-    }
-    // Re-export leg: where specimens originated (origin) before the exporter
-    if (r.o && r.e) {
-      const key = `${r.o}->${r.e}`;
-      const e = reExportMap.get(key) || { records: 0, quantity: 0 };
-      e.records++;
-      e.quantity += r.q;
-      reExportMap.set(key, e);
-    }
-
-    const tuKey = termUnitKey(r.t, r.u);
-    const tu = termUnitMap.get(tuKey) || {
-      term: r.t,
-      unit: r.u,
-      records: 0,
-      quantity: 0,
-    };
-    tu.records++;
-    tu.quantity += r.q;
-    termUnitMap.set(tuKey, tu);
-  }
-
-  const byYear = Array.from(yearMap.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([year, v]) => ({ year, ...v }));
-
-  const topSources = Array.from(sourceMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .map(([code, records]) => ({
-      code,
-      label: code === "" ? "Unspecified" : SOURCE_LABELS[code] || code,
-      records,
-    }));
-
-  const topPurposes = Array.from(purposeMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .map(([code, records]) => ({
-      code,
-      label: code === "" ? "Unspecified" : PURPOSE_LABELS[code] || code,
-      records,
-    }));
-
-  // Full sorted lists (not capped): the map colours every country that traded,
-  // and the lists slice for display. Capping here previously hid genuine
-  // traders (e.g. Cameroon, rank 16) from the map until a filter promoted them.
-  const topExporters = Array.from(exporterMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .map(([code, v]) => ({ code, ...v }));
-
-  const topImporters = Array.from(importerMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .map(([code, v]) => ({ code, ...v }));
-
-  // Full sorted flow lists (not capped here): the map applies a user-controlled
-  // cap on how many of the top flows to draw via its "Flows shown" control, so
-  // we hand it everything and let it slice. Flows stay sorted by record count so
-  // slicing the top N keeps the largest.
-  const topFlows = Array.from(flowMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .map(([key, v]) => {
-      const [from, to] = key.split("->");
-      return { from, to, ...v };
-    });
-
-  const reExportFlows = Array.from(reExportMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .map(([key, v]) => {
-      const [from, to] = key.split("->");
-      return { from, to, ...v };
-    });
-
-  const termsByUnit = Array.from(termUnitMap.values()).sort(
-    (a, b) => b.records - a.records
-  );
-
-  return {
-    totalRecords: rows.length,
-    byYear,
-    topSources,
-    topPurposes,
-    topExporters,
-    topImporters,
-    topFlows,
-    reExportFlows,
-    termsByUnit,
-  };
-}
-
-/* ------------------------------------------------------------------ */
 /*  Interactive filter bar chart                                        */
 /* ------------------------------------------------------------------ */
 
@@ -302,13 +121,16 @@ interface FilterBar {
   key: string;
   label: string;
   sublabel?: string;
-  records: number;
+  /** Bar length (a quantity in the selected commodity's unit). */
+  value: number;
+  /** Text shown at the end of the row. */
+  valueLabel: string;
   /** Whether this category is currently included by the filter. */
   active: boolean;
-  /** Tailwind classes for the bar fill. */
-  barClass: string;
-  /** Optional tooltip override (defaults to "label (sublabel) — N records"). */
-  title?: string;
+  /** Tailwind classes for the bar fill; omitted for a plain list (no bars). */
+  barClass?: string;
+  /** Tooltip. */
+  title: string;
 }
 
 /** Rows shown per page in the paginated bar charts and country lists. */
@@ -374,7 +196,7 @@ function FilterBarChart({
   }
 
   // Scale bars against the global max so widths stay comparable across pages.
-  const max = bars.reduce((m, b) => Math.max(m, b.records), 0);
+  const max = bars.reduce((m, b) => Math.max(m, b.value), 0);
   const totalPages = Math.max(1, Math.ceil(bars.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const pageBars = bars.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
@@ -399,20 +221,25 @@ function FilterBarChart({
       </div>
       <div className="space-y-1">
         {pageBars.map((b) => {
-          const pct = max > 0 ? (b.records / max) * 100 : 0;
+          const pct = max > 0 ? (b.value / max) * 100 : 0;
           return (
             <div
               key={b.key}
               onClick={onToggle ? () => onToggle(b.key) : undefined}
-              title={
-                b.title ??
-                `${b.label}${b.sublabel ? ` (${b.sublabel})` : ""} — ${b.records.toLocaleString()} records`
-              }
+              title={b.title}
               className={`flex items-center gap-2 text-xs select-none transition-opacity ${
                 onToggle ? "cursor-pointer" : ""
-              } ${b.active ? "" : "opacity-40"}`}
+              } ${
+                // Bars: de-selected categories dim. A plain pick-one list
+                // (no bars): the picked row is marked, the rest stay readable.
+                b.barClass
+                  ? b.active ? "" : "opacity-40"
+                  : b.active
+                    ? "font-semibold rounded bg-violet-50 dark:bg-violet-500/15 -mx-1 px-1"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60 rounded -mx-1 px-1"
+              }`}
             >
-              <span className="w-24 shrink-0 truncate capitalize text-zinc-700 dark:text-zinc-300">
+              <span className={`${b.barClass ? "w-24 shrink-0" : "flex-1 min-w-0"} truncate capitalize text-zinc-700 dark:text-zinc-300`}>
                 {b.label}
                 {b.sublabel && (
                   <span className="text-zinc-400 dark:text-zinc-500 ml-1 normal-case">
@@ -420,14 +247,16 @@ function FilterBarChart({
                   </span>
                 )}
               </span>
-              <div className="flex-1 h-3.5 bg-zinc-100 dark:bg-zinc-800 rounded overflow-hidden">
-                <div
-                  className={`h-full rounded ${b.barClass}`}
-                  style={{ width: `${Math.max(pct, 1)}%` }}
-                />
-              </div>
+              {b.barClass && (
+                <div className="flex-1 h-3.5 bg-zinc-100 dark:bg-zinc-800 rounded overflow-hidden">
+                  <div
+                    className={`h-full rounded ${b.barClass}`}
+                    style={{ width: `${Math.max(pct, 1)}%` }}
+                  />
+                </div>
+              )}
               <span className="w-12 text-right text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
-                {b.records.toLocaleString()}
+                {b.valueLabel}
               </span>
             </div>
           );
@@ -457,13 +286,13 @@ function ChartTooltip({
   active,
   payload,
   label,
-  metric,
+  unitLabel,
   provisionalFromYear,
 }: {
   active?: boolean;
   payload?: { value: number | null; dataKey: string }[];
   label?: number;
-  metric: "records" | "quantity";
+  unitLabel: string;
   provisionalFromYear: number;
 }) {
   if (!active || !payload || payload.length === 0) return null;
@@ -474,8 +303,7 @@ function ChartTooltip({
     <div className="bg-zinc-900 border border-zinc-700 rounded-lg text-xs px-2.5 py-1.5">
       <div className="text-zinc-400">{label}</div>
       <div className="text-white tabular-nums">
-        {(point.value ?? 0).toLocaleString()}{" "}
-        {metric === "records" ? "records" : "items"}
+        {fmtFull(point.value ?? 0)} {unitLabel}
       </div>
       {isProvisional && (
         <div className="text-amber-400 text-[10px] mt-0.5">
@@ -488,15 +316,15 @@ function ChartTooltip({
 
 function TrendLineChart({
   data,
-  metric,
+  unitLabel,
   minYear,
   maxYear,
   brush,
   onBrushChange,
   provisionalFromYear,
 }: {
-  data: YearData[];
-  metric: "records" | "quantity";
+  data: { year: number; quantity: number }[];
+  unitLabel: string;
   minYear: number;
   maxYear: number;
   brush: [number, number] | null;
@@ -546,7 +374,7 @@ function TrendLineChart({
 
   // Build chart series: solid up to the last complete year, dashed beyond.
   const lastComplete = provisionalFromYear - 1;
-  const lookup = new Map(data.map((d) => [d.year, d[metric]]));
+  const lookup = new Map(data.map((d) => [d.year, d.quantity]));
   const chartData: ChartPoint[] = [];
   for (let y = minYear; y <= maxYear; y++) {
     const v = lookup.get(y) ?? 0;
@@ -616,7 +444,7 @@ function TrendLineChart({
           <Tooltip
             content={
               <ChartTooltip
-                metric={metric}
+                unitLabel={unitLabel}
                 provisionalFromYear={provisionalFromYear}
               />
             }
@@ -729,12 +557,14 @@ function TrendLineChart({
 function CountryTable({
   data,
   label,
+  unitLabel,
   selected,
   onSelect,
   barClass,
 }: {
-  data: CountryData[];
+  data: Total[];
   label: string;
+  unitLabel: string;
   selected?: string | null;
   onSelect?: (code: string | null) => void;
   /** Tailwind classes for the (unselected) bar fill. */
@@ -742,9 +572,9 @@ function CountryTable({
 }) {
   const [page, setPage] = useState(0);
   if (data.length === 0) return null;
-  const sorted = [...data].sort((a, b) => b.records - a.records);
+  const sorted = [...data].sort((a, b) => b.quantity - a.quantity);
   // Scale bars against the global max so widths stay comparable across pages.
-  const max = sorted.reduce((m, c) => Math.max(m, c.records), 0);
+  const max = sorted.reduce((m, c) => Math.max(m, c.quantity), 0);
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const pageRows = sorted.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
@@ -757,12 +587,12 @@ function CountryTable({
       <div className="space-y-1">
         {pageRows.map((c) => {
           const isSel = selected === c.code;
-          const pct = max > 0 ? (c.records / max) * 100 : 0;
+          const pct = max > 0 ? (c.quantity / max) * 100 : 0;
           return (
             <div
               key={c.code}
               onClick={onSelect ? () => onSelect(isSel ? null : c.code) : undefined}
-              title={`${countryName(c.code)} — ${c.records.toLocaleString()} records`}
+              title={`${countryName(c.code)}: ${fmtFull(c.quantity)} ${unitLabel}`}
               className={`flex items-center gap-1.5 text-[11px] select-none ${
                 onSelect ? "cursor-pointer" : ""
               }`}
@@ -785,7 +615,7 @@ function CountryTable({
                 />
               </div>
               <span className="w-9 text-right text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
-                {c.records.toLocaleString()}
+                {fmtQty(c.quantity)}
               </span>
             </div>
           );
@@ -797,40 +627,69 @@ function CountryTable({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Individual shipment records table                                  */
+/*  Comparative-tabulation rows table                                  */
 /* ------------------------------------------------------------------ */
 
-/** Default rows shown per page in the individual-records table. */
+/** Default rows shown per page in the rows table. */
 const RECORDS_PAGE_SIZE = 5;
 
-/** Page-size options offered in the individual-records table. */
+/** Page-size options offered in the rows table. */
 const RECORDS_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 
+const ROWS_INFO =
+  "Rows of the CITES comparative tabulation. A row can cover any number of shipments. " +
+  "The exporter's and importer's quantities are separate reports of the same trade, so they are shown side by side and never added. " +
+  "When the two countries described a trade differently, it appears as two rows, each with one country's figure.";
+
+/** Small "i" with a hover explanation. */
+function InfoTip({ text, align = "center" }: { text: string; align?: "center" | "left" }) {
+  return (
+    <span className="relative group inline-flex">
+      <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-zinc-400 dark:border-zinc-500 text-[9px] font-semibold text-zinc-400 dark:text-zinc-500 cursor-help normal-case">
+        i
+      </span>
+      <span
+        className={`pointer-events-none absolute top-full mt-1 hidden group-hover:block z-20 w-64 bg-zinc-800 dark:bg-zinc-700 text-white text-[10px] leading-snug rounded-md p-2 shadow-lg normal-case font-normal tracking-normal ${
+          align === "left" ? "left-0" : "left-1/2 -translate-x-1/2"
+        }`}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
 /**
- * A paginated table of the individual shipment records behind the summary,
- * reflecting every active filter. Sorted most-recent-first so the latest trade
- * is on top. Quantities follow the CITES guide (exporter-reported preferred);
- * a re-export origin, when present, is shown ahead of the exporter.
+ * The comparative-tabulation rows behind the summary, reflecting every active
+ * filter, most recent first. Both parties' quantities are shown, the one the
+ * summary reads in bold; a re-export origin is shown ahead of the exporter.
  */
-function RecordsTable({ rows }: { rows: CompactRecord[] }) {
+function RecordsTable({ rows, reporter }: { rows: CompactRecord[]; reporter: Reporter }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(RECORDS_PAGE_SIZE);
   if (rows.length === 0) return null;
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const pageRows = rows.slice(
-    safePage * pageSize,
-    safePage * pageSize + pageSize
+  const pageRows = rows.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  const qtyCell = (q: number | undefined, read: boolean) => (
+    <td
+      className={`px-2.5 py-1 text-right tabular-nums ${
+        read ? "text-zinc-800 dark:text-zinc-100 font-medium" : "text-zinc-400 dark:text-zinc-500"
+      }`}
+    >
+      {q !== undefined ? fmtFull(q) : "—"}
+    </td>
   );
 
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <h5 className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-          Records{" "}
+        <h5 className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+          Rows{" "}
           <span className="text-zinc-400 dark:text-zinc-500 normal-case tabular-nums">
             ({rows.length.toLocaleString()})
           </span>
+          <InfoTip text={ROWS_INFO} align="left" />
         </h5>
         <label className="flex items-center gap-1 text-[11px] text-zinc-400 dark:text-zinc-500">
           <span>Rows</span>
@@ -856,7 +715,12 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
             <tr className="text-left text-zinc-400 dark:text-zinc-500 border-b border-zinc-100 dark:border-zinc-800">
               <th className="px-2.5 py-1 font-medium">Year</th>
               <th className="px-2.5 py-1 font-medium">Commodity</th>
-              <th className="px-2.5 py-1 font-medium text-right">Qty</th>
+              <th className={`px-2.5 py-1 font-medium text-right ${reporter === "exporter" ? "text-zinc-600 dark:text-zinc-300" : ""}`}>
+                Exporter qty
+              </th>
+              <th className={`px-2.5 py-1 font-medium text-right ${reporter === "importer" ? "text-zinc-600 dark:text-zinc-300" : ""}`}>
+                Importer qty
+              </th>
               <th className="px-2.5 py-1 font-medium">Exporter &rarr; Importer</th>
               <th className="px-2.5 py-1 font-medium">Source</th>
               <th className="px-2.5 py-1 font-medium">Purpose</th>
@@ -864,24 +728,16 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
           </thead>
           <tbody>
             {pageRows.map((r, i) => (
-              <tr
-                key={i}
-                className="border-t first:border-t-0 border-zinc-100 dark:border-zinc-800"
-              >
-                <td className="px-2.5 py-1 tabular-nums text-zinc-600 dark:text-zinc-300">
-                  {r.y}
-                </td>
+              <tr key={i} className="border-t first:border-t-0 border-zinc-100 dark:border-zinc-800">
+                <td className="px-2.5 py-1 tabular-nums text-zinc-600 dark:text-zinc-300">{r.y}</td>
                 <td className="px-2.5 py-1 text-zinc-700 dark:text-zinc-300 capitalize">
                   {r.t}
                   {r.u && (
-                    <span className="text-zinc-400 dark:text-zinc-500 ml-1 normal-case">
-                      {r.u}
-                    </span>
+                    <span className="text-zinc-400 dark:text-zinc-500 ml-1 normal-case">{r.u}</span>
                   )}
                 </td>
-                <td className="px-2.5 py-1 text-right tabular-nums text-zinc-600 dark:text-zinc-300">
-                  {r.q > 0 ? fmtQty(r.q) : "—"}
-                </td>
+                {qtyCell(r.qe, reporter === "exporter")}
+                {qtyCell(r.qi, reporter === "importer")}
                 <td className="px-2.5 py-1 text-zinc-700 dark:text-zinc-300">
                   {r.o && (
                     <span title={`Origin ${countryName(r.o)}`}>
@@ -910,12 +766,7 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
           </tbody>
         </table>
       </div>
-      <Pager
-        page={safePage}
-        total={rows.length}
-        onPage={setPage}
-        pageSize={pageSize}
-      />
+      <Pager page={safePage} total={rows.length} onPage={setPage} pageSize={pageSize} />
     </div>
   );
 }
@@ -924,6 +775,20 @@ function RecordsTable({ rows }: { rows: CompactRecord[] }) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
+/** Which filters a view ignores (each chart ignores its own dimension). */
+interface Skip {
+  source?: boolean;
+  purpose?: boolean;
+  commodity?: boolean;
+  country?: boolean;
+  years?: boolean;
+}
+
+/**
+ * Trade in a CITES species, following the CITES Trade Database guide
+ * (lib/cites-trade.ts): every figure is ONE reporter's quantity (exporter- or
+ * importer-reported, never a mix) of ONE commodity (term + unit).
+ */
 export default function CitesTradeSummary({
   citesId,
   prefetchedData,
@@ -943,24 +808,21 @@ export default function CitesTradeSummary({
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Trend is always measured in shipment records. Quantities are NEVER plotted
-  // as a single line because the CITES guide warns they cannot be aggregated
-  // across incompatible units (kg, m, pieces, unit-less) — per-unit quantities
-  // live in the Commodities table instead.
-  const metric = "records" as const;
+  // Exporter-reported by default: the guide's "often more complete" side.
+  const [reporter, setReporter] = useState<Reporter>("exporter");
+  // The commodity every figure is in; null = the reporter's most-reported one.
+  const [chosenCommodity, setChosenCommodity] = useState<string | null>(null);
 
-  // Filter state — all checked by default
+  // Source / purpose filters: all checked by default
   const [checkedSources, setCheckedSources] = useState<Record<string, boolean>>({});
   const [checkedPurposes, setCheckedPurposes] = useState<Record<string, boolean>>({});
-  const [checkedTerms, setCheckedTerms] = useState<Record<string, boolean>>({});
-  const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [termSearch, setTermSearch] = useState("");
 
   // Year-range trim (null = full range)
   const [brush, setBrush] = useState<[number, number] | null>(null);
 
   // Country highlighted on the map (also set by clicking a Top exporters /
-  // importers row). Filters the map's flows to that country.
+  // importers row). Filters everything to that country's trade.
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   // Use prefetched data from parent when available; fall back to own fetch
@@ -994,201 +856,78 @@ export default function CitesTradeSummary({
     };
   }, [citesId, prefetchedData, prefetchedLoading]);
 
-  // Source / purpose category universes derived from the records, INCLUDING the
-  // blank "" ("Unspecified") category, so it gets initialised and is isolatable.
-  const allSourceCodes = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of data?.shipments ?? []) set.add(r.s);
-    return Array.from(set);
-  }, [data]);
-  const allPurposeCodes = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of data?.shipments ?? []) set.add(r.p);
-    return Array.from(set);
-  }, [data]);
+  const shipments = useMemo(() => (data?.found ? data.shipments ?? [] : []), [data]);
 
-  // Initialize filter checkboxes when data arrives
-  useEffect(() => {
-    if (!data || !data.found || filtersInitialized) return;
+  // Source / purpose category universes, INCLUDING the blank "" ("Unspecified")
+  // category so it is isolatable. Unchecked state is tracked as `false`;
+  // a missing key means checked.
+  const allSourceCodes = useMemo(() => Array.from(new Set(shipments.map((r) => r.s))), [shipments]);
+  const allPurposeCodes = useMemo(() => Array.from(new Set(shipments.map((r) => r.p))), [shipments]);
 
-    if (allSourceCodes.length > 0) {
-      const init: Record<string, boolean> = {};
-      for (const c of allSourceCodes) init[c] = true;
-      setCheckedSources(init);
-    }
-    if (allPurposeCodes.length > 0) {
-      const init: Record<string, boolean> = {};
-      for (const c of allPurposeCodes) init[c] = true;
-      setCheckedPurposes(init);
-    }
-    if (data.allTermsByUnit) {
-      const init: Record<string, boolean> = {};
-      for (const t of data.allTermsByUnit) init[termUnitKey(t.term, t.unit)] = true;
-      setCheckedTerms(init);
-    }
-    setFiltersInitialized(true);
-  }, [data, filtersInitialized, allSourceCodes, allPurposeCodes]);
+  // Every commodity the reporter reported, and the one in force.
+  const allCommodities = useMemo(() => commodities(shipments, reporter), [shipments, reporter]);
+  const commodity =
+    allCommodities.find((c) => c.key === chosenCommodity) ?? allCommodities[0] ?? null;
+  const unitLabel = commodity ? commodityLabel(commodity.term, commodity.unit) : "";
 
   // Clicking a bar isolates that category (selects only it); clicking the
   // already-isolated one resets the dimension to all.
   const isolateSource = useCallback(
-    (code: string) => {
-      setCheckedSources((prev) => isolateState(prev, allSourceCodes, code));
-    },
+    (code: string) => setCheckedSources((prev) => isolateState(prev, allSourceCodes, code)),
     [allSourceCodes]
   );
   const isolatePurpose = useCallback(
-    (code: string) => {
-      setCheckedPurposes((prev) => isolateState(prev, allPurposeCodes, code));
-    },
+    (code: string) => setCheckedPurposes((prev) => isolateState(prev, allPurposeCodes, code)),
     [allPurposeCodes]
   );
-  const isolateTerm = useCallback(
-    (key: string) => {
-      const keys = (data?.allTermsByUnit ?? []).map((t) =>
-        termUnitKey(t.term, t.unit)
-      );
-      setCheckedTerms((prev) => isolateState(prev, keys, key));
-    },
-    [data]
-  );
 
-  // Whether a dimension is actively filtered (some category de-selected). When
-  // it is, rows with a *blank* value for that dimension are excluded too —
-  // otherwise isolating e.g. "Hunting trophy" would also keep the ~10.9k
-  // blank-purpose elephant records (source/purpose can be blank; term can't).
-  const anySourceOff = useMemo(
-    () => Object.values(checkedSources).some((v) => v === false),
-    [checkedSources]
-  );
-  const anyPurposeOff = useMemo(
-    () => Object.values(checkedPurposes).some((v) => v === false),
-    [checkedPurposes]
-  );
+  const anySourceOff = Object.values(checkedSources).some((v) => v === false);
+  const anyPurposeOff = Object.values(checkedPurposes).some((v) => v === false);
+  const hasActiveFilters =
+    anySourceOff || anyPurposeOff || brush !== null || selectedCountry !== null;
 
-  // Are any filters active (something unchecked, or a year range trimmed)?
-  const hasActiveFilters = useMemo(() => {
-    const anyTermOff = Object.values(checkedTerms).some((v) => v === false);
-    return (
-      anySourceOff ||
-      anyPurposeOff ||
-      anyTermOff ||
-      brush !== null ||
-      selectedCountry !== null
-    );
-  }, [anySourceOff, anyPurposeOff, checkedTerms, brush, selectedCountry]);
-
-  // Clear all filters (re-check everything, reset the year trim)
   const clearFilters = useCallback(() => {
-    setCheckedSources((prev) => {
-      const next = { ...prev };
-      for (const k of Object.keys(next)) next[k] = true;
-      return next;
-    });
-    setCheckedPurposes((prev) => {
-      const next = { ...prev };
-      for (const k of Object.keys(next)) next[k] = true;
-      return next;
-    });
-    setCheckedTerms((prev) => {
-      const next = { ...prev };
-      for (const k of Object.keys(next)) next[k] = true;
-      return next;
-    });
+    setCheckedSources({});
+    setCheckedPurposes({});
     setBrush(null);
     setTermSearch("");
     setSelectedCountry(null);
   }, []);
 
-  // Records passing the active filters (all years) — drives the chart line.
-  // A selected country acts as an extra cross-filter: keep only its trade
-  // (as exporter or importer).
-  const checkboxRows = useMemo(() => {
-    if (!data?.found || !data.shipments) return [];
-    return data.shipments.filter((r) => {
-      if (checkedSources[r.s] === false) return false;
-      if (checkedPurposes[r.p] === false) return false;
-      if (checkedTerms[termUnitKey(r.t, r.u)] === false) return false;
-      if (selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
-        return false;
-      return true;
-    });
-  }, [data, checkedSources, checkedPurposes, checkedTerms, selectedCountry]);
+  /** Rows passing every active filter except the skipped ones. */
+  const filterRows = useCallback(
+    (skip: Skip) =>
+      shipments.filter((r) => {
+        if (!skip.source && checkedSources[r.s] === false) return false;
+        if (!skip.purpose && checkedPurposes[r.p] === false) return false;
+        if (!skip.commodity && commodity && commodityKey(r.t, r.u) !== commodity.key) return false;
+        if (!skip.years && brush && (r.y < brush[0] || r.y > brush[1])) return false;
+        if (!skip.country && selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
+          return false;
+        return true;
+      }),
+    [shipments, checkedSources, checkedPurposes, commodity, brush, selectedCountry]
+  );
 
-  // Chart series (all years, checkbox-filtered)
-  const chartAgg = useMemo(() => aggregateShipments(checkboxRows), [checkboxRows]);
+  // The trend shows every year (the trim is drawn on it, not applied to it).
+  const chartAgg = useMemo(() => aggregate(filterRows({ years: true }), reporter), [filterRows, reporter]);
 
-  // The individual records behind the summary: every active filter applied
-  // (checkboxes, country, and the year-range trim), sorted most-recent-first
-  // (largest quantity breaks ties) so the records table leads with recent trade.
+  // Every filter applied: the headline, map flows and the rows table. The
+  // table keeps rows only the other party reported (shown with "—" in the
+  // column being read), so both sides of the comparison stay visible.
   const displayRows = useMemo(() => {
-    const rows = brush
-      ? checkboxRows.filter((r) => r.y >= brush[0] && r.y <= brush[1])
-      : checkboxRows;
-    return [...rows].sort((a, b) => b.y - a.y || b.q - a.q);
-  }, [checkboxRows, brush]);
+    const rows = filterRows({});
+    const q = (r: CompactRecord) => reportedQty(r, reporter) ?? -1;
+    return rows.sort((a, b) => b.y - a.y || q(b) - q(a));
+  }, [filterRows, reporter]);
+  const display = useMemo(() => aggregate(displayRows, reporter), [displayRows, reporter]);
 
-  // Everything else also respects the year-range trim
-  const display = useMemo(() => aggregateShipments(displayRows), [displayRows]);
-
-  // Cross-filter views: each interactive chart aggregates rows passing every
-  // active filter EXCEPT its own dimension, so its categories stay visible and
-  // a click can toggle them back on (rather than vanishing once de-selected).
-  const commodityChart = useMemo(() => {
-    if (!data?.found || !data.shipments) return [];
-    const rows = data.shipments.filter((r) => {
-      if (checkedSources[r.s] === false) return false;
-      if (checkedPurposes[r.p] === false) return false;
-      if (brush && (r.y < brush[0] || r.y > brush[1])) return false;
-      if (selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
-        return false;
-      return true;
-    });
-    return aggregateShipments(rows).termsByUnit;
-  }, [data, checkedSources, checkedPurposes, brush, selectedCountry]);
-
-  const sourceChart = useMemo(() => {
-    if (!data?.found || !data.shipments) return [];
-    const rows = data.shipments.filter((r) => {
-      if (checkedPurposes[r.p] === false) return false;
-      if (checkedTerms[termUnitKey(r.t, r.u)] === false) return false;
-      if (brush && (r.y < brush[0] || r.y > brush[1])) return false;
-      if (selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
-        return false;
-      return true;
-    });
-    return aggregateShipments(rows).topSources;
-  }, [data, checkedPurposes, checkedTerms, brush, selectedCountry]);
-
-  const purposeChart = useMemo(() => {
-    if (!data?.found || !data.shipments) return [];
-    const rows = data.shipments.filter((r) => {
-      if (checkedSources[r.s] === false) return false;
-      if (checkedTerms[termUnitKey(r.t, r.u)] === false) return false;
-      if (brush && (r.y < brush[0] || r.y > brush[1])) return false;
-      if (selectedCountry && r.e !== selectedCountry && r.i !== selectedCountry)
-        return false;
-      return true;
-    });
-    return aggregateShipments(rows).topPurposes;
-  }, [data, checkedSources, checkedTerms, brush, selectedCountry]);
-
-  // Exporter / importer aggregates that DON'T apply the country cross-filter, so
-  // the Top exporters / importers lists stay populated and let you switch
-  // country (the same "exclude your own dimension" rule the bar charts use).
-  const countryAgg = useMemo(() => {
-    if (!data?.found || !data.shipments) return null;
-    const rows = data.shipments.filter((r) => {
-      if (checkedSources[r.s] === false) return false;
-      if (checkedPurposes[r.p] === false) return false;
-      if (checkedTerms[termUnitKey(r.t, r.u)] === false) return false;
-      if (brush && (r.y < brush[0] || r.y > brush[1])) return false;
-      return true;
-    });
-    return aggregateShipments(rows);
-  }, [data, checkedSources, checkedPurposes, checkedTerms, brush]);
-
-  const hasShipments = !!data?.shipments && data.shipments.length > 0;
+  // Cross-filter views: each chart ignores its own dimension so its categories
+  // stay visible and clickable.
+  const commodityList = useMemo(() => commodities(filterRows({ commodity: true }), reporter), [filterRows, reporter]);
+  const sourceChart = useMemo(() => aggregate(filterRows({ source: true }), reporter).bySource, [filterRows, reporter]);
+  const purposeChart = useMemo(() => aggregate(filterRows({ purpose: true }), reporter).byPurpose, [filterRows, reporter]);
+  const countryAgg = useMemo(() => aggregate(filterRows({ country: true }), reporter), [filterRows, reporter]);
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -1198,26 +937,15 @@ export default function CitesTradeSummary({
     return (
       <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500 py-3">
         <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-          <circle
-            className="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-          />
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
         Loading trade data...
       </div>
     );
   }
 
-  if (error || !data || !data.found) {
+  if (error || !data || !data.found || shipments.length === 0) {
     return null;
   }
 
@@ -1225,80 +953,64 @@ export default function CitesTradeSummary({
   const currentYear = new Date().getFullYear();
   const provisionalFromYear = currentYear - PROVISIONAL_YEARS + 1;
   const effectiveRange: [number, number] = brush ?? data.yearRange;
+  const qtyTitle = (label: string, q: number) => `${label}: ${fmtFull(q)} ${unitLabel}`;
 
-  // Fall back to server-provided byYear when no shipments for client filtering
-  const chartByYear =
-    hasShipments && chartAgg.byYear.length > 0 ? chartAgg.byYear : data.byYear;
-  // Full country lists (and the map's colour-by-role) use the country-excluded
-  // aggregate so they stay global while a country is selected. The map colours
-  // every trading country; the Top exporters/importers lists show the leaders.
-  const displayExporters =
-    hasShipments && countryAgg && countryAgg.topExporters.length > 0
-      ? countryAgg.topExporters
-      : data.topExporters;
-  const displayImporters =
-    hasShipments && countryAgg && countryAgg.topImporters.length > 0
-      ? countryAgg.topImporters
-      : data.topImporters;
-  const tableExporters = displayExporters.slice(0, 15);
-  const tableImporters = displayImporters.slice(0, 15);
-  const displayFlows =
-    hasShipments && display.topFlows.length > 0 ? display.topFlows : data.topFlows ?? [];
+  const tableExporters = countryAgg.exporters.slice(0, 15);
+  const tableImporters = countryAgg.importers.slice(0, 15);
 
-  // Build the three interactive filter charts. Source bars keep the
-  // wild (amber) vs captive (emerald) distinction by colour.
-  const sourceBars: FilterBar[] = sourceChart.map((s) => ({
-    key: s.code,
-    label: s.label,
-    sublabel: s.code,
-    records: s.records,
-    active: checkedSources[s.code] !== false,
-    barClass:
-      s.code === ""
-        ? "bg-zinc-400 dark:bg-zinc-500"
-        : WILD_SOURCE_CODES.has(s.code)
-          ? "bg-amber-400 dark:bg-amber-500"
-          : "bg-emerald-300 dark:bg-emerald-600",
-  }));
+  // Source bars keep the wild (amber) vs captive (emerald) distinction.
+  const sourceBars: FilterBar[] = sourceChart.map((s) => {
+    const label = s.code === "" ? "Unspecified" : SOURCE_LABELS[s.code] || s.code;
+    return {
+      key: s.code,
+      label,
+      sublabel: s.code,
+      value: s.quantity,
+      valueLabel: fmtQty(s.quantity),
+      active: checkedSources[s.code] !== false,
+      barClass:
+        s.code === ""
+          ? "bg-zinc-400 dark:bg-zinc-500"
+          : WILD_SOURCE_CODES.has(s.code)
+            ? "bg-amber-400 dark:bg-amber-500"
+            : "bg-emerald-300 dark:bg-emerald-600",
+      title: qtyTitle(label, s.quantity),
+    };
+  });
 
-  const purposeBars: FilterBar[] = purposeChart.map((p) => ({
-    key: p.code,
-    label: p.label,
-    sublabel: p.code,
-    records: p.records,
-    active: checkedPurposes[p.code] !== false,
-    barClass: p.code === "" ? "bg-zinc-400 dark:bg-zinc-500" : "bg-blue-400 dark:bg-blue-500",
-  }));
+  const purposeBars: FilterBar[] = purposeChart.map((p) => {
+    const label = p.code === "" ? "Unspecified" : PURPOSE_LABELS[p.code] || p.code;
+    return {
+      key: p.code,
+      label,
+      sublabel: p.code,
+      value: p.quantity,
+      valueLabel: fmtQty(p.quantity),
+      active: checkedPurposes[p.code] !== false,
+      barClass: p.code === "" ? "bg-zinc-400 dark:bg-zinc-500" : "bg-blue-400 dark:bg-blue-500",
+      title: qtyTitle(label, p.quantity),
+    };
+  });
 
+  // Commodities are a pick-one list, not bars: quantities in different terms
+  // and units can't be compared on one scale.
   const commoditySearch = termSearch.trim().toLowerCase();
-  const commodityBars: FilterBar[] = commodityChart
-    .filter((t) =>
-      commoditySearch
-        ? `${t.term} ${t.unit}`.toLowerCase().includes(commoditySearch)
-        : true
-    )
-    .map((t) => {
-      const key = termUnitKey(t.term, t.unit);
-      return {
-        key,
-        label: t.term,
-        sublabel: t.unit || undefined,
-        records: t.records,
-        active: checkedTerms[key] !== false,
-        barClass: "bg-violet-400 dark:bg-violet-500",
-        title: `${t.term}${t.unit ? ` (${t.unit})` : ""} — ${t.records.toLocaleString()} records / ${fmtQty(t.quantity)} ${t.unit || "items"}`,
-      };
-    });
+  const commodityBars: FilterBar[] = commodityList
+    .filter((c) => (commoditySearch ? `${c.term} ${c.unit}`.toLowerCase().includes(commoditySearch) : true))
+    .map((c) => ({
+      key: c.key,
+      label: c.term,
+      sublabel: c.unit || undefined,
+      value: c.quantity,
+      valueLabel: fmtQty(c.quantity),
+      active: c.key === commodity?.key,
+      title: `${fmtFull(c.quantity)} ${commodityLabel(c.term, c.unit)} (${REPORTER_LABEL[reporter].toLowerCase()}). Click to show this commodity.`,
+    }));
 
-  const hasFilterCharts =
-    sourceBars.length > 0 || purposeBars.length > 0 || commodityChart.length > 0;
-
-  // Trade-over-time chart, placed in the map's side column (or full width when
-  // there is no map).
   const trendInfo =
-    "Drag the handles to trim the year range." +
+    `${REPORTER_LABEL[reporter]} quantity of ${unitLabel} per year. Drag the handles to trim the year range.` +
     (maxYear >= provisionalFromYear
-      ? ` Recent years (dashed, ${provisionalFromYear}+) are provisional — CITES reporting lags by a few years, so they are usually incomplete rather than showing a real drop.`
+      ? ` Recent years (dashed, ${provisionalFromYear}+) are provisional: CITES annual reports are due 31 October of the following year and often arrive later, so a drop there is usually missing reports rather than less trade.`
       : "");
   const tradeOverTimeChart = (
     <div className="flex flex-col">
@@ -1306,17 +1018,8 @@ export default function CitesTradeSummary({
         <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
           Trade over time
         </span>
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-500 normal-case">
-          (records)
-        </span>
-        <span className="relative group inline-flex">
-          <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-zinc-400 dark:border-zinc-500 text-[9px] font-semibold text-zinc-400 dark:text-zinc-500 cursor-help">
-            i
-          </span>
-          <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 hidden group-hover:block z-20 w-56 bg-zinc-800 dark:bg-zinc-700 text-white text-[10px] leading-snug rounded-md p-2 shadow-lg normal-case font-normal tracking-normal">
-            {trendInfo}
-          </span>
-        </span>
+        <span className="text-[11px] text-zinc-400 dark:text-zinc-500 normal-case truncate">({unitLabel})</span>
+        <InfoTip text={trendInfo} />
         {brush && (
           <span className="text-[11px] text-blue-600 dark:text-blue-400 tabular-nums ml-auto">
             {brush[0]}–{brush[1]}
@@ -1324,8 +1027,8 @@ export default function CitesTradeSummary({
         )}
       </div>
       <TrendLineChart
-        data={chartByYear}
-        metric={metric}
+        data={chartAgg.byYear}
+        unitLabel={unitLabel}
         minYear={minYear}
         maxYear={maxYear}
         brush={brush}
@@ -1335,15 +1038,11 @@ export default function CitesTradeSummary({
     </div>
   );
 
-  // Record count + year range + clear button. Overlaid on the map (or shown as
-  // a row when there is no map) so it doesn't take a whole dead row of its own.
+  // Quantity + year range + clear button, overlaid on the map.
   const headline = (
     <div className="flex items-baseline gap-2">
       <span className="text-sm text-zinc-700 dark:text-zinc-200">
-        <span className="font-semibold tabular-nums">
-          {display.totalRecords.toLocaleString()}
-        </span>{" "}
-        records
+        <span className="font-semibold tabular-nums">{fmtFull(display.quantity)}</span> {unitLabel}
         <span className="text-zinc-400 dark:text-zinc-500 ml-1 tabular-nums">
           {effectiveRange[0]}–{effectiveRange[1]}
         </span>
@@ -1365,21 +1064,86 @@ export default function CitesTradeSummary({
     </div>
   );
 
+  const reporterInfo =
+    "Each trade can be reported twice, by the exporting and the importing country, and the two reports often differ. " +
+    "Following the CITES Trade Database guide, the figures here use one side's reports throughout and never add or mix the two. " +
+    "Exporter-reported data are often more complete; importer-reported data can be better where an exporter's annual reports are missing.";
+
+  // What every figure below is: one reporter's quantity of one commodity.
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+      <label className="flex items-center gap-1.5">
+        <span>Commodity</span>
+        <select
+          value={commodity?.key ?? ""}
+          onChange={(e) => setChosenCommodity(e.target.value)}
+          className={`${CHART_SELECT_CLASS} max-w-[16rem]`}
+        >
+          {allCommodities.map((c) => (
+            <option key={c.key} value={c.key}>
+              {commodityLabel(c.term, c.unit)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="flex items-center gap-1.5">
+        <span>Quantities</span>
+        <div className={CHART_SEGMENTED_CLASS} role="group" aria-label="Whose reports to read">
+          {(["exporter", "importer"] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              aria-pressed={reporter === r}
+              onClick={() => setReporter(r)}
+              className={chartSegmentClass(reporter === r)}
+            >
+              {REPORTER_LABEL[r]}
+            </button>
+          ))}
+        </div>
+        <InfoTip text={reporterInfo} />
+      </div>
+    </div>
+  );
+
+  const countryTables = (
+    <>
+      <CountryTable
+        data={tableExporters}
+        label="Top exporters"
+        unitLabel={unitLabel}
+        selected={selectedCountry}
+        onSelect={setSelectedCountry}
+        barClass="bg-red-400 dark:bg-red-500"
+      />
+      <CountryTable
+        data={tableImporters}
+        label="Top importers"
+        unitLabel={unitLabel}
+        selected={selectedCountry}
+        onSelect={setSelectedCountry}
+        barClass="bg-blue-400 dark:bg-blue-500"
+      />
+    </>
+  );
+
   return (
     <div className="space-y-4">
-      {/* Trade flow map (with the record count overlaid), and Top exporters /
-          importers + the trade-over-time chart in the side column. */}
-      {displayFlows.length > 0 ? (
+      {toolbar}
+      {/* Trade flow map (headline overlaid), and Top exporters / importers +
+          the trade-over-time chart in the side column. */}
+      {display.flows.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
           <div className="lg:col-span-3 relative border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden bg-zinc-50 dark:bg-zinc-800/30">
             <div className="absolute top-2 left-3 z-10 bg-zinc-50/70 dark:bg-zinc-900/40 backdrop-blur-sm rounded-md px-2 py-1">
               {headline}
             </div>
             <TradeFlowMap
-              flows={displayFlows}
-              reExportFlows={display.reExportFlows}
-              exporters={displayExporters}
-              importers={displayImporters}
+              flows={display.flows}
+              reExportFlows={display.reExports}
+              exporters={countryAgg.exporters}
+              importers={countryAgg.importers}
+              unitLabel={unitLabel}
               suspensionCountries={suspensionCountries}
               countryAnnotations={countryAnnotations}
               selectedCountry={selectedCountry}
@@ -1389,81 +1153,35 @@ export default function CitesTradeSummary({
           {/* Side column stretches to the map's height; the trade-over-time
               chart is pushed to the bottom so it lines up with the map base. */}
           <div className="lg:col-span-2 flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              <CountryTable
-                data={tableExporters}
-                label="Top exporters"
-                selected={selectedCountry}
-                onSelect={setSelectedCountry}
-                barClass="bg-red-400 dark:bg-red-500"
-              />
-              <CountryTable
-                data={tableImporters}
-                label="Top importers"
-                selected={selectedCountry}
-                onSelect={setSelectedCountry}
-                barClass="bg-blue-400 dark:bg-blue-500"
-              />
-            </div>
+            <div className="grid grid-cols-2 gap-3">{countryTables}</div>
             <div className="mt-auto">{tradeOverTimeChart}</div>
           </div>
         </div>
       ) : (
         <div className="space-y-4">
           {headline}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CountryTable
-              data={tableExporters}
-              label="Top exporters"
-              selected={selectedCountry}
-              onSelect={setSelectedCountry}
-              barClass="bg-red-400 dark:bg-red-500"
-            />
-            <CountryTable
-              data={tableImporters}
-              label="Top importers"
-              selected={selectedCountry}
-              onSelect={setSelectedCountry}
-              barClass="bg-blue-400 dark:bg-blue-500"
-            />
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{countryTables}</div>
           {tradeOverTimeChart}
         </div>
       )}
 
-      {/* Filter charts below the map — click a bar to cross-filter the whole
-          summary. Source bars are coloured wild (amber) vs captive (emerald). */}
-      {hasFilterCharts && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FilterBarChart
-            title="Commodity"
-            bars={commodityBars}
-            onToggle={hasShipments ? isolateTerm : undefined}
-            search={termSearch}
-            onSearchChange={setTermSearch}
-            searchPlaceholder="Search…"
-            emptyHint={
-              commoditySearch
-                ? `No commodities match “${termSearch}”.`
-                : undefined
-            }
-          />
-          <FilterBarChart
-            title="Purpose"
-            bars={purposeBars}
-            onToggle={hasShipments ? isolatePurpose : undefined}
-          />
-          <FilterBarChart
-            title="Source"
-            bars={sourceBars}
-            onToggle={hasShipments ? isolateSource : undefined}
-          />
-        </div>
-      )}
+      {/* Below the map: pick a commodity, or click a purpose / source bar to
+          cross-filter everything. */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FilterBarChart
+          title="Commodity"
+          bars={commodityBars}
+          onToggle={setChosenCommodity}
+          search={termSearch}
+          onSearchChange={setTermSearch}
+          searchPlaceholder="Search…"
+          emptyHint={commoditySearch ? `No commodities match “${termSearch}”.` : undefined}
+        />
+        <FilterBarChart title="Purpose" bars={purposeBars} onToggle={isolatePurpose} />
+        <FilterBarChart title="Source" bars={sourceBars} onToggle={isolateSource} />
+      </div>
 
-      {/* The individual shipment records behind everything above, paginated and
-          reflecting all active filters. */}
-      {hasShipments && <RecordsTable rows={displayRows} />}
+      <RecordsTable rows={displayRows} reporter={reporter} />
     </div>
   );
 }

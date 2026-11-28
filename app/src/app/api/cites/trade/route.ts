@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { normalizeUnit, parseReportedQty, type CompactRecord } from "@/lib/cites-trade";
 
 // NOTE: This hits the CITES Trade DB web interface's JSON endpoint, not an
 // official API. It may break if CITES changes their frontend. No stable public
@@ -46,276 +47,29 @@ interface TradeRow {
   Source: string;
 }
 
-// CITES purpose codes → human-readable labels
-const PURPOSE_LABELS: Record<string, string> = {
-  B: "Breeding in captivity",
-  E: "Educational",
-  G: "Botanical garden",
-  H: "Hunting trophy",
-  L: "Law enforcement",
-  M: "Medical/biomedical",
-  N: "Reintroduction",
-  P: "Personal",
-  Q: "Circus/exhibition",
-  S: "Scientific",
-  T: "Commercial",
-  Z: "Zoo",
-};
-
-// CITES source codes → human-readable labels
-const SOURCE_LABELS: Record<string, string> = {
-  A: "Artificially propagated",
-  C: "Captive-bred",
-  D: "Appendix I captive-bred",
-  F: "F1 captive-born",
-  I: "Confiscated/seized",
-  O: "Pre-Convention",
-  R: "Ranched",
-  U: "Unknown",
-  W: "Wild",
-  X: "Marine",
-};
-
-/** Compact per-shipment record for client-side filtering */
-interface CompactRecord {
-  y: number;   // year
-  s: string;   // source code
-  p: string;   // purpose code
-  t: string;   // term
-  u: string;   // unit (empty string = unit-less / "number of specimens")
-  q: number;   // quantity (exporter-reported preferred, per CITES guide)
-  e: string;   // exporter country code
-  i: string;   // importer country code
-  o: string;   // origin country code (for re-export pathways; empty if same as exporter)
-}
-
-interface TradeSummary {
-  totalRecords: number;
-  yearRange: [number, number];
-  /** Total quantities by year (exporter-reported preferred) */
-  byYear: { year: number; quantity: number; records: number }[];
-  /** Top traded terms (e.g. "live", "skins", "trophies") */
-  topTerms: { term: string; quantity: number; records: number }[];
-  /** Top purposes */
-  topPurposes: { code: string; label: string; records: number }[];
-  /** Top sources */
-  topSources: { code: string; label: string; records: number }[];
-  /** Top exporting countries */
-  topExporters: { code: string; records: number; quantity: number }[];
-  /** Top importing countries */
-  topImporters: { code: string; records: number; quantity: number }[];
-  /** Top bilateral trade flows (exporter → importer) */
-  topFlows: { from: string; to: string; records: number; quantity: number }[];
-  /** Compact per-shipment records for client-side filtering */
-  shipments: CompactRecord[];
-  /** All unique source codes with labels */
-  allSources: { code: string; label: string; records: number }[];
-  /** All unique purpose codes with labels */
-  allPurposes: { code: string; label: string; records: number }[];
-  /** All unique terms with record counts */
-  allTerms: { term: string; records: number }[];
-  /**
-   * Terms grouped by term + unit. Quantities are NEVER aggregated across
-   * different units (kg, m³, pieces, unit-less) — each term+unit is its own row.
-   */
-  allTermsByUnit: { term: string; unit: string; records: number; quantity: number }[];
-}
-
-function parseQty(val: string | null): number {
-  if (!val) return 0;
-  const n = parseFloat(val);
-  return isNaN(n) ? 0 : n;
-}
-
 /**
- * Pick the reported quantity for a row. The CITES Trade Database Guide treats
- * importer- and exporter-reported figures as two independent reports of the
- * same trade — they must never be summed. We prefer the exporter-reported
- * quantity (the re-exporter is the authority on what left their territory),
- * falling back to the importer figure only when the exporter did not report.
+ * Compact a comparative-tabulation row. Both parties' quantities are kept, each
+ * only when that party reported it: they are separate reports of the same trade
+ * and the client reads one or the other, never a mix (see lib/cites-trade.ts).
  */
-function pickQty(r: TradeRow): number {
-  const exporter = parseQty(r["Exporter reported quantity"]);
-  if (exporter > 0) return exporter;
-  return parseQty(r["Importer reported quantity"]);
-}
-
-function summarize(rows: TradeRow[]): TradeSummary {
-  const years = rows.map((r) => r.Year).filter(Boolean);
-  const yearRange: [number, number] = [Math.min(...years), Math.max(...years)];
-
-  // By year
-  const yearMap = new Map<number, { quantity: number; records: number }>();
-  for (const r of rows) {
-    const entry = yearMap.get(r.Year) || { quantity: 0, records: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    yearMap.set(r.Year, entry);
-  }
-  const byYear = Array.from(yearMap.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([year, v]) => ({ year, ...v }));
-
-  // By term
-  const termMap = new Map<string, { quantity: number; records: number }>();
-  for (const r of rows) {
-    const term = r.Term || "unspecified";
-    const entry = termMap.get(term) || { quantity: 0, records: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    termMap.set(term, entry);
-  }
-  const topTerms = Array.from(termMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .slice(0, 8)
-    .map(([term, v]) => ({ term, ...v }));
-
-  // By purpose
-  const purposeMap = new Map<string, number>();
-  for (const r of rows) {
-    if (r.Purpose) purposeMap.set(r.Purpose, (purposeMap.get(r.Purpose) || 0) + 1);
-  }
-  const topPurposes = Array.from(purposeMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 6)
-    .map(([code, records]) => ({
-      code,
-      label: PURPOSE_LABELS[code] || code,
-      records,
-    }));
-
-  // By source
-  const sourceMap = new Map<string, number>();
-  for (const r of rows) {
-    if (r.Source) sourceMap.set(r.Source, (sourceMap.get(r.Source) || 0) + 1);
-  }
-  const topSources = Array.from(sourceMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 6)
-    .map(([code, records]) => ({
-      code,
-      label: SOURCE_LABELS[code] || code,
-      records,
-    }));
-
-  // Top exporters
-  const exporterMap = new Map<string, { records: number; quantity: number }>();
-  for (const r of rows) {
-    if (!r.Exporter) continue;
-    const entry = exporterMap.get(r.Exporter) || { records: 0, quantity: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    exporterMap.set(r.Exporter, entry);
-  }
-  const topExporters = Array.from(exporterMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .slice(0, 8)
-    .map(([code, v]) => ({ code, ...v }));
-
-  // Top importers
-  const importerMap = new Map<string, { records: number; quantity: number }>();
-  for (const r of rows) {
-    if (!r.Importer) continue;
-    const entry = importerMap.get(r.Importer) || { records: 0, quantity: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    importerMap.set(r.Importer, entry);
-  }
-  const topImporters = Array.from(importerMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .slice(0, 8)
-    .map(([code, v]) => ({ code, ...v }));
-
-  // Bilateral flows (exporter → importer pairs)
-  const flowMap = new Map<string, { records: number; quantity: number }>();
-  for (const r of rows) {
-    if (!r.Exporter || !r.Importer) continue;
-    const key = `${r.Exporter}->${r.Importer}`;
-    const entry = flowMap.get(key) || { records: 0, quantity: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    flowMap.set(key, entry);
-  }
-  const topFlows = Array.from(flowMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .slice(0, 12)
-    .map(([key, v]) => {
-      const [from, to] = key.split("->");
-      return { from, to, ...v };
-    });
-
-  // Compact per-shipment records for client-side filtering
-  const shipments: CompactRecord[] = rows.map((r) => ({
+function toCompact(r: TradeRow): CompactRecord {
+  const rec: CompactRecord = {
     y: r.Year,
     s: r.Source || "",
     p: r.Purpose || "",
     t: r.Term || "unspecified",
-    u: r.Unit || "",
-    q: pickQty(r),
+    u: normalizeUnit(r.Unit),
     e: r.Exporter || "",
     i: r.Importer || "",
-    // Origin only carried when it's a genuine re-export (origin differs from
-    // the exporter); otherwise empty to keep the payload small.
+    // Origin only carried for a genuine re-export (origin differs from the
+    // exporter); otherwise empty to keep the payload small.
     o: r.Origin && r.Origin !== r.Exporter ? r.Origin : "",
-  }));
-
-  // All unique sources (not just top 6)
-  const allSources = Array.from(sourceMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .map(([code, records]) => ({
-      code,
-      label: SOURCE_LABELS[code] || code,
-      records,
-    }));
-
-  // All unique purposes (not just top 6)
-  const allPurposes = Array.from(purposeMap.entries())
-    .sort(([, a], [, b]) => b - a)
-    .map(([code, records]) => ({
-      code,
-      label: PURPOSE_LABELS[code] || code,
-      records,
-    }));
-
-  // All unique terms with record counts
-  const allTerms = Array.from(termMap.entries())
-    .sort(([, a], [, b]) => b.records - a.records)
-    .map(([term, v]) => ({ term, records: v.records }));
-
-  // Terms grouped by term + unit — quantities are never summed across units.
-  const termUnitMap = new Map<
-    string,
-    { term: string; unit: string; quantity: number; records: number }
-  >();
-  for (const r of rows) {
-    const term = r.Term || "unspecified";
-    const unit = r.Unit || "";
-    const key = `${term} ${unit}`;
-    const entry = termUnitMap.get(key) || { term, unit, quantity: 0, records: 0 };
-    entry.records++;
-    entry.quantity += pickQty(r);
-    termUnitMap.set(key, entry);
-  }
-  const allTermsByUnit = Array.from(termUnitMap.values()).sort(
-    (a, b) => b.records - a.records
-  );
-
-  return {
-    totalRecords: rows.length,
-    yearRange,
-    byYear,
-    topTerms,
-    topPurposes,
-    topSources,
-    topExporters,
-    topImporters,
-    topFlows,
-    shipments,
-    allSources,
-    allPurposes,
-    allTerms,
-    allTermsByUnit,
   };
+  const qe = parseReportedQty(r["Exporter reported quantity"]);
+  const qi = parseReportedQty(r["Importer reported quantity"]);
+  if (qe !== undefined) rec.qe = qe;
+  if (qi !== undefined) rec.qi = qi;
+  return rec;
 }
 
 /**
@@ -361,8 +115,9 @@ async function fetchTradeChunk(
 /**
  * GET /api/cites/trade?taxon_id=<citesId>
  *
- * Fetches comparative tabulation data from the CITES Trade Database
- * and returns a pre-summarized overview.
+ * Fetches comparative tabulation data from the CITES Trade Database and
+ * returns its rows, compacted, with the exporter- and importer-reported
+ * quantities kept apart. The client aggregates (lib/cites-trade.ts).
  */
 export async function GET(request: NextRequest) {
   const taxonId = request.nextUrl.searchParams.get("taxon_id");
@@ -403,8 +158,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(result, { headers: CACHE_1H });
     }
 
-    const summary = summarize(rows);
-    const result = { found: true, taxonId, ...summary };
+    const years = rows.map((r) => r.Year).filter(Boolean);
+    const result = {
+      found: true,
+      taxonId,
+      yearRange: [Math.min(...years), Math.max(...years)],
+      shipments: rows.map(toCompact),
+    };
     tradeCache.set(cacheKey, { data: result, timestamp: Date.now() });
     return NextResponse.json(result, { headers: CACHE_1H });
   } catch (error) {
