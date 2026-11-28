@@ -90,9 +90,21 @@ export default function ScopedRedListAssessments({ sisTaxonId, pageScope, curren
   }, [sisTaxonId, loaded]);
   const scopes = loaded?.scopes ?? null;
 
-  // The page's scope if the species has it, else Global, until a scope is clicked.
+  // One button per assessment, not per scope: IUCN often files one assessment
+  // under several scopes (a regional endemic's global assessment is also its
+  // regional one; about 58% of regional rows are), and three buttons showing the
+  // same assessment read as three assessments. A group is named by all its
+  // scopes and led by its first (Global, when it is one of them).
   const available = scopes ?? [];
-  const opened = available.some((s) => s.scope === pageScope) ? pageScope : null;
+  const groups: { lead: string | null; scopes: (string | null)[]; category: string }[] = [];
+  for (const s of available) {
+    const g = groups.find((x) => available.find((a) => a.scope === x.lead)?.assessmentId === s.assessmentId);
+    if (g) g.scopes.push(s.scope);
+    else groups.push({ lead: s.scope, scopes: [s.scope], category: s.category });
+  }
+  const leadOf = (s: string | null) => groups.find((g) => g.scopes.includes(s))?.lead ?? null;
+  // The page's scope if the species has it, else Global, until a scope is clicked.
+  const opened = available.some((s) => s.scope === pageScope) ? leadOf(pageScope) : null;
   const scope = picked !== undefined ? picked : opened;
   const key = scope ?? "";
 
@@ -111,22 +123,25 @@ export default function ScopedRedListAssessments({ sisTaxonId, pageScope, curren
 
   return (
     <div>
-      {available.length > 1 && (
+      {groups.length > 1 && (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">Assessments</span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Scope</span>
           <div className={CHART_SEGMENTED_CLASS} role="group" aria-label="Assessment scope">
-            {available.map((s) => (
-              <button
-                key={s.scope ?? ""}
-                type="button"
-                aria-pressed={s.scope === scope}
-                onClick={() => setPicked(s.scope)}
-                className={`${chartSegmentClass(s.scope === scope)} px-2`}
-                title={s.scope ? `${s.scope} regional assessment: ${s.category}` : `Global assessment: ${s.category}`}
-              >
-                {s.scope ?? "Global"} <span className="opacity-60">{s.category}</span>
-              </button>
-            ))}
+            {groups.map((g) => {
+              const names = g.scopes.map((s) => s ?? "Global");
+              return (
+                <button
+                  key={g.lead ?? ""}
+                  type="button"
+                  aria-pressed={g.lead === scope}
+                  onClick={() => setPicked(g.lead)}
+                  className={`${chartSegmentClass(g.lead === scope)} px-2`}
+                  title={names.length > 1 ? `One assessment, filed as ${names.join(", ")}: ${g.category}` : `${names[0]} assessment: ${g.category}`}
+                >
+                  {names.join(" · ")} <span className="opacity-60">{g.category}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

@@ -1762,11 +1762,11 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // region's (Europe, Mediterranean, …), assessed under the regional guidelines.
   const scopeSelect = onAssessmentScopeChange && regions.length > 0 ? (
     <span className="inline-flex items-center gap-2">
-      <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Assessments</span>
+      <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Scope</span>
       <select
         value={assessmentScope ?? ""}
         onChange={(e) => onAssessmentScopeChange(e.target.value || null)}
-        aria-label="Assessments"
+        aria-label="Scope"
         title="Global Red List assessments, or one region's (assessed under IUCN's regional guidelines)"
         className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
@@ -1805,7 +1805,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         }}
         className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
-        <option value="taxonomic">By Taxonomic Group</option>
+        <option value="taxonomic">By Taxon</option>
         <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
