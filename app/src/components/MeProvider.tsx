@@ -47,11 +47,11 @@ export function MeProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     fetch("/api/auth/me")
       .then((res) => (res.ok ? res.json() : SIGNED_OUT))
-      .then((data: Me & { canViewRangeMap?: boolean }) => {
+      .then((data: Me & { internal?: boolean }) => {
         if (cancelled) return;
-        // Admins are the dashboard's own team: mark their traffic so usage
-        // analysis can exclude it.
-        if (data.canViewRangeMap) markInternalTraffic();
+        // The dashboard's own maintainer: mark their traffic so usage analysis
+        // can exclude it (see INTERNAL_ANALYTICS_EMAILS in /api/auth/me).
+        if (data.internal) markInternalTraffic();
         setMe(data);
         setLoaded(true);
       })

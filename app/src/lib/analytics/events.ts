@@ -163,9 +163,10 @@ export function reportFilterUsage(search: string): void {
 }
 
 /**
- * Tags the rest of this page's events as the dashboard team's own traffic, so
- * analysis can leave it out. Called once /api/auth/me says the signed-in user
- * is an admin; events sent before that answer (the first pageview) go untagged.
+ * Tags the rest of this page's events as the dashboard's own traffic, so
+ * analysis can leave it out. Called once /api/auth/me says the signed-in
+ * account is internal; events sent before that answer (the first pageview) go
+ * untagged.
  */
 export function markInternalTraffic(): void {
   if (!enabled()) return;

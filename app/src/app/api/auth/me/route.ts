@@ -13,5 +13,19 @@ export async function GET() {
     email: user?.email ?? null,
     avatarUrl: user?.user_metadata?.avatar_url ?? null,
     canViewRangeMap: await isAdmin(supabase, user?.id),
+    internal: isInternalEmail(user?.email),
   });
+}
+
+/**
+ * Whether this account's analytics should be marked as the dashboard's own
+ * traffic. INTERNAL_ANALYTICS_EMAILS is a server-only, comma-separated list, so
+ * the addresses stay out of the repo and the client bundle; only the yes/no
+ * reaches the browser.
+ */
+function isInternalEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const internal = (process.env.INTERNAL_ANALYTICS_EMAILS ?? "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return internal.includes(email.toLowerCase());
 }
