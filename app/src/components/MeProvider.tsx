@@ -50,7 +50,7 @@ export function MeProvider({ children }: { children: React.ReactNode }) {
       .then((data: Me & { internal?: boolean }) => {
         if (cancelled) return;
         // The dashboard's own maintainer: mark their traffic so usage analysis
-        // can exclude it (see INTERNAL_ANALYTICS_EMAILS in /api/auth/me).
+        // can exclude it (see INTERNAL_EMAIL in /api/auth/me).
         if (data.internal) markInternalTraffic();
         setMe(data);
         setLoaded(true);

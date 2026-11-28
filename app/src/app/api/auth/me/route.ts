@@ -17,15 +17,9 @@ export async function GET() {
   });
 }
 
-/**
- * Whether this account's analytics should be marked as the dashboard's own
- * traffic. INTERNAL_ANALYTICS_EMAILS is a server-only, comma-separated list, so
- * the addresses stay out of the repo and the client bundle; only the yes/no
- * reaches the browser.
- */
+/** The maintainer's account: its analytics events are tagged internal. */
+const INTERNAL_EMAIL = "shaneweisz@gmail.com";
+
 function isInternalEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const internal = (process.env.INTERNAL_ANALYTICS_EMAILS ?? "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return internal.includes(email.toLowerCase());
+  return email?.toLowerCase() === INTERNAL_EMAIL;
 }
