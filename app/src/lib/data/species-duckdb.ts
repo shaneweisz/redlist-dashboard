@@ -40,6 +40,16 @@ export function parquetUri(name: string): string {
   return `s3://${process.env.R2_DATA_BUCKET_NAME}/syncs/${ts}/${syncPath(name)}`;
 }
 
+/**
+ * The assessed species table as a FROM item: assessed.parquet, or under a region
+ * scope (lib/region-scope.ts) regional-assessed.parquet narrowed to that region.
+ * The two have the same columns, so every query over one works over the other.
+ */
+export function assessedSource(region?: string | null): string {
+  if (!region) return `read_parquet('${parquetUri("assessed.parquet")}')`;
+  return `(SELECT * EXCLUDE (region) FROM read_parquet('${parquetUri("regional-assessed.parquet")}') WHERE region = '${region.replace(/'/g, "''")}')`;
+}
+
 let connPromise: Promise<DuckDBConnection> | null = null;
 export async function getConn(): Promise<DuckDBConnection> {
   if (!connPromise) {
@@ -277,13 +287,18 @@ export async function querySpecies(opts: {
    * a view needs — see lib/species-lists).
    */
   group?: string;
+  /** A region scope (lib/region-scope.ts): that region's assessments, and no Not Evaluated list. */
+  region?: string | null;
 }): Promise<{ species: ReturnType<typeof toSpeciesRow>[]; truncated: boolean; tooLarge: boolean; neTotal: number | null }> {
   const conn = await getConn();
   const where: WhereParts = opts.group
     ? { clauses: ["taxon_group = $g"], params: { g: opts.group } }
     : resolveWhere(opts.taxon);
   const whereSql = where.clauses.length ? `WHERE ${where.clauses.join(" AND ")}` : "";
-  const assessedUri = parquetUri("assessed.parquet");
+  // "Not Evaluated" is every described species minus the assessed ones: a global
+  // idea, with no regional meaning.
+  if (opts.region) opts = { ...opts, includeNE: false };
+  const assessedFrom = assessedSource(opts.region);
   // Cap the Not-Evaluated additions: a giant aggregate (insects ~1M, invertebrates
   // ~1.3M) can't be serialized in one response (it 500s / times out). Return up to
   // NE_CAP, flag `truncated`, and report `neTotal` so the UI can say "showing N of M
@@ -316,7 +331,7 @@ export async function querySpecies(opts: {
   // (denormalized columns). The full per-species history array is fetched lazily
   // via getAssessmentHistory when a detail panel opens. This reads a single file
   // and drops ≈40% of the payload (history was ~half the bytes for large taxa).
-  const assessedSql = `SELECT ${ASSESSED_SELECT} FROM '${assessedUri}' a ${whereSql}`;
+  const assessedSql = `SELECT ${ASSESSED_SELECT} FROM ${assessedFrom} a ${whereSql}`;
   const rows = (await conn.runAndReadAll(assessedSql, where.params)).getRowObjects();
 
   let result = rows.map(toSpeciesRow);
@@ -1142,8 +1157,15 @@ export async function warmConnection(): Promise<void> {
 // Lazy per-species assessment history (index 0 = latest), fetched when a detail
 // panel opens. assessments.parquet is sorted by sis_taxon_id, so this prunes to
 // a single row group.
-export async function getAssessmentHistory(sisTaxonId: number): Promise<PreviousAssessment[]> {
+export async function getAssessmentHistory(sisTaxonId: number, region?: string | null): Promise<PreviousAssessment[]> {
   const conn = await getConn();
+  // A region's history (lib/region-scope.ts): the same columns, per region.
+  if (region) {
+    const rows = (await conn.runAndReadAll(
+      `SELECT * FROM '${parquetUri("regional-assessments.parquet")}' WHERE sis_taxon_id = $id AND region = $region ORDER BY seq`,
+      { id: sisTaxonId, region })).getRowObjects();
+    return rows.map(historyRow);
+  }
   // SELECT * rather than naming `criteria` explicitly: assessments.parquet is
   // rebuilt by a separate scheduled sync (scripts/sync/dbt/models/lists/), not by this
   // deploy, so there's a window where the deployed code expects a column the
@@ -1157,7 +1179,24 @@ export async function getAssessmentHistory(sisTaxonId: number): Promise<Previous
     WHERE sis_taxon_id = $id
     ORDER BY seq`;
   const rows = (await conn.runAndReadAll(sql, { id: sisTaxonId })).getRowObjects();
-  return rows.map((pa) => ({
+  return rows.map(historyRow);
+}
+
+/**
+ * The regions a species is assessed in, each with its latest assessment there.
+ * Reads only the small regional file: the global entry is the global history's
+ * newest row, which the caller already has (assessed.parquet over R2 took seconds).
+ */
+export async function getRegionalScopes(sisTaxonId: number): Promise<{ scope: string; assessmentId: number; category: string; date: string | null }[]> {
+  const conn = await getConn();
+  const rows = (await conn.runAndReadAll(
+    `SELECT region, assessment_id, iucn_category, assessment_date FROM read_parquet('${parquetUri("regional-assessed.parquet")}')
+     WHERE id = $id ORDER BY region`, { id: sisTaxonId })).getRowObjects();
+  return rows.map((r) => ({ scope: String(r.region), assessmentId: Number(r.assessment_id), category: String(r.iucn_category ?? ""), date: (r.assessment_date as string) ?? null }));
+}
+
+function historyRow(pa: Record<string, unknown>): PreviousAssessment {
+  return ({
     id: Number(pa.id),
     year: String(pa.year ?? ""),
     category: String(pa.category ?? ""),
@@ -1168,7 +1207,7 @@ export async function getAssessmentHistory(sisTaxonId: number): Promise<Previous
     facilitators: (pa.facilitators as string) ?? null,
     contributors: (pa.contributors as string) ?? null,
     institutions: (pa.institutions as string) ?? null,
-  }));
+  });
 }
 
 // ─── CoL backbone: arbitrary-rank species listing (#271, Phase 3) ────────────

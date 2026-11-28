@@ -22,7 +22,7 @@
  * with no valid live value yet, rather than omitting them (NodeSummary requires
  * numbers).
  */
-import { getConn, parquetUri, ensureNeHelpers } from "./species-duckdb";
+import { getConn, parquetUri, ensureNeHelpers, assessedSource } from "./species-duckdb";
 import { outdatedSql } from "./scoped-taxa-summary-duckdb";
 import { ensureVernacularNamesLoaded } from "./vernacular-names";
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
@@ -85,6 +85,8 @@ export async function getLiveRankChildren(
   parentId: string,
   nextRank: DynamicRank,
   extraWhere?: string,
+  /** A region scope (lib/region-scope.ts): pass extraWhere too ("TRUE"), so the global CoL counts are left out. */
+  region?: string | null,
 ): Promise<NodeSummary[]> {
   const parentFilter = isDynamicNodeId(parentId) ? dynamicNodeFilter(parentId) : NODE_INDEX.get(parentId)?.filter;
   if (!parentFilter) return [];
@@ -92,7 +94,7 @@ export async function getLiveRankChildren(
   ensureVernacularNamesLoaded();
   const conn = await getConn();
   const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
-  const assessedUri = parquetUri("assessed.parquet");
+  const assessedFrom = assessedSource(region);
   const parentWhere = filterToSql(parentFilter);
   const rankCol = RANK_COLUMN_SQL[nextRank];
   const extra = extraWhere ? ` AND (${extraWhere})` : "";
@@ -102,7 +104,7 @@ export async function getLiveRankChildren(
   const assessedRows = (await conn.runAndReadAll(
     `SELECT ${rankCol} AS v, iucn_category AS category, count(*) AS n,
             sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated
-     FROM read_parquet('${assessedUri}')
+     FROM ${assessedFrom}
      WHERE (${parentWhere})${extra}
      GROUP BY v, category`
   )).getRowObjects();

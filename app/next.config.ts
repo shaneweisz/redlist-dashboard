@@ -143,6 +143,10 @@ const nextConfig: NextConfig = {
     "/api/search/warm": DUCKDB_TRACE,
     "/api/taxa/species": DUCKDB_TRACE,
     "/api/redlist/synonyms": DUCKDB_TRACE,
+    // Under ?region= it computes the map's totals live from regional-assessed.parquet in R2.
+    "/api/redlist/country-stats": DUCKDB_TRACE,
+    // The scope picker's regions, from regional-assessed.parquet in R2.
+    "/api/redlist/regions": DUCKDB_TRACE,
     // The standalone mapping page resolves its species server-side with the
     // same DuckDB-over-R2 query (getSpeciesByGbifKey), so it needs the addon's
     // dlopen'd .so and the sync pointer like every route above. Written with a
@@ -213,6 +217,8 @@ const nextConfig: NextConfig = {
     "/api/literature-link": ["**/data/**"],
     // Queries taxa.parquet + assessment_link in R2 (httpfs) — no local data.
     "/api/redlist/synonyms": ["**/data/**"],
+    // Reads regional-assessed.parquet in R2 (httpfs) — no local data.
+    "/api/redlist/regions": ["**/data/**"],
     // These keys are ROUTE PATHS, so renaming a route silently drops its pruning
     // and the function balloons to the whole dataset (the credit lines' merge
     // behind one endpoint once took this one from ~80MB to 494MB).

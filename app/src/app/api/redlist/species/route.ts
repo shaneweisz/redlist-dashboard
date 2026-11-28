@@ -7,15 +7,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { querySpecies } from "@/lib/data/species-duckdb";
 import { CACHE_5M } from "@/lib/cache-headers";
+import { parseRegion, REGION_PARAM } from "@/lib/region-scope";
 
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const taxon = sp.get("taxon") || "all";
   const category = sp.get("category");
+  const region = parseRegion(sp.get(REGION_PARAM));
 
   try {
     const includeNE = category === "NE";
-    const { species: all, truncated, tooLarge, neTotal } = await querySpecies({ taxon, includeNE });
+    const { species: all, truncated, tooLarge, neTotal } = await querySpecies({ taxon, includeNE, region });
     const species = category === "NE" ? all.filter((s) => s.category === "NE") : all;
 
     return NextResponse.json({ species, total: species.length, truncated, tooLarge, neTotal }, { headers: CACHE_5M });

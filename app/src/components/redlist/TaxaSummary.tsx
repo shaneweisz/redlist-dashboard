@@ -1,5 +1,6 @@
 "use client";
 
+import { REGION_PARAM } from "@/lib/region-scope";
 import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from "react";
 import { CHART_MENU_PANEL_CLASS } from "./chart-controls";
 import { createPortal } from "react-dom";
@@ -101,6 +102,19 @@ const SSC_SECTIONS: { nodeId: string; parentTaxon: string; title: string; catchA
   { nodeId: "ssc-fungi-groups", parentTaxon: "fungi", title: "FUNGI SPECIALIST GROUPS", catchAllId: "ssc-other-fungi" },
 ];
 
+// The Scope picker's regions (lib/region-scope.ts): one request per session,
+// started when this module loads so it is usually back before the toolbar draws.
+let loadedRegions: string[] | null = null;
+let regionsRequest: Promise<string[]> | null = null;
+function loadRegions(): Promise<string[]> {
+  regionsRequest ??= fetch("/api/redlist/regions")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => (loadedRegions = ((d?.regions ?? []) as { region: string }[]).map((x) => x.region)))
+    .catch(() => { regionsRequest = null; return []; });
+  return regionsRequest;
+}
+if (typeof window !== "undefined") void loadRegions();
+
 // Ordered categories for the breakdown bar (most threatened first)
 const BAR_CATEGORIES = Object.keys(CATEGORY_ORDER).sort(
   (a, b) => CATEGORY_ORDER[a] - CATEGORY_ORDER[b]
@@ -181,6 +195,9 @@ interface Props {
   onHoverTaxon?: (id: string | null) => void;
   /** Which GBIF records the GBIF columns count (src/lib/gbif-records.ts). */
   gbifRecordMode?: GbifRecordMode;
+  /** A region scope (lib/region-scope.ts): the table reads that region's assessments. Null: global. */
+  assessmentScope?: string | null;
+  onAssessmentScopeChange?: (region: string | null) => void;
 }
 
 /**
@@ -1470,7 +1487,7 @@ function DescribedInfoIcon({ nodeId, source, breakdown }: { nodeId: string; sour
   );
 }
 
-export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, onSelectedRow, onHoverTaxon, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE }: Props) {
+export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgroups, onToggleSubgroup, onNavigateToSubgroup, disableAllSpecies, viewMode = "reassessments", layoutMode, onLayoutModeChange, countryModeContent, countryPillsContent, countryScope, onSelectedRow, onHoverTaxon, gbifRecordMode = DEFAULT_GBIF_RECORD_MODE, assessmentScope = null, onAssessmentScopeChange }: Props) {
   const isNewAssessments = viewMode === "new-assessments";
   const router = useRouter();
   const [rawTaxa, setTaxa] = useState<TaxonSummary[]>([]);
@@ -1551,12 +1568,18 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // means toggling two countries on in either order produces the same key (and
   // cache-friendly URL), not one per click order.
   const countryPart = layoutMode === "country" && countryScope?.length ? [...countryScope].sort().join(",") : "";
-  const scoped = !!countryPart;
-  const scopeKey = scoped ? `c:${countryPart}` : "";
+  // A region scope (lib/region-scope.ts) is scoped too: its numbers are computed
+  // live from the region's assessments, and like a country they have no CoL or
+  // GBIF-unassessed columns.
+  const scoped = !!countryPart || !!assessmentScope;
+  const scopeKey = scoped ? `c:${countryPart}|r:${assessmentScope ?? ""}` : "";
   // The scope's query string, built once here so every fetch below stays in
   // lockstep with scopeKey (the staleness guard) — no leading ? or &, callers
   // add whichever they need.
-  const scopeQs = countryPart ? `country=${encodeURIComponent(countryPart)}` : "";
+  const scopeQs = [
+    countryPart ? `country=${encodeURIComponent(countryPart)}` : "",
+    assessmentScope ? `${REGION_PARAM}=${encodeURIComponent(assessmentScope)}` : "",
+  ].filter(Boolean).join("&");
   // Kept in sync every render (plain assignment, not an effect — refs don't
   // need one) so the promise-chained fetches below (toggleExpand, Table 1a,
   // SSC groups — unlike the main fetchTaxa effect above, these aren't
@@ -1569,14 +1592,16 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // view's landing page always uses the plain 3-column style (even before a
   // country is picked, showing global data), since Described/GBIF/CoL columns
   // have no country dimension there either.
-  const scopeStyleColumns = layoutMode === "country";
+  // A region scope too: its % assessed would divide by the global described count.
+  const scopeStyleColumns = layoutMode === "country" || !!assessmentScope;
   // Tighter, non-responsive padding for the sticky Taxonomic Group column in
   // the scope views — cellPad's px-4 growth at the md breakpoint is more than the
   // taxon name + icon need just to avoid wrapping, and that column is the
   // biggest lever for giving the Outdated/% Outdated bars more room in the
   // narrower 3/5-width table.
   const taxonCellPad = scopeStyleColumns ? "px-2 py-2 md:py-2.5" : cellPad;
-  const isVisible = (col: ColumnId) => !hiddenColumns.has(col) && !(scopeStyleColumns && SCOPE_HIDDEN_COLUMNS.includes(col));
+  // A region scope hides the same columns: the described counts are global, and its GBIF/CoL totals aren't computed.
+  const isVisible = (col: ColumnId) => !hiddenColumns.has(col) && !((scopeStyleColumns || assessmentScope) && SCOPE_HIDDEN_COLUMNS.includes(col));
   const toggleColumn = (col: ColumnId) => {
     setHiddenColumns((prev) => {
       const next = new Set(prev);
@@ -1739,6 +1764,41 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // (+ their "Exit ... View" states). "Country view" needs real per-country
   // location data, which Not Evaluated species don't have (no assessment means no
   // assessment_locations row), so it's disabled under New Assessments.
+  // The regions a scope can be (lib/region-scope.ts), from the data. Requested
+  // once per session, as soon as this module loads, and the picker is drawn at
+  // once with whatever is known (Global, and the URL's own scope): waiting on the
+  // request to draw it made it pop in after the rest of the toolbar.
+  const [regions, setRegions] = useState<string[]>(() => loadedRegions ?? []);
+  useEffect(() => {
+    // Always through the shared request (cheap once it has come back): skipping
+    // when loadedRegions was set missed a response landing between the first
+    // render and this effect, leaving the picker with Global only.
+    if (!onAssessmentScopeChange) return;
+    let live = true;
+    loadRegions().then((r) => { if (live) setRegions(r); });
+    return () => { live = false; };
+  }, [onAssessmentScopeChange]);
+  const regionOptions = assessmentScope && !regions.includes(assessmentScope) ? [assessmentScope, ...regions] : regions;
+  // Which assessments everything on the page reads: IUCN's global ones, or one
+  // region's (Europe, Mediterranean, …), assessed under the regional guidelines.
+  const scopeSelect = onAssessmentScopeChange ? (
+    <span className="inline-flex items-center gap-2">
+      <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">Scope</span>
+      <select
+        value={assessmentScope ?? ""}
+        onChange={(e) => onAssessmentScopeChange(e.target.value || null)}
+        aria-label="Scope"
+        title="Global Red List assessments, or one region's (assessed under IUCN's regional guidelines)"
+        // Fixed to fit the longest region name, so the picker doesn't widen when
+        // the regions arrive after it is drawn.
+        className="w-40 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
+      >
+        <option value="">Global</option>
+        {regionOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+      </select>
+    </span>
+  ) : null;
+
   const layoutModeSelect = (
     <span className="inline-flex items-center gap-2">
       <span className="text-sm font-medium text-zinc-600 dark:text-zinc-300">View</span>
@@ -1768,13 +1828,13 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         }}
         className="text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md px-2 py-1 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-500"
       >
-        <option value="taxonomic">By Taxonomic Group</option>
+        <option value="taxonomic">By Taxon</option>
         <option value="country" disabled={isNewAssessments} title={isNewAssessments ? "Not available for First Assessments — Not Evaluated species have no location data" : undefined}>
           By Country
         </option>
-        <option value="ssc">By SSC Specialist Group (WIP)</option>
-        <option value="text">By Assessment Text (search)</option>
-        <option value="near">Near a Location (map)</option>
+        <option value="ssc">By Specialist Group</option>
+        <option value="text">By Assessment Text</option>
+        <option value="near">By Location</option>
         <option value="table1a">Table 1a</option>
       </select>
     </span>
@@ -2939,17 +2999,17 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
         here), same as before this rework. The table's own scrollRef box
         below is zoomed down (zoom-[.75]) to compensate for the narrower
         (1/2, was 2/3) column. */}
-    {countryMode && !scoped && (
+    {countryMode && !countryPart && (
       <div data-country-content className="flex flex-col flex-1 min-h-0 mb-4">{countryModeContent}</div>
     )}
-    {countryMode && scoped && (
+    {countryMode && !!countryPart && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-1.5">
         <div aria-hidden="true" />
         <div>{countryPillsContent}</div>
       </div>
     )}
-    <div data-country-content={countryMode && scoped ? "" : undefined} className={countryMode ? (scoped ? "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4" : "hidden") : "contents"}>
-      {countryMode && scoped && <div>{countryModeContent}</div>}
+    <div data-country-content={countryMode && countryPart ? "" : undefined} className={countryMode ? (countryPart ? "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4" : "hidden") : "contents"}>
+      {countryMode && !!countryPart && <div>{countryModeContent}</div>}
       <div className={countryMode ? "min-w-0 flex flex-col h-full" : "contents"}>
         {/* No "country name atop the table" heading here anymore — a country
             scoped outside Country View now shows only as the normal removable
@@ -3470,6 +3530,7 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
               only rule broke that. It now lives as the "Assessed Species"
               stat card's own header instead (RedListView), which is shown at
               both states. */}
+          {scopeSelect}
           {layoutModeSelect}
           {(table1aMode || sscMode) && (
             <span className="relative group/lm">

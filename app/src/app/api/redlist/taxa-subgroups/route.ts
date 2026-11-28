@@ -5,11 +5,12 @@ import { getLiveRankChildren } from "@/lib/data/live-taxa-children";
 import { findNode, hasChildren } from "@/lib/taxonomy-utils";
 import { isLiveDrilldownNode, nextDynamicRank } from "@/lib/dynamic-taxon";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { parseRegion, REGION_PARAM } from "@/lib/region-scope";
 
 /** Upper bound on `nodeIds=` — the SSC groups table asks for 6. */
 const MAX_NODE_IDS = 20;
 
-async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>): Promise<NodeSummary[]> {
+async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>, region: string | null): Promise<NodeSummary[]> {
   // Live, arbitrary-depth taxonomic drilldown (see dynamic-taxon.ts) — takes
   // over from the static tree + precomputed JSON for DYNAMIC_DRILLDOWN_ROOTS,
   // scoped or not (Phase 7: country-scoping ports onto the same
@@ -21,7 +22,7 @@ async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>):
     const nextRank = nextDynamicRank(nodeId);
     // No further rank below genus — the leaf is the existing species-list view.
     if (!nextRank) return [];
-    return getLiveRankChildren(nodeId, nextRank, where ?? undefined);
+    return getLiveRankChildren(nodeId, nextRank, where ?? undefined, region);
   }
 
   if (!findNode(nodeId) || !hasChildren(nodeId)) return [];
@@ -29,7 +30,7 @@ async function childrenOf(nodeId: string, where: ReturnType<typeof scopeWhere>):
   // Scoped summaries carry zeroed estimatedDescribed/gbifNeSpeciesCount
   // (no country dimension exists in that data) — `scoped` tells the client
   // to hide those columns rather than render a misleading 0.
-  return where ? getScopedChildrenSummaries(where, nodeId) : getPrecomputedChildrenSummaries(nodeId);
+  return where ? getScopedChildrenSummaries(where, nodeId, region) : getPrecomputedChildrenSummaries(nodeId);
 }
 
 /**
@@ -44,7 +45,10 @@ export async function GET(request: NextRequest) {
   const nodeIds = params.get("nodeIds")?.split(",").map((n) => n.trim()).filter(Boolean) ?? [];
   // One or more comma-separated values — see taxa-summary/route.ts's own comment.
   const countries = params.get("country")?.split(",").map((c) => c.trim()).filter(Boolean) ?? [];
-  const where = scopeWhere(countries);
+  // A region scope reads that region's assessments: always the live (scoped) path,
+  // since the precomputed summaries are global.
+  const region = parseRegion(params.get(REGION_PARAM));
+  const where = scopeWhere(countries) ?? (region ? "TRUE" : null);
   const scoped = where !== null;
 
   if (!nodeId && nodeIds.length === 0) {
@@ -56,11 +60,11 @@ export async function GET(request: NextRequest) {
 
   try {
     if (nodeId) {
-      const subgroups = await childrenOf(nodeId, where);
+      const subgroups = await childrenOf(nodeId, where, region);
       return NextResponse.json({ subgroups, scoped }, { headers: CACHE_1H });
     }
     const unique = [...new Set(nodeIds)];
-    const lists = await Promise.all(unique.map((id) => childrenOf(id, where)));
+    const lists = await Promise.all(unique.map((id) => childrenOf(id, where, region)));
     const subgroupsByNode = Object.fromEntries(unique.map((id, i) => [id, lists[i]]));
     return NextResponse.json({ subgroupsByNode, scoped }, { headers: CACHE_1H });
   } catch (error) {

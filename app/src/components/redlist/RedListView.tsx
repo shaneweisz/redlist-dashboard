@@ -1,5 +1,6 @@
 "use client";
 
+import { withRegion } from "@/lib/region-scope";
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
@@ -17,6 +18,7 @@ import { countNoteText } from "@/lib/count-note";
 import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchReview, type SuggestedRecord } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
+import ScopedRedListAssessments, { loadAssessmentScopes, loadScopeHistory } from "./ScopedRedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
@@ -1520,6 +1522,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedHabitatSuitability, setSelectedHabitatSuitability,
     breakdownFilter, setBreakdownFilter,
     endemicsOnly, setEndemicsOnly,
+    assessmentScope, setAssessmentScope,
     selectedGrowthForms, setSelectedGrowthForms,
     selectedAssessors, setSelectedAssessors,
     selectedFacilitators, setSelectedFacilitators,
@@ -1539,8 +1542,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     fromPopstateRef,
   } = useFilterParams();
   // Not Evaluated species have no assessment, so no New or % New: the chart
-  // shows Total there whatever the URL asks for.
-  const gbifChartKeys = isNewAssessments ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
+  // shows Total there whatever the URL asks for. Nor under a region scope: the
+  // since-assessment counts are measured from the global assessment's date.
+  const showNewCounts = !isNewAssessments && !assessmentScope;
+  const gbifChartKeys = !showNewCounts ? GBIF_RANGE_KEYS.filter((k) => gbifKeyParts(k).metric === "total") : GBIF_RANGE_KEYS;
   const gbifChartKey: GbifRangeKey = gbifChartKeys.includes(gbifChartKeyParam) ? gbifChartKeyParam : "total.all";
 
   // Both habitat checkbox-dropdowns default to "everything checked" (see
@@ -1553,9 +1558,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const cache = useSpeciesCache();
   const speciesApiUrl = useCallback(
-    (taxonId: string, categoryParam: string) => `${SPECIES_API}?taxon=${encodeURIComponent(taxonId)}${categoryParam}`,
-    []
+    // Under a region scope, that region's assessments (lib/region-scope.ts); the
+    // scope is part of the URL, so the cache keeps each scope's rows apart.
+    (taxonId: string, categoryParam: string) => withRegion(`${SPECIES_API}?taxon=${encodeURIComponent(taxonId)}${categoryParam}`, assessmentScope),
+    [assessmentScope]
   );
+
+  // "Awaiting 1st Assessment" is every described species minus the assessed
+  // ones, a global idea: a region scope has only its assessed species.
+  useEffect(() => {
+    if (assessmentScope && isNewAssessments) onViewModeChange?.("reassessments");
+  }, [assessmentScope, isNewAssessments, onViewModeChange]);
 
   // Country view needs data Not Evaluated species don't have: a per-country
   // location (no assessment means no assessment_locations row) — see the
@@ -2748,7 +2761,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesPriorityBox(s)) return;
       counts[s.category] = (counts[s.category] || 0) + 1;
     });
-    const DISPLAY_ORDER = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"];
+    // RE and NA exist only in regional assessments (lib/region-scope.ts): shown when present.
+    const DISPLAY_ORDER = ["EX", "EW", "RE", "CR", "EN", "VU", "NT", "LC", "DD", "NA"]
+      .filter((code) => (code !== "RE" && code !== "NA") || counts[code]);
     const total = DISPLAY_ORDER.reduce((sum, code) => sum + (counts[code] || 0), 0);
     return DISPLAY_ORDER.map(code => ({
       code,
@@ -3948,17 +3963,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     let aborted = false;
     (async () => {
       try {
-        const res = await fetch(`/api/redlist/species/history?id=${sis}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (!aborted) setAssessmentHistory((prev) => ({ ...prev, [sis]: data.previous_assessments ?? [] }));
-        }
+        // With the species' scopes, so the Red List tab's switch is ready when it
+        // opens, and under a region scope that region's history too.
+        if (assessmentScope) void loadScopeHistory(sis, assessmentScope);
+        const data = await loadAssessmentScopes(sis);
+        if (data && !aborted) setAssessmentHistory((prev) => ({ ...prev, [sis]: (data.previous_assessments ?? []) as Species["previous_assessments"] }));
       } catch {
         // Ignore — the panel falls back to an empty history.
       }
     })();
     return () => { aborted = true; };
-  }, [selectedSpeciesKey, paginatedSpecies, assessmentHistory]);
+  }, [selectedSpeciesKey, paginatedSpecies, assessmentHistory, assessmentScope]);
 
   // Lazily fetch CoL synonyms for the open species — only once the CoL tab is opened.
   // Keyed by the row key, which already encodes which id the lookup uses (`col-…` →
@@ -4335,10 +4350,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // reasons, but would mean downloading the entire "All Species" dataset just
   // to show the landing map — multi-second blank-map delay for no reason,
   // since this data never varies by taxon selection on the landing page).
-  const [countryLandingStats, setCountryLandingStats] = useState<CountryStats | null>(null);
+  // Kept per scope (global or a region), so switching scope fetches that scope's totals.
+  const [countryLandingByScope, setCountryLandingByScope] = useState<Record<string, CountryStats>>({});
+  const countryLandingStats = countryLandingByScope[assessmentScope ?? ""] ?? null;
   useEffect(() => {
     if (layoutMode !== "country" || countryLandingStats) return;
-    fetch("/api/redlist/country-stats")
+    const scopeKey = assessmentScope ?? "";
+    fetch(withRegion("/api/redlist/country-stats", assessmentScope))
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (!data?.stats) return;
@@ -4346,10 +4364,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         for (const [code, s] of Object.entries(data.stats as Record<string, { species: number; outdated: number }>)) {
           shaped[code] = { occurrences: 0, species: s.species, outdated: s.outdated };
         }
-        setCountryLandingStats(shaped);
+        setCountryLandingByScope(prev => ({ ...prev, [scopeKey]: shaped }));
       })
       .catch(() => {});
-  }, [layoutMode, countryLandingStats]);
+  }, [layoutMode, countryLandingStats, assessmentScope]);
 
   // Country view landing page content — a promoted WorldMap (its own Map/List
   // toggle applies here too), passed into TaxaSummary rather than duplicating a
@@ -5757,6 +5775,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryModeContent={countryModeContent}
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
+        assessmentScope={assessmentScope}
+        onAssessmentScopeChange={setAssessmentScope}
         onSelectedRow={setSelectedRow}
         onHoverTaxon={hoverTaxon}
         onToggleSubgroup={(sgId) => {
@@ -5835,7 +5855,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {([
               ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
-            ] as const).map(([mode, label, count]) => (
+            ] as const).filter(([mode]) => !(assessmentScope && mode === "new-assessments")).map(([mode, label, count]) => (
               <button
                 key={mode}
                 type="button"
@@ -5930,7 +5950,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 </div>
               )}
               <div className="min-w-0">
-                <div className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 truncate">{selectedRow.name}</span>
+                  {/* Under a region scope everything on the page is that region's
+                      assessments: said on the card every taxon opens with, in the
+                      words of the list's chip, so it can't be read as global. */}
+                  {assessmentScope && (
+                    <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {assessmentScope} assessments
+                    </span>
+                  )}
+                </div>
                 {rankLine && <div className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{rankLine}</div>}
               </div>
             </div>
@@ -6783,6 +6813,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 {onViewModeChange && <span className="text-sm">×</span>}
               </button>
             )}
+            {/* A region scope (lib/region-scope.ts) reads different assessments
+                altogether, so it is shown wherever the list is, as a chip like
+                any filter; removing it goes back to global assessments. */}
+            {assessmentScope && (
+              <button
+                type="button"
+                onClick={() => setAssessmentScope(null)}
+                title="Back to global assessments"
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 flex items-center gap-1 hover:opacity-80"
+              >
+                {assessmentScope} assessments
+                <span className="text-sm">×</span>
+              </button>
+            )}
             {Array.from(selectedTaxa).map(taxonId => (
               <button
                 key={taxonId}
@@ -7238,7 +7282,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     <SortIndicator field="totalGbif" />
                   </span>
                 </th>
-                {!isNewAssessments && (
+                {showNewCounts && (
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("newGbif", e)}
@@ -7255,7 +7299,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </span>
                 </th>
                 )}
-                {!isNewAssessments && (
+                {showNewCounts && (
                 <th
                   className={`${SPECIES_TH} text-right min-w-[60px] ${SPECIES_TH_SORTABLE}`}
                   onClick={(e) => handleSort("pctNewGbif", e)}
@@ -7354,7 +7398,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                 )}
                 {/* One heading over the GBIF columns, with the record-mode toggle:
                     the mode is said once here, not under every column. */}
-                <th colSpan={isNewAssessments ? 1 : 3} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
+                <th colSpan={showNewCounts ? 3 : 1} className="px-2 md:px-4 pt-2 pb-1 border-b border-zinc-200 dark:border-zinc-700">
                   <span className="flex items-center justify-end gap-2">
                     <span className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300">GBIF Records</span>
                     {setGbifRecordMode && <GbifRecordModeToggle mode={gbifRecordMode} onChange={setGbifRecordMode} />}
@@ -7623,7 +7667,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                       ) : "—"}
                     </td>
                     {/* New GBIF */}
-                    {!isNewAssessments && (
+                    {showNewCounts && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? (
                         <span className="text-zinc-400">N/A</span>
@@ -7655,7 +7699,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                     </td>
                     )}
                     {/* % New GBIF */}
-                    {!isNewAssessments && (
+                    {showNewCounts && (
                     <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-400 text-sm tabular-nums whitespace-nowrap">
                       {isNE(s) ? <span className="text-zinc-400">N/A</span> : (() => {
                         const total = s.gbif_records;
@@ -7680,7 +7724,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                   </tr>
                   {selectedSpeciesKey === speciesKey && (
                     <tr>
-                      <td colSpan={isNewAssessments ? 6 : 7} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
+                      <td colSpan={isNewAssessments ? 6 : showNewCounts ? 7 : 5} className="p-0 bg-zinc-50 dark:bg-zinc-800/30" style={{ width: 0 }}>
                         <div style={{ width: 'var(--view-width, 100%)', maxWidth: '100%', transform: 'translateX(var(--scroll-left, 0px))' }}>
                           {/* Tab bar */}
                           <div className="flex flex-wrap items-center border-b border-zinc-200 dark:border-zinc-700" onClick={(e) => e.stopPropagation()}>
@@ -7853,6 +7897,15 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                           )}
                           {s.category !== "NE" && (visitedTabs.has("redlist")) && (
                             <div style={{ display: activeDetailTab === "redlist" ? undefined : "none" }}>
+                              {s.sis_taxon_id ? (
+                              // With a switch between the species' global and regional assessments.
+                              <ScopedRedListAssessments
+                                sisTaxonId={s.sis_taxon_id}
+                                pageScope={assessmentScope}
+                                current={{ assessmentId: s.assessment_id ?? 0, category: s.category, date: s.assessment_date ?? null }}
+                                globalHistory={assessmentScope ? null : (assessmentHistory[s.sis_taxon_id] ?? null)}
+                              />
+                              ) : (
                               <RedListAssessments
                                 sisTaxonId={s.sis_taxon_id ?? undefined}
                                 currentAssessmentId={s.assessment_id ?? 0}
@@ -7861,6 +7914,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
                                 previousAssessments={((s.sis_taxon_id ? assessmentHistory[s.sis_taxon_id] : null) ?? s.previous_assessments ?? []).map((a) => ({ year: a.year, assessment_id: a.id, category: a.category, assessors: a.assessors, reviewers: a.reviewers, facilitators: a.facilitators, contributors: a.contributors, institutions: a.institutions }))}
                                 speciesUrl={`https://www.iucnredlist.org/species/${s.sis_taxon_id}/${s.assessment_id}`}
                               />
+                              )}
                             </div>
                           )}
                           {SHOW_WIKIPEDIA_TAB && (visitedTabs.has("wikipedia")) && (
@@ -7888,7 +7942,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               })}
               {totalFiltered === 0 && !speciesLoading && (
                 <tr>
-                  <td colSpan={isNewAssessments ? 6 : 7} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={isNewAssessments ? 6 : showNewCounts ? 7 : 5} className="px-4 py-8 text-center text-zinc-500">
                     No species found
                   </td>
                 </tr>
