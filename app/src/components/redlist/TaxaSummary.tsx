@@ -1594,6 +1594,13 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
   // have no country dimension there either.
   // A region scope too: its % assessed would divide by the global described count.
   const scopeStyleColumns = layoutMode === "country" || !!assessmentScope;
+  // # Needs Updating's compact count + small bar is for Country View's narrower
+  // table. A region scope keeps the full-width table but hides its other
+  // columns, so there the column takes the freed width with the plain table's
+  // full bar, the two sharing the freed width half and half rather than leaving
+  // it all as dead space in # Red List Assessed.
+  const compactOutdated = layoutMode === "country";
+  const wideOutdated = scopeStyleColumns && !compactOutdated;
   // Tighter, non-responsive padding for the sticky Taxonomic Group column in
   // the scope views — cellPad's px-4 growth at the md breakpoint is more than the
   // taxon name + icon need just to avoid wrapping, and that column is the
@@ -2429,10 +2436,10 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           </td>
         )}
         {isVisible("outdated") && (
-          <td className={scopeStyleColumns ? numericTdNoDividerClasses : flexTdClasses}>
+          <td className={compactOutdated ? numericTdNoDividerClasses : flexTdClasses}>
             {!available ? (
               <span className="text-sm md:text-base text-zinc-400">—</span>
-            ) : scopeStyleColumns ? (
+            ) : compactOutdated ? (
               renderScopedOutdated(outdated, percentOutdated, "text-sm md:text-base text-zinc-700 dark:text-zinc-300")
             ) : (
               renderBar(percentOutdated, getOutdatedBarColor(percentOutdated), isAllRow, outdated)
@@ -2719,10 +2726,10 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             </td>
           )}
           {isVisible("outdated") && (
-            <td className={scopeStyleColumns ? numericTdNoDividerClasses : flexTdClasses}>
+            <td className={compactOutdated ? numericTdNoDividerClasses : flexTdClasses}>
               {sg.totalAssessed === 0 ? (
                 <span className="text-sm text-zinc-400">—</span>
-              ) : scopeStyleColumns ? (
+              ) : compactOutdated ? (
                 renderScopedOutdated(sg.outdated, sgPctOutdated, "text-sm text-zinc-600 dark:text-zinc-400")
               ) : (
                 renderBar(sgPctOutdated, getOutdatedBarColor(sgPctOutdated), false, sg.outdated)
@@ -2820,10 +2827,10 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
             </td>
           )}
           {isVisible("outdated") && (
-            <td className={scopeStyleColumns ? numericTdNoDividerClasses : flexTdClasses}>
+            <td className={compactOutdated ? numericTdNoDividerClasses : flexTdClasses}>
               {!taxon.available ? (
                 <span className="text-sm text-zinc-400">—</span>
-              ) : scopeStyleColumns ? (
+              ) : compactOutdated ? (
                 renderScopedOutdated(taxon.outdated, taxon.percentOutdated, "text-sm md:text-base text-zinc-700 dark:text-zinc-300")
               ) : (
                 renderBar(taxon.percentOutdated, getOutdatedBarColor(taxon.percentOutdated), false, taxon.outdated)
@@ -2900,12 +2907,12 @@ export default function TaxaSummary({ onToggleTaxon, selectedTaxa, selectedSubgr
           <th className={numericThClasses}># Described Species (CoL)</th>
         )}
         {isVisible("assessed") && (
-          <th className={scopeStyleColumns ? `${centeredThClasses} whitespace-nowrap min-w-[80px]` : centeredThClasses}>
+          <th className={scopeStyleColumns ? `${wideOutdated ? centeredThClasses.replace(" w-0", " w-1/2") : centeredThClasses} whitespace-nowrap min-w-[80px]` : centeredThClasses}>
             # Red List Assessed
           </th>
         )}
         {isVisible("outdated") && (
-          <th className={scopeStyleColumns ? numericThNoDividerClasses : centeredThClasses}>
+          <th className={compactOutdated ? numericThNoDividerClasses : wideOutdated ? centeredThClasses.replace(" w-0", " w-1/2") : centeredThClasses}>
             {/* The scope views used to shorten this to "# Needs Updating": the
                 full qualifier + info icon wouldn't fit on one non-wrapping line
                 in Country View's half-width column. Merging the old separate
