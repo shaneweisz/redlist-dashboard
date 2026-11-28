@@ -57,7 +57,11 @@ const pg = (sql: string) => `postgres_query('pg', ${lit(sql)})`;
 export const CURRENT_TAXON = `t.latest AND t.infra_name IS NULL AND t.subpopulation_name IS NULL`;
 export const GLOBAL_ASSESSMENT = `a.suppress = false AND EXISTS (
   SELECT 1 FROM assessment_scopes s WHERE s.assessment_id = a.id AND s.scope_lookup_id = 15)`;
-const IN_SCOPE = `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon_id WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`;
+/** A regional assessment (Europe, Mediterranean, …): any scope but Global. Many are also tagged Global. */
+export const REGIONAL_ASSESSMENT = `a.suppress = false AND EXISTS (
+  SELECT 1 FROM assessment_scopes s WHERE s.assessment_id = a.id AND s.scope_lookup_id <> 15)`;
+export type AssessmentScope = "global" | "regional";
+const inScope = (where: string) => `SELECT a.id FROM assessments a JOIN taxons t ON t.id = a.taxon_id WHERE ${CURRENT_TAXON} AND ${where}`;
 
 /**
  * IUCN's group definitions (scripts/lib/taxa.ts) as SQL over the uppercased
@@ -90,7 +94,16 @@ export async function attachRedList(conn: DuckDBConnection): Promise<void> {
   if (ro.ro !== "on") throw new Error("assessments: the Red List session is not read-only; refusing to continue.");
 }
 
-export async function buildAssessments(assessmentsFile: string): Promise<void> {
+/**
+ * scope "regional" builds the same table from regional assessments instead, with
+ * a region column (the scope's name, "Europe"): one row per assessment and
+ * region, is_latest per species and region. Its Table 1a check is skipped: a
+ * few regionally assessed species fall outside every group (taxon_group null).
+ */
+export async function buildAssessments(assessmentsFile: string, scope: AssessmentScope = "global"): Promise<void> {
+  const regional = scope === "regional";
+  const SCOPE = regional ? REGIONAL_ASSESSMENT : GLOBAL_ASSESSMENT;
+  const IN_SCOPE = inScope(SCOPE);
   const conn = await openDuckDB();
   await attachRedList(conn);
   const out = output(assessmentsFile);
@@ -102,7 +115,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
   // The database's latest flag; is_latest picks one per species below.
   await conn.run(`CREATE OR REPLACE TEMP TABLE assessment AS SELECT * FROM ${pg(`
     SELECT t.sis_id AS sis_taxon_id, a.id AS assessment_id,
-           a.latest AS flagged_latest,
+           a.latest AS flagged_latest,${regional ? " sl.description->>'en' AS region," : ""}
            a.year_published, a.assessment_date::date AS assessment_date, rlc.code AS category, a.criteria,
            coalesce(a.possibly_extinct, false) AS possibly_extinct,
            coalesce(a.possibly_extinct_in_the_wild, false) AS possibly_extinct_in_the_wild,
@@ -112,7 +125,9 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
     JOIN assessments a ON a.taxon_id = t.id
     JOIN red_list_category_lookup rlc ON rlc.id = a.red_list_category_id
     LEFT JOIN population_trend_lookup pt ON pt.id = a.population_trend_id
-    WHERE ${CURRENT_TAXON} AND ${GLOBAL_ASSESSMENT}`)}`);
+    ${regional ? `JOIN assessment_scopes rs ON rs.assessment_id = a.id AND rs.scope_lookup_id <> 15
+    JOIN scope_lookup sl ON sl.id = rs.scope_lookup_id` : ""}
+    WHERE ${CURRENT_TAXON} AND ${SCOPE}`)}`);
 
   await conn.run(`CREATE OR REPLACE TEMP TABLE species AS SELECT * FROM ${pg(`
     SELECT t.sis_id AS sis_taxon_id, t.scientific_name, t.authority,
@@ -124,7 +139,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
     FROM taxons t WHERE ${CURRENT_TAXON}
       -- A few species have a second, identical "latest" taxon record with no
       -- assessments (Rhantus fennicus, Amolops daorum); keep the one assessed.
-      AND EXISTS (SELECT 1 FROM assessments a WHERE a.taxon_id = t.id AND ${GLOBAL_ASSESSMENT})`)}`);
+      AND EXISTS (SELECT 1 FROM assessments a WHERE a.taxon_id = t.id AND ${SCOPE})`)}`);
   const [dup] = (await conn.runAndReadAll(
     `SELECT count(*) AS n FROM (SELECT sis_taxon_id FROM species GROUP BY 1 HAVING count(*) > 1)`)).getRowObjects();
   if (Number(dup.n) > 0) throw new Error(`assessments: ${dup.n} species have more than one current assessed taxon record`);
@@ -164,7 +179,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
       FROM assessment_habitats x JOIN habitat_lookup l ON l.id = x.habitat_id
       WHERE x.assessment_id IN (${IN_SCOPE}) GROUP BY 1`)})
     SELECT assessment_id, countries, systems, growth_forms, movement_pattern, threat_codes, habitat_codes
-    FROM assessment
+    FROM (SELECT DISTINCT assessment_id FROM assessment)
     LEFT JOIN countries USING (assessment_id) LEFT JOIN systems USING (assessment_id) LEFT JOIN growth_forms USING (assessment_id)
     LEFT JOIN movement USING (assessment_id) LEFT JOIN threats USING (assessment_id) LEFT JOIN habitats USING (assessment_id)`);
 
@@ -200,7 +215,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
     SELECT k, p, c, o, ${matchCount} AS hits, count(*) AS n
     FROM species WHERE sis_taxon_id IN (SELECT sis_taxon_id FROM assessment WHERE flagged_latest)
     GROUP BY ALL HAVING hits <> 1 ORDER BY n DESC`)).getRowObjects();
-  if (coverage.length > 0) {
+  if (coverage.length > 0 && !regional) {
     const lines = coverage.map((r) => `  ${r.k}/${r.p}/${r.c}/${r.o}: ${r.n} species in ${r.hits} groups`);
     throw new Error(`assessments: species outside exactly one Table 1a group:\n${lines.join("\n")}`);
   }
@@ -213,10 +228,11 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
 
   await conn.run(`COPY (
     WITH latest AS (
-      SELECT assessment_id FROM (
-        SELECT assessment_id, row_number() OVER (PARTITION BY sis_taxon_id ORDER BY assessment_date DESC, assessment_id DESC) AS rn
+      SELECT assessment_id${regional ? ", region" : ""} FROM (
+        SELECT assessment_id${regional ? ", region" : ""}, row_number() OVER (PARTITION BY sis_taxon_id${regional ? ", region" : ""} ORDER BY assessment_date DESC, assessment_id DESC) AS rn
         FROM assessment WHERE flagged_latest) WHERE rn = 1)
-    SELECT a.sis_taxon_id, a.assessment_id, a.assessment_id IN (SELECT assessment_id FROM latest) AS is_latest,
+    SELECT ${regional ? "a.region, " : ""}a.sis_taxon_id, a.assessment_id,
+           ${regional ? "(a.assessment_id, a.region) IN (SELECT (assessment_id, region) FROM latest)" : "a.assessment_id IN (SELECT assessment_id FROM latest)"} AS is_latest,
            a.year_published, a.assessment_date, a.category, nullif(a.criteria, '') AS criteria,
            a.possibly_extinct, a.possibly_extinct_in_the_wild,
            CASE a.trend_code WHEN '0' THEN 'Increasing' WHEN '1' THEN 'Decreasing' WHEN '2' THEN 'Stable' WHEN '3' THEN 'Unknown' END AS population_trend,
@@ -235,7 +251,7 @@ export async function buildAssessments(assessmentsFile: string): Promise<void> {
     JOIN species sp USING (sis_taxon_id)
     LEFT JOIN assessment_lists l USING (assessment_id)
     LEFT JOIN synonyms syn USING (sis_taxon_id)
-    ORDER BY a.sis_taxon_id, a.year_published DESC, a.assessment_id DESC
+    ORDER BY ${regional ? "a.region, " : ""}a.sis_taxon_id, a.year_published DESC, a.assessment_id DESC
   ) TO ${lit(out)} (FORMAT parquet, COMPRESSION zstd)`);
   const [s] = (await conn.runAndReadAll(`SELECT count(*) AS n, count(*) FILTER (is_latest) AS latest,
       count(DISTINCT sis_taxon_id) AS species, max(year_published) AS newest FROM read_parquet(${lit(out)})`)).getRowObjects();

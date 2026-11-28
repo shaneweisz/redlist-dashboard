@@ -44,6 +44,7 @@ export function tables(buildDir = BUILD_DIR) {
     sourcesReleases: working("sources", "sources-releases.json"),
     taxa: working("sources", "taxa.parquet"),
     assessments: working("sources", "assessments.parquet"),
+    regionalAssessments: working("sources", "regional_assessments.parquet"),
     occurrences: working("sources", "occurrences.parquet"),
     occurrenceCountries: working("sources", "occurrence_countries.parquet"),
     commonNames: working("sources", "common_names.parquet"),
@@ -61,6 +62,7 @@ export function tables(buildDir = BUILD_DIR) {
     // 4. Lists
     specialistGroupSpecies: working("lists", "specialist_group_species.parquet"),
     assessed: data("assessed.parquet"),
+    regionalAssessed: data("regional-assessed.parquet"),
     assessmentHistory: data("assessments.parquet"),
     species: data("species"),
     ne: data("ne.parquet"),

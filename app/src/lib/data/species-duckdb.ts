@@ -40,6 +40,16 @@ export function parquetUri(name: string): string {
   return `s3://${process.env.R2_DATA_BUCKET_NAME}/syncs/${ts}/${syncPath(name)}`;
 }
 
+/**
+ * The assessed species table as a FROM item: assessed.parquet, or under a region
+ * scope (lib/region-scope.ts) regional-assessed.parquet narrowed to that region.
+ * The two have the same columns, so every query over one works over the other.
+ */
+export function assessedSource(region?: string | null): string {
+  if (!region) return `read_parquet('${parquetUri("assessed.parquet")}')`;
+  return `(SELECT * EXCLUDE (region) FROM read_parquet('${parquetUri("regional-assessed.parquet")}') WHERE region = '${region.replace(/'/g, "''")}')`;
+}
+
 let connPromise: Promise<DuckDBConnection> | null = null;
 export async function getConn(): Promise<DuckDBConnection> {
   if (!connPromise) {
@@ -277,13 +287,18 @@ export async function querySpecies(opts: {
    * a view needs — see lib/species-lists).
    */
   group?: string;
+  /** A region scope (lib/region-scope.ts): that region's assessments, and no Not Evaluated list. */
+  region?: string | null;
 }): Promise<{ species: ReturnType<typeof toSpeciesRow>[]; truncated: boolean; tooLarge: boolean; neTotal: number | null }> {
   const conn = await getConn();
   const where: WhereParts = opts.group
     ? { clauses: ["taxon_group = $g"], params: { g: opts.group } }
     : resolveWhere(opts.taxon);
   const whereSql = where.clauses.length ? `WHERE ${where.clauses.join(" AND ")}` : "";
-  const assessedUri = parquetUri("assessed.parquet");
+  // "Not Evaluated" is every described species minus the assessed ones: a global
+  // idea, with no regional meaning.
+  if (opts.region) opts = { ...opts, includeNE: false };
+  const assessedFrom = assessedSource(opts.region);
   // Cap the Not-Evaluated additions: a giant aggregate (insects ~1M, invertebrates
   // ~1.3M) can't be serialized in one response (it 500s / times out). Return up to
   // NE_CAP, flag `truncated`, and report `neTotal` so the UI can say "showing N of M
@@ -316,7 +331,7 @@ export async function querySpecies(opts: {
   // (denormalized columns). The full per-species history array is fetched lazily
   // via getAssessmentHistory when a detail panel opens. This reads a single file
   // and drops ≈40% of the payload (history was ~half the bytes for large taxa).
-  const assessedSql = `SELECT ${ASSESSED_SELECT} FROM '${assessedUri}' a ${whereSql}`;
+  const assessedSql = `SELECT ${ASSESSED_SELECT} FROM ${assessedFrom} a ${whereSql}`;
   const rows = (await conn.runAndReadAll(assessedSql, where.params)).getRowObjects();
 
   let result = rows.map(toSpeciesRow);

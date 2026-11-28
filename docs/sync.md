@@ -166,7 +166,7 @@ Every *described* CoL species (`species/`'s `described`: accepted, curated, not 
 
 | Folder | What |
 |---|---|
-| `lists/` | `assessed.parquet` (one row per assessed species), `assessments.parquet` (history), `ne.parquet`, `species/` (every accepted CoL species, by group) |
+| `lists/` | `assessed.parquet` (one row per assessed species), `regional-assessed.parquet` (the same columns plus `region`, one row per species and region, from regional assessments; the dashboard reads it under `?scope=`), `assessments.parquet` (history), `ne.parquet`, `species/` (every accepted CoL species, by group) |
 | `taxonomy/` | the app's `taxa` and `assessment_link`, the CoL-differences files, the tree's common names |
 | `search/` | the name, rank and synonym indexes |
 | `summaries/` | per-group and per-country totals |

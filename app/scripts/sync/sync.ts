@@ -51,6 +51,7 @@ import { buildLiteratureMentions, localOpenAlexWorks } from "./sources/literatur
 import { ensureBhlMentions } from "./inputs/bhl";
 import { listOpenAlexWorks } from "./inputs/openalex-snapshot";
 import { buildSpecialistGroups } from "./sources/specialist-groups";
+import { buildRegionalAssessed } from "./precomputed/regional-assessed";
 import { askMatcher } from "./link/matches";
 import { buildLink } from "./link/assessment-link";
 import { runDbt, exportDbtTables } from "./dbt";
@@ -134,6 +135,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
         `the curated release the XR was built from should demote none`);
     }
     await buildAssessments(T.assessments);
+    // The same table from regional assessments (Europe, Mediterranean, …), for the region scope.
+    await buildAssessments(T.regionalAssessments, "regional");
     await buildOccurrences({ snapshotCounts: snapshot.dir, sourceRows: snapshot.sourceRows, taxa: T.taxa },
       { occurrences: T.occurrences, occurrenceCountries: T.occurrenceCountries });
     await buildCommonNames({ colVernacularNames: col.vernacularNames, taxa: T.taxa, inatNames: inat }, T.commonNames);
@@ -159,6 +162,8 @@ export async function sync(opts: { from?: Stage; skipCompare?: boolean; baseline
     done = step("3 count, 4 lists, 5 precomputed SQL (dbt)");
     runDbt({ buildDir: BUILD_DIR, today: new Date().toISOString().slice(0, 10) });
     await exportDbtTables(T, BUILD_DIR);
+    // assessed.parquet's columns for each region, from the global rows it reuses.
+    await buildRegionalAssessed({ regionalAssessments: T.regionalAssessments, assessed: T.assessed }, T.regionalAssessed);
     done();
   }
 

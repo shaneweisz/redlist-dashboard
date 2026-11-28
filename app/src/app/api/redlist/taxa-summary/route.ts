@@ -4,6 +4,7 @@ import { getScopedTaxaSummary, scopeWhere } from "@/lib/data/scoped-taxa-summary
 import { findNode, getTaxonGroupsForNode } from "@/lib/taxonomy-utils";
 import { getView } from "@/config/taxonomy-views";
 import { CACHE_1H } from "@/lib/cache-headers";
+import { parseRegion, REGION_PARAM } from "@/lib/region-scope";
 import { GBIF_RECORD_MODES, GBIF_RECORDS_PARAM, parseGbifRecordMode, type GbifRecordMode } from "@/lib/gbif-records";
 import type { TaxaSummaryRow } from "@/lib/data/species-store";
 
@@ -80,8 +81,10 @@ export async function GET(request: NextRequest) {
     // Which GBIF records the flat gbif* fields count (src/lib/gbif-records.ts);
     // gbifByMode carries both, which is what the dashboard reads.
     const mode = parseGbifRecordMode(request.nextUrl.searchParams.get(GBIF_RECORDS_PARAM));
-    const where = scopeWhere(countries);
-    const data = where ? await getScopedTaxaSummary(where) : getTaxaSummary();
+    // A region scope reads that region's assessments, always live (the precomputed summary is global).
+    const region = parseRegion(request.nextUrl.searchParams.get(REGION_PARAM));
+    const where = scopeWhere(countries) ?? (region ? "TRUE" : null);
+    const data = where ? await getScopedTaxaSummary(where, region) : getTaxaSummary();
     const scoped = where !== null;
     const rowsByGroup = new Map(
       data.map((row) => [row.table1a_taxon_group, row])

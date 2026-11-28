@@ -145,6 +145,11 @@ export const CATEGORY_COLORS: Record<string, string> = {
   LC: "#60c659",
   DD: "#6b7280",
   NE: "#a3a3a3",
+  // Regional assessments only (lib/region-scope.ts): Regionally Extinct (gone
+  // from the region, extant elsewhere) and Not Applicable (not assessed in the
+  // region: a vagrant, a recent introduction). Global data never has them.
+  RE: "#6b2142",
+  NA: "#d4d4d8",
   // Pre-1994 Red Data Book category: a catch-all "Threatened" verdict, predating
   // the CR/EN/VU split — not equivalent to any single modern category, so left
   // un-normalized (see normalizeCategory below) with its own color rather than
@@ -156,6 +161,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
 export const CATEGORY_ORDER: Record<string, number> = {
   EX: 0,
   EW: 1,
+  RE: 1.5,
   CR: 2,
   EN: 3,
   VU: 4,
@@ -163,6 +169,7 @@ export const CATEGORY_ORDER: Record<string, number> = {
   LC: 6,
   DD: 7,
   NE: 8,
+  NA: 9,
 };
 
 // IUCN "Threatened" categories: Critically Endangered, Endangered, Vulnerable
@@ -179,6 +186,8 @@ export const CATEGORY_NAMES: Record<string, string> = {
   LC: "Least Concern",
   DD: "Data Deficient",
   NE: "Not Evaluated",
+  RE: "Regionally Extinct",
+  NA: "Not Applicable",
   T: "Threatened (pre-1994 category)",
 };
 

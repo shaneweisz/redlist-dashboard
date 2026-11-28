@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { parseRegion, REGION_PARAM } from "@/lib/region-scope";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
 import { resolveRegions } from "@/lib/regions";
 import { expandTaxaToken, collapseTaxaToTokens, getViewRootForNode, type FilterRank } from "@/lib/taxonomy-utils";
@@ -110,7 +111,7 @@ const roundTriage = (v: number) => Math.round(v * 1000) / 1000;
 // being cleared, with nothing catching it (see filterParams.test.ts's
 // "OWN_PARAM_NAMES stays in sync" test).
 export const OWN_PARAM_NAMES = [
-  "view", "layout", "origin", "countries", "region", "taxa", "subgroups",
+  "view", "layout", "origin", "countries", "region", REGION_PARAM, "taxa", "subgroups",
   "categories", "years", "assessmentYears", "describedYears", "assessmentCounts",
   "systems", "trends", "movement", "threats", "threatsScope", "criteria", "habitat", "habitatBreadth",
   "habitatImportance", "habitatSeasons", "habitatSuitability", "bd", "endemics", "growthForms",
@@ -351,6 +352,8 @@ export function parseParams(search: string) {
     breakdown: parseBreakdownParam(p, "bd"),
     // Endemics-only: restrict to species occurring in exactly one country.
     endemicsOnly: p.get("endemics") === "1",
+    // Which assessments the whole dashboard reads: global (null) or a region's (lib/region-scope.ts).
+    assessmentScope: parseRegion(p.get(REGION_PARAM)),
     growthForms: p.get("growthForms")
       ? new Set(p.get("growthForms")!.split(",").filter(Boolean))
       : new Set<string>(),
@@ -460,6 +463,8 @@ export function buildQs(state: {
   habitatSuitability: Set<string>;
   breakdown?: BreakdownParam | null;
   endemicsOnly: boolean;
+  /** A region scope (lib/region-scope.ts), or null for global assessments. */
+  assessmentScope?: string | null;
   growthForms: Set<string>;
   assessors: Set<string>;
   reviewers: Set<string>;
@@ -525,6 +530,7 @@ export function buildQs(state: {
     p.set("bd", bd);
   }
   if (state.endemicsOnly) p.set("endemics", "1");
+  if (state.assessmentScope) p.set(REGION_PARAM, state.assessmentScope);
   if (state.growthForms.size > 0) p.set("growthForms", [...state.growthForms].join(","));
   if (state.assessors.size > 0) p.set("assessors", [...state.assessors].join("|"));
   if (state.reviewers.size > 0) p.set("reviewers", [...state.reviewers].join("|"));
@@ -1069,6 +1075,18 @@ export function useFilterParams() {
     [syncUrl]
   );
 
+  // A view of different data rather than a filter, so Clear all keeps it (like layout).
+  const setAssessmentScope = useCallback(
+    (value: string | null) => {
+      setState(prev => {
+        const next = { ...prev, assessmentScope: value };
+        queueMicrotask(() => syncUrl(next, false));
+        return next;
+      });
+    },
+    [syncUrl]
+  );
+
   const setSelectedAssessors = useCallback(
     (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
       setState(prev => {
@@ -1427,6 +1445,7 @@ export function useFilterParams() {
     selectedHabitatSuitability: state.habitatSuitability,
     breakdownFilter: state.breakdown,
     endemicsOnly: state.endemicsOnly,
+    assessmentScope: state.assessmentScope ?? null,
     selectedGrowthForms: state.growthForms,
     selectedAssessors: state.assessors,
     selectedReviewers: state.reviewers,
@@ -1479,6 +1498,7 @@ export function useFilterParams() {
     setSelectedHabitatSuitability,
     setBreakdownFilter,
     setEndemicsOnly,
+    setAssessmentScope,
     setSelectedGrowthForms,
     setSelectedAssessors,
     setSelectedReviewers,

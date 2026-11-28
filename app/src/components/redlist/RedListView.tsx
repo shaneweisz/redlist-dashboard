@@ -1,5 +1,6 @@
 "use client";
 
+import { withRegion } from "@/lib/region-scope";
 import { loadAssessment } from "@/lib/redlist/assessment";
 import { loadThumbnail } from "@/lib/redlist/inat-thumbnail";
 import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from "react";
@@ -1520,6 +1521,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     selectedHabitatSuitability, setSelectedHabitatSuitability,
     breakdownFilter, setBreakdownFilter,
     endemicsOnly, setEndemicsOnly,
+    assessmentScope, setAssessmentScope,
     selectedGrowthForms, setSelectedGrowthForms,
     selectedAssessors, setSelectedAssessors,
     selectedFacilitators, setSelectedFacilitators,
@@ -1553,9 +1555,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
 
   const cache = useSpeciesCache();
   const speciesApiUrl = useCallback(
-    (taxonId: string, categoryParam: string) => `${SPECIES_API}?taxon=${encodeURIComponent(taxonId)}${categoryParam}`,
-    []
+    // Under a region scope, that region's assessments (lib/region-scope.ts); the
+    // scope is part of the URL, so the cache keeps each scope's rows apart.
+    (taxonId: string, categoryParam: string) => withRegion(`${SPECIES_API}?taxon=${encodeURIComponent(taxonId)}${categoryParam}`, assessmentScope),
+    [assessmentScope]
   );
+
+  // "Awaiting 1st Assessment" is every described species minus the assessed
+  // ones, a global idea: a region scope has only its assessed species.
+  useEffect(() => {
+    if (assessmentScope && isNewAssessments) onViewModeChange?.("reassessments");
+  }, [assessmentScope, isNewAssessments, onViewModeChange]);
 
   // Country view needs data Not Evaluated species don't have: a per-country
   // location (no assessment means no assessment_locations row) — see the
@@ -2748,7 +2758,9 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
       if (!matchesPriorityBox(s)) return;
       counts[s.category] = (counts[s.category] || 0) + 1;
     });
-    const DISPLAY_ORDER = ["EX", "EW", "CR", "EN", "VU", "NT", "LC", "DD"];
+    // RE and NA exist only in regional assessments (lib/region-scope.ts): shown when present.
+    const DISPLAY_ORDER = ["EX", "EW", "RE", "CR", "EN", "VU", "NT", "LC", "DD", "NA"]
+      .filter((code) => (code !== "RE" && code !== "NA") || counts[code]);
     const total = DISPLAY_ORDER.reduce((sum, code) => sum + (counts[code] || 0), 0);
     return DISPLAY_ORDER.map(code => ({
       code,
@@ -4330,10 +4342,13 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
   // reasons, but would mean downloading the entire "All Species" dataset just
   // to show the landing map — multi-second blank-map delay for no reason,
   // since this data never varies by taxon selection on the landing page).
-  const [countryLandingStats, setCountryLandingStats] = useState<CountryStats | null>(null);
+  // Kept per scope (global or a region), so switching scope fetches that scope's totals.
+  const [countryLandingByScope, setCountryLandingByScope] = useState<Record<string, CountryStats>>({});
+  const countryLandingStats = countryLandingByScope[assessmentScope ?? ""] ?? null;
   useEffect(() => {
     if (layoutMode !== "country" || countryLandingStats) return;
-    fetch("/api/redlist/country-stats")
+    const scopeKey = assessmentScope ?? "";
+    fetch(withRegion("/api/redlist/country-stats", assessmentScope))
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (!data?.stats) return;
@@ -4341,10 +4356,10 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         for (const [code, s] of Object.entries(data.stats as Record<string, { species: number; outdated: number }>)) {
           shaped[code] = { occurrences: 0, species: s.species, outdated: s.outdated };
         }
-        setCountryLandingStats(shaped);
+        setCountryLandingByScope(prev => ({ ...prev, [scopeKey]: shaped }));
       })
       .catch(() => {});
-  }, [layoutMode, countryLandingStats]);
+  }, [layoutMode, countryLandingStats, assessmentScope]);
 
   // Country view landing page content — a promoted WorldMap (its own Map/List
   // toggle applies here too), passed into TaxaSummary rather than duplicating a
@@ -5752,6 +5767,8 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
         countryModeContent={countryModeContent}
         countryPillsContent={countryPillsContent}
         countryScope={countryScope}
+        assessmentScope={assessmentScope}
+        onAssessmentScopeChange={setAssessmentScope}
         onSelectedRow={setSelectedRow}
         onHoverTaxon={hoverTaxon}
         onToggleSubgroup={(sgId) => {
@@ -5830,7 +5847,7 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
             {([
               ["reassessments", "Species Assessed", selectedRow?.assessed],
               ["new-assessments", "Awaiting 1st Assessment", selectedRow?.notEvaluated],
-            ] as const).map(([mode, label, count]) => (
+            ] as const).filter(([mode]) => !(assessmentScope && mode === "new-assessments")).map(([mode, label, count]) => (
               <button
                 key={mode}
                 type="button"
@@ -6766,6 +6783,20 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
               >
                 Awaiting 1st assessment
                 {onViewModeChange && <span className="text-sm">×</span>}
+              </button>
+            )}
+            {/* A region scope (lib/region-scope.ts) reads different assessments
+                altogether, so it is shown wherever the list is, as a chip like
+                any filter; removing it goes back to global assessments. */}
+            {assessmentScope && (
+              <button
+                type="button"
+                onClick={() => setAssessmentScope(null)}
+                title="Back to global assessments"
+                className="px-3 py-1.5 text-sm font-medium rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 flex items-center gap-1 hover:opacity-80"
+              >
+                {assessmentScope} assessments
+                <span className="text-sm">×</span>
               </button>
             )}
             {Array.from(selectedTaxa).map(taxonId => (

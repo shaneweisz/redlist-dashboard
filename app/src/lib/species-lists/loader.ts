@@ -20,6 +20,7 @@
  * falls back to the live API route, which still answers everything it always did.
  */
 import { NODE_INDEX } from "@/lib/taxonomy-utils";
+import { REGION_PARAM } from "@/lib/region-scope";
 import { dynamicNodeFilter, isDynamicNodeId } from "@/lib/dynamic-taxon";
 import { canonicalizeTaxonId } from "@/lib/data/taxonomy-constants";
 import type { RedListSpecies } from "@/hooks/useRedListSpeciesQuery";
@@ -107,6 +108,8 @@ function parseSpeciesUrl(url: string): { taxon: string; ne: boolean } | null {
   const q = url.indexOf("?");
   if (q < 0) return null;
   const sp = new URLSearchParams(url.slice(q + 1));
+  // The files hold global assessments only; a region scope is the route's.
+  if (sp.get(REGION_PARAM)) return null;
   return { taxon: sp.get("taxon") || "all", ne: sp.get("category") === "NE" };
 }
 

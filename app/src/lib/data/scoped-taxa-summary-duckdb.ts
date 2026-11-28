@@ -20,7 +20,7 @@
  * their response as scoped so the client knows to hide those columns rather than
  * render a misleading 0/undefined.
  */
-import { getConn, parquetUri } from "./species-duckdb";
+import { getConn, assessedSource } from "./species-duckdb";
 import { getTaxaSummary, type TaxaSummaryRow, type NodeSummary } from "./species-store";
 import { NODE_INDEX, staticNodeSql } from "@/lib/taxonomy-utils";
 import { outdatedCutoffDate } from "@/lib/outdated";
@@ -74,14 +74,15 @@ export function outdatedSql(cutoffIso: string): string {
  * `where` is a scope predicate from scopeWhere() — see its doc comment for why
  * this is safe from double-counting however many countries it covers.
  */
-export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRow[]> {
+export async function getScopedTaxaSummary(where: string, region?: string | null): Promise<TaxaSummaryRow[]> {
   const conn = await getConn();
   const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
-  const assessedUri = parquetUri("assessed.parquet");
+  // A region scope reads that region's assessments (lib/region-scope.ts).
+  const assessedFrom = assessedSource(region);
   const rows = (await conn.runAndReadAll(
     `SELECT taxon_group, iucn_category AS category, count(*) AS n,
             sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated
-     FROM '${assessedUri}'
+     FROM ${assessedFrom}
      WHERE ${where}
      GROUP BY taxon_group, iucn_category`
   )).getRowObjects();
@@ -122,12 +123,13 @@ export async function getScopedTaxaSummary(where: string): Promise<TaxaSummaryRo
  *
  * `where` is a scope predicate — see getScopedTaxaSummary's doc comment.
  */
-export async function getScopedChildrenSummaries(where: string, parentNodeId: string): Promise<NodeSummary[]> {
+export async function getScopedChildrenSummaries(where: string, parentNodeId: string, region?: string | null): Promise<NodeSummary[]> {
   const parent = NODE_INDEX.get(parentNodeId);
   if (!parent?.children?.length) return [];
   const conn = await getConn();
   const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
-  const assessedUri = parquetUri("assessed.parquet");
+  // A region scope reads that region's assessments (lib/region-scope.ts).
+  const assessedFrom = assessedSource(region);
   const children = parent.children;
 
   const summaries: NodeSummary[] = [];
@@ -136,7 +138,7 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
     const rows = (await conn.runAndReadAll(
       `SELECT iucn_category AS category, count(*) AS n,
               sum(CASE WHEN ${outdatedSql(cutoff)} THEN 1 ELSE 0 END) AS n_outdated
-       FROM '${assessedUri}'
+       FROM ${assessedFrom}
        WHERE (${childWhere}) AND (${where})
        GROUP BY iucn_category`
     )).getRowObjects();
@@ -165,4 +167,21 @@ export async function getScopedChildrenSummaries(where: string, parentNodeId: st
     });
   }
   return summaries;
+}
+
+/**
+ * Live equivalent of country-stats.json for a region scope (lib/region-scope.ts):
+ * per country, the region's assessed species native there and how many are
+ * outdated. A regional assessment lists the species' whole recorded range, so a
+ * country outside the region can show a few.
+ */
+export async function getRegionCountryStats(region: string): Promise<Record<string, { species: number; outdated: number }>> {
+  const conn = await getConn();
+  const cutoff = outdatedCutoffDate(getDataSyncDate()).toISOString().slice(0, 10);
+  const rows = (await conn.runAndReadAll(
+    `SELECT code, count(*)::INT AS species, count(*) FILTER (${outdatedSql(cutoff)})::INT AS outdated
+     FROM (SELECT unnest(string_split(countries, ';')) AS code, assessment_date FROM ${assessedSource(region)} WHERE countries IS NOT NULL)
+     GROUP BY code ORDER BY species DESC`
+  )).getRowObjects();
+  return Object.fromEntries(rows.map((r) => [String(r.code), { species: Number(r.species), outdated: Number(r.outdated) }]));
 }
