@@ -163,7 +163,7 @@ export default function RedListPage() {
 
         <footer className="max-w-xl mx-auto w-full shrink-0 mt-2 pb-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
-            Questions, feedback, or feature requests? Contact{" "}
+            Questions or feedback? Contact{" "}
             <a
               href="https://www.shaneweisz.com/"
               target="_blank"
@@ -179,7 +179,7 @@ export default function RedListPage() {
             >
               sw984@cam.ac.uk
             </a>
-            . Or better yet,{" "}
+            , or{" "}
             {/* href carries the plain draft so this is a real link — middle-click,
                 "copy link address" and a JS-less load all still work. The click
                 handler re-builds it with the URL the reader is actually on, which
@@ -203,7 +203,7 @@ export default function RedListPage() {
             >
               create a GitHub Issue
             </a>
-            . I&apos;ll take a look as soon as I can.
+            .
           </p>
         </footer>
       </div>
