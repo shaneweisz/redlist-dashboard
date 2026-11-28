@@ -27,6 +27,41 @@ interface HistoryRow {
 }
 interface ScopeInfo { scope: string | null; assessmentId: number; category: string; date: string | null }
 
+interface ScopesAnswer { previous_assessments: HistoryRow[]; scopes: ScopeInfo[] }
+
+// One request per species for the whole session, started when the species
+// opens (RedListView calls loadAssessmentScopes), so the switch is usually
+// ready before the tab is. `done` lets a tab opened later render it at once.
+const requests = new Map<number, Promise<ScopesAnswer | null>>();
+const done = new Map<number, ScopesAnswer>();
+export function loadAssessmentScopes(sisTaxonId: number): Promise<ScopesAnswer | null> {
+  let p = requests.get(sisTaxonId);
+  if (!p) {
+    p = fetch(`/api/redlist/species/history?id=${sisTaxonId}&scopes=1`)
+      .then((r) => (r.ok ? (r.json() as Promise<ScopesAnswer>) : null))
+      .then((d) => { if (d) done.set(sisTaxonId, d); else requests.delete(sisTaxonId); return d; })
+      .catch(() => { requests.delete(sisTaxonId); return null; });
+    requests.set(sisTaxonId, p);
+  }
+  return p;
+}
+
+// A region's history, once per species and region; prefetched for the page's scope.
+const histories = new Map<string, Promise<HistoryRow[] | null>>();
+export function loadScopeHistory(sisTaxonId: number, scope: string): Promise<HistoryRow[] | null> {
+  const k = `${sisTaxonId}|${scope}`;
+  let p = histories.get(k);
+  if (!p) {
+    p = fetch(`/api/redlist/species/history?id=${sisTaxonId}&${REGION_PARAM}=${encodeURIComponent(scope)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (d ? (d.previous_assessments ?? []) as HistoryRow[] : null))
+      .catch(() => null);
+    p.then((rows) => { if (!rows) histories.delete(k); });
+    histories.set(k, p);
+  }
+  return p;
+}
+
 const toTimeline = (rows: HistoryRow[]) => rows.map((a) => ({
   year: a.year, assessment_id: a.id, category: a.category, assessors: a.assessors, reviewers: a.reviewers,
   facilitators: a.facilitators, contributors: a.contributors, institutions: a.institutions,
@@ -41,22 +76,19 @@ export default function ScopedRedListAssessments({ sisTaxonId, pageScope, curren
   /** The global history the panel already fetched, if any. */
   globalHistory: HistoryRow[] | null;
 }) {
-  const [scopes, setScopes] = useState<ScopeInfo[] | null>(null);
+  // Ready at once when the species' request has already come back (the usual case).
+  const ready = done.get(sisTaxonId);
+  const [loaded, setLoaded] = useState<ScopesAnswer | null>(ready ?? null);
   const [picked, setPicked] = useState<string | null | undefined>(undefined);
-  const [histories, setHistories] = useState<Record<string, HistoryRow[]>>({});
+  const [scopeHistories, setScopeHistories] = useState<Record<string, HistoryRow[]>>({});
 
   useEffect(() => {
+    if (loaded) return;
     let live = true;
-    fetch(`/api/redlist/species/history?id=${sisTaxonId}&scopes=1`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!live || !d) return;
-        setScopes(d.scopes ?? []);
-        setHistories((prev) => ({ ...prev, "": d.previous_assessments ?? [] }));
-      })
-      .catch(() => {});
+    loadAssessmentScopes(sisTaxonId).then((d) => { if (live && d) setLoaded(d); });
     return () => { live = false; };
-  }, [sisTaxonId]);
+  }, [sisTaxonId, loaded]);
+  const scopes = loaded?.scopes ?? null;
 
   // The page's scope if the species has it, else Global, until a scope is clicked.
   const available = scopes ?? [];
@@ -65,19 +97,17 @@ export default function ScopedRedListAssessments({ sisTaxonId, pageScope, curren
   const key = scope ?? "";
 
   useEffect(() => {
-    if (!scope || histories[scope]) return;
+    if (!scope || scopeHistories[scope]) return;
     let live = true;
-    fetch(`/api/redlist/species/history?id=${sisTaxonId}&${REGION_PARAM}=${encodeURIComponent(scope)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (live && d) setHistories((prev) => ({ ...prev, [scope]: d.previous_assessments ?? [] })); })
-      .catch(() => {});
+    loadScopeHistory(sisTaxonId, scope).then((rows) => { if (live && rows) setScopeHistories((prev) => ({ ...prev, [scope]: rows })); });
     return () => { live = false; };
-  }, [scope, sisTaxonId, histories]);
+  }, [scope, sisTaxonId, scopeHistories]);
 
   const info = available.find((s) => s.scope === scope);
   // Before the scopes arrive, the row's own assessment (whatever scope the page is in).
   const shown = info ?? { assessmentId: current.assessmentId, category: current.category, date: current.date };
-  const history = histories[key] ?? (key === "" && pageScope == null ? globalHistory : null) ?? [];
+  const history = scopeHistories[key] ?? (key === "" ? loaded?.previous_assessments : null)
+    ?? (key === "" && pageScope == null ? globalHistory : null) ?? [];
 
   return (
     <div>

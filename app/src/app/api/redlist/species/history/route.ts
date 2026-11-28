@@ -8,7 +8,7 @@
  * for the Red List tab's switch.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getAssessmentHistory, getAssessmentScopes } from "@/lib/data/species-duckdb";
+import { getAssessmentHistory, getRegionalScopes } from "@/lib/data/species-duckdb";
 import { parseRegion, REGION_PARAM } from "@/lib/region-scope";
 import { CACHE_5M } from "@/lib/cache-headers";
 
@@ -20,12 +20,20 @@ export async function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
     const region = parseRegion(sp.get(REGION_PARAM));
-    const [previous_assessments, scopes] = await Promise.all([
+    const wantScopes = !!sp.get("scopes");
+    const [previous_assessments, regional] = await Promise.all([
       getAssessmentHistory(id, region),
       // A sync without the regional files has no scopes to offer: the tab shows no switch.
-      sp.get("scopes") ? getAssessmentScopes(id).catch(() => []) : Promise.resolve(undefined),
+      wantScopes ? getRegionalScopes(id).catch(() => []) : Promise.resolve([]),
     ]);
-    return NextResponse.json(scopes ? { previous_assessments, scopes } : { previous_assessments }, { headers: CACHE_5M });
+    if (!wantScopes) return NextResponse.json({ previous_assessments }, { headers: CACHE_5M });
+    // Global: the newest row of the global history (asked for without &scope=).
+    const latest = region ? null : previous_assessments[0];
+    const scopes = [
+      ...(latest ? [{ scope: null, assessmentId: latest.id, category: latest.category, date: latest.date }] : []),
+      ...regional,
+    ];
+    return NextResponse.json({ previous_assessments, scopes }, { headers: CACHE_5M });
   } catch (error) {
     console.error("history query error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";

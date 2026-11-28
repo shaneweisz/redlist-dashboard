@@ -1182,15 +1182,17 @@ export async function getAssessmentHistory(sisTaxonId: number, region?: string |
   return rows.map(historyRow);
 }
 
-/** The scopes a species is assessed in: global (scope null) and each region, with each one's latest assessment. */
-export async function getAssessmentScopes(sisTaxonId: number): Promise<{ scope: string | null; assessmentId: number; category: string; date: string | null }[]> {
+/**
+ * The regions a species is assessed in, each with its latest assessment there.
+ * Reads only the small regional file: the global entry is the global history's
+ * newest row, which the caller already has (assessed.parquet over R2 took seconds).
+ */
+export async function getRegionalScopes(sisTaxonId: number): Promise<{ scope: string; assessmentId: number; category: string; date: string | null }[]> {
   const conn = await getConn();
   const rows = (await conn.runAndReadAll(
-    `SELECT NULL::VARCHAR AS scope, assessment_id, iucn_category, assessment_date FROM ${assessedSource(null)} WHERE id = $id
-     UNION ALL
-     SELECT region, assessment_id, iucn_category, assessment_date FROM read_parquet('${parquetUri("regional-assessed.parquet")}') WHERE id = $id
-     ORDER BY scope NULLS FIRST`, { id: sisTaxonId })).getRowObjects();
-  return rows.map((r) => ({ scope: (r.scope as string) ?? null, assessmentId: Number(r.assessment_id), category: String(r.iucn_category ?? ""), date: (r.assessment_date as string) ?? null }));
+    `SELECT region, assessment_id, iucn_category, assessment_date FROM read_parquet('${parquetUri("regional-assessed.parquet")}')
+     WHERE id = $id ORDER BY region`, { id: sisTaxonId })).getRowObjects();
+  return rows.map((r) => ({ scope: String(r.region), assessmentId: Number(r.assessment_id), category: String(r.iucn_category ?? ""), date: (r.assessment_date as string) ?? null }));
 }
 
 function historyRow(pa: Record<string, unknown>): PreviousAssessment {

@@ -18,7 +18,7 @@ import { countNoteText } from "@/lib/count-note";
 import { MATCH_BARS, GROUP_COLOR, GROUP_TITLE, matchesMatchFilter, newMatchTally, tallyMatch, isFlagged as isMatchFlagged, isExact as isExactMatch, barLabel, barGroup, assessedHere, checklistBankUrl, type SpeciesMatch, type MatchGroup, type MatchReview, type SuggestedRecord } from "@/lib/gbif-match";
 import { DATA_VERSIONS } from "@/lib/data/data-versions";
 import RedListAssessments from "../RedListAssessments";
-import ScopedRedListAssessments from "./ScopedRedListAssessments";
+import ScopedRedListAssessments, { loadAssessmentScopes, loadScopeHistory } from "./ScopedRedListAssessments";
 import CitesSummary from "../CitesSummary";
 import WikipediaSummary from "../WikipediaSummary";
 import EolSummary from "../EolSummary";
@@ -3958,17 +3958,17 @@ export default function RedListView({ viewMode = "reassessments", onViewModeChan
     let aborted = false;
     (async () => {
       try {
-        const res = await fetch(`/api/redlist/species/history?id=${sis}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (!aborted) setAssessmentHistory((prev) => ({ ...prev, [sis]: data.previous_assessments ?? [] }));
-        }
+        // With the species' scopes, so the Red List tab's switch is ready when it
+        // opens, and under a region scope that region's history too.
+        if (assessmentScope) void loadScopeHistory(sis, assessmentScope);
+        const data = await loadAssessmentScopes(sis);
+        if (data && !aborted) setAssessmentHistory((prev) => ({ ...prev, [sis]: (data.previous_assessments ?? []) as Species["previous_assessments"] }));
       } catch {
         // Ignore — the panel falls back to an empty history.
       }
     })();
     return () => { aborted = true; };
-  }, [selectedSpeciesKey, paginatedSpecies, assessmentHistory]);
+  }, [selectedSpeciesKey, paginatedSpecies, assessmentHistory, assessmentScope]);
 
   // Lazily fetch CoL synonyms for the open species — only once the CoL tab is opened.
   // Keyed by the row key, which already encodes which id the lookup uses (`col-…` →
