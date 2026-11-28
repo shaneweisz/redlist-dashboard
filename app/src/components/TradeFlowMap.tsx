@@ -164,10 +164,10 @@ function endAngle(from: [number, number], to: [number, number], curvature = 0.25
   return (Math.atan2(tdy, tdx) * 180) / Math.PI;
 }
 
+/** A bilateral flow's reported quantity, in the panel's one commodity (term + unit). */
 export interface TradeFlow {
   from: string;
   to: string;
-  records: number;
   quantity: number;
 }
 
@@ -178,7 +178,7 @@ export interface CountryAnnotation {
 
 interface CountryTotal {
   code: string;
-  records: number;
+  quantity: number;
 }
 
 interface TradeFlowMapProps {
@@ -189,13 +189,15 @@ interface TradeFlowMapProps {
    */
   reExportFlows?: TradeFlow[];
   /**
-   * Whole-dataset exporter / importer record totals (the figures behind the
+   * Whole-dataset exporter / importer quantity totals (the figures behind the
    * Top Exporters / Top Importers tables). These drive each country's colour
    * so the map agrees with those tables; without them we fall back to tallying
    * the handful of drawn flows, which misclassifies net importers.
    */
   exporters?: CountryTotal[];
   importers?: CountryTotal[];
+  /** What the quantities are, e.g. "trophies" or "skins (kg)". */
+  unitLabel: string;
   /** ISO alpha-2 codes of countries with active trade suspensions */
   suspensionCountries?: Set<string>;
   /** Per-country suspension/quota annotations for hover tooltip */
@@ -214,6 +216,7 @@ function TradeFlowMap({
   reExportFlows,
   exporters,
   importers,
+  unitLabel,
   suspensionCountries,
   countryAnnotations,
   selectedCountry: selectedCountryProp,
@@ -366,17 +369,19 @@ function TradeFlowMap({
   const exportRecords = new Map<string, number>();
   const importRecords = new Map<string, number>();
   for (const f of visibleFlows) {
-    exportRecords.set(f.from, (exportRecords.get(f.from) ?? 0) + f.records);
-    importRecords.set(f.to, (importRecords.get(f.to) ?? 0) + f.records);
+    exportRecords.set(f.from, (exportRecords.get(f.from) ?? 0) + f.quantity);
+    importRecords.set(f.to, (importRecords.get(f.to) ?? 0) + f.quantity);
   }
-  for (const e of exporters ?? []) exportRecords.set(e.code, e.records);
-  for (const i of importers ?? []) importRecords.set(i.code, i.records);
+  for (const e of exporters ?? []) exportRecords.set(e.code, e.quantity);
+  for (const i of importers ?? []) importRecords.set(i.code, i.quantity);
 
   type TradeRole = "exporter" | "importer";
 
   /**
-   * Classify a country by its net direction of trade: whichever of exports /
-   * imports accounts for more records. Ties fall to importer. This keeps the
+   * Classify a country by its main direction of trade: whichever of exports /
+   * imports is the larger reported quantity. Ties fall to importer. (Labelled
+   * "mainly exports / imports", not "net": in the CITES guide net trade is a
+   * specific gross-exports-minus-gross-imports calculation we don't do.) This keeps the
    * colour consistent with the headline Top Exporters / Top Importers tables.
    */
   function roleOf(code: string): TradeRole | null {
@@ -386,8 +391,8 @@ function TradeFlowMap({
     return ex > im ? "exporter" : "importer";
   }
 
-  // Colour depth scales linearly with a country's NET trade (|exports −
-  // imports|) relative to the largest net trader, so depth faithfully reflects
+  // Colour depth scales linearly with a country's trade balance (|exports −
+  // imports|) relative to the largest one, so depth faithfully reflects
   // scale: a 900-net country next to an ~11k-net one reads as ~900/11k.
   const netOf = (code: string) =>
     Math.abs((exportRecords.get(code) ?? 0) - (importRecords.get(code) ?? 0));
@@ -400,7 +405,7 @@ function TradeFlowMap({
     return Math.min(1, netOf(code) / maxMagnitude);
   }
 
-  const maxRecords = visibleFlows.length > 0 ? Math.max(...visibleFlows.map((f) => f.records)) : 0;
+  const maxQuantity = visibleFlows.length > 0 ? Math.max(...visibleFlows.map((f) => f.quantity)) : 0;
 
   // Theme-aware colors for SVG fills (can't use Tailwind classes in SVG). The
   // exporter/importer values are the *saturated* end of the depth ramp (mixed
@@ -431,13 +436,8 @@ function TradeFlowMap({
           <span className="text-zinc-400">Importer </span>
           <span className="font-medium">{countryName(hoveredFlowData.to)}</span>
           <span className="text-zinc-400 ml-2">
-            {hoveredFlowData.records.toLocaleString()} records
+            {fmtQty(hoveredFlowData.quantity)} {unitLabel}
           </span>
-          {hoveredFlowData.quantity > 0 && (
-            <span className="text-zinc-400 ml-1">
-              / {fmtQty(hoveredFlowData.quantity)} items
-            </span>
-          )}
         </div>
       )}
 
@@ -450,7 +450,7 @@ function TradeFlowMap({
           <span className="text-zinc-400">re-exported by </span>
           <span className="font-medium">{countryName(hoveredReExportData.to)}</span>
           <span className="text-zinc-400 ml-1.5">
-            {hoveredReExportData.records.toLocaleString()} records
+            {fmtQty(hoveredReExportData.quantity)} {unitLabel}
           </span>
         </div>
       )}
@@ -464,15 +464,15 @@ function TradeFlowMap({
               {hoveredExports > 0 && (
                 <div>
                   <span className="text-red-300">Exports</span>{" "}
-                  <span className="text-zinc-200 tabular-nums">{hoveredExports.toLocaleString()}</span>
-                  <span className="text-zinc-400"> records</span>
+                  <span className="text-zinc-200 tabular-nums">{fmtQty(hoveredExports)}</span>
+                  <span className="text-zinc-400"> {unitLabel}</span>
                 </div>
               )}
               {hoveredImports > 0 && (
                 <div>
                   <span className="text-blue-300">Imports</span>{" "}
-                  <span className="text-zinc-200 tabular-nums">{hoveredImports.toLocaleString()}</span>
-                  <span className="text-zinc-400"> records</span>
+                  <span className="text-zinc-200 tabular-nums">{fmtQty(hoveredImports)}</span>
+                  <span className="text-zinc-400"> {unitLabel}</span>
                 </div>
               )}
             </div>
@@ -663,7 +663,7 @@ function TradeFlowMap({
           const path = arcPath(from, to);
           if (!path) return null;
 
-          const ratio = maxRecords > 0 ? flow.records / maxRecords : 0;
+          const ratio = maxQuantity > 0 ? flow.quantity / maxQuantity : 0;
           const strokeWidth = 1.5 + ratio * 2.5;
           // Opacity also nudges up with volume, so the busiest corridors read a
           // touch stronger — kept subtle so it reinforces the stroke-width cue
@@ -777,11 +777,11 @@ function TradeFlowMap({
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-          Net exporter
+          Mainly exports
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
-          Net importer
+          Mainly imports
         </span>
         <span className="flex items-center gap-1">
           <svg width="16" height="8" className="inline-block">

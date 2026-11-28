@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import CitesTradeSummary from "./CitesTradeSummary";
+import { CITES_TRADE_GUIDE_URL } from "@/lib/cites-trade";
 import { ChartPager } from "@/components/redlist/chart-controls";
 import type { CountryAnnotation } from "./TradeFlowMap";
 
@@ -336,9 +337,19 @@ export default function CitesSummary({
       {/* Trade overview from CITES Trade Database */}
       {data.citesId && (
         <div>
-          <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-            International Trade
-          </h4>
+          <div className="flex items-baseline justify-between gap-3 mb-2">
+            <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+              International Trade
+            </h4>
+            <a
+              href={CITES_TRADE_GUIDE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              How to read CITES trade data (official guide)
+            </a>
+          </div>
           <CitesTradeSummary citesId={data.citesId} prefetchedData={tradeData} prefetchedLoading={tradeLoading} suspensionCountries={suspensionCountryCodes} countryAnnotations={countryAnnotations} />
         </div>
       )}
@@ -508,8 +519,25 @@ export default function CitesSummary({
         </div>
       )}
 
-      {/* Footer attribution — required by Species+ Terms of Use */}
+      {/* Footer attribution: the trade data as the CITES Trade Database guide
+          asks it to be cited (with the output type and parameters), then
+          Species+ as its Terms of Use require. */}
       <div className="text-xs sm:text-[10px] text-zinc-400 dark:text-zinc-500 pt-2 space-y-1">
+        {data.citesId && (
+          <p>
+            CITES Trade Database {new Date().getFullYear()}. Compiled by UNEP-WCMC for the CITES Secretariat. Available at:{" "}
+            <a href="https://trade.cites.org" target="_blank" rel="noopener noreferrer" className="hover:underline">
+              trade.cites.org
+            </a>
+            . Accessed{" "}
+            {new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })}.
+            Comparative tabulation, 1975 to present, all exporters, importers, sources, purposes and terms. Read following{" "}
+            <a href={CITES_TRADE_GUIDE_URL} target="_blank" rel="noopener noreferrer" className="hover:underline">
+              A guide to using the CITES Trade Database
+            </a>{" "}
+            (version 9, 2022).
+          </p>
+        )}
         <p>
           UNEP ({new Date().getFullYear()}).{" "}
           <a
